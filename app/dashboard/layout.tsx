@@ -14,9 +14,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: profile } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
 
-  const { data: lusha } = await supabase
-    .from('lusha_credits').select('balance').limit(1).single();
-
   const { count: pendingPosts } = await supabase
     .from('social_posts').select('*', { count: 'exact', head: true })
     .eq('status', 'pending_review');
@@ -33,7 +30,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="app">
       <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} />
       <div className="main">
-        <TopBar initialLushaBalance={lusha?.balance ?? 0} />
+        <TopBar />
         <main className="page">{children}</main>
       </div>
     </div>

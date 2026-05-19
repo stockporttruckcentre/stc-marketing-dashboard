@@ -43,7 +43,7 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
     {
       key: 'admin', label: 'Admin',
       items: [
-        { href: '/dashboard/admin',    label: 'Roles & approvals', Icon: ShieldCheck, roles: ['admin'] },
+        { href: '/dashboard/admin',    label: 'Team', Icon: ShieldCheck, roles: ['admin'] },
         { href: '/dashboard/settings', label: 'Settings',          Icon: Settings,    roles: ['admin','marketer','sales','viewer'] },
       ],
     },

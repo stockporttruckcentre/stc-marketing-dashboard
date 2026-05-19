@@ -14,7 +14,6 @@ export async function POST(req: NextRequest) {
   const email = (body.email || '').trim();
   if (!email) return NextResponse.json({ error: 'email required' }, { status: 400 });
 
-  // Resolve target list_id - body, then global
   let listId = body.list_id;
   if (!listId) {
     const { data: globalList } = await supabase.from('crm_lists').select('id').eq('is_global', true).single();
@@ -22,19 +21,12 @@ export async function POST(req: NextRequest) {
   }
   if (!listId) return NextResponse.json({ error: 'no list to assign to' }, { status: 400 });
 
-  // Decrement credits
-  const { data: credit, error: cErr } = await supabase.from('lusha_credits').select('id, balance').limit(1).single();
-  if (cErr || !credit) return NextResponse.json({ error: 'no credit record' }, { status: 500 });
-  if (credit.balance <= 0) return NextResponse.json({ error: 'Out of Lusha credits' }, { status: 402 });
-
   let lushaData: any = null;
   try {
     lushaData = await enrichByEmail(email);
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Lusha error' }, { status: 502 });
   }
-
-  await supabase.from('lusha_credits').update({ balance: credit.balance - 1, updated_at: new Date().toISOString() }).eq('id', credit.id);
 
   const person = lushaData?.data ?? lushaData;
   const company = person?.company ?? (person?.companyName ? { name: person.companyName, location: person.location, fleet_size: null } : null);
@@ -51,7 +43,6 @@ export async function POST(req: NextRequest) {
     status: 'lead' as const,
   };
 
-  // If replace_id is given, update existing record with enriched fields
   if (body.replace_id) {
     const { data: updated, error: uErr } = await supabase
       .from('crm_contacts')

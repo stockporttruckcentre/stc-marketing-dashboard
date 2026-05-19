@@ -399,3 +399,66 @@ BEGIN
     BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE social_posts;   EXCEPTION WHEN duplicate_object THEN NULL; END;
   END IF;
 END $$;
+
+-- =============================================================
+-- ADD-ON: contact_notes (history of notes per CRM contact)
+-- =============================================================
+CREATE TABLE IF NOT EXISTS contact_notes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  contact_id UUID REFERENCES crm_contacts ON DELETE CASCADE NOT NULL,
+  author_id UUID REFERENCES auth.users ON DELETE SET NULL,
+  author_name TEXT NOT NULL DEFAULT '—',
+  text TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contact_notes_contact ON contact_notes (contact_id, created_at DESC);
+
+ALTER TABLE contact_notes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "notes_select" ON contact_notes;
+DROP POLICY IF EXISTS "notes_insert" ON contact_notes;
+DROP POLICY IF EXISTS "notes_delete" ON contact_notes;
+
+-- Read notes for any contact whose parent list you can see
+CREATE POLICY "notes_select" ON contact_notes FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM crm_contacts c
+    LEFT JOIN crm_lists l ON l.id = c.list_id
+    WHERE c.id = contact_notes.contact_id
+      AND (l.id IS NULL OR l.is_global = TRUE OR l.owner_id = auth.uid() OR is_list_member_safe(l.id))
+  )
+);
+CREATE POLICY "notes_insert" ON contact_notes FOR INSERT WITH CHECK (
+  author_id = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM crm_contacts c
+    LEFT JOIN crm_lists l ON l.id = c.list_id
+    WHERE c.id = contact_notes.contact_id
+      AND (l.id IS NULL OR l.is_global = TRUE OR l.owner_id = auth.uid() OR is_list_member_safe(l.id))
+  )
+);
+CREATE POLICY "notes_delete" ON contact_notes FOR DELETE USING (
+  author_id = auth.uid() OR current_role_safe() = 'admin'
+);
+
+-- Trigger: when a contact_note is inserted, sync the latest text to crm_contacts.notes
+CREATE OR REPLACE FUNCTION sync_latest_note()
+RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+BEGIN
+  UPDATE crm_contacts SET notes = NEW.text WHERE id = NEW.contact_id;
+  RETURN NEW;
+END;
+$func$;
+
+DROP TRIGGER IF EXISTS contact_notes_sync_latest ON contact_notes;
+CREATE TRIGGER contact_notes_sync_latest
+  AFTER INSERT ON contact_notes
+  FOR EACH ROW EXECUTE FUNCTION sync_latest_note();
+
+-- Add to realtime
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE contact_notes; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  END IF;
+END $$;

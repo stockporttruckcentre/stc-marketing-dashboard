@@ -111,6 +111,15 @@ export interface CalendarEvent {
   updated_at: string;
 }
 
+export interface ContactNote {
+  id: string;
+  contact_id: string;
+  author_id: string | null;
+  author_name: string;
+  text: string;
+  created_at: string;
+}
+
 export const DEPOTS = [
   { name: 'Bredbury',   lat: 53.4225, lng: -2.1289 },
   { name: 'Hyde',       lat: 53.4500, lng: -2.0747 },
