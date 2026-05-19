@@ -7,6 +7,7 @@ import { Hash, Search, Bell, HelpCircle } from 'lucide-react';
 const CRUMBS: Record<string, [string, string]> = {
   '/dashboard':           ['Workspace', 'Dashboard'],
   '/dashboard/news':      ['Workspace', 'Industry news'],
+  '/dashboard/calendar':  ['Workspace', 'Team calendar'],
   '/dashboard/crm':       ['Sales',     'CRM pipeline'],
   '/dashboard/finder':    ['Sales',     'Company finder'],
   '/dashboard/sales':     ['Sales',     'Trailer sales'],

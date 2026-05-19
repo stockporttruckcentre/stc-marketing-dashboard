@@ -1,0 +1,25 @@
+-- =============================================================
+-- STC team — seed accounts
+-- Run this AFTER:
+--   1) running schema.sql
+--   2) lowering "Minimum password length" to 3 in
+--      Supabase Dashboard → Authentication → Policies
+--      (or use the admin API which bypasses the check, as below)
+--
+-- Creates Tom, Alex, Dave, Dean with password "123" and admin role.
+-- This file uses the admin API and should be run by the setup script
+-- with the SERVICE ROLE KEY, not via SQL editor.
+-- =============================================================
+
+-- This file is a comment-only reference. The actual user creation
+-- is done by the setup-users Node script (supabase/setup-users.mjs)
+-- which calls supabase.auth.admin.createUser() — that bypasses
+-- the password-length policy and also generates IDs we can update
+-- profiles for in one transaction.
+
+-- For Supabase SQL editor users who want to do it manually, the
+-- closest pure-SQL approach is:
+-- 1. Visit Auth -> Users -> "Add user" 4 times
+-- 2. Then run:
+-- UPDATE profiles SET role = 'admin' WHERE email IN
+--   ('tom@stc-uk.com','alex@stc-uk.com','dave@stc-uk.com','dean@stc-uk.com');

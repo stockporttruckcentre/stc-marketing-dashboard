@@ -5,19 +5,11 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, TrendingUp, Users, Search, Package, Calendar,
-  Image as ImageIcon, ShieldCheck, Settings, LogOut,
+  Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays,
 } from 'lucide-react';
 import type { Profile, UserRole } from '@/lib/types';
 
-type Item = {
-  href: string;
-  label: string;
-  Icon: any;
-  roles: UserRole[];
-  badge?: string;
-  alert?: boolean;
-};
-
+type Item = { href: string; label: string; Icon: any; roles: UserRole[]; badge?: string; alert?: boolean };
 type Section = { key: string; label: string; items: Item[] };
 
 export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendingPosts?: number }) {
@@ -27,8 +19,9 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
     {
       key: 'workspace', label: 'Workspace',
       items: [
-        { href: '/dashboard',        label: 'Dashboard',     Icon: LayoutDashboard, roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/news',   label: 'Industry news', Icon: TrendingUp,      roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard',          label: 'Dashboard',     Icon: LayoutDashboard, roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/calendar', label: 'Team calendar', Icon: CalendarDays,    roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/news',     label: 'Industry news', Icon: TrendingUp,      roles: ['admin','marketer','sales','viewer'] },
       ],
     },
     {
@@ -56,8 +49,7 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
     },
   ];
 
-  const isActive = (href: string) =>
-    href === '/dashboard' ? path === '/dashboard' : path.startsWith(href);
+  const isActive = (href: string) => href === '/dashboard' ? path === '/dashboard' : path.startsWith(href);
 
   return (
     <aside className="sidebar">
@@ -81,13 +73,10 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
                   const active = isActive(i.href);
                   const Icon = i.Icon;
                   return (
-                    <Link key={i.href} href={i.href}
-                      className={`sidebar__item${active ? ' is-active' : ''}`}>
+                    <Link key={i.href} href={i.href} className={`sidebar__item${active ? ' is-active' : ''}`}>
                       <Icon size={16} />
                       <span>{i.label}</span>
-                      {i.badge && (
-                        <span className={`badge${i.alert ? ' badge--alert' : ''}`}>{i.badge}</span>
-                      )}
+                      {i.badge && <span className={`badge${i.alert ? ' badge--alert' : ''}`}>{i.badge}</span>}
                     </Link>
                   );
                 })}

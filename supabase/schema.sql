@@ -259,3 +259,143 @@ INSERT INTO brand_assets (name, type, url, category) VALUES
   ('Navy Primary',   'color', '#071458', 'Colors'),
   ('Red Accent',     'color', '#cf2417', 'Colors')
 ON CONFLICT DO NOTHING;
+
+-- =============================================================
+-- ADD-ON: CRM LISTS, LIST MEMBERS, CALENDAR EVENTS
+-- Run after the rest of the schema. Safe to re-run.
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS crm_lists (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  owner_id UUID REFERENCES auth.users ON DELETE SET NULL,
+  is_global BOOLEAN DEFAULT FALSE NOT NULL,
+  color TEXT DEFAULT '#cf2417',
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+-- Ensure only one global list
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_global_list ON crm_lists ((is_global)) WHERE is_global = TRUE;
+
+INSERT INTO crm_lists (name, description, is_global, color)
+SELECT 'Global CRM', 'Shared CRM visible to the whole team', TRUE, '#cf2417'
+WHERE NOT EXISTS (SELECT 1 FROM crm_lists WHERE is_global = TRUE);
+
+CREATE TABLE IF NOT EXISTS crm_list_members (
+  list_id UUID REFERENCES crm_lists ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users ON DELETE CASCADE,
+  can_edit BOOLEAN DEFAULT TRUE NOT NULL,
+  added_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  PRIMARY KEY (list_id, user_id)
+);
+
+-- Attach list_id to contacts (default to global)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='list_id') THEN
+    ALTER TABLE crm_contacts ADD COLUMN list_id UUID REFERENCES crm_lists ON DELETE SET NULL;
+    UPDATE crm_contacts SET list_id = (SELECT id FROM crm_lists WHERE is_global = TRUE LIMIT 1) WHERE list_id IS NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_crm_contacts_list_id ON crm_contacts (list_id);
+
+-- =============================================================
+-- CALENDAR EVENTS
+-- =============================================================
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  start_at TIMESTAMPTZ NOT NULL,
+  end_at TIMESTAMPTZ,
+  all_day BOOLEAN DEFAULT FALSE NOT NULL,
+  color TEXT DEFAULT '#cf2417',
+  created_by UUID REFERENCES auth.users ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_start ON calendar_events (start_at);
+
+-- updated_at triggers
+DO $$ BEGIN
+  PERFORM 1 FROM pg_trigger WHERE tgname = 'update_crm_lists_updated_at';
+  IF NOT FOUND THEN
+    CREATE TRIGGER update_crm_lists_updated_at BEFORE UPDATE ON crm_lists
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
+DO $$ BEGIN
+  PERFORM 1 FROM pg_trigger WHERE tgname = 'update_calendar_events_updated_at';
+  IF NOT FOUND THEN
+    CREATE TRIGGER update_calendar_events_updated_at BEFORE UPDATE ON calendar_events
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
+
+-- =============================================================
+-- RLS for new tables
+-- =============================================================
+ALTER TABLE crm_lists        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE crm_list_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events  ENABLE ROW LEVEL SECURITY;
+
+-- Lists: read global + your own + shared with you
+DROP POLICY IF EXISTS "lists_select" ON crm_lists;
+DROP POLICY IF EXISTS "lists_insert" ON crm_lists;
+DROP POLICY IF EXISTS "lists_update" ON crm_lists;
+DROP POLICY IF EXISTS "lists_delete" ON crm_lists;
+CREATE POLICY "lists_select" ON crm_lists FOR SELECT USING (
+  is_global = TRUE
+  OR owner_id = auth.uid()
+  OR EXISTS (SELECT 1 FROM crm_list_members m WHERE m.list_id = crm_lists.id AND m.user_id = auth.uid())
+);
+CREATE POLICY "lists_insert" ON crm_lists FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "lists_update" ON crm_lists FOR UPDATE USING (
+  owner_id = auth.uid() OR current_role_safe() = 'admin'
+);
+CREATE POLICY "lists_delete" ON crm_lists FOR DELETE USING (
+  (owner_id = auth.uid() AND is_global = FALSE) OR current_role_safe() = 'admin'
+);
+
+-- List members
+DROP POLICY IF EXISTS "members_all" ON crm_list_members;
+CREATE POLICY "members_all" ON crm_list_members FOR ALL USING (
+  EXISTS (SELECT 1 FROM crm_lists l WHERE l.id = crm_list_members.list_id AND (l.owner_id = auth.uid() OR current_role_safe() = 'admin'))
+  OR user_id = auth.uid()
+);
+
+-- Update existing CRM policies to honour list_id visibility
+DROP POLICY IF EXISTS "crm_select" ON crm_contacts;
+CREATE POLICY "crm_select" ON crm_contacts FOR SELECT USING (
+  auth.role() = 'authenticated' AND (
+    list_id IS NULL
+    OR EXISTS (
+      SELECT 1 FROM crm_lists l
+      WHERE l.id = crm_contacts.list_id
+        AND (l.is_global = TRUE OR l.owner_id = auth.uid()
+             OR EXISTS (SELECT 1 FROM crm_list_members m WHERE m.list_id = l.id AND m.user_id = auth.uid()))
+    )
+  )
+);
+
+-- Calendar events - all authenticated read+write (team calendar)
+DROP POLICY IF EXISTS "cal_select" ON calendar_events;
+DROP POLICY IF EXISTS "cal_write"  ON calendar_events;
+CREATE POLICY "cal_select" ON calendar_events FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "cal_write"  ON calendar_events FOR ALL    USING (auth.role() = 'authenticated');
+
+-- =============================================================
+-- REALTIME PUBLICATION
+-- =============================================================
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE crm_contacts;   EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE crm_lists;      EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE calendar_events; EXCEPTION WHEN duplicate_object THEN NULL; END;
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE social_posts;   EXCEPTION WHEN duplicate_object THEN NULL; END;
+  END IF;
+END $$;
