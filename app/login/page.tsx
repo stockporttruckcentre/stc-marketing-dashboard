@@ -8,7 +8,7 @@ import { Loader, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-stc-navy" />}>
+    <Suspense fallback={<div className="login-bg" />}>
       <LoginForm />
     </Suspense>
   );
@@ -31,48 +31,50 @@ function LoginForm() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    if (error) { setError(error.message); return; }
     router.push(redirectTo);
     router.refresh();
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-stc-navy px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
-        <div className="mb-6 text-center">
-          <div className="text-3xl font-bold text-stc-navy">STC</div>
-          <div className="text-sm text-gray-600 mt-1">Marketing Dashboard</div>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stc-navy focus:border-stc-navy outline-none"
-              placeholder="you@stc-uk.com" />
+    <div className="login-bg">
+      <div className="login__card">
+        <div className="page-head__eyebrow" style={{ marginBottom: 10 }}>Stockport Truck Centre</div>
+        <h2 className="dot-red">Sign in</h2>
+        <div className="sub">Marketing &amp; sales dashboard.</div>
+
+        <form onSubmit={handleSubmit} className="login__form">
+          <div className="field">
+            <div className="field__label">Email</div>
+            <input
+              type="email" required
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@stc-uk.com"
+              className="input"
+            />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
-            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stc-navy focus:border-stc-navy outline-none" />
+          <div className="field">
+            <div className="field__label">Password</div>
+            <input
+              type="password" required
+              value={password} onChange={(e) => setPassword(e.target.value)}
+              className="input"
+            />
           </div>
           {error && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 text-red-800 rounded-lg text-sm">
-              <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+            <div className="alert alert--danger">
+              <AlertCircle size={14} />
               <span>{error}</span>
             </div>
           )}
-          <button type="submit" disabled={loading}
-            className="w-full bg-stc-navy text-white py-2.5 rounded-lg font-medium hover:bg-stc-navy-light disabled:opacity-60 flex items-center justify-center gap-2">
-            {loading && <Loader size={16} className="animate-spin" />}
+          <button type="submit" disabled={loading} className="btn btn--primary btn--lg" style={{ width: '100%' }}>
+            {loading ? <Loader size={14} className="spin" /> : null}
             Sign in
           </button>
         </form>
-        <div className="mt-4 text-center text-sm text-gray-600">
-          Need an account?{' '}
-          <Link href="/signup" className="text-stc-red font-medium hover:underline">Sign up</Link>
+
+        <div className="login__hint">
+          Need an account? <Link href="/signup" style={{ color: 'var(--stc-red)', fontWeight: 500 }}>Sign up</Link>
         </div>
       </div>
     </div>

@@ -15,12 +15,8 @@ const INDUSTRIES = [
 ];
 
 interface FinderResult {
-  name: string;
-  employees: number | null;
-  location: string;
-  distance: number | null;
-  domain: string | null;
-  industry: string | null;
+  name: string; employees: number | null; location: string;
+  distance: number | null; domain: string | null; industry: string | null;
 }
 
 export function CompanyFinder() {
@@ -36,20 +32,13 @@ export function CompanyFinder() {
   const [message, setMessage] = useState<string | null>(null);
 
   async function handleSearch() {
-    setSearching(true);
-    setMessage(null);
-    setAdded({});
+    setSearching(true); setMessage(null); setAdded({});
     try {
       const res = await fetch('/api/lusha/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          location: depot,
-          radiusMiles: radius,
-          industry,
-          minEmployees: empMin,
-          maxEmployees: empMax,
-          limit: 25,
+          location: depot, radiusMiles: radius, industry,
+          minEmployees: empMin, maxEmployees: empMax, limit: 25,
         }),
       });
       const json = await res.json();
@@ -57,20 +46,14 @@ export function CompanyFinder() {
       setResults(json.companies);
       setMessage(`Found ${json.companies.length} companies (${json.cost} credits used)`);
     } catch (e: any) {
-      setMessage(e.message);
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
+      setMessage(e.message); setResults([]);
+    } finally { setSearching(false); }
   }
 
   async function addToCrm(c: FinderResult) {
     const { error } = await supabase.from('crm_contacts').insert({
-      company_name: c.name,
-      location: c.location,
-      fleet_size: c.employees,
-      source: 'Lusha Company Finder',
-      status: 'lead',
+      company_name: c.name, location: c.location, fleet_size: c.employees,
+      source: 'Lusha Company Finder', status: 'lead',
       notes: c.domain ? `Domain: ${c.domain}` : null,
     });
     if (error) { setMessage(error.message); return; }
@@ -78,71 +61,71 @@ export function CompanyFinder() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-lg shadow p-5">
-        <h2 className="text-lg font-semibold mb-4">Find companies near your depots</h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-          <Field label="Depot">
-            <select value={depot} onChange={(e) => setDepot(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-              {DEPOTS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Radius (mi)">
-            <input type="number" value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg" />
-          </Field>
-          <Field label="Industry">
-            <select value={industry} onChange={(e) => setIndustry(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-              {INDUSTRIES.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Employees min">
-            <input type="number" value={empMin} onChange={(e) => setEmpMin(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg" />
-          </Field>
-          <Field label="Employees max">
-            <input type="number" value={empMax} onChange={(e) => setEmpMax(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg" />
-          </Field>
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-head__eyebrow">Sales · Company finder</div>
+          <h1 className="page-head__title">Find prospects<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <div className="page-head__sub">Lusha company search around each depot. One credit per result returned.</div>
         </div>
-        <button
-          onClick={handleSearch}
-          disabled={searching}
-          className="px-5 py-2 bg-stc-navy text-white rounded-lg hover:bg-stc-navy-light disabled:opacity-50 flex items-center gap-2"
-        >
-          {searching ? <Loader size={16} className="animate-spin" /> : <Search size={16} />}
-          Search
-        </button>
       </div>
 
-      {message && <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-2 text-sm">{message}</div>}
+      <div className="card" style={{ padding: 18 }}>
+        <div className="grid-5">
+          <div className="field"><div className="field__label">Depot</div>
+            <select value={depot} onChange={(e) => setDepot(e.target.value)} className="input">
+              {DEPOTS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+            </select></div>
+          <div className="field"><div className="field__label">Radius (mi)</div>
+            <input type="number" value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="input" /></div>
+          <div className="field"><div className="field__label">Industry</div>
+            <select value={industry} onChange={(e) => setIndustry(e.target.value)} className="input">
+              {INDUSTRIES.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
+            </select></div>
+          <div className="field"><div className="field__label">Employees min</div>
+            <input type="number" value={empMin} onChange={(e) => setEmpMin(Number(e.target.value))} className="input" /></div>
+          <div className="field"><div className="field__label">Employees max</div>
+            <input type="number" value={empMax} onChange={(e) => setEmpMax(Number(e.target.value))} className="input" /></div>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button onClick={handleSearch} disabled={searching} className="btn btn--primary btn--lg">
+            {searching ? <Loader size={14} className="spin" /> : <Search size={14} />} Search
+          </button>
+        </div>
+      </div>
+
+      {message && <div className="alert alert--info" style={{ marginTop: 14 }}>{message}</div>}
 
       {results.length > 0 && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+        <div className="card" style={{ marginTop: 14 }}>
+          <div className="card__head">
+            <h3 style={{ margin: 0 }}>Results</h3>
+            <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11 }}>
+              WITHIN {radius} MI OF {depot.toUpperCase()}
+            </span>
+          </div>
+          <table className="adm-table">
+            <thead>
               <tr>
-                <Th>Company</Th>
-                <Th>Employees</Th>
-                <Th>Location</Th>
-                <Th>Industry</Th>
-                <Th>Domain</Th>
-                <Th className="text-right">Action</Th>
+                <th>Company</th><th>Employees</th><th>Location</th><th>Industry</th><th>Domain</th><th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {results.map((c, i) => (
-                <tr key={`${c.name}-${i}`} className="border-b hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
-                  <td className="px-4 py-3">{c.employees ?? '—'}</td>
-                  <td className="px-4 py-3">{c.location || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{c.industry || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{c.domain || '—'}</td>
-                  <td className="px-4 py-3 text-right">
+                <tr key={`${c.name}-${i}`}>
+                  <td style={{ color: 'var(--fg-1)', fontWeight: 500 }}>{c.name}</td>
+                  <td className="tnum">{c.employees ?? '—'}</td>
+                  <td>{c.location || '—'}</td>
+                  <td style={{ color: 'var(--fg-3)' }}>{c.industry || '—'}</td>
+                  <td className="mono" style={{ color: 'var(--fg-3)', fontSize: 12 }}>{c.domain || '—'}</td>
+                  <td style={{ textAlign: 'right' }}>
                     {added[c.name] ? (
-                      <span className="inline-flex items-center gap-1 text-green-700 text-sm">
-                        <CheckCircle size={14} /> Added
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--stc-success)', fontSize: 12 }}>
+                        <CheckCircle size={12} /> Added
                       </span>
                     ) : (
-                      <button onClick={() => addToCrm(c)} className="px-3 py-1.5 bg-stc-navy text-white text-sm rounded hover:bg-stc-navy-light inline-flex items-center gap-1">
-                        <Plus size={14} /> Add to CRM
+                      <button onClick={() => addToCrm(c)} className="btn btn--sm btn--primary">
+                        <Plus size={12} /> Add
                       </button>
                     )}
                   </td>
@@ -154,17 +137,4 @@ export function CompanyFinder() {
       )}
     </div>
   );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase ${className}`}>{children}</th>;
 }

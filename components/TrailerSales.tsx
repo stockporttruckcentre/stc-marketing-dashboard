@@ -8,12 +8,6 @@ import { Plus, Upload, Trash2, Package, MapPin, Loader, LayoutGrid, Table } from
 import { createClient } from '@/lib/supabase/client';
 import type { Trailer, TrailerStatus, UserRole } from '@/lib/types';
 
-const STATUS_COLORS: Record<TrailerStatus, string> = {
-  available: 'bg-green-100 text-green-800',
-  reserved:  'bg-yellow-100 text-yellow-800',
-  sold:      'bg-gray-200 text-gray-800',
-};
-
 const STATUSES: TrailerStatus[] = ['available', 'reserved', 'sold'];
 
 export function TrailerSales({
@@ -31,10 +25,7 @@ export function TrailerSales({
     const field = params.colDef.field as keyof Trailer;
     if (params.data[field] === params.newValue) return false;
     (params.data as any)[field] = params.newValue;
-    supabase
-      .from('trailer_sales')
-      .update({ [field]: params.newValue })
-      .eq('id', params.data.id)
+    supabase.from('trailer_sales').update({ [field]: params.newValue }).eq('id', params.data.id)
       .then(({ error }) => { if (error) setMessage(error.message); });
     return true;
   }, [supabase]);
@@ -43,24 +34,24 @@ export function TrailerSales({
     {
       headerName: '', width: 50, pinned: 'left',
       cellRenderer: (p: ICellRendererParams<Trailer>) => canEdit ? (
-        <button className="p-1 text-gray-400 hover:text-red-600"
+        <button className="btn btn--icon btn--sm"
           onClick={async () => {
             if (!confirm('Delete trailer?')) return;
             const { error } = await supabase.from('trailer_sales').delete().eq('id', p.data!.id);
             if (error) { setMessage(error.message); return; }
             setRows(r => r.filter(t => t.id !== p.data!.id));
-          }}><Trash2 size={14} /></button>
+          }}><Trash2 size={12} /></button>
       ) : null, sortable: false, filter: false, editable: false,
     },
     { field: 'make',  flex: 1, minWidth: 120, editable: canEdit, valueSetter: saveCell },
     { field: 'model', flex: 1, minWidth: 140, editable: canEdit, valueSetter: saveCell },
     { field: 'year', width: 90, editable: canEdit, valueSetter: saveCell, valueParser: p => Number(p.newValue) || null },
-    { field: 'price', width: 110, editable: canEdit, valueSetter: saveCell, valueParser: p => Number(p.newValue) || 0,
+    { field: 'price', width: 120, editable: canEdit, valueSetter: saveCell, valueParser: p => Number(p.newValue) || 0,
       valueFormatter: p => p.value != null ? `£${Number(p.value).toLocaleString()}` : '' },
-    { field: 'status', width: 130, editable: canEdit, valueSetter: saveCell,
+    { field: 'status', width: 140, editable: canEdit, valueSetter: saveCell,
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: STATUSES },
       cellRenderer: (p: ICellRendererParams<Trailer, TrailerStatus>) =>
-        p.value ? <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[p.value]}`}>{p.value}</span> : null,
+        p.value ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{p.value}</span> : null,
     },
     { field: 'location', flex: 1, minWidth: 130, editable: canEdit, valueSetter: saveCell },
     { field: 'description', flex: 1.5, minWidth: 200, editable: canEdit, valueSetter: saveCell },
@@ -72,8 +63,7 @@ export function TrailerSales({
   }), []);
 
   async function handleAdd() {
-    const { data, error } = await supabase
-      .from('trailer_sales')
+    const { data, error } = await supabase.from('trailer_sales')
       .insert({ make: 'New', model: 'Trailer', year: new Date().getFullYear(), price: 0, status: 'available', location: '' })
       .select('*').single();
     if (error) { setMessage(error.message); return; }
@@ -81,15 +71,13 @@ export function TrailerSales({
   }
 
   async function handleSyncCsv(file: File) {
-    setImporting(true);
-    setMessage(null);
+    setImporting(true); setMessage(null);
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
       complete: async (results) => {
         try {
           const res = await fetch('/api/trailers/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rows: results.data }),
           });
           const json = await res.json();
@@ -99,9 +87,7 @@ export function TrailerSales({
           setRows((data ?? []) as Trailer[]);
         } catch (e: any) {
           setMessage(e.message);
-        } finally {
-          setImporting(false);
-        }
+        } finally { setImporting(false); }
       },
     });
   }
@@ -114,80 +100,78 @@ export function TrailerSales({
   }), [rows]);
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-4 gap-3">
-        <Stat label="Total" value={counts.total} color="bg-gray-100" />
-        <Stat label="Available" value={counts.available} color="bg-green-100" />
-        <Stat label="Reserved" value={counts.reserved} color="bg-yellow-100" />
-        <Stat label="Sold" value={counts.sold} color="bg-gray-200" />
-      </div>
-
-      <div className="bg-white rounded-lg shadow p-3 flex flex-wrap items-center gap-3">
-        <div className="flex border rounded-lg overflow-hidden">
-          <button onClick={() => setView('grid')} className={`px-3 py-2 flex items-center gap-1 text-sm ${view === 'grid' ? 'bg-stc-navy text-white' : 'bg-white'}`}>
-            <Table size={14} /> Grid
-          </button>
-          <button onClick={() => setView('cards')} className={`px-3 py-2 flex items-center gap-1 text-sm ${view === 'cards' ? 'bg-stc-navy text-white' : 'bg-white'}`}>
-            <LayoutGrid size={14} /> Cards
-          </button>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {canEdit && (
-            <>
-              <label className="px-4 py-2 border rounded-lg flex items-center gap-2 hover:bg-gray-50 cursor-pointer">
-                {importing ? <Loader size={14} className="animate-spin" /> : <Upload size={14} />}
-                Sync from MD&apos;s Excel (CSV)
-                <input type="file" accept=".csv" hidden onChange={(e) => {
-                  const f = e.target.files?.[0]; if (f) handleSyncCsv(f);
-                  e.target.value = '';
-                }} />
-              </label>
-              <button onClick={handleAdd} className="px-4 py-2 bg-stc-red text-white rounded-lg hover:bg-stc-red-dark flex items-center gap-2">
-                <Plus size={14} /> Add trailer
-              </button>
-            </>
-          )}
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-head__eyebrow">Sales · Trailer inventory</div>
+          <h1 className="page-head__title">{counts.total} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>units</span></h1>
+          <div className="page-head__sub">{counts.available} available · {counts.reserved} reserved · {counts.sold} sold</div>
         </div>
       </div>
 
-      {message && <div className="bg-blue-50 text-blue-900 rounded-lg px-4 py-2 text-sm">{message}</div>}
+      <div className="stats-grid">
+        <Stat label="Total"     value={counts.total} />
+        <Stat label="Available" value={counts.available} accent="success" />
+        <Stat label="Reserved"  value={counts.reserved}  accent="warning" />
+        <Stat label="Sold"      value={counts.sold}      accent="info" />
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <div className="row" style={{ background: 'var(--stc-black-700)', borderRadius: 'var(--r-2)', border: '1px solid var(--border)', overflow: 'hidden', padding: 2 }}>
+          <button onClick={() => setView('grid')} className={`btn btn--sm ${view === 'grid' ? 'btn--primary' : 'btn--ghost'}`}>
+            <Table size={12} /> Grid
+          </button>
+          <button onClick={() => setView('cards')} className={`btn btn--sm ${view === 'cards' ? 'btn--primary' : 'btn--ghost'}`}>
+            <LayoutGrid size={12} /> Cards
+          </button>
+        </div>
+        <div className="toolbar__spacer" />
+        {canEdit && (
+          <>
+            <label className="btn">
+              {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Sync from MD&apos;s Excel (CSV)
+              <input type="file" accept=".csv" hidden onChange={(e) => {
+                const f = e.target.files?.[0]; if (f) handleSyncCsv(f);
+                e.target.value = '';
+              }} />
+            </label>
+            <button onClick={handleAdd} className="btn btn--primary"><Plus size={14} /> Add trailer</button>
+          </>
+        )}
+      </div>
+
+      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
       {view === 'grid' ? (
-        <div className="ag-theme-quartz bg-white rounded-lg shadow" style={{ height: 'calc(100vh - 380px)', minHeight: 400 }}>
+        <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 380px)', minHeight: 420, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
           <AgGridReact<Trailer>
-            rowData={rows}
-            columnDefs={columnDefs}
-            defaultColDef={defaultColDef}
-            animateRows
-            stopEditingWhenCellsLoseFocus
-            getRowId={(p) => p.data.id}
+            rowData={rows} columnDefs={columnDefs} defaultColDef={defaultColDef}
+            animateRows stopEditingWhenCellsLoseFocus getRowId={(p) => p.data.id}
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="card-grid">
           {rows.map(t => (
-            <div key={t.id} className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="h-44 bg-gray-100 flex items-center justify-center">
-                <Package size={48} className="text-gray-300" />
-              </div>
-              <div className="p-4 space-y-2">
-                <div className="flex items-start justify-between">
+            <div key={t.id} className="trailer-card">
+              <div className="trailer-card__img"><Package size={42} /></div>
+              <div className="trailer-card__body">
+                <div className="row" style={{ justifyContent: 'space-between' }}>
                   <div>
-                    <h3 className="font-semibold">{t.make} {t.model}</h3>
-                    <p className="text-xs text-gray-600">{t.year}</p>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)' }}>{t.make} {t.model}</div>
+                    <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>{t.year}</div>
                   </div>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[t.status]}`}>{t.status}</span>
+                  <span className={`pill pill--${t.status}`}><span className="pill__dot" />{t.status}</span>
                 </div>
-                <p className="text-2xl font-bold text-stc-red">£{(t.price ?? 0).toLocaleString()}</p>
-                <p className="text-sm text-gray-600 line-clamp-2">{t.description || '—'}</p>
-                <div className="flex items-center gap-1 text-sm text-gray-600">
-                  <MapPin size={14} /> {t.location || '—'}
+                <div style={{ fontFamily: '"Panton", sans-serif', fontSize: 22, fontWeight: 700, color: 'var(--stc-red)', marginTop: 6 }}>£{(t.price ?? 0).toLocaleString()}</div>
+                <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '6px 0 0' }}>{t.description || '—'}</p>
+                <div className="row" style={{ marginTop: 8, fontSize: 12.5, color: 'var(--fg-3)' }}>
+                  <MapPin size={12} /> {t.location || '—'}
                 </div>
               </div>
             </div>
           ))}
           {rows.length === 0 && (
-            <div className="col-span-full bg-white rounded-lg shadow p-8 text-center text-gray-500">No trailers in stock.</div>
+            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', gridColumn: '1/-1' }}>No trailers in stock.</div>
           )}
         </div>
       )}
@@ -195,11 +179,12 @@ export function TrailerSales({
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+function Stat({ label, value, accent }: { label: string; value: number | string; accent?: 'red'|'success'|'warning'|'info'|'lusha' }) {
   return (
-    <div className={`${color} rounded-lg p-3`}>
-      <div className="text-2xl font-bold leading-none mb-1">{value}</div>
-      <div className="text-xs text-gray-700">{label}</div>
+    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
+      <div className="stat__bar" />
+      <div className="stat__label">{label}</div>
+      <div className="stat__value tnum">{value}</div>
     </div>
   );
 }

@@ -5,8 +5,6 @@ import { Image as ImageIcon, FileText, Upload, Plus, Trash2, Loader, Palette, Do
 import { createClient } from '@/lib/supabase/client';
 import type { BrandAsset, AssetType, UserRole } from '@/lib/types';
 
-const ASSET_TYPES: AssetType[] = ['logo', 'font', 'color', 'template', 'image'];
-
 export function BrandKit({
   initialAssets, role,
 }: { initialAssets: BrandAsset[]; role: UserRole }) {
@@ -23,33 +21,25 @@ export function BrandKit({
   }, [assets]);
 
   async function handleFileUpload(file: File, type: AssetType, category: string) {
-    setUploading(true);
-    setMessage(null);
+    setUploading(true); setMessage(null);
     try {
       const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const { error: upErr } = await supabase.storage
-        .from('brand-assets').upload(fileName, file, { upsert: false });
+      const { error: upErr } = await supabase.storage.from('brand-assets').upload(fileName, file, { upsert: false });
       if (upErr) throw upErr;
       const { data: pub } = supabase.storage.from('brand-assets').getPublicUrl(fileName);
-      const { data, error } = await supabase
-        .from('brand_assets')
-        .insert({ name: file.name, type, url: pub.publicUrl, category })
-        .select('*').single();
+      const { data, error } = await supabase.from('brand_assets')
+        .insert({ name: file.name, type, url: pub.publicUrl, category }).select('*').single();
       if (error) throw error;
       setAssets(a => [data as BrandAsset, ...a]);
       setMessage(`Uploaded ${file.name}`);
     } catch (e: any) {
       setMessage(e.message);
-    } finally {
-      setUploading(false);
-    }
+    } finally { setUploading(false); }
   }
 
   async function addColor(name: string, hex: string) {
-    const { data, error } = await supabase
-      .from('brand_assets')
-      .insert({ name, type: 'color', url: hex, category: 'Colors' })
-      .select('*').single();
+    const { data, error } = await supabase.from('brand_assets')
+      .insert({ name, type: 'color', url: hex, category: 'Colors' }).select('*').single();
     if (error) { setMessage(error.message); return; }
     setAssets(a => [data as BrandAsset, ...a]);
     setShowAddColor(false);
@@ -67,96 +57,84 @@ export function BrandKit({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-lg shadow p-3 flex flex-wrap items-center gap-3">
-        <h2 className="text-lg font-semibold mr-auto">Brand Kit</h2>
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-head__eyebrow">Marketing · Brand kit</div>
+          <h1 className="page-head__title">Brand assets<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <div className="page-head__sub">Logos, fonts, templates and colours. Anyone can download; marketers can upload.</div>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="toolbar__spacer" />
         {canEdit && (
           <>
-            <button onClick={() => setShowAddColor(s => !s)}
-              className="px-4 py-2 border rounded-lg flex items-center gap-2 hover:bg-gray-50">
-              <Palette size={14} /> Add color
-            </button>
+            <button onClick={() => setShowAddColor(s => !s)} className="btn"><Palette size={14} /> Add colour</button>
             <UploadMenu onUpload={handleFileUpload} uploading={uploading} />
           </>
         )}
       </div>
 
-      {showAddColor && (
-        <ColorForm onSubmit={addColor} onCancel={() => setShowAddColor(false)} />
-      )}
-
-      {message && <div className="bg-blue-50 text-blue-900 rounded-lg px-4 py-2 text-sm">{message}</div>}
+      {showAddColor && <ColorForm onSubmit={addColor} onCancel={() => setShowAddColor(false)} />}
+      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
       {categories.map(cat => (
-        <div key={cat} className="bg-white rounded-lg shadow p-5">
-          <h3 className="text-lg font-semibold mb-3">{cat}</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {assets.filter(a => a.category === cat).map(asset => (
-              <div key={asset.id} className="border rounded-lg p-3 hover:shadow-md transition-shadow group">
-                <div className="h-24 rounded mb-2 flex items-center justify-center overflow-hidden">
-                  {asset.type === 'color' ? (
-                    <div className="w-full h-full rounded" style={{ backgroundColor: asset.url }} />
-                  ) : asset.type === 'logo' || asset.type === 'image' || asset.type === 'template' ? (
-                    /\.(png|jpe?g|webp|gif|svg)$/i.test(asset.url) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={asset.url} alt={asset.name} className="max-h-full max-w-full object-contain" />
+        <div key={cat} className="card" style={{ marginBottom: 14 }}>
+          <div className="card__head"><h3 style={{ margin: 0 }}>{cat}</h3></div>
+          <div style={{ padding: 18 }}>
+            <div className="asset-grid">
+              {assets.filter(a => a.category === cat).map(asset => (
+                <div key={asset.id} className="asset">
+                  <div className="asset__preview">
+                    {asset.type === 'color' ? (
+                      <div style={{ width: '100%', height: '100%', background: asset.url, borderRadius: 'var(--r-2)' }} />
+                    ) : asset.type === 'logo' || asset.type === 'image' || asset.type === 'template' ? (
+                      /\.(png|jpe?g|webp|gif|svg)$/i.test(asset.url) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={asset.url} alt={asset.name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                      ) : (
+                        <ImageIcon size={28} style={{ color: 'var(--fg-4)' }} />
+                      )
                     ) : (
-                      <ImageIcon size={32} className="text-gray-300" />
-                    )
-                  ) : (
-                    <FileText size={32} className="text-gray-300" />
-                  )}
+                      <FileText size={28} style={{ color: 'var(--fg-4)' }} />
+                    )}
+                  </div>
+                  <div className="asset__name">{asset.name}</div>
+                  {asset.type === 'color' && <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{asset.url}</div>}
+                  <div className="row" style={{ marginTop: 6, justifyContent: 'space-between' }}>
+                    {asset.type !== 'color' ? (
+                      <a href={asset.url} target="_blank" rel="noopener noreferrer" className="btn btn--sm btn--ghost"><Download size={12} /> Download</a>
+                    ) : <span />}
+                    {canEdit && (
+                      <button onClick={() => deleteAsset(asset)} className="btn btn--icon btn--sm"><Trash2 size={12} /></button>
+                    )}
+                  </div>
                 </div>
-                <p className="text-sm font-medium truncate">{asset.name}</p>
-                {asset.type === 'color' && <p className="text-xs text-gray-600 font-mono">{asset.url}</p>}
-                <div className="flex items-center justify-between mt-2">
-                  {asset.type !== 'color' ? (
-                    <a href={asset.url} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-stc-red hover:underline flex items-center gap-1">
-                      <Download size={12} /> Download
-                    </a>
-                  ) : (
-                    <span className="text-xs text-gray-500">{asset.url}</span>
-                  )}
-                  {canEdit && (
-                    <button onClick={() => deleteAsset(asset)}
-                      className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600">
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       ))}
       {categories.length === 0 && (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">No brand assets yet.</div>
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)' }}>No brand assets yet.</div>
       )}
     </div>
   );
 }
 
-function UploadMenu({
-  onUpload, uploading,
-}: { onUpload: (file: File, type: AssetType, cat: string) => void; uploading: boolean }) {
+function UploadMenu({ onUpload, uploading }: { onUpload: (f: File, t: AssetType, c: string) => void; uploading: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(o => !o)}
-        className="px-4 py-2 bg-stc-red text-white rounded-lg hover:bg-stc-red-dark flex items-center gap-2">
-        {uploading ? <Loader size={14} className="animate-spin" /> : <Upload size={14} />}
-        Upload asset
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} className="btn btn--primary">
+        {uploading ? <Loader size={14} className="spin" /> : <Upload size={14} />} Upload
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-56 bg-white border rounded-lg shadow-lg z-20 p-2">
-          {([
-            ['Logo',     'logo',     'Logos'],
-            ['Font',     'font',     'Fonts'],
-            ['Template', 'template', 'Templates'],
-            ['Image',    'image',    'Images'],
-          ] as [string, AssetType, string][]).map(([label, type, cat]) => (
-            <label key={type} className="block px-3 py-2 hover:bg-gray-50 rounded cursor-pointer text-sm">
+        <div className="card" style={{ position: 'absolute', right: 0, top: '110%', width: 200, zIndex: 20, padding: 6 }}>
+          {([['Logo','logo','Logos'],['Font','font','Fonts'],['Template','template','Templates'],['Image','image','Images']] as [string, AssetType, string][]).map(([label, type, cat]) => (
+            <label key={type} style={{ display: 'block', padding: '8px 10px', cursor: 'pointer', fontSize: 12.5, color: 'var(--fg-2)', borderRadius: 'var(--r-2)' }}
+              className="upload-opt">
               {label}
               <input type="file" hidden onChange={(e) => {
                 const f = e.target.files?.[0]; if (f) { onUpload(f, type, cat); setOpen(false); }
@@ -170,33 +148,25 @@ function UploadMenu({
   );
 }
 
-function ColorForm({
-  onSubmit, onCancel,
-}: { onSubmit: (name: string, hex: string) => void; onCancel: () => void }) {
+function ColorForm({ onSubmit, onCancel }: { onSubmit: (n: string, h: string) => void; onCancel: () => void }) {
   const [name, setName] = useState('');
   const [hex, setHex] = useState('#071458');
   return (
-    <form
-      onSubmit={(e) => { e.preventDefault(); if (name) onSubmit(name, hex); }}
-      className="bg-white rounded-lg shadow p-4 flex flex-wrap items-end gap-3"
-    >
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Navy Primary" className="px-3 py-2 border rounded-lg" />
+    <form onSubmit={(e) => { e.preventDefault(); if (name) onSubmit(name, hex); }}
+      className="card" style={{ padding: 14, marginBottom: 14, display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
+      <div className="field" style={{ flex: 1, minWidth: 180 }}>
+        <div className="field__label">Name</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Navy Primary" className="input" />
       </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Hex</label>
-        <div className="flex items-center gap-2">
-          <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} className="h-10 w-12 border rounded" />
-          <input value={hex} onChange={(e) => setHex(e.target.value)} className="px-3 py-2 border rounded-lg font-mono w-28" />
+      <div className="field">
+        <div className="field__label">Hex</div>
+        <div className="row" style={{ gap: 6 }}>
+          <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} style={{ width: 40, height: 32, border: '1px solid var(--border)', borderRadius: 'var(--r-2)', background: 'transparent' }} />
+          <input value={hex} onChange={(e) => setHex(e.target.value)} className="input mono" style={{ width: 110 }} />
         </div>
       </div>
-      <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="px-4 py-2 border rounded-lg">Cancel</button>
-        <button type="submit" className="px-4 py-2 bg-stc-navy text-white rounded-lg flex items-center gap-1">
-          <Plus size={14} /> Add color
-        </button>
-      </div>
+      <button type="button" onClick={onCancel} className="btn btn--ghost">Cancel</button>
+      <button type="submit" className="btn btn--primary"><Plus size={14} /> Add colour</button>
     </form>
   );
 }

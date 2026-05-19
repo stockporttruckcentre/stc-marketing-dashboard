@@ -2,29 +2,17 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, ICellRendererParams, ValueSetterParams, GridReadyEvent } from 'ag-grid-community';
+import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
 import Papa from 'papaparse';
 import { Plus, Upload, Download, Loader, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, UserRole } from '@/lib/types';
 
-const STATUS_COLORS: Record<ContactStatus, string> = {
-  lead:      'bg-blue-100 text-blue-800',
-  contacted: 'bg-yellow-100 text-yellow-800',
-  quoted:    'bg-purple-100 text-purple-800',
-  won:       'bg-green-100 text-green-800',
-  lost:      'bg-red-100 text-red-800',
-};
-
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
 export function CrmGrid({
-  initialContacts,
-  role,
-}: {
-  initialContacts: CRMContact[];
-  role: UserRole;
-}) {
+  initialContacts, role,
+}: { initialContacts: CRMContact[]; role: UserRole }) {
   const supabase = useMemo(() => createClient(), []);
   const gridRef = useRef<AgGridReact<CRMContact>>(null);
   const [rows, setRows] = useState<CRMContact[]>(initialContacts);
@@ -42,15 +30,11 @@ export function CrmGrid({
     const newValue = params.newValue;
     if (params.data[field] === newValue) return false;
     (params.data as any)[field] = newValue;
-
-    // Fire-and-forget background save; surface errors via message.
     supabase
       .from('crm_contacts')
       .update({ [field]: newValue })
       .eq('id', params.data.id)
-      .then(({ error }) => {
-        if (error) setMessage(`Save failed: ${error.message}`);
-      });
+      .then(({ error }) => { if (error) setMessage(`Save failed: ${error.message}`); });
     return true;
   }, [supabase]);
 
@@ -59,15 +43,14 @@ export function CrmGrid({
       headerName: '', field: 'id', width: 50, pinned: 'left',
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
         canDelete ? (
-          <button
-            className="p-1 text-gray-400 hover:text-red-600"
+          <button className="btn btn--icon btn--sm"
             onClick={async () => {
               if (!confirm('Delete this contact?')) return;
               const { error } = await supabase.from('crm_contacts').delete().eq('id', p.data!.id);
               if (error) { setMessage(error.message); return; }
               setRows(r => r.filter(c => c.id !== p.data!.id));
             }}
-          ><Trash2 size={14} /></button>
+          ><Trash2 size={12} /></button>
         ) : null,
       sortable: false, filter: false, editable: false,
     },
@@ -79,12 +62,12 @@ export function CrmGrid({
     { field: 'fleet_size', headerName: 'Fleet', width: 90, editable: canEdit, valueSetter: saveCell,
       valueParser: (p) => p.newValue === '' ? null : Number(p.newValue) },
     {
-      field: 'status', headerName: 'Status', width: 130, editable: canEdit, valueSetter: saveCell,
+      field: 'status', headerName: 'Status', width: 140, editable: canEdit, valueSetter: saveCell,
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: STATUSES },
       cellRenderer: (p: ICellRendererParams<CRMContact, ContactStatus>) => {
         const v = p.value as ContactStatus | undefined;
         if (!v) return null;
-        return <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[v]}`}>{v}</span>;
+        return <span className={`pill pill--${v}`}><span className="pill__dot" />{v}</span>;
       },
     },
     { field: 'source', headerName: 'Source', width: 110, editable: canEdit, valueSetter: saveCell },
@@ -99,12 +82,10 @@ export function CrmGrid({
 
   async function handleEnrich() {
     if (!enrichEmail.trim()) return;
-    setEnriching(true);
-    setMessage(null);
+    setEnriching(true); setMessage(null);
     try {
       const res = await fetch('/api/lusha/enrich', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: enrichEmail.trim() }),
       });
       const json = await res.json();
@@ -134,24 +115,19 @@ export function CrmGrid({
   }
 
   async function handleImport(file: File) {
-    setImporting(true);
-    setMessage(null);
+    setImporting(true); setMessage(null);
     Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
+      header: true, skipEmptyLines: true,
       complete: async (results) => {
         try {
           const res = await fetch('/api/crm/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rows: results.data }),
           });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error || 'Import failed');
           setMessage(`Imported ${json.inserted} contacts`);
-          // Re-fetch
-          const { data } = await supabase
-            .from('crm_contacts').select('*').order('updated_at', { ascending: false });
+          const { data } = await supabase.from('crm_contacts').select('*').order('updated_at', { ascending: false });
           setRows((data ?? []) as CRMContact[]);
         } catch (e: any) {
           setMessage(e.message);
@@ -164,15 +140,9 @@ export function CrmGrid({
 
   async function handleAddRow() {
     setAdding(true);
-    const { data, error } = await supabase
-      .from('crm_contacts')
-      .insert({
-        company_name: 'New company',
-        status: 'lead',
-        source: 'manual',
-      })
-      .select('*')
-      .single();
+    const { data, error } = await supabase.from('crm_contacts')
+      .insert({ company_name: 'New company', status: 'lead', source: 'manual' })
+      .select('*').single();
     setAdding(false);
     if (error) { setMessage(error.message); return; }
     setRows(r => [data as CRMContact, ...r]);
@@ -185,73 +155,54 @@ export function CrmGrid({
   }, [rows]);
 
   return (
-    <div className="space-y-4">
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <Stat label="Total"     value={statusCounts.all}       color="bg-gray-100" />
-        <Stat label="Leads"     value={statusCounts.lead}      color="bg-blue-100" />
-        <Stat label="Contacted" value={statusCounts.contacted} color="bg-yellow-100" />
-        <Stat label="Quoted"    value={statusCounts.quoted}    color="bg-purple-100" />
-        <Stat label="Won"       value={statusCounts.won}       color="bg-green-100" />
-        <Stat label="Lost"      value={statusCounts.lost}      color="bg-red-100" />
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-head__eyebrow">Sales · CRM pipeline</div>
+          <h1 className="page-head__title">{rows.length} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>contacts</span></h1>
+          <div className="page-head__sub">Inline edit · sort · filter · export. Type an email below to enrich via Lusha.</div>
+        </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="bg-white rounded-lg shadow p-3 flex flex-wrap items-center gap-3">
+      <div className="stats-grid">
+        <Stat label="Open Leads" value={statusCounts.lead}      accent="info" />
+        <Stat label="Contacted"  value={statusCounts.contacted} accent="warning" />
+        <Stat label="Quoted"     value={statusCounts.quoted}    accent="lusha" />
+        <Stat label="Won · Lost" value={`${statusCounts.won} · ${statusCounts.lost}`} accent="success" />
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
         {canEdit && (
-          <div className="flex items-center gap-2">
-            <input
-              type="email"
-              placeholder="email@company.com"
-              value={enrichEmail}
-              onChange={(e) => setEnrichEmail(e.target.value)}
-              className="px-3 py-2 border rounded-lg w-60"
-            />
-            <button
-              onClick={handleEnrich}
-              disabled={enriching || !enrichEmail}
-              className="px-4 py-2 bg-stc-navy text-white rounded-lg hover:bg-stc-navy-light disabled:opacity-50 flex items-center gap-2"
-            >
-              {enriching ? <Loader size={14} className="animate-spin" /> : <Plus size={14} />}
-              Enrich
+          <div className="row">
+            <input type="email" placeholder="email@company.com"
+              value={enrichEmail} onChange={(e) => setEnrichEmail(e.target.value)}
+              className="input" style={{ width: 240 }} />
+            <button onClick={handleEnrich} disabled={enriching || !enrichEmail} className="btn btn--primary">
+              {enriching ? <Loader size={14} className="spin" /> : <Plus size={14} />} Enrich
             </button>
           </div>
         )}
-
-        <div className="flex items-center gap-2 ml-auto">
-          {canEdit && (
-            <label className="px-4 py-2 border rounded-lg flex items-center gap-2 hover:bg-gray-50 cursor-pointer">
-              {importing ? <Loader size={14} className="animate-spin" /> : <Upload size={14} />}
-              Import CSV
-              <input type="file" accept=".csv" hidden onChange={(e) => {
-                const f = e.target.files?.[0]; if (f) handleImport(f);
-                e.target.value = '';
-              }} />
-            </label>
-          )}
-          <button onClick={handleExport} className="px-4 py-2 border rounded-lg flex items-center gap-2 hover:bg-gray-50">
-            <Download size={14} /> Export
+        <div className="toolbar__spacer" />
+        {canEdit && (
+          <label className="btn">
+            {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Import CSV
+            <input type="file" accept=".csv" hidden onChange={(e) => {
+              const f = e.target.files?.[0]; if (f) handleImport(f);
+              e.target.value = '';
+            }} />
+          </label>
+        )}
+        <button onClick={handleExport} className="btn"><Download size={14} /> Export</button>
+        {canEdit && (
+          <button onClick={handleAddRow} disabled={adding} className="btn btn--primary">
+            <Plus size={14} /> Add contact
           </button>
-          {canEdit && (
-            <button
-              onClick={handleAddRow}
-              disabled={adding}
-              className="px-4 py-2 bg-stc-red text-white rounded-lg hover:bg-stc-red-dark flex items-center gap-2"
-            >
-              <Plus size={14} /> Add contact
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
-      {message && (
-        <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-2 text-sm">
-          {message}
-        </div>
-      )}
+      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
-      {/* Grid */}
-      <div className="ag-theme-quartz bg-white rounded-lg shadow" style={{ height: 'calc(100vh - 380px)', minHeight: 400 }}>
+      <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 380px)', minHeight: 420, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
         <AgGridReact<CRMContact>
           ref={gridRef}
           rowData={rows}
@@ -267,11 +218,12 @@ export function CrmGrid({
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+function Stat({ label, value, accent }: { label: string; value: number | string; accent?: 'red'|'success'|'warning'|'info'|'lusha' }) {
   return (
-    <div className={`${color} rounded-lg p-3`}>
-      <div className="text-2xl font-bold leading-none mb-1">{value}</div>
-      <div className="text-xs text-gray-700">{label}</div>
+    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
+      <div className="stat__bar" />
+      <div className="stat__label">{label}</div>
+      <div className="stat__value tnum">{value}</div>
     </div>
   );
 }

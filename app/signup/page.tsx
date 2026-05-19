@@ -17,97 +17,53 @@ export default function SignupPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     const supabase = createClient();
     const { error } = await supabase.auth.signUp({
-      email,
-      password,
+      email, password,
       options: { data: { full_name: fullName } },
     });
     setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    if (error) { setError(error.message); return; }
     setSuccess(true);
     setTimeout(() => router.push('/login'), 2000);
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-stc-navy px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
-        <div className="mb-6 text-center">
-          <div className="text-3xl font-bold text-stc-navy">STC</div>
-          <div className="text-sm text-gray-600 mt-1">Create account</div>
-        </div>
+    <div className="login-bg">
+      <div className="login__card">
+        <div className="page-head__eyebrow" style={{ marginBottom: 10 }}>Stockport Truck Centre</div>
+        <h2 className="dot-red">Create account</h2>
+        <div className="sub">An admin will grant your role after sign-up.</div>
 
         {success ? (
-          <div className="text-center space-y-3 py-6">
-            <CheckCircle size={48} className="text-green-500 mx-auto" />
-            <p className="font-medium">Account created!</p>
-            <p className="text-sm text-gray-600">
-              Check your email to confirm, then sign in. An admin will need to grant your role.
-            </p>
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <CheckCircle size={40} style={{ color: 'var(--stc-success)', margin: '0 auto 8px' }} />
+            <p style={{ color: 'var(--fg-1)', fontWeight: 500 }}>Account created.</p>
+            <p className="sub" style={{ marginTop: 6 }}>Check your email to confirm, then sign in.</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Full name</label>
-              <input
-                type="text"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stc-navy outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stc-navy outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Password</label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-stc-navy outline-none"
-              />
-              <p className="text-xs text-gray-500 mt-1">Min 8 characters</p>
-            </div>
-
+          <form onSubmit={handleSubmit} className="login__form">
+            <div className="field"><div className="field__label">Full name</div>
+              <input className="input" type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} /></div>
+            <div className="field"><div className="field__label">Email</div>
+              <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+            <div className="field"><div className="field__label">Password (min 8)</div>
+              <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} /></div>
             {error && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 text-red-800 rounded-lg text-sm">
-                <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
-                <span>{error}</span>
+              <div className="alert alert--danger">
+                <AlertCircle size={14} /><span>{error}</span>
               </div>
             )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-stc-navy text-white py-2.5 rounded-lg font-medium hover:bg-stc-navy-light disabled:opacity-60 flex items-center justify-center gap-2"
-            >
-              {loading && <Loader size={16} className="animate-spin" />}
+            <button type="submit" disabled={loading} className="btn btn--primary btn--lg" style={{ width: '100%' }}>
+              {loading ? <Loader size={14} className="spin" /> : null}
               Create account
             </button>
           </form>
         )}
 
-        <div className="mt-4 text-center text-sm text-gray-600">
-          Already have an account?{' '}
-          <Link href="/login" className="text-stc-red font-medium hover:underline">
-            Sign in
-          </Link>
+        <div className="login__hint">
+          Already have an account? <Link href="/login" style={{ color: 'var(--stc-red)', fontWeight: 500 }}>Sign in</Link>
         </div>
       </div>
     </div>

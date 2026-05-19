@@ -16,8 +16,7 @@ export function IndustryNews({
   const canRefresh = role === 'admin' || role === 'marketer';
 
   async function refresh() {
-    setRefreshing(true);
-    setMessage(null);
+    setRefreshing(true); setMessage(null);
     try {
       const res = await fetch('/api/news/fetch', { method: 'POST' });
       const json = await res.json();
@@ -26,11 +25,8 @@ export function IndustryNews({
         .from('news_items').select('*').order('published_date', { ascending: false }).limit(50);
       setItems((data ?? []) as NewsItem[]);
       setMessage(`Fetched ${json.added} new items from ${json.sources} feed(s)`);
-    } catch (e: any) {
-      setMessage(e.message);
-    } finally {
-      setRefreshing(false);
-    }
+    } catch (e: any) { setMessage(e.message); }
+    finally { setRefreshing(false); }
   }
 
   async function deleteItem(id: string) {
@@ -41,41 +37,39 @@ export function IndustryNews({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-lg shadow p-4 flex items-center justify-between">
+    <div>
+      <div className="page-head">
         <div>
-          <h2 className="text-lg font-semibold">Industry news</h2>
-          <p className="text-xs text-gray-600 mt-1">Pulled from Commercial Motor, Fleet News, Transport Engineer</p>
+          <div className="page-head__eyebrow">Workspace · Industry news</div>
+          <h1 className="page-head__title">News<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <div className="page-head__sub">Commercial Motor · Fleet News · Transport Engineer. {items.length} stories indexed.</div>
         </div>
         {canRefresh && (
-          <button onClick={refresh} disabled={refreshing}
-            className="px-4 py-2 bg-stc-navy text-white rounded-lg hover:bg-stc-navy-light disabled:opacity-50 flex items-center gap-2">
-            {refreshing ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Refresh news
+          <button onClick={refresh} disabled={refreshing} className="btn btn--primary">
+            {refreshing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />} Refresh
           </button>
         )}
       </div>
 
-      {message && <div className="bg-blue-50 text-blue-900 rounded-lg px-4 py-2 text-sm">{message}</div>}
+      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
-      <div className="grid gap-3">
+      <div className="col" style={{ gap: 12 }}>
         {items.map(item => (
-          <div key={item.id} className="bg-white rounded-lg shadow p-5">
-            <div className="flex items-start justify-between gap-4 mb-2">
-              <h3 className="font-semibold flex-1">{item.title}</h3>
-              <span className="text-xs text-gray-500 whitespace-nowrap">{item.published_date}</span>
+          <div key={item.id} className="card" style={{ padding: 18 }}>
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, gap: 12 }}>
+              <h3 style={{ margin: 0, flex: 1 }}>{item.title}</h3>
+              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11, whiteSpace: 'nowrap' }}>{item.published_date}</span>
             </div>
-            {item.summary && <p className="text-sm text-gray-700 mb-3 line-clamp-3">{item.summary}</p>}
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-500">{item.source}</span>
-              <div className="flex items-center gap-2">
-                <a href={item.url} target="_blank" rel="noopener noreferrer"
-                  className="text-sm text-stc-red hover:underline flex items-center gap-1">
+            {item.summary && <p style={{ color: 'var(--fg-2)', fontSize: 13, margin: '0 0 10px' }}>{item.summary}</p>}
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <span className="dispatch-label">{item.source}</span>
+              <div className="row" style={{ gap: 6 }}>
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn btn--sm btn--ghost">
                   Read more <ExternalLink size={12} />
                 </a>
-                {(role === 'admin') && (
-                  <button onClick={() => deleteItem(item.id)} className="text-gray-400 hover:text-red-600">
-                    <Trash2 size={14} />
+                {role === 'admin' && (
+                  <button onClick={() => deleteItem(item.id)} className="btn btn--icon btn--sm" title="Delete">
+                    <Trash2 size={12} />
                   </button>
                 )}
               </div>
@@ -83,8 +77,8 @@ export function IndustryNews({
           </div>
         ))}
         {items.length === 0 && (
-          <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-            No news yet. Click <strong>Refresh news</strong> to pull the latest.
+          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)' }}>
+            No news yet. Click <strong style={{ color: 'var(--fg-1)' }}>Refresh</strong> to pull the latest.
           </div>
         )}
       </div>

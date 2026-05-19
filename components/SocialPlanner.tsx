@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Plus, Check, X, FileText, Clock, CheckCircle, Calendar, Trash2 } from 'lucide-react';
+import { Plus, Check, X, Calendar, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { SocialPost, PostStatus, Profile } from '@/lib/types';
 
@@ -14,13 +14,8 @@ const STATUSES: { value: PostStatus | 'all'; label: string }[] = [
   { value: 'scheduled',      label: 'Scheduled' },
   { value: 'posted',         label: 'Posted' },
 ];
-
-const STATUS_META: Record<PostStatus, { color: string; Icon: any; label: string }> = {
-  draft:          { color: 'bg-gray-100 text-gray-800',     Icon: FileText,    label: 'Draft' },
-  pending_review: { color: 'bg-yellow-100 text-yellow-800', Icon: Clock,       label: 'Pending review' },
-  approved:       { color: 'bg-green-100 text-green-800',   Icon: CheckCircle, label: 'Approved' },
-  scheduled:      { color: 'bg-blue-100 text-blue-800',     Icon: Calendar,    label: 'Scheduled' },
-  posted:         { color: 'bg-purple-100 text-purple-800', Icon: Check,       label: 'Posted' },
+const STATUS_LABEL: Record<PostStatus, string> = {
+  draft: 'Draft', pending_review: 'Pending review', approved: 'Approved', scheduled: 'Scheduled', posted: 'Posted',
 };
 
 export function SocialPlanner({
@@ -34,7 +29,6 @@ export function SocialPlanner({
 
   const isAdmin = profile.role === 'admin';
   const canCreate = isAdmin || profile.role === 'marketer';
-
   const filtered = useMemo(
     () => posts.filter(p => filter === 'all' || p.status === filter),
     [posts, filter]
@@ -76,127 +70,93 @@ export function SocialPlanner({
   }
 
   return (
-    <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="bg-white rounded-lg shadow p-3 flex flex-wrap items-center gap-3">
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value as any)}
-          className="px-3 py-2 border rounded-lg"
-        >
-          {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        <div className="ml-auto">
-          {canCreate && (
-            <button
-              onClick={() => setShowForm(s => !s)}
-              className="px-4 py-2 bg-stc-red text-white rounded-lg hover:bg-stc-red-dark flex items-center gap-2"
-            >
-              <Plus size={14} /> New post
-            </button>
-          )}
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-head__eyebrow">Marketing · Social planner</div>
+          <h1 className="page-head__title">{posts.length} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>posts</span></h1>
+          <div className="page-head__sub">Draft → review → approve → schedule → post. {posts.filter(p => p.status === 'pending_review').length} awaiting review.</div>
         </div>
       </div>
 
-      {error && <div className="bg-red-50 text-red-800 rounded-lg px-4 py-2 text-sm">{error}</div>}
+      <div className="toolbar">
+        <select value={filter} onChange={(e) => setFilter(e.target.value as any)} className="input" style={{ width: 180, height: 32 }}>
+          {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+        <div className="toolbar__spacer" />
+        {canCreate && (
+          <button onClick={() => setShowForm(s => !s)} className="btn btn--primary"><Plus size={14} /> New post</button>
+        )}
+      </div>
+
+      {error && <div className="alert alert--danger" style={{ marginBottom: 12 }}>{error}</div>}
 
       {showForm && (
-        <form
-          className="bg-white rounded-lg shadow p-4 space-y-3"
-          action={async (fd) => handleCreate(fd)}
-        >
-          <textarea name="content" required placeholder="Post content..." className="w-full px-3 py-2 border rounded-lg min-h-[100px]" />
-          <input name="caption" placeholder="Caption (optional)" className="w-full px-3 py-2 border rounded-lg" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <input type="date" name="scheduled_date" required className="px-3 py-2 border rounded-lg" defaultValue={new Date().toISOString().slice(0,10)} />
-            <input name="hashtags" placeholder="Hashtags (#STC #MOT)" className="md:col-span-3 px-3 py-2 border rounded-lg" />
+        <form action={async (fd) => handleCreate(fd)} className="card" style={{ padding: 16, marginBottom: 14 }}>
+          <div className="field">
+            <div className="field__label">Content</div>
+            <textarea name="content" required placeholder="Write the post..." className="input" style={{ minHeight: 100, padding: 10 }} />
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="field" style={{ marginTop: 10 }}>
+            <div className="field__label">Caption</div>
+            <input name="caption" placeholder="Optional caption" className="input" />
+          </div>
+          <div className="split-2" style={{ marginTop: 10 }}>
+            <div className="field"><div className="field__label">Scheduled date</div>
+              <input type="date" name="scheduled_date" required className="input" defaultValue={new Date().toISOString().slice(0,10)} /></div>
+            <div className="field"><div className="field__label">Hashtags</div>
+              <input name="hashtags" placeholder="#STC #MOT #HGV" className="input" /></div>
+          </div>
+          <div className="row" style={{ marginTop: 12, gap: 12 }}>
             {PLATFORMS.map(p => (
-              <label key={p} className="flex items-center gap-1.5 text-sm">
+              <label key={p} className="row" style={{ fontSize: 12.5, color: 'var(--fg-2)', cursor: 'pointer' }}>
                 <input type="checkbox" name={`plat_${p}`} defaultChecked={p === 'Facebook' || p === 'LinkedIn'} /> {p}
               </label>
             ))}
           </div>
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border rounded-lg">Cancel</button>
-            <button type="submit" className="px-4 py-2 bg-stc-navy text-white rounded-lg">
-              {isAdmin ? 'Create & approve' : 'Submit for review'}
-            </button>
+          <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setShowForm(false)} className="btn btn--ghost">Cancel</button>
+            <button type="submit" className="btn btn--primary">{isAdmin ? 'Create & approve' : 'Submit for review'}</button>
           </div>
         </form>
       )}
 
-      <div className="grid gap-3">
-        {filtered.map(p => {
-          const meta = STATUS_META[p.status];
-          const Icon = meta.Icon;
-          return (
-            <div key={p.id} className="bg-white rounded-lg shadow p-5">
-              <div className="flex items-start justify-between gap-4 mb-3">
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center flex-wrap gap-2 mb-1">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${meta.color}`}>
-                      <Icon size={12} /> {meta.label}
-                    </span>
-                    {p.platform.map(pl => (
-                      <span key={pl} className="text-xs px-2 py-0.5 bg-gray-100 rounded">{pl}</span>
-                    ))}
-                    <span className="text-xs text-gray-500">Scheduled: {p.scheduled_date}</span>
-                  </div>
-                  <p className="whitespace-pre-wrap">{p.content}</p>
-                  {p.caption && <p className="text-sm text-gray-600">{p.caption}</p>}
-                  {p.hashtags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {p.hashtags.map(t => <span key={t} className="text-xs text-stc-red">#{t}</span>)}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col items-end gap-2">
-                  {p.status === 'pending_review' && isAdmin && (
-                    <div className="flex gap-2">
-                      <button onClick={() => setStatus(p.id, 'approved')}
-                        className="px-3 py-1.5 bg-green-600 text-white rounded flex items-center gap-1 hover:bg-green-700">
-                        <Check size={14} /> Approve
-                      </button>
-                      <button onClick={() => setStatus(p.id, 'draft')}
-                        className="px-3 py-1.5 bg-red-600 text-white rounded flex items-center gap-1 hover:bg-red-700">
-                        <X size={14} /> Reject
-                      </button>
-                    </div>
-                  )}
-                  {p.status === 'approved' && (
-                    <button onClick={() => setStatus(p.id, 'scheduled')}
-                      className="px-3 py-1.5 bg-blue-600 text-white rounded flex items-center gap-1">
-                      <Calendar size={14} /> Mark scheduled
-                    </button>
-                  )}
-                  {(p.status === 'scheduled' || p.status === 'approved') && (
-                    <button onClick={() => setStatus(p.id, 'posted')}
-                      className="px-3 py-1.5 bg-purple-600 text-white rounded flex items-center gap-1">
-                      <Check size={14} /> Mark posted
-                    </button>
-                  )}
-                  {isAdmin && (
-                    <button onClick={() => deletePost(p.id)} title="Delete"
-                      className="p-1.5 text-gray-400 hover:text-red-600">
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="text-xs text-gray-500 border-t pt-2">
-                Created by {p.created_by} on {new Date(p.created_at).toLocaleDateString()}
-                {p.reviewed_by && ` • Reviewed by ${p.reviewed_by}`}
-              </div>
+      <div className="col" style={{ gap: 12 }}>
+        {filtered.map(p => (
+          <div key={p.id} className="card" style={{ padding: 18 }}>
+            <div className="row" style={{ gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span className={`pill pill--${p.status}`}>
+                <span className="pill__dot" />{STATUS_LABEL[p.status]}
+              </span>
+              {p.platform.map(pl => <span key={pl} className="tag">{pl}</span>)}
+              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11 }}>SCHEDULED · {p.scheduled_date}</span>
+              <div className="toolbar__spacer" />
+              {p.status === 'pending_review' && isAdmin && (
+                <>
+                  <button onClick={() => setStatus(p.id, 'approved')} className="btn btn--sm btn--primary"><Check size={12} /> Approve</button>
+                  <button onClick={() => setStatus(p.id, 'draft')} className="btn btn--sm"><X size={12} /> Reject</button>
+                </>
+              )}
+              {p.status === 'approved' && <button onClick={() => setStatus(p.id, 'scheduled')} className="btn btn--sm"><Calendar size={12} /> Mark scheduled</button>}
+              {(p.status === 'scheduled' || p.status === 'approved') && <button onClick={() => setStatus(p.id, 'posted')} className="btn btn--sm"><Check size={12} /> Mark posted</button>}
+              {isAdmin && <button onClick={() => deletePost(p.id)} className="btn btn--icon btn--sm" title="Delete"><Trash2 size={12} /></button>}
             </div>
-          );
-        })}
-        {filtered.length === 0 && (
-          <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-            No posts yet.
+            <p style={{ color: 'var(--fg-1)', whiteSpace: 'pre-wrap', margin: 0 }}>{p.content}</p>
+            {p.caption && <p style={{ color: 'var(--fg-3)', fontSize: 12.5, marginTop: 8, marginBottom: 0 }}>{p.caption}</p>}
+            {p.hashtags.length > 0 && (
+              <div className="row" style={{ flexWrap: 'wrap', marginTop: 8, gap: 6 }}>
+                {p.hashtags.map(t => <span key={t} style={{ color: 'var(--stc-red)', fontSize: 12 }}>#{t}</span>)}
+              </div>
+            )}
+            <div className="hr" />
+            <div style={{ fontSize: 11.5, color: 'var(--fg-4)' }} className="mono">
+              CREATED BY {p.created_by.toUpperCase()} · {new Date(p.created_at).toLocaleDateString('en-GB')}
+              {p.reviewed_by && ` · REVIEWED BY ${p.reviewed_by.toUpperCase()}`}
+            </div>
           </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)' }}>No posts at this status.</div>
         )}
       </div>
     </div>

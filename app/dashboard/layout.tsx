@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { Header } from '@/components/Header';
-import { Nav } from '@/components/Nav';
+import { Sidebar } from '@/components/Sidebar';
+import { TopBar } from '@/components/TopBar';
 import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -12,16 +12,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect('/login');
 
   const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+    .from('profiles').select('*').eq('id', user.id).single();
 
   const { data: lusha } = await supabase
-    .from('lusha_credits')
-    .select('balance')
-    .limit(1)
-    .single();
+    .from('lusha_credits').select('balance').limit(1).single();
+
+  const { count: pendingPosts } = await supabase
+    .from('social_posts').select('*', { count: 'exact', head: true })
+    .eq('status', 'pending_review');
 
   const p = (profile as Profile) ?? {
     id: user.id,
@@ -32,10 +30,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header profile={p} lushaBalance={lusha?.balance ?? 0} />
-      <Nav role={p.role} />
-      <main className="flex-1 max-w-screen-3xl w-full mx-auto px-6 py-6">{children}</main>
+    <div className="app">
+      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} />
+      <div className="main">
+        <TopBar initialLushaBalance={lusha?.balance ?? 0} />
+        <main className="page">{children}</main>
+      </div>
     </div>
   );
 }
