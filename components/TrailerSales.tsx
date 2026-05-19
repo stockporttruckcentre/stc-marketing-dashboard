@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
 import Papa from 'papaparse';
-import { Plus, Upload, Trash2, Package, MapPin, Loader, LayoutGrid, Table } from 'lucide-react';
+import { Plus, Upload, Trash2, Loader, Download } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Trailer, TrailerStatus, UserRole } from '@/lib/types';
 
@@ -15,9 +15,10 @@ export function TrailerSales({
 }: { initialTrailers: Trailer[]; role: UserRole }) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<Trailer[]>(initialTrailers);
-  const [view, setView] = useState<'grid' | 'cards'>('grid');
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedCount, setSelectedCount] = useState(0);
+  const gridRef = useState<AgGridReact<Trailer> | null>(null)[0];
 
   const canEdit = role === 'admin' || role === 'sales';
 
@@ -31,35 +32,28 @@ export function TrailerSales({
   }, [supabase]);
 
   const columnDefs: ColDef<Trailer>[] = useMemo(() => [
-    {
-      headerName: '', width: 50, pinned: 'left',
-      cellRenderer: (p: ICellRendererParams<Trailer>) => canEdit ? (
-        <button className="btn btn--icon btn--sm"
-          onClick={async () => {
-            if (!confirm('Delete trailer?')) return;
-            const { error } = await supabase.from('trailer_sales').delete().eq('id', p.data!.id);
-            if (error) { setMessage(error.message); return; }
-            setRows(r => r.filter(t => t.id !== p.data!.id));
-          }}><Trash2 size={12} /></button>
-      ) : null, sortable: false, filter: false, editable: false,
+    { headerName: '', width: 38, pinned: 'left',
+      checkboxSelection: canEdit, headerCheckboxSelection: canEdit, headerCheckboxSelectionFilteredOnly: true,
+      sortable: false, filter: false, editable: false, suppressMenu: true,
     },
-    { field: 'make',  flex: 1, minWidth: 120, editable: canEdit, valueSetter: saveCell },
-    { field: 'model', flex: 1, minWidth: 140, editable: canEdit, valueSetter: saveCell },
-    { field: 'year', width: 90, editable: canEdit, valueSetter: saveCell, valueParser: p => Number(p.newValue) || null },
-    { field: 'price', width: 120, editable: canEdit, valueSetter: saveCell, valueParser: p => Number(p.newValue) || 0,
-      valueFormatter: p => p.value != null ? `£${Number(p.value).toLocaleString()}` : '' },
-    { field: 'status', width: 140, editable: canEdit, valueSetter: saveCell,
+    { field: 'make',  headerName: 'Make',  flex: 1, minWidth: 120, editable: canEdit, valueSetter: saveCell },
+    { field: 'model', headerName: 'Model', flex: 1.2, minWidth: 160, editable: canEdit, valueSetter: saveCell },
+    { field: 'year', headerName: 'Year', width: 90, editable: canEdit, valueSetter: saveCell, valueParser: (p) => Number(p.newValue) || null },
+    { field: 'price', headerName: 'Price', width: 130, editable: canEdit, valueSetter: saveCell,
+      valueParser: (p) => Number(p.newValue) || 0,
+      valueFormatter: (p) => p.value != null ? `£${Number(p.value).toLocaleString()}` : '',
+      cellStyle: { fontFamily: '"IBM Plex Mono", monospace' } },
+    { field: 'status', headerName: 'Status', width: 130, editable: canEdit, valueSetter: saveCell,
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: STATUSES },
       cellRenderer: (p: ICellRendererParams<Trailer, TrailerStatus>) =>
         p.value ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{p.value}</span> : null,
     },
-    { field: 'location', flex: 1, minWidth: 130, editable: canEdit, valueSetter: saveCell },
-    { field: 'description', flex: 1.5, minWidth: 200, editable: canEdit, valueSetter: saveCell },
-    { field: 'external_id', headerName: 'MD Excel ID', width: 130, editable: canEdit, valueSetter: saveCell },
-  ], [canEdit, saveCell, supabase]);
+    { field: 'location', headerName: 'Location', flex: 1, minWidth: 130, editable: canEdit, valueSetter: saveCell },
+    { field: 'description', headerName: 'Description', flex: 1.5, minWidth: 220, editable: canEdit, valueSetter: saveCell },
+  ], [canEdit, saveCell]);
 
   const defaultColDef: ColDef = useMemo(() => ({
-    resizable: true, sortable: true, filter: true, floatingFilter: true,
+    resizable: true, sortable: true, filter: true, floatingFilter: false,
   }), []);
 
   async function handleAdd() {
@@ -67,10 +61,10 @@ export function TrailerSales({
       .insert({ make: 'New', model: 'Trailer', year: new Date().getFullYear(), price: 0, status: 'available', location: '' })
       .select('*').single();
     if (error) { setMessage(error.message); return; }
-    setRows(r => [data as Trailer, ...r]);
+    setRows((r) => [data as Trailer, ...r]);
   }
 
-  async function handleSyncCsv(file: File) {
+  async function handleUploadStockSheet(file: File) {
     setImporting(true); setMessage(null);
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
@@ -81,22 +75,44 @@ export function TrailerSales({
             body: JSON.stringify({ rows: results.data }),
           });
           const json = await res.json();
-          if (!res.ok) throw new Error(json.error || 'Sync failed');
-          setMessage(`Synced ${json.upserted} trailers from MD's Excel`);
+          if (!res.ok) throw new Error(json.error || 'Upload failed');
+          setMessage(`Uploaded ${json.upserted} trailers from stock sheet`);
           const { data } = await supabase.from('trailer_sales').select('*').order('updated_at', { ascending: false });
           setRows((data ?? []) as Trailer[]);
-        } catch (e: any) {
-          setMessage(e.message);
-        } finally { setImporting(false); }
+        } catch (e: any) { setMessage(e.message); }
+        finally { setImporting(false); }
       },
     });
   }
 
+  function handleExport() {
+    const csv = Papa.unparse(rows.map((r) => ({
+      make: r.make, model: r.model, year: r.year, price: r.price, status: r.status,
+      location: r.location, description: r.description,
+    })));
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `stc-trailer-stock-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function bulkDelete(api: any) {
+    const sel = api?.getSelectedRows() ?? [];
+    if (!sel.length) return;
+    if (!confirm(`Delete ${sel.length} trailer${sel.length === 1 ? '' : 's'}?`)) return;
+    const ids = sel.map((r: Trailer) => r.id);
+    const { error } = await supabase.from('trailer_sales').delete().in('id', ids);
+    if (error) { setMessage(error.message); return; }
+    setRows((r) => r.filter((c) => !ids.includes(c.id)));
+  }
+
   const counts = useMemo(() => ({
     total: rows.length,
-    available: rows.filter(r => r.status === 'available').length,
-    reserved: rows.filter(r => r.status === 'reserved').length,
-    sold: rows.filter(r => r.status === 'sold').length,
+    available: rows.filter((r) => r.status === 'available').length,
+    reserved: rows.filter((r) => r.status === 'reserved').length,
+    sold: rows.filter((r) => r.status === 'sold').length,
   }), [rows]);
 
   return (
@@ -104,7 +120,7 @@ export function TrailerSales({
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Sales · Trailer inventory</div>
-          <h1 className="page-head__title">{counts.total} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>units</span></h1>
+          <h1 className="page-head__title">{counts.total} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>units in stock</span></h1>
           <div className="page-head__sub">{counts.available} available · {counts.reserved} reserved · {counts.sold} sold</div>
         </div>
       </div>
@@ -117,21 +133,19 @@ export function TrailerSales({
       </div>
 
       <div className="toolbar" style={{ marginTop: 14 }}>
-        <div className="row" style={{ background: 'var(--stc-black-700)', borderRadius: 'var(--r-2)', border: '1px solid var(--border)', overflow: 'hidden', padding: 2 }}>
-          <button onClick={() => setView('grid')} className={`btn btn--sm ${view === 'grid' ? 'btn--primary' : 'btn--ghost'}`}>
-            <Table size={12} /> Grid
-          </button>
-          <button onClick={() => setView('cards')} className={`btn btn--sm ${view === 'cards' ? 'btn--primary' : 'btn--ghost'}`}>
-            <LayoutGrid size={12} /> Cards
-          </button>
-        </div>
         <div className="toolbar__spacer" />
+        {selectedCount > 0 && (
+          <span className="row" style={{ background: 'var(--stc-danger-bg)', padding: '4px 10px', borderRadius: 'var(--r-2)', border: '1px solid rgba(207,36,23,0.3)', marginRight: 8 }}>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--stc-red-300)' }}>{selectedCount} SELECTED</span>
+          </span>
+        )}
+        <button onClick={handleExport} className="btn"><Download size={14} /> Export CSV</button>
         {canEdit && (
           <>
             <label className="btn">
-              {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Sync from MD&apos;s Excel (CSV)
+              {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Upload stock sheet
               <input type="file" accept=".csv" hidden onChange={(e) => {
-                const f = e.target.files?.[0]; if (f) handleSyncCsv(f);
+                const f = e.target.files?.[0]; if (f) handleUploadStockSheet(f);
                 e.target.value = '';
               }} />
             </label>
@@ -140,41 +154,26 @@ export function TrailerSales({
         )}
       </div>
 
+      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 6, marginTop: 4 }}>
+        TIP · click any cell to edit · select rows to delete · upload a CSV with columns: make, model, year, price, status, location, description
+      </div>
+
       {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
-      {view === 'grid' ? (
-        <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 380px)', minHeight: 420, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
-          <AgGridReact<Trailer>
-            rowData={rows} columnDefs={columnDefs} defaultColDef={defaultColDef}
-            animateRows stopEditingWhenCellsLoseFocus getRowId={(p) => p.data.id}
-          />
-        </div>
-      ) : (
-        <div className="card-grid">
-          {rows.map(t => (
-            <div key={t.id} className="trailer-card">
-              <div className="trailer-card__img"><Package size={42} /></div>
-              <div className="trailer-card__body">
-                <div className="row" style={{ justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)' }}>{t.make} {t.model}</div>
-                    <div className="mono" style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>{t.year}</div>
-                  </div>
-                  <span className={`pill pill--${t.status}`}><span className="pill__dot" />{t.status}</span>
-                </div>
-                <div style={{ fontFamily: '"Panton", sans-serif', fontSize: 22, fontWeight: 700, color: 'var(--stc-red)', marginTop: 6 }}>£{(t.price ?? 0).toLocaleString()}</div>
-                <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '6px 0 0' }}>{t.description || '—'}</p>
-                <div className="row" style={{ marginTop: 8, fontSize: 12.5, color: 'var(--fg-3)' }}>
-                  <MapPin size={12} /> {t.location || '—'}
-                </div>
-              </div>
-            </div>
-          ))}
-          {rows.length === 0 && (
-            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--fg-3)', gridColumn: '1/-1' }}>No trailers in stock.</div>
-          )}
-        </div>
-      )}
+      <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 380px)', minHeight: 420, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+        <AgGridReact<Trailer>
+          rowData={rows}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          rowSelection="multiple"
+          suppressRowClickSelection
+          animateRows
+          stopEditingWhenCellsLoseFocus
+          enableCellTextSelection
+          getRowId={(p) => p.data.id}
+          onSelectionChanged={(e) => setSelectedCount(e.api.getSelectedRows().length)}
+        />
+      </div>
     </div>
   );
 }
