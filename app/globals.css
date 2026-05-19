@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --stc-navy: #071458;
+  --stc-red: #cf2417;
+}
+
+html, body {
+  height: 100%;
+}
+
+/* AG Grid tweaks */
+.ag-theme-quartz {
+  --ag-header-background-color: #f8fafc;
+  --ag-odd-row-background-color: #fcfcfd;
+  --ag-border-color: #e5e7eb;
+  --ag-font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto;
+  --ag-font-size: 13px;
+}
