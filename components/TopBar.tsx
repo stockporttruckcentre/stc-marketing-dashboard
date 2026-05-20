@@ -47,7 +47,7 @@ export function TopBar() {
       }
     }
     load();
-    const id = setInterval(load, 60_000);
+    const id = setInterval(load, 90_000);
     return () => { mounted = false; clearInterval(id); };
   }, []);
 
