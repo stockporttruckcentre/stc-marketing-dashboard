@@ -51,6 +51,57 @@ export async function enrichByName(firstName: string, lastName: string, companyN
   return r.json;
 }
 
+// ============ Free company lookup with progressive name variants ============
+/**
+ * Build up to 4 candidate names for a single company, progressively trimmed.
+ * Order: full input → legal-suffix stripped → first-two-words → first-word.
+ * Variants are deduplicated and never include the empty string.
+ */
+function companyNameVariants(raw: string): string[] {
+  const out: string[] = [];
+  const add = (v: string) => { const t = v.trim(); if (t && !out.includes(t)) out.push(t); };
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return [];
+  add(trimmed);
+  // Strip common legal/entity suffixes (apply repeatedly for stacked ones)
+  const sufRe = /\s+(limited|ltd|plc|p\.l\.c|llp|llc|inc|incorporated|corp|corporation|co|company|gmbh|bv|sa|s\.a)\.?$/gi;
+  let cleaned = trimmed;
+  for (let i = 0; i < 3; i++) {
+    const next = cleaned.replace(sufRe, '').trim();
+    if (next === cleaned) break;
+    cleaned = next;
+  }
+  cleaned = cleaned.replace(/\s*\(uk\)\s*$/gi, '').replace(/\s*&\s*(sons|co)\.?$/gi, '').trim();
+  if (cleaned) add(cleaned);
+  // First two words (often the recognisable trading name)
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) add(words.slice(0, 2).join(' '));
+  // First word only - skip if too short to be meaningful (e.g. "AB Ltd" → "AB" not useful)
+  if (words.length >= 1 && words[0].length >= 4) add(words[0]);
+  return out;
+}
+
+/**
+ * Search Lusha's company database with progressively trimmed name variants.
+ * /prospecting/company/search is FREE - only counts against daily call quota, not credits.
+ * Returns the first matching Lusha company (id, canonical name) or null if none of the variants match.
+ */
+export async function findLushaCompany(companyName: string): Promise<{ id: string; name: string; matchedVariant: string } | null> {
+  const variants = companyNameVariants(companyName);
+  for (const variant of variants) {
+    const r = await postJson(`${BASE}/prospecting/company/search`, {
+      pages: { page: 0, size: 5 },
+      filters: { companies: { include: { names: [variant] } } },
+    });
+    if (!r.ok) continue;
+    const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
+    const first = Array.isArray(items) ? items[0] : null;
+    const id = first?.id ?? first?.companyId ?? null;
+    if (id) return { id, name: first?.name ?? first?.companyName ?? variant, matchedVariant: variant };
+  }
+  return null;
+}
+
 // ============ Strategy 3: prospecting (company + role fallback) ============
 // Step 3a: search for contact IDs at a company filtered by job titles
 async function prospectingContactSearch(companyName: string, jobTitles: string[], size = 5) {
@@ -78,6 +129,11 @@ async function prospectingContactEnrich(contactIds: string[]) {
  * Returns the first enriched person we find.
  */
 export async function prospectingByCompanyAndRoles(companyName: string): Promise<any | null> {
+  // First do a FREE company lookup with progressive name variants so misnamed/suffixed rows still match.
+  // E.g. "Chartrange Enviro Limited" → tries that → "Chartrange Enviro" → "Chartrange" until Lusha returns a hit.
+  const company = await findLushaCompany(companyName);
+  if (!company) return null; // no variant matched - genuinely unknown to Lusha, do NOT burn credits trying name strings
+
   const roleGroups: string[][] = [
     ['Sales Director', 'Sales Manager', 'Head of Sales'],
     ['Managing Director', 'CEO', 'Owner'],
@@ -86,17 +142,28 @@ export async function prospectingByCompanyAndRoles(companyName: string): Promise
     ['Director'],
   ];
   for (const group of roleGroups) {
-    const search = await prospectingContactSearch(companyName, group, 5);
+    // Search contacts using the resolved company ID (more reliable than name string)
+    const body = {
+      pages: { page: 0, size: 5 },
+      filters: {
+        contacts: {
+          include: {
+            companies: { ids: [company.id] },
+            jobTitles: { values: group },
+          },
+        },
+      },
+    };
+    const search = await postJson(`${BASE}/prospecting/contact/search`, body);
     if (!search.ok) continue;
     const found = search.json?.data ?? search.json?.contacts ?? [];
     const ids: string[] = (Array.isArray(found) ? found : []).map((c: any) => c.id ?? c.contactId).filter(Boolean);
     if (!ids.length) continue;
-    // Enrich the first ID (cheapest — 1 credit, finds someone matching)
     const enrich = await prospectingContactEnrich(ids.slice(0, 1));
     if (!enrich.ok) continue;
     const enriched = enrich.json?.data ?? enrich.json?.contacts ?? null;
     const first = Array.isArray(enriched) ? enriched[0] : enriched;
-    if (first) return { data: first, _via: 'prospecting', _role: group.join(' / ') };
+    if (first) return { data: first, _via: 'prospecting', _role: group.join(' / '), _matched_company: company.matchedVariant };
   }
   return null;
 }
