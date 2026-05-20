@@ -620,3 +620,36 @@ INSERT INTO brand_assets (name, type, url, category) VALUES
   ('Christmas variant',               'logo', '/assets/logos/xmas.jpg',          'Logos'),
   ('Favicon source',                  'logo', '/assets/logos/favicon.jpg',       'Logos')
 ON CONFLICT DO NOTHING;
+
+
+-- =============================================================
+-- NEWS SOURCES (per-publication backdrops)
+-- =============================================================
+CREATE TABLE IF NOT EXISTS news_sources (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  backdrop_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+ALTER TABLE news_sources ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "news_sources_select" ON news_sources;
+DROP POLICY IF EXISTS "news_sources_write"  ON news_sources;
+CREATE POLICY "news_sources_select" ON news_sources FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "news_sources_write"  ON news_sources FOR ALL    USING (current_role_safe() IN ('admin','marketer'));
+
+-- Seed each known feed source (8 sources, slugs match backdrop filenames)
+INSERT INTO news_sources (name) VALUES
+  ('Commercial Motor'),
+  ('Fleet News'),
+  ('IRTE'),
+  ('Road Transport'),
+  ('Motor Transport'),
+  ('Trucking'),
+  ('Logistics UK'),
+  ('RHA')
+ON CONFLICT (name) DO NOTHING;
+
+-- Migrate older rows that used the previous names so the source chips show correctly
+UPDATE news_items   SET source = 'IRTE' WHERE source = 'Transport Engineer';
+UPDATE news_items   SET source = 'RHA'  WHERE source = 'UK HGV / haulage';
+DELETE FROM news_sources WHERE name IN ('Transport Engineer', 'UK HGV / haulage');

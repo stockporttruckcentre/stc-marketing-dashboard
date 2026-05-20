@@ -1,26 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { RefreshCw, ExternalLink, Loader, Trash2, TrendingUp, Search, Calendar, User } from 'lucide-react';
+import { RefreshCw, ExternalLink, Loader, Trash2, TrendingUp, Search, Calendar, User, Upload, ImagePlus } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import type { NewsItem, UserRole } from '@/lib/types';
-
-const SOURCE_DOMAINS: Record<string, string> = {
-  'Commercial Motor':   'commercialmotor.com',
-  'Fleet News':         'fleetnews.co.uk',
-  'Transport Engineer': 'transportengineer.org.uk',
-  'UK HGV / haulage':   'news.google.com',
-};
-
-function faviconFor(source: string, articleUrl?: string): string {
-  // Try domain mapping first, otherwise derive from the article URL
-  let host = SOURCE_DOMAINS[source];
-  if (!host && articleUrl) {
-    try { host = new URL(articleUrl).hostname.replace(/^www\./, ''); } catch {}
-  }
-  if (!host) host = 'news.google.com';
-  return `https://www.google.com/s2/favicons?sz=64&domain=${host}`;
-}
+import type { NewsItem, NewsSource, UserRole } from '@/lib/types';
 
 function formatDate(iso: string): string {
   if (!iso) return '';
@@ -36,21 +19,28 @@ function formatDate(iso: string): string {
 }
 
 export function IndustryNews({
-  initialItems, role,
-}: { initialItems: NewsItem[]; role: UserRole }) {
+  initialItems, initialSources, role,
+}: { initialItems: NewsItem[]; initialSources: NewsSource[]; role: UserRole }) {
   const supabase = createClient();
   const [items, setItems] = useState<NewsItem[]>(initialItems);
+  const [sources, setSources] = useState<NewsSource[]>(initialSources);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploadingSrc, setUploadingSrc] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSource, setActiveSource] = useState<string | null>(null);
+  const [showManage, setShowManage] = useState(false);
 
-  const canRefresh = role === 'admin' || role === 'marketer';
+  const canEdit = role === 'admin' || role === 'marketer';
 
-  const sources = useMemo(() => {
-    const set = new Set(items.map(i => i.source));
-    return Array.from(set).sort();
-  }, [items]);
+  // Source name → backdrop URL lookup
+  const backdropFor = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const s of sources) m.set(s.name, s.backdrop_url);
+    return m;
+  }, [sources]);
+
+  const sourceList = useMemo(() => sources.map(s => s.name), [sources]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -71,15 +61,34 @@ export function IndustryNews({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Refresh failed');
       const { data } = await supabase
-        .from('news_items').select('*').order('published_date', { ascending: false }).limit(80);
+        .from('news_items').select('*').order('published_date', { ascending: false }).limit(120);
       setItems((data ?? []) as NewsItem[]);
-      const parts: string[] = [];
-      parts.push(`${json.added} new`);
-      if (json.backfilled) parts.push(`${json.backfilled} updated with images`);
+      const parts: string[] = [`${json.added} new`];
       parts.push(`${json.sources} feed${json.sources === 1 ? '' : 's'}`);
       setMessage(parts.join(' · '));
     } catch (e: any) { setMessage(e.message); }
     finally { setRefreshing(false); }
+  }
+
+  async function uploadBackdrop(sourceName: string, file: File) {
+    setUploadingSrc(sourceName); setMessage(null);
+    try {
+      const slug = sourceName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `news-backdrops/${slug}-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('brand-assets').upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('brand-assets').getPublicUrl(path);
+      const { data, error } = await supabase
+        .from('news_sources')
+        .update({ backdrop_url: pub.publicUrl, updated_at: new Date().toISOString() })
+        .eq('name', sourceName)
+        .select('*').single();
+      if (error) throw error;
+      setSources(s => s.map(x => x.name === sourceName ? (data as NewsSource) : x));
+      setMessage(`Backdrop set for ${sourceName}`);
+    } catch (e: any) { setMessage(e.message); }
+    finally { setUploadingSrc(null); }
   }
 
   async function deleteItem(id: string) {
@@ -99,17 +108,56 @@ export function IndustryNews({
             <span>News<span style={{ color: 'var(--stc-red)' }}>.</span></span>
           </h1>
           <div className="page-head__sub">
-            {items.length} stor{items.length === 1 ? 'y' : 'ies'} indexed across {sources.length} publication{sources.length === 1 ? '' : 's'}.
+            {items.length} stor{items.length === 1 ? 'y' : 'ies'} indexed across {sourceList.length} publication{sourceList.length === 1 ? '' : 's'}.
           </div>
         </div>
-        {canRefresh && (
-          <button onClick={refresh} disabled={refreshing} className="btn btn--primary">
-            {refreshing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />} Refresh feeds
-          </button>
-        )}
+        <div className="row" style={{ gap: 8 }}>
+          {canEdit && (
+            <button onClick={() => setShowManage(s => !s)} className="btn">
+              <ImagePlus size={14} /> Backdrops
+            </button>
+          )}
+          {canEdit && (
+            <button onClick={refresh} disabled={refreshing} className="btn btn--primary">
+              {refreshing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />} Refresh feeds
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Toolbar: search + source chips */}
+      {showManage && (
+        <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={{ margin: 0 }}>Publication backdrops</h3>
+            <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>One 16:9 image per publication. JPG/PNG/WebP, ~1600×900.</span>
+          </div>
+          <div className="backdrop-manager">
+            {sources.map(src => (
+              <div key={src.id} className="backdrop-tile">
+                <div className="backdrop-tile__preview">
+                  {src.backdrop_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={src.backdrop_url} alt={src.name} />
+                  ) : (
+                    <div className="backdrop-tile__empty">No backdrop</div>
+                  )}
+                </div>
+                <div className="backdrop-tile__name">{src.name}</div>
+                <label className="btn btn--sm btn--ghost" style={{ cursor: 'pointer' }}>
+                  {uploadingSrc === src.name ? <Loader size={12} className="spin" /> : <Upload size={12} />}
+                  {src.backdrop_url ? 'Replace' : 'Upload'}
+                  <input type="file" accept="image/*" hidden onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadBackdrop(src.name, f);
+                    e.target.value = '';
+                  }} />
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="news-toolbar">
         <div className="news-search">
           <Search size={14} />
@@ -125,12 +173,11 @@ export function IndustryNews({
             onClick={() => setActiveSource(null)}>
             All
           </button>
-          {sources.map(src => (
+          {sourceList.map(src => (
             <button
               key={src}
               className={`news-chip ${activeSource === src ? 'is-active' : ''}`}
               onClick={() => setActiveSource(activeSource === src ? null : src)}>
-              <img src={faviconFor(src)} alt="" width={14} height={14} style={{ borderRadius: 3 }} />
               {src}
             </button>
           ))}
@@ -142,64 +189,56 @@ export function IndustryNews({
       {filtered.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--fg-3)' }}>
           {items.length === 0
-            ? <>No stories yet. Click <strong style={{ color: 'var(--fg-1)' }}>Refresh feeds</strong> to pull the latest from Commercial Motor, Fleet News, Transport Engineer and more.</>
+            ? <>No stories yet. Click <strong style={{ color: 'var(--fg-1)' }}>Refresh feeds</strong> to pull the latest.</>
             : <>No stories match your filter.</>}
         </div>
       ) : (
         <div className="news-grid">
-          {filtered.map(item => (
-            <article key={item.id} className="news-card">
-              <a href={item.url} target="_blank" rel="noopener noreferrer" className="news-card__link">
-                <div className="news-card__media">
-                  {item.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={item.image_url}
-                      alt=""
-                      loading="lazy"
-                      onError={(e) => {
-                        // Hide broken images so the gradient placeholder shows
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div className="news-card__placeholder">
-                      <img src={faviconFor(item.source, item.url)} alt="" width={32} height={32} style={{ opacity: 0.6 }} />
-                    </div>
-                  )}
-                  <div className="news-card__source-badge">
-                    <img src={faviconFor(item.source, item.url)} alt="" width={14} height={14} style={{ borderRadius: 2 }} />
-                    {item.source}
-                  </div>
-                </div>
-                <div className="news-card__body">
-                  <h3 className="news-card__title">{item.title}</h3>
-                  {item.summary && <p className="news-card__summary">{item.summary}</p>}
-                  <div className="news-card__meta">
-                    <span className="news-card__meta-item">
-                      <Calendar size={12} /> {formatDate(item.published_date)}
-                    </span>
-                    {item.author && (
-                      <span className="news-card__meta-item">
-                        <User size={12} /> {item.author}
-                      </span>
+          {filtered.map(item => {
+            const backdrop = backdropFor.get(item.source) || null;
+            return (
+              <article key={item.id} className="news-card">
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="news-card__link">
+                  <div className="news-card__media">
+                    {backdrop ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={backdrop} alt={item.source} loading="lazy" />
+                    ) : (
+                      <div className="news-card__placeholder">
+                        <span>{item.source}</span>
+                      </div>
                     )}
-                    <span className="news-card__meta-item news-card__meta-item--cta">
-                      Read <ExternalLink size={11} />
-                    </span>
+                    <div className="news-card__source-badge">{item.source}</div>
                   </div>
-                </div>
-              </a>
-              {role === 'admin' && (
-                <button
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteItem(item.id); }}
-                  className="news-card__delete"
-                  title="Delete">
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </article>
-          ))}
+                  <div className="news-card__body">
+                    <h3 className="news-card__title">{item.title}</h3>
+                    {item.summary && <p className="news-card__summary">{item.summary}</p>}
+                    <div className="news-card__meta">
+                      <span className="news-card__meta-item">
+                        <Calendar size={12} /> {formatDate(item.published_date)}
+                      </span>
+                      {item.author && (
+                        <span className="news-card__meta-item">
+                          <User size={12} /> {item.author}
+                        </span>
+                      )}
+                      <span className="news-card__meta-item news-card__meta-item--cta">
+                        Read <ExternalLink size={11} />
+                      </span>
+                    </div>
+                  </div>
+                </a>
+                {role === 'admin' && (
+                  <button
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteItem(item.id); }}
+                    className="news-card__delete"
+                    title="Delete">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </article>
+            );
+          })}
         </div>
       )}
     </div>

@@ -148,3 +148,10 @@ export const DEPOTS = [
   { name: 'Birkenhead', lat: 53.3934, lng: -3.0150 },
   { name: 'Atherton',   lat: 53.5219, lng: -2.4925 },
 ] as const;
+
+export interface NewsSource {
+  id: string;
+  name: string;
+  backdrop_url: string | null;
+  updated_at: string;
+}
