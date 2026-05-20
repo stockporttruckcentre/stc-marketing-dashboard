@@ -42,7 +42,7 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-  type Record = { title: string; source: string; url: string; summary: string | null; published_date: string; image_url: string | null; author: string | null };
+  type Record = { title: string; source: string; url: string; summary: string | null; published_date: string };
   const debug: { source: string; status: number | string; itemCount: number }[] = [];
 
   // Fetch a single feed with strict per-feed timeout so one slow feed can't stall the batch.
@@ -78,15 +78,7 @@ export async function POST() {
         const rawDesc = String(it.description?.['#text'] ?? it.description ?? it.summary?.['#text'] ?? it.summary ?? '');
         const summary = stripHtml(rawDesc);
         // Try every common RSS image location, then fall back to first <img> in description
-        // We no longer use article hero images - the news cards always show the
-        // per-source backdrop uploaded by the team. Keep image_url null.
-        const image_url: string | null = null;
-        const author: string | null = String(
-          it['dc:creator']?.['#text'] ?? it['dc:creator'] ??
-          it.author?.name ?? it.author?.['#text'] ?? it.author ??
-          ''
-        ).trim() || null;
-        if (title && url) { out.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr, image_url, author }); count++; }
+        if (title && url) { out.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr }); count++; }
       }
       debug.push({ source: feed.source, status: 200, itemCount: count });
     } catch (e: any) {
