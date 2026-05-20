@@ -7,10 +7,10 @@ import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEve
 import Papa from 'papaparse';
 import {
   Plus, Upload, Download, Loader, Trash2, X, Mail, Edit2, MoreHorizontal,
-  Globe, Users, UserPlus, Share2, Phone, Building, MapPin, Hash, Send,
+  Globe, Users, UserPlus, Share2, Phone, Building, MapPin, Hash, Send, Home, Star,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote } from '@/lib/types';
+import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
 import { extractCityFromAddress } from '@/lib/uk-cities';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
@@ -51,7 +51,8 @@ export function CrmWorkspace({
   const [showNewList, setShowNewList] = useState(false);
   const [showShare, setShowShare] = useState<CrmList | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: CRMContact; field?: string } | null>(null);
-  const [moveTargetMenu, setMoveTargetMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
+  const [moveTargetMenu, setMoveTargetMenu] = useState<{ x: number; y: number; rowIds: string[]; mode?: 'move' | 'duplicate' } | null>(null);
+  const [emptyAreaMenu, setEmptyAreaMenu] = useState<{ x: number; y: number } | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
   const [listPickerFor, setListPickerFor] = useState<{ purpose: 'enrich'; email: string } | null>(null);
   const [enrichConfirm, setEnrichConfirm] = useState<{ row: CRMContact; field: string } | null>(null);
@@ -336,7 +337,7 @@ export function CrmWorkspace({
   }
 
   useEffect(() => {
-    function close() { setContextMenu(null); setMoveTargetMenu(null); }
+    function close() { setContextMenu(null); setMoveTargetMenu(null); setEmptyAreaMenu(null); }
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, []);
@@ -429,7 +430,10 @@ export function CrmWorkspace({
           <div className="row" style={{ background: 'var(--stc-danger-bg)', padding: '4px 10px', borderRadius: 'var(--r-2)', border: '1px solid rgba(207,36,23,0.3)' }}>
             <span className="mono" style={{ fontSize: 11, color: 'var(--stc-red-300)' }}>{selectedCount} SELECTED</span>
             <button onClick={bulkEnrich} className="btn btn--sm"><Mail size={12} /> Enrich</button>
-            <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [] })} className="btn btn--sm"><MoreHorizontal size={12} /> Move…</button>
+            <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'move' })} className="btn btn--sm"><MoreHorizontal size={12} /> Move…</button>
+            {selectedCount <= 10 && (
+              <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'duplicate' })} className="btn btn--sm"><Plus size={12} /> Duplicate…</button>
+            )}
             <button onClick={bulkDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
           </div>
         )}
@@ -451,7 +455,14 @@ export function CrmWorkspace({
 
       {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
-      <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 420px)', minHeight: 400, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div className="ag-theme-quartz-dark"
+        onContextMenu={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('.ag-row') || target.closest('.ag-header-cell')) return;
+          e.preventDefault();
+          setEmptyAreaMenu({ x: e.clientX, y: e.clientY });
+        }}
+        style={{ height: 'calc(100vh - 420px)', minHeight: 400, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
         <AgGridReact<CRMContact>
           ref={gridRef}
           rowData={rows}
@@ -504,12 +515,23 @@ export function CrmWorkspace({
 
       {moveTargetMenu && (
         <MoveMenu x={moveTargetMenu.x} y={moveTargetMenu.y}
+          mode={moveTargetMenu.mode ?? 'move'}
           lists={lists.filter((l) => l.id !== selectedListId)}
           onPick={async (listId) => {
-            const { error } = await supabase.from('crm_contacts').update({ list_id: listId }).in('id', moveTargetMenu.rowIds);
-            if (error) setMessage(error.message); else {
-              setRows((r) => r.filter((c) => !moveTargetMenu.rowIds.includes(c.id)));
-              setMessage(`Moved ${moveTargetMenu.rowIds.length} → ${lists.find((l) => l.id === listId)?.name}`);
+            const mode = moveTargetMenu.mode ?? 'move';
+            if (mode === 'duplicate') {
+              const { data: src } = await supabase.from('crm_contacts').select('*').in('id', moveTargetMenu.rowIds);
+              if (src && src.length) {
+                const clones = src.map(({ id, created_at, updated_at, ...rest }: any) => ({ ...rest, list_id: listId }));
+                const { error } = await supabase.from('crm_contacts').insert(clones);
+                if (error) setMessage(error.message); else setMessage(`Duplicated ${clones.length} → ${lists.find((l) => l.id === listId)?.name}`);
+              }
+            } else {
+              const { error } = await supabase.from('crm_contacts').update({ list_id: listId }).in('id', moveTargetMenu.rowIds);
+              if (error) setMessage(error.message); else {
+                setRows((r) => r.filter((c) => !moveTargetMenu.rowIds.includes(c.id)));
+                setMessage(`Moved ${moveTargetMenu.rowIds.length} → ${lists.find((l) => l.id === listId)?.name}`);
+              }
             }
             setMoveTargetMenu(null);
           }}
@@ -531,6 +553,13 @@ export function CrmWorkspace({
         />
       )}
 
+            {emptyAreaMenu && (
+        <div className="ctx-menu" style={{ left: emptyAreaMenu.x, top: emptyAreaMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <div className="ctx-menu__head">{selectedList?.name ?? 'CRM'}</div>
+          <button onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} disabled={!canEdit}><Plus size={12} /> Add contact</button>
+          <button onClick={() => { setEmptyAreaMenu(null); document.querySelector<HTMLInputElement>('input[type=file][accept=".csv"]')?.click(); }} disabled={!canEdit}><Upload size={12} /> Import CSV…</button>
+        </div>
+      )}
       {drawerRow && (
         <ContactDrawer
           contact={drawerRow}
@@ -613,7 +642,7 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
 function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
   return (
     <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">{row.company_name}{field && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {field}</span>}</div>
+      <div className="ctx-menu__head">{row.company_name}{row.location && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.location}</span>}</div>
       <button onClick={onView}><Edit2 size={12} /> Open details</button>
       <button onClick={onEdit} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
       <button onClick={onEnrich}><Mail size={12} /> Enrich from Lusha…</button>
@@ -624,10 +653,10 @@ function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDe
   );
 }
 
-function MoveMenu({ x, y, lists, onPick, onClose }: { x: number; y: number; lists: CrmList[]; onPick: (id: string) => void; onClose: () => void }) {
+function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: { x: number; y: number; lists: CrmList[]; onPick: (id: string) => void; onClose: () => void; mode?: 'move' | 'duplicate' }) {
   return (
     <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">Move to list</div>
+      <div className="ctx-menu__head">{mode === 'duplicate' ? 'Duplicate to list' : 'Move to list'}</div>
       {lists.map((l) => (
         <button key={l.id} onClick={() => onPick(l.id)}>
           {l.is_global ? <Globe size={12} /> : <Users size={12} />} {l.name}
@@ -776,6 +805,15 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
     onChange(data as CRMContact);
   }
 
+    const [addrRefreshTick, setAddrRefreshTick] = useState(0);
+  async function addAddress() {
+    const { error } = await supabase.from('contact_addresses').insert({
+      contact_id: contact.id, label: 'New location', address: '', is_primary: false,
+    });
+    if (error) { alert(error.message); return; }
+    setAddrRefreshTick((t) => t + 1);
+  }
+
   async function moveToList(targetListId: string) {
     const { data, error } = await supabase.from('crm_contacts').update({ list_id: targetListId }).eq('id', contact.id).select('*').single();
     if (error) { alert(error.message); return; }
@@ -822,32 +860,28 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
             <DrawerField label="Phone" value={edit.phone} onSave={(v) => saveField('phone', v)} canEdit={canEdit} mono />
           </div>
 
-          {/* Address + Location (auto-derived) */}
+          {/* Addresses - multiple, primary indicator */}
           <div className="field" style={{ marginTop: 10 }}>
-            <div className="field__label">Address</div>
-            <textarea className="input" rows={3} disabled={!canEdit}
-              placeholder="e.g. Stockport Truck Centre Ltd, Oldmoor Road, Stockport, Manchester, SK6 2QE"
-              defaultValue={edit.address ?? ''}
-              onBlur={(e) => saveField('address', e.target.value || null)} />
-            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 4 }}>
-              {`// `}LOCATION (auto): {edit.location ?? '—'}
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+              <div className="field__label" style={{ marginBottom: 0 }}>Addresses</div>
+              {canEdit && (
+                <button type="button" onClick={addAddress} className="btn btn--sm"><Plus size={12} /> Add another location</button>
+              )}
             </div>
+            <AddressList contactId={edit.id} canEdit={canEdit} legacyAddress={edit.address}
+              onPrimaryChange={(addr, city) => onChange({ ...edit, address: addr, location: city ?? edit.location })} />
           </div>
 
-          {/* Fleet breakdown */}
+          {/* Fleet breakdown - inline 4-column */}
           <div className="field" style={{ marginTop: 14 }}>
             <div className="field__label">Fleet breakdown</div>
-            <div className="split-3" style={{ gap: 8 }}>
+            <div className="fleet-row">
               <FleetInput label="Trucks" value={edit.trucks} onSave={(n) => saveFleet('trucks', n)} canEdit={canEdit} />
               <FleetInput label="Trailers" value={edit.trailers} onSave={(n) => saveFleet('trailers', n)} canEdit={canEdit} />
               <FleetInput label="Vans" value={edit.vans} onSave={(n) => saveFleet('vans', n)} canEdit={canEdit} />
-            </div>
-            <div className="card" style={{ marginTop: 8, padding: '8px 12px' }}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>TOTAL FLEET (AUTO)</span>
-                <span className="tnum" style={{ fontWeight: 600 }}>
-                  {hasBreakdown ? fleetTotal : (edit.fleet_size ?? '—')}
-                </span>
+              <div className="fleet-row__total">
+                <span className="fleet-row__total-label">Total</span>
+                <span className="fleet-row__total-value">{hasBreakdown ? fleetTotal : (edit.fleet_size ?? '—')}</span>
               </div>
             </div>
           </div>
@@ -856,10 +890,24 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
             <div className="field">
               <div className="field__label">Status</div>
               <select className="input" disabled={!canEdit} value={edit.status} onChange={(e) => saveField('status', e.target.value)}>
-                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                {STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
               </select>
             </div>
             <DrawerField label="Assigned to" value={edit.assigned_to} onSave={(v) => saveField('assigned_to', v)} canEdit={canEdit} />
+          </div>
+          <div className="split-2" style={{ gap: 10, marginTop: 10 }}>
+            <div className="field">
+              <div className="field__label">Employees</div>
+              <input type="number" min={0} className="input tnum" disabled={!canEdit}
+                defaultValue={edit.employee_count ?? ''}
+                onBlur={(e) => saveField('employee_count', e.target.value === '' ? null : Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <div className="field__label">Turnover (£)</div>
+              <input type="number" min={0} step={1000} className="input tnum" disabled={!canEdit}
+                defaultValue={edit.turnover ?? ''}
+                onBlur={(e) => saveField('turnover', e.target.value === '' ? null : Number(e.target.value))} />
+            </div>
           </div>
 
           {/* Links */}
@@ -928,6 +976,7 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
             <>
               <button onClick={() => setMovePickerOpen('move')} className="btn btn--sm"><MoreHorizontal size={12} /> Move to list</button>
               <button onClick={() => setMovePickerOpen('duplicate')} className="btn btn--sm"><Plus size={12} /> Duplicate to list</button>
+              <button onClick={() => exportContact(edit, notes, lists)} className="btn btn--sm"><Download size={12} /> Export</button>
               <button onClick={onDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
             </>
           )}
@@ -958,6 +1007,180 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
       </div>
     </div>
   );
+}
+
+function AddressList({ contactId, canEdit, legacyAddress, onPrimaryChange }: {
+  contactId: string; canEdit: boolean; legacyAddress: string | null;
+  onPrimaryChange: (address: string, city: string | null) => void;
+}) {
+  const supabase = useMemo(() => createClient(), []);
+  const [items, setItems] = useState<ContactAddress[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from('contact_addresses').select('*').eq('contact_id', contactId).order('is_primary', { ascending: false }).order('created_at', { ascending: true });
+    setItems((data ?? []) as ContactAddress[]);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, [contactId]);
+
+  // Realtime: keep address list in sync
+  useEffect(() => {
+    const ch = supabase.channel(`addrs:${contactId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_addresses', filter: `contact_id=eq.${contactId}` },
+        () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [supabase, contactId]);
+
+  async function save(id: string, patch: Partial<ContactAddress>) {
+    let nextPatch: any = { ...patch };
+    if (patch.address !== undefined) {
+      nextPatch.city = patch.address ? extractCityFromAddress(patch.address) : null;
+    }
+    const { error } = await supabase.from('contact_addresses').update(nextPatch).eq('id', id);
+    if (error) alert(error.message);
+    if (patch.is_primary) {
+      const row = items.find((i) => i.id === id);
+      if (row) onPrimaryChange(patch.address ?? row.address, nextPatch.city ?? row.city);
+    }
+  }
+  async function remove(id: string) {
+    if (!confirm('Delete this address?')) return;
+    const { error } = await supabase.from('contact_addresses').delete().eq('id', id);
+    if (error) alert(error.message);
+  }
+  async function setPrimary(id: string) {
+    const { error } = await supabase.from('contact_addresses').update({ is_primary: true }).eq('id', id);
+    if (error) alert(error.message);
+  }
+
+  if (loading) return <div className="row-item__sub">Loading addresses…</div>;
+  // Migrate legacy single-address into first entry if no rows exist
+  if (items.length === 0 && legacyAddress) {
+    return (
+      <div className="card" style={{ padding: 12 }}>
+        <div className="field__label" style={{ marginBottom: 4 }}>Head office (primary)</div>
+        <textarea className="input" rows={6} disabled={!canEdit} defaultValue={legacyAddress}
+          onBlur={async (e) => {
+            const val = e.target.value;
+            await supabase.from('contact_addresses').insert({ contact_id: contactId, label: 'Head office', address: val, is_primary: true });
+          }} />
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <div className="card" style={{ padding: 12 }}>
+        <div className="row-item__sub">No addresses yet. Click <strong>Add another location</strong> to add one.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="col" style={{ gap: 10 }}>
+      {items.map((a) => (
+        <div key={a.id} className="card" style={{ padding: 12, borderLeft: a.is_primary ? '2px solid var(--stc-red)' : '1px solid var(--border)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+            <input className="input" disabled={!canEdit} defaultValue={a.label}
+              onBlur={(e) => save(a.id, { label: e.target.value || 'Location' })}
+              style={{ height: 28, fontSize: 12.5, fontWeight: 600, maxWidth: 240 }} />
+            <div className="row" style={{ gap: 4 }}>
+              {a.is_primary
+                ? <span className="mono" style={{ fontSize: 10, color: 'var(--stc-red)', padding: '2px 6px', border: '1px solid var(--stc-red)', borderRadius: 'var(--r-1)' }}>PRIMARY</span>
+                : canEdit && <button onClick={() => setPrimary(a.id)} className="btn btn--sm btn--ghost"><Star size={12} /> Set primary</button>
+              }
+              {canEdit && <button onClick={() => remove(a.id)} className="btn btn--icon btn--sm"><Trash2 size={12} /></button>}
+            </div>
+          </div>
+          <textarea className="input" rows={5} disabled={!canEdit}
+            placeholder="Building, Street, Town, City, Postcode"
+            defaultValue={a.address}
+            onBlur={(e) => save(a.id, { address: e.target.value })} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function exportContact(c: CRMContact, notes: ContactNote[], lists: CrmList[]) {
+  const list = lists.find((l) => l.id === c.list_id);
+  const safe = (v: any) => (v === null || v === undefined || v === '') ? null : v;
+  // Build lines, omit empty
+  const lines: string[] = [];
+  lines.push(`<!doctype html><html><head><meta charset="utf-8"><title>${c.company_name} - STC export</title>`);
+  lines.push(`<style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 760px; margin: 24px auto; padding: 0 24px; color: #0a1133; }
+    h1 { font-size: 26px; margin: 0 0 4px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: #cf2417; margin: 28px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    td { padding: 5px 0; vertical-align: top; }
+    td:first-child { width: 32%; color: #666; font-size: 13px; }
+    td:last-child { font-size: 14px; }
+    .note { background: #f8f8fb; border-left: 3px solid #cf2417; padding: 10px 12px; margin: 8px 0; border-radius: 4px; }
+    .note__meta { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .fleet { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .fleet > div { background: #f5f5fa; padding: 8px 10px; border-radius: 4px; }
+    .fleet .l { font-size: 11px; color: #666; text-transform: uppercase; }
+    .fleet .v { font-size: 18px; font-weight: 600; }
+  </style></head><body>`);
+  lines.push(`<h1>${c.company_name}</h1>`);
+  lines.push(`<div style="color:#666; font-size:13px;">${list?.name ?? ''} · ${c.status} · exported ${new Date().toLocaleString('en-GB')}</div>`);
+
+  // Primary details
+  lines.push(`<h2>Primary contact</h2><table>`);
+  const rows: [string, any][] = [
+    ['Contact name', safe(c.contact_name)],
+    ['Email', safe(c.email)],
+    ['Phone', safe(c.phone)],
+    ['Location (primary city)', safe(c.location)],
+    ['Source', safe(c.source)],
+    ['Assigned to', safe(c.assigned_to)],
+    ['Last contacted', safe(c.last_contact)],
+    ['Employee count', safe(c.employee_count)],
+    ['Turnover', c.turnover != null ? '£' + Number(c.turnover).toLocaleString() : null],
+  ];
+  for (const [k, v] of rows) if (v !== null) lines.push(`<tr><td>${k}</td><td>${v}</td></tr>`);
+  lines.push(`</table>`);
+
+  // Fleet breakdown - always shown
+  lines.push(`<h2>Fleet breakdown</h2>`);
+  lines.push(`<div class="fleet">
+    <div><div class="l">Trucks</div><div class="v">${c.trucks ?? '—'}</div></div>
+    <div><div class="l">Trailers</div><div class="v">${c.trailers ?? '—'}</div></div>
+    <div><div class="l">Vans</div><div class="v">${c.vans ?? '—'}</div></div>
+    <div><div class="l">Total</div><div class="v">${c.fleet_size ?? '—'}</div></div>
+  </div>`);
+
+  // Primary address from c.address (legacy single field)
+  if (c.address) {
+    lines.push(`<h2>Address</h2><div style="white-space:pre-wrap; font-size:14px;">${c.address}</div>`);
+  }
+
+  // Links
+  if (c.links && c.links.length) {
+    lines.push(`<h2>Links</h2><table>`);
+    for (const l of c.links) lines.push(`<tr><td>${l.label} <span style="color:#999; font-size:11px;">(${l.kind})</span></td><td><a href="${l.url}">${l.url}</a></td></tr>`);
+    lines.push(`</table>`);
+  }
+
+  // Notes history
+  if (notes.length) {
+    lines.push(`<h2>Notes &amp; history</h2>`);
+    for (const n of notes) {
+      lines.push(`<div class="note"><div class="note__meta">${n.author_name} · ${new Date(n.created_at).toLocaleString('en-GB')}</div><div>${n.text.replace(/\n/g, '<br>')}</div></div>`);
+    }
+  }
+
+  lines.push(`</body></html>`);
+  const blob = new Blob([lines.join('\n')], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${c.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-export-${new Date().toISOString().slice(0, 10)}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function FleetInput({ label, value, onSave, canEdit }: { label: string; value: number | null; onSave: (n: number | null) => void; canEdit: boolean }) {

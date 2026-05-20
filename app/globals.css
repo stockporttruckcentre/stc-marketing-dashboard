@@ -1676,3 +1676,25 @@ a { color: inherit; text-decoration: none; }
 
 /* Instagram aspect: square */
 .preview--ig .preview__img { aspect-ratio: 1/1; object-fit: cover; }
+
+/* Tell browser to render native widgets (selects, date pickers) in dark mode */
+html { color-scheme: dark; }
+
+/* Native dropdown options should not flash white */
+select option { background: var(--bg-elevated); color: var(--fg-1); }
+
+/* Smaller fleet inline grid - 4 numeric inputs in one row */
+.fleet-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.fleet-row__total {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 6px 10px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.fleet-row__total-label { font-family: "Inter", sans-serif; font-weight: 500; font-size: 12px; letter-spacing: -0.01em; color: var(--fg-3); }
+.fleet-row__total-value { font-family: "IBM Plex Mono", monospace; font-size: 18px; color: var(--fg-1); font-weight: 600; }

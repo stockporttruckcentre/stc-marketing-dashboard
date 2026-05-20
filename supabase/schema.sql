@@ -499,3 +499,81 @@ DROP TRIGGER IF EXISTS crm_contacts_fleet_total ON crm_contacts;
 CREATE TRIGGER crm_contacts_fleet_total
   BEFORE INSERT OR UPDATE ON crm_contacts
   FOR EACH ROW EXECUTE FUNCTION sync_fleet_total();
+
+-- =============================================================
+-- ADD-ON: employees + turnover + multi-address
+-- =============================================================
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='employee_count') THEN
+    ALTER TABLE crm_contacts ADD COLUMN employee_count INTEGER;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='turnover') THEN
+    ALTER TABLE crm_contacts ADD COLUMN turnover NUMERIC(14,2);
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS contact_addresses (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  contact_id UUID REFERENCES crm_contacts ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL DEFAULT 'Head office',
+  address TEXT NOT NULL,
+  city TEXT,
+  is_primary BOOLEAN DEFAULT FALSE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contact_addresses_contact ON contact_addresses (contact_id, is_primary DESC);
+
+ALTER TABLE contact_addresses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "addresses_all" ON contact_addresses;
+CREATE POLICY "addresses_all" ON contact_addresses FOR ALL USING (
+  EXISTS (SELECT 1 FROM crm_contacts c WHERE c.id = contact_addresses.contact_id)
+);
+
+-- One primary per contact: when marking primary, unmark others
+CREATE OR REPLACE FUNCTION enforce_single_primary_address()
+RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+BEGIN
+  IF NEW.is_primary THEN
+    UPDATE contact_addresses SET is_primary = FALSE
+    WHERE contact_id = NEW.contact_id AND id != NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$func$;
+DROP TRIGGER IF EXISTS contact_addresses_single_primary ON contact_addresses;
+CREATE TRIGGER contact_addresses_single_primary
+  AFTER INSERT OR UPDATE OF is_primary ON contact_addresses
+  FOR EACH ROW WHEN (NEW.is_primary = TRUE)
+  EXECUTE FUNCTION enforce_single_primary_address();
+
+-- Sync crm_contacts.location from primary address city
+CREATE OR REPLACE FUNCTION sync_primary_address_to_contact()
+RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+DECLARE
+  prim_city TEXT;
+  prim_addr TEXT;
+BEGIN
+  SELECT city, address INTO prim_city, prim_addr
+  FROM contact_addresses
+  WHERE contact_id = COALESCE(NEW.contact_id, OLD.contact_id) AND is_primary = TRUE
+  ORDER BY created_at DESC LIMIT 1;
+
+  UPDATE crm_contacts
+    SET location = COALESCE(prim_city, location),
+        address  = COALESCE(prim_addr, address)
+    WHERE id = COALESCE(NEW.contact_id, OLD.contact_id);
+  RETURN COALESCE(NEW, OLD);
+END;
+$func$;
+DROP TRIGGER IF EXISTS contact_addresses_sync ON contact_addresses;
+CREATE TRIGGER contact_addresses_sync
+  AFTER INSERT OR UPDATE OR DELETE ON contact_addresses
+  FOR EACH ROW EXECUTE FUNCTION sync_primary_address_to_contact();
+
+-- Realtime
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE contact_addresses; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  END IF;
+END $$;

@@ -39,6 +39,8 @@ export interface CRMContact {
   phone: string | null;
   source: string;
   status: ContactStatus;
+  employee_count: number | null;
+  turnover: number | null;
   fleet_size: number | null;  // derived sum of trucks+trailers+vans (set by trigger)
   trucks: number | null;
   trailers: number | null;
@@ -122,6 +124,16 @@ export interface ContactNote {
   author_id: string | null;
   author_name: string;
   text: string;
+  created_at: string;
+}
+
+export interface ContactAddress {
+  id: string;
+  contact_id: string;
+  label: string;
+  address: string;
+  city: string | null;
+  is_primary: boolean;
   created_at: string;
 }
 
