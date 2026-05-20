@@ -1501,7 +1501,7 @@ function Modal({ children, onClose, title }: { children: React.ReactNode; onClos
 
 
 // ===== Schedule meeting modal =====
-function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }: {
+export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }: {
   contact: CRMContact;
   profile: Profile;
   allProfiles: Profile[];
@@ -1664,7 +1664,7 @@ function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }: {
   );
 }
 
-function VisibilityPicker({ profiles, onCancel, onSave, error }: {
+export function VisibilityPicker({ profiles, onCancel, onSave, error }: {
   profiles: Profile[];
   onCancel: () => void;
   onSave: (visibility: 'private' | 'team' | 'specific', visibleTo: string[]) => void;
