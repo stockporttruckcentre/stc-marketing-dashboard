@@ -586,3 +586,14 @@ DO $$ BEGIN
     ALTER TABLE profiles ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('dark', 'light'));
   END IF;
 END $$;
+
+-- =============================================================
+-- ADD-ON: brand asset seed refresh with real local files
+-- =============================================================
+DELETE FROM brand_assets WHERE url LIKE '/assets/logo-%' OR url LIKE '/assets/fonts/%';
+
+INSERT INTO brand_assets (name, type, url, category) VALUES
+  ('STC Logo Emblem',           'logo',  '/assets/stc-logo-emblem.png',           'Logos'),
+  ('STC Navbar Button',         'logo',  '/assets/stc-navbar-button.png',         'Logos'),
+  ('STC Sales & Leasing (White)', 'logo', '/assets/stc-sales-leasing-white.png',  'Logos')
+ON CONFLICT DO NOTHING;
