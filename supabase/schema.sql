@@ -609,8 +609,8 @@ INSERT INTO brand_assets (name, type, url, category) VALUES
   ('Stockport Truck Centre — Navy',   'logo', '/assets/logos/stc-navy.jpg',      'Logos'),
   ('Sales & Leasing — White',         'logo', '/assets/logos/sl-white.jpg',      'Logos'),
   ('Sales & Leasing — Navy',          'logo', '/assets/logos/sl-navy.jpg',       'Logos'),
-  ('Just text (no oval)',             'logo', '/assets/logos/notext.jpg',        'Logos'),
-  ('Just oval (no text)',             'logo', '/assets/logos/nooval.jpg',        'Logos'),
+  ('STC oval (no text)',              'logo', '/assets/logos/notext.jpg',        'Logos'),
+  ('STC text (no oval)',              'logo', '/assets/logos/nooval.jpg',        'Logos'),
   ('Trailers To Go',                  'logo', '/assets/logos/trailerstogo.jpg',  'Logos'),
   ('Christmas variant',               'logo', '/assets/logos/xmas.jpg',          'Logos'),
   ('Favicon source',                  'logo', '/assets/logos/favicon.jpg',       'Logos')

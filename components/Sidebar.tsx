@@ -55,7 +55,7 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <Image src="/assets/stc-logo-emblem.png" alt="STC" width={38} height={38} />
+        <Image src="/assets/logos/notext.jpg" alt="STC" width={38} height={38} />
         <div className="sidebar__brand-text">
           <div className="sidebar__brand-title">STOCKPORT TRUCK CENTRE</div>
           <div className="sidebar__brand-sub">Marketing &amp; Sales</div>
