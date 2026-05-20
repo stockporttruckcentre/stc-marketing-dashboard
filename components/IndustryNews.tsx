@@ -66,6 +66,7 @@ export function IndustryNews({
         .from('news_items').select('*').order('published_date', { ascending: false }).limit(120);
       setItems((data ?? []) as NewsItem[]);
       const parts: string[] = [`${json.added} new`];
+      if (json.purged) parts.push(`${json.purged} stale removed`);
       parts.push(`${json.sources} feed${json.sources === 1 ? '' : 's'}`);
       setMessage(parts.join(' · '));
     } catch (e: any) { setMessage(e.message); }

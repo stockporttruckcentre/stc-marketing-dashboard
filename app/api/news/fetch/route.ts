@@ -10,15 +10,17 @@ export const maxDuration = 30;
 // All feeds use Google News search RSS with `when:7d` to force last-week freshness.
 // Returned in reverse chronological order via the pubDate field on each item.
 const FEEDS = [
-  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=site:commercialmotor.com+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=site:fleetnews.co.uk+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=site:roadtransport.com+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=site:logistics.org.uk+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=site:rha.uk.net+when:7d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=site:commercialmotor.com+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=site:fleetnews.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=site:roadtransport.com+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=site:logistics.org.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=site:rha.uk.net+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
 ];
+
+const MAX_AGE_DAYS = 14;
 
 function stripHtml(s: string) {
   return s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) : '';
@@ -51,8 +53,12 @@ export async function POST() {
       for (const it of items.slice(0, 15)) {
         const title = String(it.title?.['#text'] ?? it.title ?? '').trim();
         const url   = String(it.link?.['@_href'] ?? it.link ?? it.guid?.['#text'] ?? it.guid ?? '').trim();
-        const pub   = it.pubDate ?? it.published ?? it.updated;
-        const dateStr = pub ? new Date(pub).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+        const pub = it.pubDate ?? it.published ?? it.updated;
+        const dateObj = pub ? new Date(pub) : null;
+        if (!dateObj || isNaN(+dateObj)) continue; // skip items without a real pubDate
+        const ageDays = (Date.now() - +dateObj) / 86_400_000;
+        if (ageDays > MAX_AGE_DAYS) continue; // hard cutoff regardless of what Google returns
+        const dateStr = dateObj.toISOString().slice(0, 10);
         const rawDesc = String(it.description?.['#text'] ?? it.description ?? it.summary?.['#text'] ?? it.summary ?? '');
         const summary = stripHtml(rawDesc);
         // Try every common RSS image location, then fall back to first <img> in description
@@ -72,8 +78,15 @@ export async function POST() {
     }
   }
 
+  // Always sweep stale stories first - older than the cutoff cannot live on the site
+  const cutoffIso = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const { count: purged } = await supabase
+    .from('news_items')
+    .delete({ count: 'exact' })
+    .lt('published_date', cutoffIso);
+
   if (!records.length) {
-    return NextResponse.json({ added: 0, sources: 0, debug }, { status: records.length === 0 ? 502 : 200 });
+    return NextResponse.json({ added: 0, purged: purged ?? 0, sources: 0, debug }, { status: 200 });
   }
 
   // Insert new stories - existing rows (same url) are skipped
@@ -99,6 +112,7 @@ export async function POST() {
 
   return NextResponse.json({
     added: insCount ?? 0,
+    purged: purged ?? 0,
     backfilled,
     sources: debug.filter((d) => d.itemCount > 0 && d.source !== '__og_image__').length,
     debug,

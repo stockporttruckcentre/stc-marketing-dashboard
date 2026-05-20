@@ -9,7 +9,12 @@ export default async function NewsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
   const [{ data: items }, { data: sources }] = await Promise.all([
-    supabase.from('news_items').select('*').order('published_date', { ascending: false }).limit(80),
+    supabase
+      .from('news_items')
+      .select('*')
+      .gte('published_date', new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10))
+      .order('published_date', { ascending: false })
+      .limit(120),
     supabase.from('news_sources').select('*').order('name'),
   ]);
   return (
