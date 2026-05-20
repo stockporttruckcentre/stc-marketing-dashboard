@@ -742,3 +742,16 @@ DO $$ BEGIN
       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
   END IF;
 END $$;
+
+
+-- =============================================================
+-- Unified tracker: SIDE (sales vs maintenance) + maint-specific fields
+-- =============================================================
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS side TEXT DEFAULT 'trailer_sales' CHECK (side IN ('trailer_sales','maintenance'));
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS what TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS account_manager TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS next_action TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS vehicles TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS initials TEXT;
+CREATE INDEX IF NOT EXISTS idx_crm_contacts_side ON crm_contacts (side);
