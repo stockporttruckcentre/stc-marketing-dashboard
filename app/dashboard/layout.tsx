@@ -37,7 +37,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   };
 
   return (
-    <div className="app" data-theme={p.theme ?? "dark"} suppressHydrationWarning>
+    <div className="app">
       <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
       <div className="main">
         <TopBar />

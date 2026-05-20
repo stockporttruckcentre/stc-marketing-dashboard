@@ -23,11 +23,10 @@ export default async function DashboardHome() {
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
   const p = profile as Profile | null;
 
-  const [{ data: recentContacts }, { data: recentPosts }, { count: pending }, { data: lusha }] = await Promise.all([
+  const [{ data: recentContacts }, { data: recentPosts }, { count: pending }] = await Promise.all([
     supabase.from('crm_contacts').select('*').order('updated_at', { ascending: false }).limit(6),
     supabase.from('social_posts').select('*').order('updated_at', { ascending: false }).limit(6),
     supabase.from('social_posts').select('*', { count: 'exact', head: true }).eq('status', 'pending_review'),
-    supabase.from('lusha_credits').select('balance').limit(1).single(),
   ]);
 
   const { data: allContacts } = await supabase.from('crm_contacts').select('status');
@@ -47,7 +46,7 @@ export default async function DashboardHome() {
         <div>
           <div className="page-head__eyebrow">Workspace · Overview</div>
           <h1 className="page-head__title">{greeting()}, {firstName}<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
-          <div className="page-head__sub">{dateStr} · 6 depots online · 24/7 breakdown active</div>
+          <div className="page-head__sub">{dateStr} · {DEPOTS.length} depots online</div>
         </div>
         <div className="row">
           <button className="btn"><Calendar size={14} /> This week</button>
@@ -59,7 +58,7 @@ export default async function DashboardHome() {
         <Stat label="Pipeline · Open"     value={totalOpen.toString()}     accent="red"     sub={`${counts.lead} leads · ${counts.contacted} contacted · ${counts.quoted} quoted`} />
         <Stat label="Closed · Won"        value={counts.won.toString()}    accent="success" sub={`${counts.lost} lost`} />
         <Stat label="Posts pending"       value={(pending ?? 0).toString()} accent="warning" sub={`${scheduled ?? 0} scheduled`} />
-        <Stat label="Lusha credits"       value={(lusha?.balance ?? 0).toLocaleString()} accent="lusha" sub="Server-side proxied" />
+        <Stat label="Total contacts"      value={(allContacts?.length ?? 0).toLocaleString()} accent="lusha" sub={`${counts.won} won · ${counts.lost} lost`} />
       </div>
 
       <div className="split-2" style={{ marginTop: 18 }}>

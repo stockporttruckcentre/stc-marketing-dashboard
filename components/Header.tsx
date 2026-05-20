@@ -9,16 +9,8 @@ export function Header({ profile, lushaBalance }: { profile: Profile; lushaBalan
 
   useEffect(() => {
     // Re-fetch balance periodically so it stays live as users spend credits
-    const id = setInterval(async () => {
-      try {
-        const res = await fetch('/api/lusha/balance', { cache: 'no-store' });
-        if (res.ok) {
-          const json = await res.json();
-          setBalance(json.balance);
-        }
-      } catch {}
-    }, 30_000);
-    return () => clearInterval(id);
+    // Auto-polling removed: Lusha account/usage is 5 req/min rate-limited.
+    // Component appears unused in current layout; balance comes from TopBar pill instead.
   }, []);
 
   return (

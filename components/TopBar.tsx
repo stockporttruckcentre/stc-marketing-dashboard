@@ -47,9 +47,20 @@ export function TopBar() {
       }
     }
     load();
-    const id = setInterval(load, 90_000);
-    return () => { mounted = false; clearInterval(id); };
+    return () => { mounted = false; };
   }, []);
+
+  // Manual refresh: click the BALANCE pill to fetch a fresh value.
+  // Lusha account/usage is rate-limited to 5 req/min, so we never auto-poll.
+  async function refreshBalance() {
+    try {
+      setBalance(null); setBalanceErr(null);
+      const res = await fetch('/api/lusha/balance', { cache: 'no-store' });
+      const json = await res.json();
+      if (res.ok && typeof json.balance === 'number') { setBalance(json.balance); setBreakdown(json.breakdown ?? null); }
+      else setBalanceErr(json.error || 'no balance');
+    } catch (e: any) { setBalanceErr(e.message || 'fetch failed'); }
+  }
 
   return (
     <header className="topbar topbar--has-search">
@@ -69,7 +80,7 @@ export function TopBar() {
       )}
 
       <div className="topbar__right">
-        <div className="lusha" title={balanceErr ? `Lusha: ${balanceErr}` : (breakdown ? Object.entries(breakdown).map(([k,v]: any) => `${k}: ${v?.remaining ?? '?'} remaining (${v?.used ?? '?'}/${v?.total ?? '?'} used)`).join('\n') : 'Lusha Balance — live (account/usage)')}>
+        <div className="lusha" role="button" tabIndex={0} onClick={refreshBalance} onKeyDown={(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); refreshBalance(); } }} title={balanceErr ? `Lusha: ${balanceErr} (click to retry)` : (breakdown ? Object.entries(breakdown).map(([k,v]: any) => `${k}: ${v?.remaining ?? '?'} remaining (${v?.used ?? '?'}/${v?.total ?? '?'} used)`).join('\n') + '\n(click to refresh)' : 'Lusha Balance — click to refresh')} style={{ cursor: 'pointer' }}>
           <span className="lusha__dot" />
           <span className="lusha__label">BALANCE</span>
           <span className="lusha__value tnum">
