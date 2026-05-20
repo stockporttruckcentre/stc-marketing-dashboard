@@ -265,7 +265,7 @@ export async function prospectingByCompanyId(companyId: string): Promise<any | n
  * Uses the SAME role cascade as prospectingByCompanyAndRoles so the pre-check is honest.
  * Returns { found, matchedRole, count } or null on error. No credits spent.
  */
-export async function prospectingContactProbe(companyId: string): Promise<{ found: boolean; matchedRole: string; count: number } | null> {
+export async function prospectingContactProbe(companyId: string): Promise<{ found: boolean; matchedRole: string; count: number; debug: any[] } | null> {
   const roleGroups: string[][] = [
     ['Sales Director'],
     ['Sales Manager'],
@@ -279,17 +279,37 @@ export async function prospectingContactProbe(companyId: string): Promise<{ foun
     ['Procurement Manager', 'Procurement Director', 'Buyer'],
     ['Director'],
   ];
+  const debug: any[] = [];
+
+  // Also try with NO job-title filter once - so we can see if contacts exist at all
+  const shapes = [
+    (group: string[]) => ({ contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } }),
+    (group: string[]) => ({ contacts: { include: { companies: { ids: [companyId] }, jobTitles: group } } }),
+    (group: string[]) => ({ contacts: { include: { companyIds: [companyId], jobTitles: { values: group } } } }),
+  ];
+
+  // First do a NO-FILTER probe with just the company - sanity check that contacts exist
+  const sanity = await postJson(`${BASE}/prospecting/contact/search`, {
+    pages: { page: 0, size: 10 },
+    filters: { contacts: { include: { companies: { ids: [companyId] } } } },
+  });
+  debug.push({ test: 'no-role-filter', status: sanity.status, itemCount: (sanity.json?.data?.length ?? sanity.json?.contacts?.length ?? 0), rawText: (sanity.text || '').slice(0, 300) });
+
   for (const group of roleGroups) {
-    const r = await postJson(`${BASE}/prospecting/contact/search`, {
-      pages: { page: 0, size: 10 },
-      filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } },
-    });
-    if (!r.ok) continue;
-    const items = r.json?.data ?? r.json?.contacts ?? [];
-    const count = Array.isArray(items) ? items.length : 0;
-    if (count > 0) return { found: true, matchedRole: group[0], count };
+    for (let i = 0; i < shapes.length; i++) {
+      const filters = shapes[i](group);
+      const r = await postJson(`${BASE}/prospecting/contact/search`, {
+        pages: { page: 0, size: 10 },
+        filters,
+      });
+      const items = r.json?.data ?? r.json?.contacts ?? [];
+      const count = Array.isArray(items) ? items.length : 0;
+      debug.push({ role: group[0], shapeIdx: i, status: r.status, count, rawText: r.ok ? null : (r.text || '').slice(0, 200) });
+      if (!r.ok) continue;
+      if (count > 0) return { found: true, matchedRole: group[0], count, debug };
+    }
   }
-  return { found: false, matchedRole: '', count: 0 };
+  return { found: false, matchedRole: '', count: 0, debug };
 }
 
 // ============ Strategy 3: prospecting (company + role fallback) ============

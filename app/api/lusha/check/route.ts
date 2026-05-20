@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     },
     matchedRole: contactInfo?.matchedRole ?? null,
     contactCount: contactInfo?.count ?? 0,
+    contactDebug: (contactInfo as any)?.debug ?? null,
     message: contactInfo?.found
       ? `Lusha has "${company.name}" with at least one ${contactInfo.matchedRole}.`
       : `Lusha has "${company.name}" but no contact matches your role list.`,
