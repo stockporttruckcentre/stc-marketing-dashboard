@@ -899,7 +899,7 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
               <FleetInput label="Vans" value={edit.vans} onSave={(n) => saveFleet('vans', n)} canEdit={canEdit} />
               <div className="fleet-row__total">
                 <span className="fleet-row__total-label">Total</span>
-                <span className="fleet-row__total-value">{hasBreakdown ? fleetTotal : (edit.fleet_size ?? '—')}</span>
+                <span className="fleet-row__total-value">{hasBreakdown ? fleetTotal : '—'}</span>
               </div>
             </div>
           </div>
