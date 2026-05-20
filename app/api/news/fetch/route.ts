@@ -9,15 +9,25 @@ export const maxDuration = 30;
 // Each feed is a search either by-site (publisher-scoped) or by-topic.
 // All feeds use Google News search RSS with `when:7d` to force last-week freshness.
 // Returned in reverse chronological order via the pubDate field on each item.
+// Each source has two queries: site:domain for direct articles, and a topical search
+// so we catch coverage of the publication elsewhere on Google News.
 const FEEDS = [
-  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=site:commercialmotor.com+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=site:fleetnews.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=site:roadtransport.com+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=site:logistics.org.uk+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=site:rha.uk.net+when:14d&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=site:commercialmotor.com&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=%22Commercial+Motor%22+truck+UK&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=site:fleetnews.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=%22Fleet+News%22+UK+fleet&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=%22IRTE%22+OR+%22Transport+Engineer%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=site:roadtransport.com&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=%22Road+Transport%22+UK+haulage&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=%22Motor+Transport%22+UK+logistics&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=%22Trucking+magazine%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=site:logistics.org.uk&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=%22Logistics+UK%22+OR+%22FTA%22+haulage&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=site:rha.uk.net&hl=en-GB&gl=GB&ceid=GB:en' },
+  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=%22Road+Haulage+Association%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
 ];
 
 const MAX_AGE_DAYS = 14;
@@ -50,7 +60,7 @@ export async function POST() {
       const itemsRaw = json?.rss?.channel?.item ?? json?.feed?.entry ?? [];
       const items: any[] = Array.isArray(itemsRaw) ? itemsRaw : [itemsRaw];
       let count = 0;
-      for (const it of items.slice(0, 15)) {
+      for (const it of items.slice(0, 50)) {
         const title = String(it.title?.['#text'] ?? it.title ?? '').trim();
         const url   = String(it.link?.['@_href'] ?? it.link ?? it.guid?.['#text'] ?? it.guid ?? '').trim();
         const pub = it.pubDate ?? it.published ?? it.updated;

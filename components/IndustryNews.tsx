@@ -38,11 +38,19 @@ export function IndustryNews({
     return m;
   }, [sources]);
 
-  // Source chip list comes from what's actually in the items - always renders
-  const sourceList = useMemo(() => {
-    const set = new Set(items.map(i => i.source));
-    return Array.from(set).sort();
+  // Show all 8 publication chips, even if a source returned zero this week.
+  // Count badge tells the team how many stories each source produced.
+  const itemCountBySource = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of items) m.set(it.source, (m.get(it.source) || 0) + 1);
+    return m;
   }, [items]);
+  const sourceList = useMemo(() => {
+    // Prefer the news_sources table (canonical 8); fall back to items if empty
+    const fromTable = sources.map(s => s.name);
+    if (fromTable.length) return fromTable;
+    return Array.from(new Set(items.map(i => i.source))).sort();
+  }, [sources, items]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -116,14 +124,19 @@ export function IndustryNews({
             onClick={() => setActiveSource(null)}>
             All
           </button>
-          {sourceList.map(src => (
-            <button
-              key={src}
-              className={`news-chip ${activeSource === src ? 'is-active' : ''}`}
-              onClick={() => setActiveSource(activeSource === src ? null : src)}>
-              {src}
-            </button>
-          ))}
+          {sourceList.map(src => {
+            const n = itemCountBySource.get(src) || 0;
+            return (
+              <button
+                key={src}
+                className={`news-chip ${activeSource === src ? 'is-active' : ''} ${n === 0 ? 'is-empty' : ''}`}
+                onClick={() => setActiveSource(activeSource === src ? null : src)}
+                title={n === 0 ? `${src} — no stories in the last 14 days` : `${src} — ${n} stor${n === 1 ? 'y' : 'ies'}`}>
+                {src}
+                <span className="news-chip__count">{n}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
