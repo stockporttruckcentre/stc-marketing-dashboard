@@ -15,6 +15,23 @@ export function BrandKit({
   const [message, setMessage] = useState<string | null>(null);
 
   const canEdit = role === 'admin' || role === 'marketer';
+
+  // Logo display order — STC house first, then S&L, then divisions, then seasonal/no-oval last.
+  // Matched against the file name in the public URL (case-insensitive).
+  const LOGO_PRIORITY: string[] = [
+    'stc-navy', 'stc-white',
+    'sl-navy',  'sl-white',
+    'group', 'holdings',
+    'notext', 'trailerstogo', 'xmas', 'nooval',
+  ];
+  function logoRank(a: BrandAsset): number {
+    const tail = (a.url || '').split('/').pop()?.toLowerCase() || '';
+    const nameLower = (a.name || '').toLowerCase();
+    for (let i = 0; i < LOGO_PRIORITY.length; i++) {
+      if (tail.includes(LOGO_PRIORITY[i]) || nameLower.includes(LOGO_PRIORITY[i])) return i;
+    }
+    return LOGO_PRIORITY.length; // unranked goes last
+  }
   const categories = useMemo(() => {
     const set = new Set(assets.map(a => a.category));
     return Array.from(set).sort();
@@ -84,7 +101,16 @@ export function BrandKit({
           <div className="card__head"><h3 style={{ margin: 0 }}>{cat}</h3></div>
           <div style={{ padding: 18 }}>
             <div className="asset-grid">
-              {assets.filter(a => a.category === cat).map(asset => (
+              {assets
+                .filter(a => a.category === cat)
+                .sort((x, y) => {
+                  if (cat.toLowerCase().includes('logo')) {
+                    const r = logoRank(x) - logoRank(y);
+                    if (r !== 0) return r;
+                  }
+                  return (x.name || '').localeCompare(y.name || '');
+                })
+                .map(asset => (
                 <div key={asset.id} className="asset">
                   <div className="asset__preview">
                     {asset.type === 'color' ? (

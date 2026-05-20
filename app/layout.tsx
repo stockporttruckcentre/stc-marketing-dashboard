@@ -6,7 +6,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'STC Marketing Dashboard',
   description: 'Stockport Truck Centre - CRM, social, sales, brand',
-  icons: { icon: '/icon.webp', shortcut: '/icon.webp' },
+  // app/icon.png + app/apple-icon.png are auto-detected by Next.js App Router
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
