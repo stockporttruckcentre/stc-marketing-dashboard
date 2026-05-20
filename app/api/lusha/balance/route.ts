@@ -19,7 +19,7 @@ function sumRemaining(usage: any): number | null {
   return found ? total : null;
 }
 
-// Keep cache between warm function invocations
+// Keep cache between warm function invocations (new key 4f87)
 const g = globalThis as any;
 
 export async function GET() {
