@@ -39,7 +39,12 @@ export interface CRMContact {
   phone: string | null;
   source: string;
   status: ContactStatus;
-  fleet_size: number | null;
+  fleet_size: number | null;  // derived sum of trucks+trailers+vans (set by trigger)
+  trucks: number | null;
+  trailers: number | null;
+  vans: number | null;
+  address: string | null;
+  links: { id: string; label: string; url: string; kind: 'website' | 'linkedin' | 'facebook' | 'instagram' | 'x' | 'other' }[];
   location: string | null;
   services_interested: string[];
   notes: string | null;

@@ -462,3 +462,40 @@ BEGIN
     BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE contact_notes; EXCEPTION WHEN duplicate_object THEN NULL; END;
   END IF;
 END $$;
+
+-- =============================================================
+-- ADD-ON: detailed CRM contact fields (fleet breakdown, address, links)
+-- =============================================================
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='trucks') THEN
+    ALTER TABLE crm_contacts ADD COLUMN trucks INTEGER;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='trailers') THEN
+    ALTER TABLE crm_contacts ADD COLUMN trailers INTEGER;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='vans') THEN
+    ALTER TABLE crm_contacts ADD COLUMN vans INTEGER;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='address') THEN
+    ALTER TABLE crm_contacts ADD COLUMN address TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='crm_contacts' AND column_name='links') THEN
+    ALTER TABLE crm_contacts ADD COLUMN links JSONB DEFAULT '[]'::jsonb NOT NULL;
+  END IF;
+END $$;
+
+-- Optional: keep fleet_size in sync as derived value
+CREATE OR REPLACE FUNCTION sync_fleet_total()
+RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+BEGIN
+  IF (NEW.trucks IS NOT NULL OR NEW.trailers IS NOT NULL OR NEW.vans IS NOT NULL) THEN
+    NEW.fleet_size := COALESCE(NEW.trucks, 0) + COALESCE(NEW.trailers, 0) + COALESCE(NEW.vans, 0);
+  END IF;
+  RETURN NEW;
+END;
+$func$;
+
+DROP TRIGGER IF EXISTS crm_contacts_fleet_total ON crm_contacts;
+CREATE TRIGGER crm_contacts_fleet_total
+  BEFORE INSERT OR UPDATE ON crm_contacts
+  FOR EACH ROW EXECUTE FUNCTION sync_fleet_total();

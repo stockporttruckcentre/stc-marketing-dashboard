@@ -5,16 +5,23 @@ import { Loader, Search, Plus, CheckCircle, Globe, Users, X, MapPin, Building } 
 import { createClient } from '@/lib/supabase/client';
 import { DEPOTS, type CrmList } from '@/lib/types';
 
+// LinkedIn / Lusha numeric industry IDs (mainIndustriesIds)
 const INDUSTRIES = [
-  { value: 'transportation/trucking/railroad', label: 'Transport & Logistics' },
-  { value: 'construction',                     label: 'Construction' },
-  { value: 'wholesale',                        label: 'Wholesale & Distribution' },
-  { value: 'machinery',                        label: 'Machinery / Manufacturing' },
-  { value: 'retail',                           label: 'Retail' },
-  { value: 'food production',                  label: 'Food production' },
-  { value: 'mining',                           label: 'Mining & Quarry' },
-  { value: 'agriculture',                      label: 'Agriculture' },
-  { value: 'waste management',                 label: 'Waste & Recycling' },
+  { id: 116, label: 'Transportation, Logistics & Storage' },
+  { id: 92,  label: 'Truck Transportation' },
+  { id: 93,  label: 'Warehousing & Storage' },
+  { id: 48,  label: 'Construction' },
+  { id: 25,  label: 'Manufacturing (general)' },
+  { id: 135, label: 'Industrial Machinery Manufacturing' },
+  { id: 53,  label: 'Motor Vehicle Manufacturing' },
+  { id: 27,  label: 'Retail' },
+  { id: 23,  label: 'Food & Beverage Manufacturing' },
+  { id: 332, label: 'Oil, Gas & Mining' },
+  { id: 56,  label: 'Mining' },
+  { id: 63,  label: 'Farming' },
+  { id: 201, label: 'Farming, Ranching, Forestry' },
+  { id: 1981,label: 'Waste Collection' },
+  { id: 2226,label: 'Vehicle Repair & Maintenance' },
 ];
 
 interface FinderResult {
@@ -27,7 +34,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   const [depotKey, setDepotKey] = useState<string>('Hyde');
   const [customPostcode, setCustomPostcode] = useState('');
   const [radius, setRadius] = useState(10);
-  const [industry, setIndustry] = useState(INDUSTRIES[0].value);
+  const [industry, setIndustry] = useState<number>(INDUSTRIES[0].id);
   const [empMin, setEmpMin] = useState(10);
   const [empMax, setEmpMax] = useState(200);
   const [searching, setSearching] = useState(false);
@@ -51,7 +58,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           location: isCustom ? customPostcode : depotKey,
-          radiusMiles: radius, industry,
+          radiusMiles: radius, industryIds: [industry],
           minEmployees: empMin, maxEmployees: empMax, limit: 25,
         }),
       });
@@ -134,8 +141,8 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
             <input type="number" min={1} max={300} value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="input" />
           </Field>
           <Field label="INDUSTRY">
-            <select value={industry} onChange={(e) => setIndustry(e.target.value)} className="input">
-              {INDUSTRIES.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
+            <select value={industry} onChange={(e) => setIndustry(Number(e.target.value))} className="input">
+              {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
             </select>
           </Field>
           <Field label="EMPLOYEES MIN">

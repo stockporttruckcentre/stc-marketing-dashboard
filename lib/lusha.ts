@@ -21,25 +21,21 @@ export async function enrichByEmail(email: string) {
 export async function searchCompanies(opts: {
   location?: string;
   radiusMiles?: number;
-  industry?: string;
+  /** LinkedIn-style numeric industry IDs (Lusha uses these) */
+  industryIds?: number[];
   minEmployees?: number;
   maxEmployees?: number;
   limit?: number;
 }) {
-  // Lusha Company Search endpoint
+  const include: any = {};
+  if (opts.location) include.locations = [{ country: 'United Kingdom', city: opts.location }];
+  if (opts.industryIds && opts.industryIds.length) include.mainIndustriesIds = opts.industryIds;
+  if (opts.minEmployees != null && opts.maxEmployees != null) {
+    include.sizes = [{ min: opts.minEmployees, max: opts.maxEmployees }];
+  }
   const body: any = {
     pages: { page: 0, size: opts.limit ?? 25 },
-    filters: {
-      companies: {
-        include: {
-          locations: opts.location ? [{ country: 'United Kingdom', city: opts.location }] : undefined,
-          mainIndustriesIds: opts.industry ? [opts.industry] : undefined,
-          sizes: opts.minEmployees != null && opts.maxEmployees != null
-            ? [{ min: opts.minEmployees, max: opts.maxEmployees }]
-            : undefined,
-        },
-      },
-    },
+    filters: { companies: { include } },
   };
   const res = await fetch(`${BASE}/prospecting/company/search`, {
     method: 'POST',

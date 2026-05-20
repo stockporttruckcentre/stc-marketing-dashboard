@@ -11,12 +11,21 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
 
+  // Accept either a single id, array of ids, or string for back-compat
+  let industryIds: number[] | undefined;
+  if (Array.isArray(body.industryIds)) {
+    industryIds = body.industryIds.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n));
+  } else if (body.industryId != null) {
+    const n = Number(body.industryId);
+    if (Number.isFinite(n)) industryIds = [n];
+  }
+
   let raw: any = null;
   try {
     raw = await searchCompanies({
       location: body.location,
       radiusMiles: body.radiusMiles,
-      industry: body.industry,
+      industryIds,
       minEmployees: body.minEmployees,
       maxEmployees: body.maxEmployees,
       limit: body.limit ?? 25,
