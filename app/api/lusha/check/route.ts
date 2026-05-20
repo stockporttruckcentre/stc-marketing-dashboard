@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { findLushaCompany, prospectingContactProbe } from '@/lib/lusha';
+import { findLushaCompany, findLushaCompanyDebug, prospectingContactProbe } from '@/lib/lusha';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,13 +36,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ found: false, strategy: 'none', message: 'No email or company name on this row.' });
   }
 
-  // Step 1: free company search with progressive variants
-  const company = await findLushaCompany(companyName);
+  // Step 1: free company search with progressive variants - use debug version so we can see
+  // exactly what Lusha returned when nothing matched (helps diagnose filter-shape mismatches).
+  const dbg = await findLushaCompanyDebug(companyName);
+  const company = dbg.match;
   if (!company) {
     return NextResponse.json({
       found: false,
       strategy: 'company',
       message: `Lusha has no record matching "${companyName}". 0 credits would be spent.`,
+      debug: { attempts: dbg.attempts },
     });
   }
 

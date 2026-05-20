@@ -87,27 +87,59 @@ function companyNameVariants(raw: string): string[] {
  * Returns the first matching Lusha company (id, canonical name) or null if none of the variants match.
  */
 export async function findLushaCompany(companyName: string): Promise<{ id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null> {
+  const result = await findLushaCompanyDebug(companyName);
+  return result.match;
+}
+
+/**
+ * Same as findLushaCompany but exposes the raw debug trail so the UI / logs can show
+ * exactly what we sent to Lusha and what came back. No extra credit cost.
+ */
+export async function findLushaCompanyDebug(companyName: string): Promise<{
+  match: { id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null;
+  attempts: Array<{ variant: string; filterShape: string; status: number; itemCount: number; rawSample: any }>;
+}> {
   const variants = companyNameVariants(companyName);
+  const attempts: any[] = [];
+
+  // Try multiple filter shapes per variant - Lusha's prospecting search docs vary.
+  // We try names[], then domain-style guesses, then a generic 'keyword' / 'text' search.
+  const buildFilters = (variant: string): Array<{ label: string; body: any }> => ([
+    { label: 'names[]',        body: { filters: { companies: { include: { names: [variant] } } } } },
+    { label: 'keyword',        body: { filters: { companies: { include: { keyword: variant } } } } },
+    { label: 'name (single)',  body: { filters: { companies: { include: { name: variant } } } } },
+    { label: 'top-keyword',    body: { keyword: variant, filters: { companies: { include: {} } } } },
+  ]);
+
   for (const variant of variants) {
-    const r = await postJson(`${BASE}/prospecting/company/search`, {
-      pages: { page: 0, size: 5 },
-      filters: { companies: { include: { names: [variant] } } },
-    });
-    if (!r.ok) continue;
-    const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
-    const first = Array.isArray(items) ? items[0] : null;
-    const id = first?.id ?? first?.companyId ?? null;
-    if (id) return {
-      id,
-      name: first?.name ?? first?.companyName ?? variant,
-      matchedVariant: variant,
-      size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
-      location: first?.location ?? first?.country ?? first?.city ?? null,
-      industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
-      domain: first?.domain ?? first?.website ?? null,
-    };
+    for (const f of buildFilters(variant)) {
+      const r = await postJson(`${BASE}/prospecting/company/search`, {
+        pages: { page: 0, size: 5 },
+        ...f.body,
+      });
+      const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
+      const arr = Array.isArray(items) ? items : (items ? [items] : []);
+      attempts.push({ variant, filterShape: f.label, status: r.status, itemCount: arr.length, rawSample: arr.slice(0, 2) });
+      if (!r.ok) continue;
+      const first = arr[0];
+      const id = first?.id ?? first?.companyId ?? null;
+      if (id) {
+        return {
+          match: {
+            id,
+            name: first?.name ?? first?.companyName ?? variant,
+            matchedVariant: variant,
+            size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
+            location: first?.location ?? first?.country ?? first?.city ?? null,
+            industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
+            domain: first?.domain ?? first?.website ?? null,
+          },
+          attempts,
+        };
+      }
+    }
   }
-  return null;
+  return { match: null, attempts };
 }
 
 // ============ Free contact probe (used by pre-flight check route) ============
