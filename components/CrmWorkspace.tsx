@@ -756,12 +756,36 @@ const ENRICHABLE_FIELD_CHOICES: { key: 'company_name' | 'contact_name' | 'email'
 ];
 
 function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: CRMContact; balance: number | null; onConfirm: (fields: string[]) => void; onCancel: () => void; busy: boolean }) {
+  // Pre-flight: ask the server to do a FREE company lookup before we let the user pick fields.
+  // No credits are spent until they hit "Spend 1 credit".
+  const [checkState, setCheckState] = useState<'loading' | 'found' | 'not_found' | 'error'>('loading');
+  const [checkData, setCheckData] = useState<{ lushaName?: string | null; matchedVariant?: string | null; strategy?: string; message?: string; availableFields?: Record<string, boolean>; matchedRole?: string | null; contactCount?: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/lusha/check', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_name: row.company_name, email: row.email }),
+        });
+        const json = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setCheckState('error'); setCheckData({ message: json.error || 'Lusha check failed' }); return; }
+        setCheckData(json);
+        setCheckState(json.found ? 'found' : 'not_found');
+      } catch (e: any) {
+        if (!cancelled) { setCheckState('error'); setCheckData({ message: e.message }); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [row.company_name, row.email]);
+
   const remaining = balance == null ? '?' : balance.toString();
   const initialChecked = new Set(ENRICHABLE_FIELD_CHOICES.filter((f) => {
     const v = (row as any)[f.key];
     return v === null || v === undefined || v === '';
   }).map((f) => f.key));
-  // If everything is filled, default to all unchecked - user can pick which to overwrite
   const [checked, setChecked] = useState<Set<string>>(initialChecked.size > 0 ? initialChecked : new Set());
 
   function toggle(k: string) {
@@ -772,23 +796,91 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
 
   const lookupHandle = row.email ? `email: ${row.email}` : `company: ${row.company_name}`;
   const willOverwrite = ENRICHABLE_FIELD_CHOICES.filter((f) => checked.has(f.key) && (row as any)[f.key]);
+  const canSpend = checkState === 'found' && checked.size > 0 && !busy;
 
   return (
     <Modal onClose={onCancel} title="Enrich from Lusha">
       <p style={{ color: 'var(--fg-2)', fontSize: 13.5, margin: 0 }}>
         Looking up via Lusha using <strong style={{ color: 'var(--fg-1)' }}>{lookupHandle}</strong>.
       </p>
-      <div style={{ marginTop: 12 }}>
+
+      {/* Pre-flight banner */}
+      {checkState === 'loading' && (
+        <div className="card" style={{ marginTop: 12, padding: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Loader size={14} className="spin" />
+          <span style={{ fontSize: 13, color: 'var(--fg-2)' }}>Checking Lusha&hellip; (free, no credits spent)</span>
+        </div>
+      )}
+      {checkState === 'found' && (
+        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-success, #2da44e)' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
+            <strong style={{ color: 'var(--stc-success, #2da44e)' }}>✓ Found on Lusha</strong>
+            {checkData?.lushaName && <> &mdash; indexed as <strong>{checkData.lushaName}</strong></>}
+            {checkData?.matchedRole && (
+              <span style={{ fontSize: 12, color: 'var(--fg-2)', display: 'block', marginTop: 4 }}>
+                Found contact at: <strong style={{ color: 'var(--fg-1)' }}>{checkData.matchedRole}</strong>
+              </span>
+            )}
+            {!checkData?.matchedRole && checkData?.contactCount === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--stc-warning, #d4a017)', display: 'block', marginTop: 4 }}>
+                No contact found in our role cascade — only company-level fields will populate.
+              </span>
+            )}
+            {checkData?.matchedVariant && checkData.matchedVariant !== row.company_name && (
+              <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', display: 'block', marginTop: 4 }}>
+                matched on &ldquo;{checkData.matchedVariant}&rdquo;
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+      {checkState === 'not_found' && (
+        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-warning, #d4a017)' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
+            <strong style={{ color: 'var(--stc-warning, #d4a017)' }}>Not on Lusha</strong>
+            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
+            <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>0 credits will be charged. Close this dialog or edit the company name.</div>
+          </div>
+        </div>
+      )}
+      {checkState === 'error' && (
+        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-red)' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
+            <strong style={{ color: 'var(--stc-red)' }}>Lusha pre-check failed</strong>
+            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Field picker - disabled until we confirm Lusha has a match;
+          each row also disabled if Lusha won't populate it. */}
+      <div style={{ marginTop: 12, opacity: checkState === 'found' ? 1 : 0.4, pointerEvents: checkState === 'found' ? 'auto' : 'none' }}>
         <div className="field__label" style={{ marginBottom: 8 }}>Which fields to update?</div>
         <div className="col" style={{ gap: 4 }}>
           {ENRICHABLE_FIELD_CHOICES.map((f) => {
             const current = (row as any)[f.key];
             const has = current !== null && current !== undefined && current !== '';
+            const available = checkData?.availableFields ? (checkData.availableFields as any)[f.key] !== false : true;
+            const disabled = !available && checkState === 'found';
+            // Auto-uncheck unavailable fields the moment we know they're unavailable
+            if (disabled && checked.has(f.key)) {
+              setTimeout(() => { const n = new Set(checked); n.delete(f.key); setChecked(n); }, 0);
+            }
             return (
-              <label key={f.key} className="row" style={{ gap: 8, padding: '6px 8px', cursor: 'pointer', borderRadius: 'var(--r-2)', background: checked.has(f.key) ? 'rgba(207,36,23,0.06)' : 'transparent' }}>
-                <input type="checkbox" checked={checked.has(f.key)} onChange={() => toggle(f.key)} />
+              <label key={f.key} className="row" style={{
+                gap: 8, padding: '6px 8px',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                borderRadius: 'var(--r-2)',
+                opacity: disabled ? 0.45 : 1,
+                background: checked.has(f.key) && !disabled ? 'rgba(207,36,23,0.06)' : 'transparent',
+              }}>
+                <input type="checkbox" checked={checked.has(f.key) && !disabled} disabled={disabled} onChange={() => !disabled && toggle(f.key)} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: 'var(--fg-1)' }}>{f.label}{has && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 6 }}>(will overwrite: {String(current).slice(0,40)})</span>}</div>
+                  <div style={{ fontSize: 13, color: 'var(--fg-1)' }}>
+                    {f.label}
+                    {disabled && <span className="mono" style={{ fontSize: 10, color: 'var(--stc-warning, #d4a017)', marginLeft: 6 }}>not available on Lusha for this row</span>}
+                    {!disabled && has && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 6 }}>(will overwrite: {String(current).slice(0,40)})</span>}
+                  </div>
                   <div className="row-item__sub">{f.help}</div>
                 </div>
               </label>
@@ -796,26 +888,32 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
           })}
         </div>
       </div>
-      <div className="card" style={{ marginTop: 12, padding: 10 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>COST</span>
-          <span className="tnum" style={{ fontWeight: 600 }}>1 credit</span>
-        </div>
-        <div className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>REMAINING AFTER</span>
-          <span className="tnum">{balance == null ? '?' : Math.max(0, balance - 1)} (of {remaining})</span>
-        </div>
-        {willOverwrite.length > 0 && (
-          <div className="mono" style={{ fontSize: 10.5, color: 'var(--stc-warning)', marginTop: 6 }}>
-            {`// `}WILL OVERWRITE {willOverwrite.length} EXISTING VALUE{willOverwrite.length === 1 ? '' : 'S'}
+
+      {checkState === 'found' && (
+        <div className="card" style={{ marginTop: 12, padding: 10 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>COST</span>
+            <span className="tnum" style={{ fontWeight: 600 }}>1 credit</span>
           </div>
-        )}
-      </div>
+          <div className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>REMAINING AFTER</span>
+            <span className="tnum">{balance == null ? '?' : Math.max(0, balance - 1)} (of {remaining})</span>
+          </div>
+          {willOverwrite.length > 0 && (
+            <div className="mono" style={{ fontSize: 10.5, color: 'var(--stc-warning)', marginTop: 6 }}>
+              {`// `}WILL OVERWRITE {willOverwrite.length} EXISTING VALUE{willOverwrite.length === 1 ? '' : 'S'}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
         <button type="button" onClick={onCancel} className="btn btn--ghost">Cancel</button>
-        <button type="button" onClick={() => onConfirm(Array.from(checked))} className="btn btn--primary" disabled={busy || checked.size === 0}>
-          {busy ? <Loader size={14} className="spin" /> : <Send size={14} />} Spend 1 credit · update {checked.size} field{checked.size === 1 ? '' : 's'}
-        </button>
+        {checkState === 'found' && (
+          <button type="button" onClick={() => onConfirm(Array.from(checked))} className="btn btn--primary" disabled={!canSpend}>
+            {busy ? <Loader size={14} className="spin" /> : <Send size={14} />} Spend 1 credit · update {checked.size} field{checked.size === 1 ? '' : 's'}
+          </button>
+        )}
       </div>
     </Modal>
   );

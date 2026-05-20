@@ -86,7 +86,7 @@ function companyNameVariants(raw: string): string[] {
  * /prospecting/company/search is FREE - only counts against daily call quota, not credits.
  * Returns the first matching Lusha company (id, canonical name) or null if none of the variants match.
  */
-export async function findLushaCompany(companyName: string): Promise<{ id: string; name: string; matchedVariant: string } | null> {
+export async function findLushaCompany(companyName: string): Promise<{ id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null> {
   const variants = companyNameVariants(companyName);
   for (const variant of variants) {
     const r = await postJson(`${BASE}/prospecting/company/search`, {
@@ -97,9 +97,50 @@ export async function findLushaCompany(companyName: string): Promise<{ id: strin
     const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
     const first = Array.isArray(items) ? items[0] : null;
     const id = first?.id ?? first?.companyId ?? null;
-    if (id) return { id, name: first?.name ?? first?.companyName ?? variant, matchedVariant: variant };
+    if (id) return {
+      id,
+      name: first?.name ?? first?.companyName ?? variant,
+      matchedVariant: variant,
+      size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
+      location: first?.location ?? first?.country ?? first?.city ?? null,
+      industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
+      domain: first?.domain ?? first?.website ?? null,
+    };
   }
   return null;
+}
+
+// ============ Free contact probe (used by pre-flight check route) ============
+/**
+ * Free probe: does Lusha have a contact matching our role cascade at this company?
+ * Uses the SAME role cascade as prospectingByCompanyAndRoles so the pre-check is honest.
+ * Returns { found, matchedRole, count } or null on error. No credits spent.
+ */
+export async function prospectingContactProbe(companyId: string): Promise<{ found: boolean; matchedRole: string; count: number } | null> {
+  const roleGroups: string[][] = [
+    ['Sales Director'],
+    ['Sales Manager'],
+    ['Sales Executive', 'Sales Associate', 'Sales Assistant'],
+    ['Head of Sales', 'Business Development Director', 'Business Development Manager'],
+    ['Account Manager', 'Account Director', 'Key Account Manager'],
+    ['Commercial Director', 'Commercial Manager'],
+    ['Managing Director', 'CEO', 'Owner'],
+    ['Fleet Manager', 'Transport Manager'],
+    ['Operations Director', 'Operations Manager'],
+    ['Procurement Manager', 'Procurement Director', 'Buyer'],
+    ['Director'],
+  ];
+  for (const group of roleGroups) {
+    const r = await postJson(`${BASE}/prospecting/contact/search`, {
+      pages: { page: 0, size: 5 },
+      filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } },
+    });
+    if (!r.ok) continue;
+    const items = r.json?.data ?? r.json?.contacts ?? [];
+    const count = Array.isArray(items) ? items.length : 0;
+    if (count > 0) return { found: true, matchedRole: group[0], count };
+  }
+  return { found: false, matchedRole: '', count: 0 };
 }
 
 // ============ Strategy 3: prospecting (company + role fallback) ============
@@ -134,10 +175,17 @@ export async function prospectingByCompanyAndRoles(companyName: string): Promise
   const company = await findLushaCompany(companyName);
   if (!company) return null; // no variant matched - genuinely unknown to Lusha, do NOT burn credits trying name strings
 
+  // Cascade in user's priority order: sales depth first, then closest alternatives
   const roleGroups: string[][] = [
-    ['Sales Director', 'Sales Manager', 'Head of Sales'],
+    ['Sales Director'],
+    ['Sales Manager'],
+    ['Sales Executive', 'Sales Associate', 'Sales Assistant'],
+    ['Head of Sales', 'Business Development Director', 'Business Development Manager'],
+    ['Account Manager', 'Account Director', 'Key Account Manager'],
+    ['Commercial Director', 'Commercial Manager'],
     ['Managing Director', 'CEO', 'Owner'],
-    ['Fleet Manager', 'Transport Manager', 'Operations Director', 'Operations Manager'],
+    ['Fleet Manager', 'Transport Manager'],
+    ['Operations Director', 'Operations Manager'],
     ['Procurement Manager', 'Procurement Director', 'Buyer'],
     ['Director'],
   ];
