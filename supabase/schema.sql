@@ -702,3 +702,43 @@ ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS sale_price      NUMERIC;
 ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS profit          NUMERIC;
 ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS profit_pct      NUMERIC;
 ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS commission      NUMERIC;
+
+
+-- =============================================================
+-- MAINTENANCE ACCOUNTS (per-user)
+-- =============================================================
+CREATE TABLE IF NOT EXISTS maint_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  owner_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
+  date_of_update DATE,
+  status TEXT,
+  company_name TEXT,
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT,
+  location TEXT,
+  services TEXT,
+  vehicles TEXT,
+  requirements TEXT,
+  update_log TEXT,
+  next_action TEXT,
+  category TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_maint_accounts_owner    ON maint_accounts (owner_id);
+CREATE INDEX IF NOT EXISTS idx_maint_accounts_category ON maint_accounts (category);
+
+ALTER TABLE maint_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "maint_owner_select" ON maint_accounts;
+DROP POLICY IF EXISTS "maint_owner_write"  ON maint_accounts;
+CREATE POLICY "maint_owner_select" ON maint_accounts FOR SELECT USING (owner_id = auth.uid());
+CREATE POLICY "maint_owner_write"  ON maint_accounts FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+
+DO $$ BEGIN
+  PERFORM 1 FROM pg_trigger WHERE tgname = 'update_maint_accounts_updated_at';
+  IF NOT FOUND THEN
+    CREATE TRIGGER update_maint_accounts_updated_at BEFORE UPDATE ON maint_accounts
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;

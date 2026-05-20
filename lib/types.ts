@@ -179,3 +179,23 @@ export interface NewsSource {
   backdrop_url: string | null;
   updated_at: string;
 }
+
+export interface MaintAccount {
+  id: string;
+  owner_id: string;
+  date_of_update: string | null;
+  status: string | null;
+  company_name: string | null;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  location: string | null;
+  services: string | null;
+  vehicles: string | null;
+  requirements: string | null;
+  update_log: string | null;
+  next_action: string | null;
+  category: string | null;
+  created_at: string;
+  updated_at: string;
+}
