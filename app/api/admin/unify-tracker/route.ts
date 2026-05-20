@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         ) VALUES (
           ${listId}, 'maintenance', ${normWhat(r.what)}, ${normStatus(r.status)},
           ${r.company_name}, ${r.contact_name}, ${r.phone}, ${r.email},
-          ${r.update_log}, ${r.source}, ${r.requirements}, ${r.action}, ${r.next_action},
+          ${r.update_log}, ${r.source || 'Import'}, ${r.requirements}, ${r.action}, ${r.next_action},
           ${r.account_manager}, ${normCategory(r.category)}, ${r.initials},
           ${r.date_of_update}
         )`;
