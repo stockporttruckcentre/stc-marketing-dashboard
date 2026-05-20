@@ -18,6 +18,52 @@ function stripHtml(s: string) {
   return s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) : '';
 }
 
+// Fetch the article page and extract og:image / twitter:image.
+// Strict timeout so a single slow site can't stall the whole refresh.
+async function fetchHeroImage(articleUrl: string, timeoutMs = 4000): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(articleUrl, {
+      signal: ctrl.signal,
+      redirect: 'follow', // Google News URLs redirect to the publisher
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; STC-Dashboard/1.0; +https://stc-marketing-dashboard.vercel.app)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    clearTimeout(tid);
+    if (!res.ok) return null;
+    // Read only the <head> portion - we don't need the whole page body
+    const reader = res.body?.getReader();
+    let html = '';
+    if (reader) {
+      const dec = new TextDecoder('utf-8', { fatal: false });
+      const headLimit = 200_000; // 200KB is more than enough for <head>
+      while (html.length < headLimit) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        html += dec.decode(value, { stream: true });
+        if (html.includes('</head>')) break;
+      }
+      try { await reader.cancel(); } catch {}
+    } else {
+      html = (await res.text()).slice(0, 200_000);
+    }
+    // og:image — match either ordering of content/property attrs
+    const og = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)?.[1]
+            || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i)?.[1]
+            || html.match(/<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i)?.[1]
+            || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i)?.[1]
+            || null;
+    if (!og) return null;
+    // Resolve relative URLs against the final article URL
+    try { return new URL(og, res.url || articleUrl).toString(); } catch { return og; }
+  } catch {
+    return null;
+  }
+}
+
 export async function POST() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -75,10 +121,46 @@ export async function POST() {
     return NextResponse.json({ added: 0, sources: 0, debug }, { status: records.length === 0 ? 502 : 200 });
   }
 
-  const { error, count } = await supabase
+  // Fetch hero images in parallel for stories that didn't already have one in the RSS.
+  // Per-fetch timeout = 4s, total wall-clock ~= slowest single fetch.
+  const heroResults = await Promise.allSettled(
+    records.map(r => r.image_url ? Promise.resolve(r.image_url) : fetchHeroImage(r.url))
+  );
+  let heroCount = 0;
+  heroResults.forEach((res, i) => {
+    if (res.status === 'fulfilled' && res.value) {
+      records[i].image_url = res.value;
+      heroCount++;
+    }
+  });
+  // @ts-ignore - augment debug shape
+  debug.push({ source: '__og_image__', status: 'ok', itemCount: heroCount });
+
+  // Insert new stories - existing rows (same url) are skipped
+  const { error: insErr, count: insCount } = await supabase
     .from('news_items')
     .upsert(records, { onConflict: 'url', ignoreDuplicates: true, count: 'exact' });
-  if (error) return NextResponse.json({ error: error.message, debug }, { status: 500 });
+  if (insErr) return NextResponse.json({ error: insErr.message, debug }, { status: 500 });
 
-  return NextResponse.json({ added: count ?? records.length, sources: debug.filter((d) => d.itemCount > 0).length, debug });
+  // Backfill image_url + author on previously-indexed rows that didn't have them
+  let backfilled = 0;
+  for (const r of records) {
+    if (!r.image_url && !r.author) continue;
+    const patch: Record<string, any> = {};
+    if (r.image_url) patch.image_url = r.image_url;
+    if (r.author)    patch.author    = r.author;
+    const { error: updErr, count: updCount } = await supabase
+      .from('news_items')
+      .update(patch, { count: 'exact' })
+      .eq('url', r.url)
+      .or('image_url.is.null,author.is.null'); // only fill blanks, never overwrite
+    if (!updErr && updCount) backfilled += updCount;
+  }
+
+  return NextResponse.json({
+    added: insCount ?? 0,
+    backfilled,
+    sources: debug.filter((d) => d.itemCount > 0 && d.source !== '__og_image__').length,
+    debug,
+  });
 }

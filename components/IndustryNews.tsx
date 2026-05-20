@@ -73,7 +73,11 @@ export function IndustryNews({
       const { data } = await supabase
         .from('news_items').select('*').order('published_date', { ascending: false }).limit(80);
       setItems((data ?? []) as NewsItem[]);
-      setMessage(`Fetched ${json.added} stories from ${json.sources} feed${json.sources === 1 ? '' : 's'}`);
+      const parts: string[] = [];
+      parts.push(`${json.added} new`);
+      if (json.backfilled) parts.push(`${json.backfilled} updated with images`);
+      parts.push(`${json.sources} feed${json.sources === 1 ? '' : 's'}`);
+      setMessage(parts.join(' · '));
     } catch (e: any) { setMessage(e.message); }
     finally { setRefreshing(false); }
   }
