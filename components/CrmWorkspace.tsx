@@ -148,8 +148,17 @@ export function CrmWorkspace({
         p.value ? <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }}>{p.value}</span>
                 : <span style={{ color: 'var(--fg-4)', fontStyle: 'italic', fontSize: 12 }}>— right-click</span> },
     { field: 'location', headerName: 'Location', width: 140, editable: canEdit, valueSetter: saveCell },
-    { field: 'fleet_size', headerName: 'Fleet', width: 80, editable: canEdit, valueSetter: saveCell,
-      valueParser: (p) => p.newValue === '' ? null : Number(p.newValue) },
+    { field: 'fleet_size', headerName: 'Fleet', width: 80, editable: false,
+      valueGetter: (p) => {
+        const r = p.data!;
+        if (r.trucks != null || r.trailers != null || r.vans != null) {
+          return (r.trucks ?? 0) + (r.trailers ?? 0) + (r.vans ?? 0);
+        }
+        return null;
+      },
+      cellRenderer: (p: ICellRendererParams<CRMContact, number>) =>
+        p.value == null ? <span style={{ color: 'var(--fg-4)' }}>—</span> : <span className="tnum">{p.value}</span>
+    },
     { field: 'status', headerName: 'Status', width: 130, editable: canEdit, valueSetter: saveCell,
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: STATUSES },
       cellRenderer: (p: ICellRendererParams<CRMContact, ContactStatus>) => {
