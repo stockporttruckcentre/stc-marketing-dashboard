@@ -228,12 +228,33 @@ export function CrmWorkspace({
   async function confirmRowEnrich() {
     if (!enrichConfirm) return;
     const { row } = enrichConfirm;
-    if (!row.email) {
-      setMessage('Need an email on the row to enrich. Inline-edit the Email cell first.');
+    if (!row.email && !row.company_name) {
+      setMessage('Need an email or company name on the row to enrich.');
       setEnrichConfirm(null);
       return;
     }
-    await doEnrich(row.email, selectedListId, row.id);
+    setEnriching(true); setMessage(null); setEnrichConfirm(null);
+    try {
+      const res = await fetch('/api/lusha/enrich', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: row.email,
+          company_name: row.company_name,
+          contact_name: row.contact_name,
+          list_id: selectedListId,
+          replace_id: row.id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Enrichment failed');
+      setMessage(`Enriched via ${json.strategy ?? 'Lusha'} - filled ${Object.keys(json.enriched ?? {}).length} fields`);
+      if (json.contact) setRows((r) => r.map((c) => c.id === json.contact.id ? json.contact as CRMContact : c));
+      fetchBalance();
+    } catch (e: any) {
+      setMessage(e.message);
+    } finally {
+      setEnriching(false);
+    }
   }
 
   // ---- CSV ----
@@ -667,14 +688,17 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
 }
 
 function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
-  // Lusha can only fill these contact attributes:
+  // Lusha returns these contact attributes:
   const ENRICHABLE_FIELDS = ['company_name','contact_name','email','phone','location','fleet_size'];
-  const canEnrich = !!row.email && ENRICHABLE_FIELDS.includes(field);
-  const enrichTitle = !row.email
-    ? 'Add an email to the row first - Lusha looks contacts up by email'
+  const hasLookupHandle = !!row.email || !!row.company_name;
+  const canEnrich = hasLookupHandle && ENRICHABLE_FIELDS.includes(field);
+  const enrichTitle = !hasLookupHandle
+    ? 'Add an email or company name to the row first - Lusha needs at least one to look up'
     : !ENRICHABLE_FIELDS.includes(field)
       ? 'Lusha does not provide this field'
-      : 'Look this contact up on Lusha and fill missing details';
+      : row.email
+        ? 'Look this contact up on Lusha by email'
+        : 'Lusha will find a contact at ' + row.company_name + ' (Sales Director, MD, Fleet Manager...)';
   return (
     <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
       <div className="ctx-menu__head">{row.company_name}{row.location && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.location}</span>}</div>
