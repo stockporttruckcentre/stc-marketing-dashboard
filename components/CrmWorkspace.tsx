@@ -225,12 +225,16 @@ export function CrmWorkspace({
     }
   }
 
-  async function confirmRowEnrich() {
+  async function confirmRowEnrich(fields: string[]) {
     if (!enrichConfirm) return;
     const { row } = enrichConfirm;
     if (!row.email && !row.company_name) {
       setMessage('Need an email or company name on the row to enrich.');
       setEnrichConfirm(null);
+      return;
+    }
+    if (fields.length === 0) {
+      setMessage('Tick at least one field to update.');
       return;
     }
     setEnriching(true); setMessage(null); setEnrichConfirm(null);
@@ -243,11 +247,12 @@ export function CrmWorkspace({
           contact_name: row.contact_name,
           list_id: selectedListId,
           replace_id: row.id,
+          only_fields: fields,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Enrichment failed');
-      setMessage(`Enriched via ${json.strategy ?? 'Lusha'} - filled ${Object.keys(json.enriched ?? {}).length} fields`);
+      setMessage(`Enriched via ${json.strategy ?? 'Lusha'} - updated ${Object.keys(json.enriched ?? {}).filter((k) => k !== 'source').length} field(s)`);
       if (json.contact) setRows((r) => r.map((c) => c.id === json.contact.id ? json.contact as CRMContact : c));
       fetchBalance();
     } catch (e: any) {
@@ -412,9 +417,8 @@ export function CrmWorkspace({
             {listIsGlobal ? 'Sales · Global CRM (team-shared)' : `Sales · My CRM list · owned by ${listOwnerName ?? '—'}`}
           </div>
           <h1 className="page-head__title">
-            {listIsGlobal && <Globe size={22} style={{ verticalAlign: 'text-bottom', marginRight: 8, color: 'var(--stc-red)' }} />}
-            {!listIsGlobal && <Users size={22} style={{ verticalAlign: 'text-bottom', marginRight: 8, color: 'var(--stc-marketing)' }} />}
-            {selectedList?.name ?? 'CRM'}<span style={{ color: 'var(--stc-red)' }}>.</span>
+            <Users size={26} style={{ color: 'var(--stc-red)' }} />
+            <span>{selectedList?.name ?? 'CRM'}<span style={{ color: 'var(--stc-red)' }}>.</span></span>
           </h1>
           <div className="page-head__sub">{rows.length} contacts · {listIsGlobal ? 'realtime · visible to everyone' : 'private to owner + shared members'}</div>
         </div>
@@ -497,7 +501,7 @@ export function CrmWorkspace({
         {canEdit && <button onClick={handleAddRow} className="btn btn--primary"><Plus size={14} /> Add contact</button>}
       </div>
 
-      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 6, marginTop: 4 }}>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 6, marginTop: 4 }}>
         TIP · click any row to open details · right-click any cell for edit, enrich, move, delete
       </div>
 
@@ -742,27 +746,75 @@ function ListPickerModal({ lists, onPick, onClose, title }: { lists: CrmList[]; 
   );
 }
 
-function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: CRMContact; balance: number | null; onConfirm: () => void; onCancel: () => void; busy: boolean }) {
+const ENRICHABLE_FIELD_CHOICES: { key: 'company_name' | 'contact_name' | 'email' | 'phone' | 'location' | 'fleet_size'; label: string; help: string }[] = [
+  { key: 'company_name', label: 'Company name', help: 'Official name from Lusha' },
+  { key: 'contact_name', label: 'Contact name', help: 'Full name of person found' },
+  { key: 'email',        label: 'Email',        help: 'Best-match email address' },
+  { key: 'phone',        label: 'Phone',        help: 'Primary phone number' },
+  { key: 'location',     label: 'Location',     help: 'City / country' },
+  { key: 'fleet_size',   label: 'Employee count', help: 'Company size (also written to legacy fleet_size)' },
+];
+
+function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: CRMContact; balance: number | null; onConfirm: (fields: string[]) => void; onCancel: () => void; busy: boolean }) {
   const remaining = balance == null ? '?' : balance.toString();
+  const initialChecked = new Set(ENRICHABLE_FIELD_CHOICES.filter((f) => {
+    const v = (row as any)[f.key];
+    return v === null || v === undefined || v === '';
+  }).map((f) => f.key));
+  // If everything is filled, default to all unchecked - user can pick which to overwrite
+  const [checked, setChecked] = useState<Set<string>>(initialChecked.size > 0 ? initialChecked : new Set());
+
+  function toggle(k: string) {
+    const next = new Set(checked);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    setChecked(next);
+  }
+
+  const lookupHandle = row.email ? `email: ${row.email}` : `company: ${row.company_name}`;
+  const willOverwrite = ENRICHABLE_FIELD_CHOICES.filter((f) => checked.has(f.key) && (row as any)[f.key]);
+
   return (
     <Modal onClose={onCancel} title="Enrich from Lusha">
       <p style={{ color: 'var(--fg-2)', fontSize: 13.5, margin: 0 }}>
-        Looking up <strong style={{ color: 'var(--fg-1)' }}>{row.email || '(no email — set the Email cell first)'}</strong> via the Lusha API.
+        Looking up via Lusha using <strong style={{ color: 'var(--fg-1)' }}>{lookupHandle}</strong>.
       </p>
-      <div className="card" style={{ marginTop: 12, padding: 12 }}>
+      <div style={{ marginTop: 12 }}>
+        <div className="field__label" style={{ marginBottom: 8 }}>Which fields to update?</div>
+        <div className="col" style={{ gap: 4 }}>
+          {ENRICHABLE_FIELD_CHOICES.map((f) => {
+            const current = (row as any)[f.key];
+            const has = current !== null && current !== undefined && current !== '';
+            return (
+              <label key={f.key} className="row" style={{ gap: 8, padding: '6px 8px', cursor: 'pointer', borderRadius: 'var(--r-2)', background: checked.has(f.key) ? 'rgba(207,36,23,0.06)' : 'transparent' }}>
+                <input type="checkbox" checked={checked.has(f.key)} onChange={() => toggle(f.key)} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: 'var(--fg-1)' }}>{f.label}{has && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 6 }}>(will overwrite: {String(current).slice(0,40)})</span>}</div>
+                  <div className="row-item__sub">{f.help}</div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+      <div className="card" style={{ marginTop: 12, padding: 10 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>COST</span>
           <span className="tnum" style={{ fontWeight: 600 }}>1 credit</span>
         </div>
-        <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>REMAINING AFTER</span>
           <span className="tnum">{balance == null ? '?' : Math.max(0, balance - 1)} (of {remaining})</span>
         </div>
+        {willOverwrite.length > 0 && (
+          <div className="mono" style={{ fontSize: 10.5, color: 'var(--stc-warning)', marginTop: 6 }}>
+            {`// `}WILL OVERWRITE {willOverwrite.length} EXISTING VALUE{willOverwrite.length === 1 ? '' : 'S'}
+          </div>
+        )}
       </div>
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
         <button type="button" onClick={onCancel} className="btn btn--ghost">Cancel</button>
-        <button type="button" onClick={onConfirm} className="btn btn--primary" disabled={busy || !row.email}>
-          {busy ? <Loader size={14} className="spin" /> : <Send size={14} />} Spend 1 credit
+        <button type="button" onClick={() => onConfirm(Array.from(checked))} className="btn btn--primary" disabled={busy || checked.size === 0}>
+          {busy ? <Loader size={14} className="spin" /> : <Send size={14} />} Spend 1 credit · update {checked.size} field{checked.size === 1 ? '' : 's'}
         </button>
       </div>
     </Modal>

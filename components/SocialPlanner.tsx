@@ -55,7 +55,7 @@ export function SocialPlanner({ initialPosts, profile }: { initialPosts: SocialP
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Marketing · Social planner</div>
-          <h1 className="page-head__title">{posts.length} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>posts</span></h1>
+          <h1 className="page-head__title"><Calendar size={26} style={{ color: 'var(--stc-red)' }} /><span>{posts.length} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>posts</span></span></h1>
           <div className="page-head__sub">Compose with live previews · {posts.filter((p) => p.status === 'pending_review').length} awaiting review.</div>
         </div>
       </div>

@@ -581,6 +581,7 @@ a { color: inherit; text-decoration: none; }
   gap: 16px;
 }
 .page-head__title {
+  display: inline-flex; align-items: center; gap: 10px;
   font-family: "Panton", sans-serif;
   font-weight: 700;
   font-size: 28px;
@@ -590,16 +591,17 @@ a { color: inherit; text-decoration: none; }
   margin: 0 0 4px;
 }
 .page-head__sub {
-  color: var(--fg-3);
+  color: var(--fg-2);
   font-size: 12.5px;
   letter-spacing: -0.01em;
 }
 .page-head__eyebrow {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--fg-4);
+  color: var(--fg-2);
   margin-bottom: 6px;
 }
 .page-head__eyebrow::before { content: "// "; color: var(--stc-red); }
@@ -1895,7 +1897,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
   font-family: "Inter", sans-serif;
   letter-spacing: -0.01em;
 }
-.crm-search input::placeholder { color: var(--fg-4); }
+.crm-search input::placeholder { color: var(--fg-3); }
 .crm-search .kbd { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--fg-4); background: var(--stc-black-600); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; }
 .crm-search > svg { color: var(--fg-4); flex-shrink: 0; }
 

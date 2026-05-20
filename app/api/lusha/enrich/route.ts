@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     contact_name?: string;
     list_id?: string;
     replace_id?: string;
+    only_fields?: string[];  // if set, only these fields will be patched on the row
   };
 
   const email = (body.email || '').trim();
@@ -129,9 +130,15 @@ export async function POST(req: NextRequest) {
   if (company?.location) enrichedFields.location = company.location;
   if (company?.size != null) {
     enrichedFields.employee_count = company.size;
-    enrichedFields.fleet_size = company.size; // legacy field also populated for older rows
+    enrichedFields.fleet_size = company.size;
   }
   enrichedFields.source = `Lusha (${usedStrategy})`;
+
+  // If the caller specified which fields to update, filter to those (source always allowed)
+  if (Array.isArray(body.only_fields) && body.only_fields.length) {
+    const allowed = new Set([...body.only_fields, 'source']);
+    for (const k of Object.keys(enrichedFields)) if (!allowed.has(k)) delete enrichedFields[k];
+  }
 
   // Persist
   let contactRow: any = null;

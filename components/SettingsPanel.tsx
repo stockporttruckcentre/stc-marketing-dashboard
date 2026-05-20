@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Save, Loader, KeyRound, User, Sun, Moon } from 'lucide-react';
+import { Save, Loader, KeyRound, User, Sun, Moon, Settings } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
 export function SettingsPanel({ profile }: { profile: Profile }) {
@@ -57,7 +57,7 @@ export function SettingsPanel({ profile }: { profile: Profile }) {
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Admin · Settings</div>
-          <h1 className="page-head__title">Settings<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><Settings size={26} style={{ color: 'var(--stc-red)' }} /><span>Settings<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">Manage your profile and password.</div>
         </div>
       </div>

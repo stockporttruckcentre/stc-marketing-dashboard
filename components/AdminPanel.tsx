@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Profile, UserRole } from '@/lib/types';
 
@@ -24,7 +25,7 @@ export function AdminPanel({ team, selfId }: { team: Profile[]; selfId: string }
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Admin · Roles &amp; approvals</div>
-          <h1 className="page-head__title">Team<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><ShieldCheck size={26} style={{ color: 'var(--stc-red)' }} /><span>Team<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">{members.length} members. Promote a sign-up to marketer/sales/admin here.</div>
         </div>
       </div>

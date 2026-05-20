@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
 import Papa from 'papaparse';
-import { Plus, Upload, Trash2, Loader, Download } from 'lucide-react';
+import { Plus, Upload, Trash2, Loader, Download, Package } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { Trailer, TrailerStatus, UserRole } from '@/lib/types';
 
@@ -120,7 +120,7 @@ export function TrailerSales({
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Sales · Trailer inventory</div>
-          <h1 className="page-head__title">{counts.total} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>units in stock</span></h1>
+          <h1 className="page-head__title"><Package size={26} style={{ color: 'var(--stc-red)' }} /><span>{counts.total} <span style={{ fontWeight: 400, color: 'var(--fg-3)', fontSize: 22 }}>units in stock</span></span></h1>
           <div className="page-head__sub">{counts.available} available · {counts.reserved} reserved · {counts.sold} sold</div>
         </div>
       </div>
@@ -154,7 +154,7 @@ export function TrailerSales({
         )}
       </div>
 
-      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginBottom: 6, marginTop: 4 }}>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 6, marginTop: 4 }}>
         TIP · click any cell to edit · select rows to delete · upload a CSV with columns: make, model, year, price, status, location, description
       </div>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { RefreshCw, ExternalLink, Loader, Trash2 } from 'lucide-react';
+import { RefreshCw, ExternalLink, Loader, Trash2, TrendingUp } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { NewsItem, UserRole } from '@/lib/types';
 
@@ -41,7 +41,7 @@ export function IndustryNews({
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Workspace · Industry news</div>
-          <h1 className="page-head__title">News<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><TrendingUp size={26} style={{ color: 'var(--stc-red)' }} /><span>News<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">Commercial Motor · Fleet News · Transport Engineer. {items.length} stories indexed.</div>
         </div>
         {canRefresh && (

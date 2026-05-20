@@ -61,7 +61,7 @@ export function BrandKit({
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Marketing · Brand kit</div>
-          <h1 className="page-head__title">Brand assets<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><ImageIcon size={26} style={{ color: 'var(--stc-red)' }} /><span>Brand assets<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">Logos, fonts, templates and colours. Anyone can download; marketers can upload.</div>
         </div>
       </div>

@@ -69,9 +69,9 @@ export function TopBar() {
       )}
 
       <div className="topbar__right">
-        <div className="lusha" title={balanceErr ? `Lusha: ${balanceErr}` : (breakdown ? Object.entries(breakdown).map(([k,v]: any) => `${k}: ${v?.remaining ?? '?'} remaining (${v?.used ?? '?'}/${v?.total ?? '?'} used)`).join('\n') : 'Live Lusha balance (account/usage)')}>
+        <div className="lusha" title={balanceErr ? `Lusha: ${balanceErr}` : (breakdown ? Object.entries(breakdown).map(([k,v]: any) => `${k}: ${v?.remaining ?? '?'} remaining (${v?.used ?? '?'}/${v?.total ?? '?'} used)`).join('\n') : 'Lusha Balance — live (account/usage)')}>
           <span className="lusha__dot" />
-          <span className="lusha__label">LUSHA</span>
+          <span className="lusha__label">BALANCE</span>
           <span className="lusha__value tnum">
             {balance === null ? (balanceErr ? '—' : '…') : balance.toLocaleString()}
           </span>
@@ -91,6 +91,20 @@ function CrmSearch({ onPick }: { onPick: (contactId: string, listId: string) => 
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Global Ctrl+K / Cmd+K to focus the search
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const isShortcut = (e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K');
+      if (isShortcut) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -136,11 +150,11 @@ function CrmSearch({ onPick }: { onPick: (contactId: string, listId: string) => 
   return (
     <div ref={wrapRef} className="crm-search">
       <Search size={14} />
-      <input
+      <input ref={inputRef}
         type="text" placeholder="Search CRM contacts..." value={q}
         onChange={(e) => setQ(e.target.value)} onFocus={() => q && setOpen(true)} onKeyDown={onKey}
       />
-      <span className="kbd">⌘K</span>
+      <span className="kbd">Ctrl K</span>
 
       {open && results.length > 0 && (
         <div className="crm-search__dropdown">

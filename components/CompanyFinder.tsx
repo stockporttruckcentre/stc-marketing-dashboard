@@ -115,7 +115,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Sales · Company finder</div>
-          <h1 className="page-head__title">Find prospects<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><Search size={26} style={{ color: 'var(--stc-red)' }} /><span>Find prospects<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">Search any STC depot, custom postcode, or radius via Lusha. Add results in bulk to any CRM list.</div>
         </div>
       </div>

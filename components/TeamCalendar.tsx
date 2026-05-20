@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { ChevronLeft, ChevronRight, Plus, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, Trash2, CalendarDays } from 'lucide-react';
 import type { CalendarEvent } from '@/lib/types';
 
 function startOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1); }
@@ -97,7 +97,7 @@ export function TeamCalendar({ initialEvents, userId }: { initialEvents: Calenda
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Workspace · Calendar</div>
-          <h1 className="page-head__title">{fmtMonth(cursor)}<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
+          <h1 className="page-head__title"><CalendarDays size={26} style={{ color: 'var(--stc-red)' }} /><span>{fmtMonth(cursor)}<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
           <div className="page-head__sub">Team calendar · realtime · {events.length} events this month</div>
         </div>
         <div className="row">
