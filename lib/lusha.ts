@@ -86,47 +86,34 @@ export async function findLushaCompanyByDomain(domain: string): Promise<{ id: st
 
 export async function findLushaCompanyByDomainDebug(domain: string): Promise<{
   match: { id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null;
-  attempts: Array<{ shape: string; sent: any; status: number; bodyKeys: string[]; itemCount: number; sample: any }>;
+  attempts: Array<{ shape: string; sentJson: string; status: number; rawText: string; itemCount: number }>;
 }> {
   const d = extractDomain(domain);
   const attempts: any[] = [];
   if (!d) return { match: null, attempts };
 
-  // Try multiple filter shapes - the Prospecting API has changed names over versions
-  const candidates: Array<{ shape: string; body: any }> = [
-    { shape: 'domains:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { domains: [d] } } } } },
-    { shape: 'mainDomains:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { mainDomains: [d] } } } } },
-    { shape: 'domain:d', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { domain: d } } } } },
-    { shape: 'websites:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { websites: [d] } } } } },
-    { shape: 'urls:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { urls: [d] } } } } },
-  ];
-
-  for (const c of candidates) {
-    const r = await postJson(`${BASE}/prospecting/company/search`, c.body);
-    const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
-    const arr = Array.isArray(items) ? items : (items ? [items] : []);
-    // Raw text of Lusha's response, capped — survives Chrome output filters that strip nested keys
-    const rawText = (r.text || '').slice(0, 500);
-    attempts.push({ shape: c.shape, sentJson: JSON.stringify(c.body.filters).slice(0, 200), status: r.status, rawText, itemCount: arr.length });
-    if (!r.ok) continue;
-    const first = arr[0];
-    const id = first?.id ?? first?.companyId ?? null;
-    if (id) {
-      return {
-        match: {
-          id,
-          name: first?.name ?? first?.companyName ?? d,
-          matchedVariant: d,
-          size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
-          location: first?.location ?? first?.country ?? first?.city ?? null,
-          industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
-          domain: first?.domain ?? first?.website ?? d,
-        },
-        attempts,
-      };
-    }
-  }
-  return { match: null, attempts };
+  // ONLY the proven-working shape: domains:[d] with pages.size >= 10
+  const body = { pages: { page: 0, size: 10 }, filters: { companies: { include: { domains: [d] } } } };
+  const r = await postJson(`${BASE}/prospecting/company/search`, body);
+  const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
+  const arr = Array.isArray(items) ? items : (items ? [items] : []);
+  attempts.push({ shape: 'domains:[d]', sentJson: JSON.stringify(body.filters).slice(0, 200), status: r.status, rawText: (r.text || '').slice(0, 400), itemCount: arr.length });
+  if (!r.ok) return { match: null, attempts };
+  const first = arr[0];
+  const id = first?.id ?? first?.companyId ?? null;
+  if (!id) return { match: null, attempts };
+  return {
+    match: {
+      id,
+      name: first?.name ?? first?.companyName ?? d,
+      matchedVariant: d,
+      size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
+      location: first?.location ?? first?.country ?? first?.city ?? null,
+      industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
+      domain: first?.domain ?? first?.website ?? d,
+    },
+    attempts,
+  };
 }
 
 // ============ Free company lookup with progressive name variants ============
@@ -265,51 +252,27 @@ export async function prospectingByCompanyId(companyId: string): Promise<any | n
  * Uses the SAME role cascade as prospectingByCompanyAndRoles so the pre-check is honest.
  * Returns { found, matchedRole, count } or null on error. No credits spent.
  */
-export async function prospectingContactProbe(companyId: string): Promise<{ found: boolean; matchedRole: string; count: number; debug: any[] } | null> {
+export async function prospectingContactProbe(companyId: string): Promise<{ found: boolean; matchedRole: string; count: number } | null> {
+  // Single tight role cascade, single proven filter shape, stop at first hit.
   const roleGroups: string[][] = [
-    ['Sales Director'],
-    ['Sales Manager'],
-    ['Sales Executive', 'Sales Associate', 'Sales Assistant'],
-    ['Head of Sales', 'Business Development Director', 'Business Development Manager'],
-    ['Account Manager', 'Account Director', 'Key Account Manager'],
-    ['Commercial Director', 'Commercial Manager'],
+    ['Sales Director', 'Sales Manager'],
+    ['Sales Executive', 'Sales Associate', 'Sales Assistant', 'Head of Sales'],
+    ['Account Manager', 'Business Development Manager', 'Commercial Manager'],
     ['Managing Director', 'CEO', 'Owner'],
-    ['Fleet Manager', 'Transport Manager'],
-    ['Operations Director', 'Operations Manager'],
-    ['Procurement Manager', 'Procurement Director', 'Buyer'],
+    ['Fleet Manager', 'Transport Manager', 'Operations Manager'],
     ['Director'],
   ];
-  const debug: any[] = [];
-
-  // Also try with NO job-title filter once - so we can see if contacts exist at all
-  const shapes = [
-    (group: string[]) => ({ contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } }),
-    (group: string[]) => ({ contacts: { include: { companies: { ids: [companyId] }, jobTitles: group } } }),
-    (group: string[]) => ({ contacts: { include: { companyIds: [companyId], jobTitles: { values: group } } } }),
-  ];
-
-  // First do a NO-FILTER probe with just the company - sanity check that contacts exist
-  const sanity = await postJson(`${BASE}/prospecting/contact/search`, {
-    pages: { page: 0, size: 10 },
-    filters: { contacts: { include: { companies: { ids: [companyId] } } } },
-  });
-  debug.push({ test: 'no-role-filter', status: sanity.status, itemCount: (sanity.json?.data?.length ?? sanity.json?.contacts?.length ?? 0), rawText: (sanity.text || '').slice(0, 300) });
-
   for (const group of roleGroups) {
-    for (let i = 0; i < shapes.length; i++) {
-      const filters = shapes[i](group);
-      const r = await postJson(`${BASE}/prospecting/contact/search`, {
-        pages: { page: 0, size: 10 },
-        filters,
-      });
-      const items = r.json?.data ?? r.json?.contacts ?? [];
-      const count = Array.isArray(items) ? items.length : 0;
-      debug.push({ role: group[0], shapeIdx: i, status: r.status, count, rawText: r.ok ? null : (r.text || '').slice(0, 200) });
-      if (!r.ok) continue;
-      if (count > 0) return { found: true, matchedRole: group[0], count, debug };
-    }
+    const r = await postJson(`${BASE}/prospecting/contact/search`, {
+      pages: { page: 0, size: 10 },
+      filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: group } } },
+    });
+    if (!r.ok) continue;
+    const items = r.json?.data ?? r.json?.contacts ?? [];
+    const count = Array.isArray(items) ? items.length : 0;
+    if (count > 0) return { found: true, matchedRole: group[0], count };
   }
-  return { found: false, matchedRole: '', count: 0, debug };
+  return { found: false, matchedRole: '', count: 0 };
 }
 
 // ============ Strategy 3: prospecting (company + role fallback) ============
