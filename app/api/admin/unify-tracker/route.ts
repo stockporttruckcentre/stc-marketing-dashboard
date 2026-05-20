@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
   const url = process.env.POSTGRES_URL || process.env.POSTGRES_URL_NON_POOLING;
   if (!url) return NextResponse.json({ error: 'POSTGRES_URL not set' }, { status: 500 });
-  const sql = postgres(url, { ssl: 'require', max: 1, idle_timeout: 5 });
+  const sql = postgres(url, { ssl: 'require', max: 1, idle_timeout: 5, prepare: false });
 
   const results: any = { target: target.full_name };
   try {
