@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote } from '@/lib/types';
+import { extractCityFromAddress } from '@/lib/uk-cities';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
@@ -535,6 +536,8 @@ export function CrmWorkspace({
           contact={drawerRow}
           profile={profile}
           canEdit={canEdit}
+          lists={lists}
+          members={members}
           onClose={() => setDrawerRow(null)}
           onChange={(updated) => {
             setRows((r) => r.map((c) => c.id === updated.id ? updated : c));
@@ -678,25 +681,49 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
   );
 }
 
-function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete }: {
+function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onChange, onDelete }: {
   contact: CRMContact; profile: Profile; canEdit: boolean;
+  lists: CrmList[]; members: Member[];
   onClose: () => void; onChange: (c: CRMContact) => void; onDelete: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [noteText, setNoteText] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loadingNotes, setLoadingNotes] = useState(true);
   const [edit, setEdit] = useState<CRMContact>(contact);
+  const [showAddLink, setShowAddLink] = useState<null | 'website' | 'linkedin' | 'facebook' | 'instagram' | 'x' | 'other'>(null);
+  const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
+  const [alsoOn, setAlsoOn] = useState<{ id: string; name: string; is_global: boolean }[]>([]);
   useEffect(() => { setEdit(contact); }, [contact]);
 
   useEffect(() => {
     (async () => {
-      setLoading(true);
+      setLoadingNotes(true);
       const { data } = await supabase.from('contact_notes').select('*').eq('contact_id', contact.id).order('created_at', { ascending: false });
       setNotes((data ?? []) as ContactNote[]);
-      setLoading(false);
+      setLoadingNotes(false);
     })();
   }, [supabase, contact.id]);
+
+  // Detect "also on" - other contacts on lists you can see that share email or company+contact
+  useEffect(() => {
+    (async () => {
+      const matches: { id: string; name: string; is_global: boolean }[] = [];
+      const otherIdsSeen = new Set<string>();
+      // Query by email if present, else by company_name+contact_name
+      let q = supabase.from('crm_contacts').select('id, list_id').neq('id', contact.id);
+      if (contact.email) q = q.eq('email', contact.email);
+      else q = q.eq('company_name', contact.company_name).eq('contact_name', contact.contact_name ?? '');
+      const { data: hits } = await q;
+      for (const h of (hits ?? []) as { id: string; list_id: string }[]) {
+        if (!h.list_id || otherIdsSeen.has(h.list_id)) continue;
+        otherIdsSeen.add(h.list_id);
+        const l = lists.find((x) => x.id === h.list_id);
+        if (l) matches.push({ id: l.id, name: l.name, is_global: l.is_global });
+      }
+      setAlsoOn(matches);
+    })();
+  }, [supabase, contact, lists]);
 
   async function addNote() {
     if (!noteText.trim()) return;
@@ -711,10 +738,63 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
 
   async function saveField(field: keyof CRMContact, value: any) {
     if (contact[field] === value) return;
-    const { data, error } = await supabase.from('crm_contacts').update({ [field]: value }).eq('id', contact.id).select('*').single();
+    const patch: any = { [field]: value };
+    // If address changed, also extract city -> location
+    if (field === 'address' && typeof value === 'string') {
+      const city = extractCityFromAddress(value);
+      if (city && city !== contact.location) patch.location = city;
+    }
+    const { data, error } = await supabase.from('crm_contacts').update(patch).eq('id', contact.id).select('*').single();
     if (error) { alert(error.message); return; }
+    setEdit(data as CRMContact);
     onChange(data as CRMContact);
   }
+
+  async function saveFleet(part: 'trucks' | 'trailers' | 'vans', value: number | null) {
+    const patch: any = { [part]: value };
+    const { data, error } = await supabase.from('crm_contacts').update(patch).eq('id', contact.id).select('*').single();
+    if (error) { alert(error.message); return; }
+    setEdit(data as CRMContact);
+    onChange(data as CRMContact);
+  }
+
+  async function addLink(kind: 'website' | 'linkedin' | 'facebook' | 'instagram' | 'x' | 'other', label: string, url: string) {
+    if (!url.trim()) return;
+    const existing = Array.isArray(contact.links) ? contact.links : [];
+    const fresh = [...existing, { id: crypto.randomUUID(), label: label.trim() || kind.charAt(0).toUpperCase() + kind.slice(1), url: url.trim(), kind }];
+    const { data, error } = await supabase.from('crm_contacts').update({ links: fresh }).eq('id', contact.id).select('*').single();
+    if (error) { alert(error.message); return; }
+    setEdit(data as CRMContact);
+    onChange(data as CRMContact);
+    setShowAddLink(null);
+  }
+  async function removeLink(id: string) {
+    const fresh = (contact.links ?? []).filter((l) => l.id !== id);
+    const { data, error } = await supabase.from('crm_contacts').update({ links: fresh }).eq('id', contact.id).select('*').single();
+    if (error) { alert(error.message); return; }
+    setEdit(data as CRMContact);
+    onChange(data as CRMContact);
+  }
+
+  async function moveToList(targetListId: string) {
+    const { data, error } = await supabase.from('crm_contacts').update({ list_id: targetListId }).eq('id', contact.id).select('*').single();
+    if (error) { alert(error.message); return; }
+    setMovePickerOpen(null);
+    onChange(data as CRMContact);
+    onClose();
+  }
+  async function duplicateToList(targetListId: string) {
+    const { id, created_at, updated_at, ...rest } = contact as any;
+    const { error } = await supabase.from('crm_contacts').insert({ ...rest, list_id: targetListId });
+    if (error) { alert(error.message); return; }
+    setMovePickerOpen(null);
+    alert(`Duplicated to ${lists.find((l) => l.id === targetListId)?.name}`);
+  }
+
+  const fleetTotal = (edit.trucks ?? 0) + (edit.trailers ?? 0) + (edit.vans ?? 0);
+  const hasBreakdown = (edit.trucks ?? 0) + (edit.trailers ?? 0) + (edit.vans ?? 0) > 0;
+
+  const otherLists = lists.filter((l) => l.id !== contact.list_id);
 
   return (
     <div className="drawer-bg" onClick={onClose}>
@@ -723,6 +803,11 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
           <div>
             <div className="page-head__eyebrow">Contact</div>
             <h2 style={{ margin: '4px 0 0' }}><Building size={18} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{edit.company_name}</h2>
+            {alsoOn.length > 0 && (
+              <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 4 }}>
+                {`// `}ALSO ON: {alsoOn.map((l) => l.name).join(', ')}
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="btn btn--icon"><X size={14} /></button>
         </div>
@@ -736,11 +821,38 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
             <DrawerField label="Email" value={edit.email} onSave={(v) => saveField('email', v)} canEdit={canEdit} mono />
             <DrawerField label="Phone" value={edit.phone} onSave={(v) => saveField('phone', v)} canEdit={canEdit} mono />
           </div>
-          <div className="split-2" style={{ gap: 10, marginTop: 10 }}>
-            <DrawerField label="Location" value={edit.location} onSave={(v) => saveField('location', v)} canEdit={canEdit} />
-            <DrawerField label="Fleet size" value={edit.fleet_size?.toString() ?? ''} onSave={(v) => saveField('fleet_size', v ? Number(v) : null)} canEdit={canEdit} />
+
+          {/* Address + Location (auto-derived) */}
+          <div className="field" style={{ marginTop: 10 }}>
+            <div className="field__label">Address</div>
+            <textarea className="input" rows={3} disabled={!canEdit}
+              placeholder="e.g. Stockport Truck Centre Ltd, Oldmoor Road, Stockport, Manchester, SK6 2QE"
+              defaultValue={edit.address ?? ''}
+              onBlur={(e) => saveField('address', e.target.value || null)} />
+            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)', marginTop: 4 }}>
+              {`// `}LOCATION (auto): {edit.location ?? '—'}
+            </div>
           </div>
-          <div className="split-2" style={{ gap: 10, marginTop: 10 }}>
+
+          {/* Fleet breakdown */}
+          <div className="field" style={{ marginTop: 14 }}>
+            <div className="field__label">Fleet breakdown</div>
+            <div className="split-3" style={{ gap: 8 }}>
+              <FleetInput label="Trucks" value={edit.trucks} onSave={(n) => saveFleet('trucks', n)} canEdit={canEdit} />
+              <FleetInput label="Trailers" value={edit.trailers} onSave={(n) => saveFleet('trailers', n)} canEdit={canEdit} />
+              <FleetInput label="Vans" value={edit.vans} onSave={(n) => saveFleet('vans', n)} canEdit={canEdit} />
+            </div>
+            <div className="card" style={{ marginTop: 8, padding: '8px 12px' }}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>TOTAL FLEET (AUTO)</span>
+                <span className="tnum" style={{ fontWeight: 600 }}>
+                  {hasBreakdown ? fleetTotal : (edit.fleet_size ?? '—')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="split-2" style={{ gap: 10, marginTop: 14 }}>
             <div className="field">
               <div className="field__label">Status</div>
               <select className="input" disabled={!canEdit} value={edit.status} onChange={(e) => saveField('status', e.target.value)}>
@@ -750,12 +862,42 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
             <DrawerField label="Assigned to" value={edit.assigned_to} onSave={(v) => saveField('assigned_to', v)} canEdit={canEdit} />
           </div>
 
+          {/* Links */}
           <div className="hr" />
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+            <div className="page-head__eyebrow" style={{ marginBottom: 0 }}>Links</div>
+            {canEdit && (
+              <div className="row">
+                <button onClick={() => setShowAddLink('website')} className="btn btn--sm"><Plus size={12} /> Add website</button>
+                <button onClick={() => setShowAddLink('linkedin')} className="btn btn--sm"><Plus size={12} /> Add social</button>
+              </div>
+            )}
+          </div>
+          {(edit.links ?? []).length === 0
+            ? <div className="row-item__sub">No links yet.</div>
+            : (
+              <div className="col" style={{ gap: 4 }}>
+                {edit.links.map((l) => (
+                  <div key={l.id} className="row" style={{ justifyContent: 'space-between', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--r-2)', padding: '6px 10px' }}>
+                    <a href={l.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--fg-1)', fontSize: 13 }}>
+                      <span className="mono" style={{ color: 'var(--stc-red)', marginRight: 6, fontSize: 10 }}>{l.kind.toUpperCase()}</span>
+                      <strong>{l.label}</strong>
+                      <span className="mono" style={{ color: 'var(--fg-4)', marginLeft: 6, fontSize: 11 }}>{l.url}</span>
+                    </a>
+                    {canEdit && <button onClick={() => removeLink(l.id)} className="btn btn--icon btn--sm"><X size={12} /></button>}
+                  </div>
+                ))}
+              </div>
+            )
+          }
+          {showAddLink && <AddLinkForm kind={showAddLink} onSave={(label, url) => addLink(showAddLink, label, url)} onCancel={() => setShowAddLink(null)} />}
 
+          {/* Notes */}
+          <div className="hr" />
           <div className="page-head__eyebrow" style={{ marginBottom: 8 }}>Notes &amp; history</div>
           {canEdit && (
             <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-              <textarea className="input" placeholder="Add a note (call summary, next step, anything)…"
+              <textarea className="input" placeholder="Add a note (call summary, next step, anything)..."
                 value={noteText} onChange={(e) => setNoteText(e.target.value)}
                 style={{ minHeight: 70, flex: 1, padding: 10 }} />
               <button onClick={addNote} className="btn btn--primary" disabled={!noteText.trim()}>
@@ -764,8 +906,8 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
             </div>
           )}
           <div style={{ marginTop: 12 }}>
-            {loading ? (
-              <div className="row-item__sub">Loading…</div>
+            {loadingNotes ? (
+              <div className="row-item__sub">Loading...</div>
             ) : notes.length === 0 ? (
               <div className="row-item__sub">No notes yet. The latest one shows in the grid.</div>
             ) : notes.map((n) => (
@@ -780,13 +922,80 @@ function ContactDrawer({ contact, profile, canEdit, onClose, onChange, onDelete 
           </div>
         </div>
 
+        {/* Manage footer */}
         <div className="drawer__foot">
-          {canEdit && <button onClick={onDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete contact</button>}
+          {canEdit && (
+            <>
+              <button onClick={() => setMovePickerOpen('move')} className="btn btn--sm"><MoreHorizontal size={12} /> Move to list</button>
+              <button onClick={() => setMovePickerOpen('duplicate')} className="btn btn--sm"><Plus size={12} /> Duplicate to list</button>
+              <button onClick={onDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
+            </>
+          )}
           <div className="toolbar__spacer" />
           <button onClick={onClose} className="btn">Close</button>
         </div>
+
+        {movePickerOpen && (
+          <div className="modal-bg" onClick={() => setMovePickerOpen(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal__head">
+                <h3 style={{ margin: 0 }}>{movePickerOpen === 'move' ? 'Move to which list?' : 'Duplicate to which list?'}</h3>
+                <button onClick={() => setMovePickerOpen(null)} className="btn btn--icon btn--sm"><X size={14} /></button>
+              </div>
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {otherLists.map((l) => (
+                  <button key={l.id}
+                    onClick={() => movePickerOpen === 'move' ? moveToList(l.id) : duplicateToList(l.id)}
+                    className="btn" style={{ justifyContent: 'flex-start', height: 40 }}>
+                    {l.is_global ? <Globe size={14} /> : <Users size={14} />} {l.name}
+                  </button>
+                ))}
+                {otherLists.length === 0 && <div className="row-item__sub">No other lists.</div>}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function FleetInput({ label, value, onSave, canEdit }: { label: string; value: number | null; onSave: (n: number | null) => void; canEdit: boolean }) {
+  const [v, setV] = useState<string>(value?.toString() ?? '');
+  useEffect(() => { setV(value?.toString() ?? ''); }, [value]);
+  return (
+    <div className="field">
+      <div className="field__label">{label}</div>
+      <input type="number" min={0} disabled={!canEdit} value={v}
+        className="input tnum"
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => onSave(v === '' ? null : Number(v))} />
+    </div>
+  );
+}
+
+function AddLinkForm({ kind, onSave, onCancel }: { kind: string; onSave: (label: string, url: string) => void; onCancel: () => void }) {
+  const placeholders: Record<string, { label: string; url: string }> = {
+    website:   { label: 'Main site', url: 'https://example.co.uk' },
+    linkedin:  { label: 'LinkedIn',  url: 'https://linkedin.com/company/...' },
+    facebook:  { label: 'Facebook',  url: 'https://facebook.com/...' },
+    instagram: { label: 'Instagram', url: 'https://instagram.com/...' },
+    x:         { label: 'X',         url: 'https://x.com/...' },
+    other:     { label: 'Other',     url: 'https://...' },
+  };
+  const ph = placeholders[kind] ?? placeholders.other;
+  const [label, setLabel] = useState(ph.label);
+  const [url, setUrl] = useState('');
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSave(label, url); }}
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--r-2)', padding: 10, marginTop: 8 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <input className="input" placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} style={{ width: 140 }} />
+        <input className="input" placeholder={ph.url} value={url} onChange={(e) => setUrl(e.target.value)} required style={{ flex: 1 }} autoFocus />
+        <button type="submit" className="btn btn--primary btn--sm"><Plus size={12} /> Save</button>
+        <button type="button" onClick={onCancel} className="btn btn--ghost btn--sm">Cancel</button>
+      </div>
+    </form>
   );
 }
 
