@@ -597,3 +597,21 @@ INSERT INTO brand_assets (name, type, url, category) VALUES
   ('STC Navbar Button',         'logo',  '/assets/stc-navbar-button.png',         'Logos'),
   ('STC Sales & Leasing (White)', 'logo', '/assets/stc-sales-leasing-white.png',  'Logos')
 ON CONFLICT DO NOTHING;
+
+-- =============================================================
+-- ADD-ON: real brand logos (11 variants from user upload)
+-- =============================================================
+DELETE FROM brand_assets WHERE category = 'Logos';
+INSERT INTO brand_assets (name, type, url, category) VALUES
+  ('STC Group',                       'logo', '/assets/logos/group.jpg',         'Logos'),
+  ('STC Holdings',                    'logo', '/assets/logos/holdings.jpg',      'Logos'),
+  ('Stockport Truck Centre — White',  'logo', '/assets/logos/stc-white.jpg',     'Logos'),
+  ('Stockport Truck Centre — Navy',   'logo', '/assets/logos/stc-navy.jpg',      'Logos'),
+  ('Sales & Leasing — White',         'logo', '/assets/logos/sl-white.jpg',      'Logos'),
+  ('Sales & Leasing — Navy',          'logo', '/assets/logos/sl-navy.jpg',       'Logos'),
+  ('Just text (no oval)',             'logo', '/assets/logos/notext.jpg',        'Logos'),
+  ('Just oval (no text)',             'logo', '/assets/logos/nooval.jpg',        'Logos'),
+  ('Trailers To Go',                  'logo', '/assets/logos/trailerstogo.jpg',  'Logos'),
+  ('Christmas variant',               'logo', '/assets/logos/xmas.jpg',          'Logos'),
+  ('Favicon source',                  'logo', '/assets/logos/favicon.jpg',       'Logos')
+ON CONFLICT DO NOTHING;
