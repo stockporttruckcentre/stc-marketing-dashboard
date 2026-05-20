@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'marketer' | 'sales' | 'viewer';
-export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'lost';
+export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'customer' | 'lost';
 export type PostStatus = 'draft' | 'pending_review' | 'approved' | 'scheduled' | 'posted';
 export type TrailerStatus = 'available' | 'reserved' | 'sold';
 export type AssetType = 'logo' | 'font' | 'color' | 'template' | 'image';
@@ -53,6 +53,19 @@ export interface CRMContact {
   notes: string | null;
   assigned_to: string | null;
   last_contact: string | null;
+  // Sales tracker fields (used when this contact is in a personal sales tracker list)
+  date_of_enquiry: string | null;
+  description: string | null;
+  new_or_used: string | null;
+  estimated_value: number | null;
+  requirement: string | null;
+  action: string | null;
+  order_date: string | null;
+  dispatch_date: string | null;
+  sale_price: number | null;
+  profit: number | null;
+  profit_pct: number | null;
+  commission: number | null;
   created_at: string;
   updated_at: string;
 }

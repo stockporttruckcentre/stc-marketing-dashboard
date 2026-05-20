@@ -2119,3 +2119,9 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 .news-chip.is-empty { opacity: 0.45; }
 .news-chip.is-empty .news-chip__count { background: transparent; }
 [data-theme="light"] .news-chip__count { background: rgba(0,0,0,0.06); color: var(--fg-2); }
+
+
+/* Sales tracker: customer status pill (active customer = ongoing relationship) */
+.pill--customer { background: rgba(46, 160, 67, 0.15); color: #5fb572; border: 1px solid rgba(46, 160, 67, 0.35); }
+.pill--customer .pill__dot { background: #5fb572; }
+[data-theme="light"] .pill--customer { background: rgba(46, 160, 67, 0.12); color: #1f8a3d; border-color: rgba(46, 160, 67, 0.4); }

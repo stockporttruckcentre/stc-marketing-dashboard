@@ -681,3 +681,24 @@ DROP POLICY IF EXISTS "calendar_update" ON calendar_events;
 CREATE POLICY "calendar_update" ON calendar_events FOR UPDATE USING (auth.uid() = created_by);
 DROP POLICY IF EXISTS "calendar_delete" ON calendar_events;
 CREATE POLICY "calendar_delete" ON calendar_events FOR DELETE USING (auth.uid() = created_by);
+
+-- =============================================================
+-- SALES TRACKER FIELDS on crm_contacts + 'customer' status
+-- (additive, idempotent)
+-- =============================================================
+ALTER TABLE crm_contacts DROP CONSTRAINT IF EXISTS crm_contacts_status_check;
+ALTER TABLE crm_contacts ADD CONSTRAINT crm_contacts_status_check
+  CHECK (status IN ('lead','contacted','quoted','won','customer','lost'));
+
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS date_of_enquiry DATE;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS description     TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS new_or_used     TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS estimated_value NUMERIC;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS requirement     TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS action          TEXT;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS order_date      DATE;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS dispatch_date   DATE;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS sale_price      NUMERIC;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS profit          NUMERIC;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS profit_pct      NUMERIC;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS commission      NUMERIC;

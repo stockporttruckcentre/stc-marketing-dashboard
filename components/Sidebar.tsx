@@ -27,9 +27,10 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
     {
       key: 'sales', label: 'Sales',
       items: [
-        { href: '/dashboard/crm',    label: 'CRM pipeline',   Icon: Users,   roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/finder', label: 'Company finder', Icon: Search,  roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: Package, roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/crm',    label: 'CRM pipeline',   Icon: Users,    roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/leads',  label: 'Sales tracker',  Icon: TrendingUp, roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/finder', label: 'Company finder', Icon: Search,   roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: Package,  roles: ['admin','marketer','sales','viewer'] },
       ],
     },
     {
