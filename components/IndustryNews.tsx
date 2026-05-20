@@ -31,12 +31,18 @@ export function IndustryNews({
 
   const canRefresh = role === 'admin' || role === 'marketer';
 
-  // Source name → backdrop URL lookup
-  const backdropFor = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const s of sources) m.set(s.name, s.backdrop_url);
-    return m;
-  }, [sources]);
+  // Source -> static backdrop image shipped in /public/news-backdrops.
+  // 7 sources, no fallback - blank gradient is intentional for any unmapped source.
+  const SOURCE_THUMB: Record<string, string> = {
+    'Commercial Motor': '/news-backdrops/commercialmotor.webp',
+    'Fleet News':       '/news-backdrops/fleetnews.webp',
+    'IRTE':             '/news-backdrops/irte.webp',
+    'Motor Transport':  '/news-backdrops/motortransport.webp',
+    'Trucking':         '/news-backdrops/trucking.webp',
+    'Logistics UK':     '/news-backdrops/logisticsuk.webp',
+    'RHA':              '/news-backdrops/rha.webp',
+  };
+  const backdropFor = { get: (src: string) => SOURCE_THUMB[src] || null };
 
   // Show all 8 publication chips, even if a source returned zero this week.
   // Count badge tells the team how many stories each source produced.

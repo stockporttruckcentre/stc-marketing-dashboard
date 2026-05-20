@@ -642,12 +642,12 @@ INSERT INTO news_sources (name) VALUES
   ('Commercial Motor'),
   ('Fleet News'),
   ('IRTE'),
-  ('Road Transport'),
   ('Motor Transport'),
   ('Trucking'),
   ('Logistics UK'),
   ('RHA')
 ON CONFLICT (name) DO NOTHING;
+DELETE FROM news_sources WHERE name = 'Road Transport';
 
 -- Migrate older rows that used the previous names so the source chips show correctly
 UPDATE news_items   SET source = 'IRTE' WHERE source = 'Transport Engineer';

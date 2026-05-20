@@ -18,8 +18,6 @@ const FEEDS = [
   { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=%22Fleet+News%22+UK+fleet&hl=en-GB&gl=GB&ceid=GB:en' },
   { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk&hl=en-GB&gl=GB&ceid=GB:en' },
   { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=%22IRTE%22+OR+%22Transport+Engineer%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=site:roadtransport.com&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Road Transport',   url: 'https://news.google.com/rss/search?q=%22Road+Transport%22+UK+haulage&hl=en-GB&gl=GB&ceid=GB:en' },
   { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
   { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=%22Motor+Transport%22+UK+logistics&hl=en-GB&gl=GB&ceid=GB:en' },
   { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
@@ -91,6 +89,12 @@ export async function POST() {
   // Run all feeds in parallel; each has its own 6s ceiling so total stays bounded
   const results = await Promise.allSettled(FEEDS.map(fetchFeed));
   const records: Record[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+
+  // Rename legacy source values from earlier feed configurations + delete dead-source rows.
+  // Idempotent, runs every refresh so the chips stay clean.
+  await supabase.from('news_items').update({ source: 'IRTE' }).eq('source', 'Transport Engineer');
+  await supabase.from('news_items').update({ source: 'RHA'  }).eq('source', 'UK HGV / haulage');
+  await supabase.from('news_items').delete().eq('source', 'Road Transport');
 
   // Always sweep stale stories first - older than the cutoff cannot live on the site
   const cutoffIso = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
