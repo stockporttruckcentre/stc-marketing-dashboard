@@ -10,8 +10,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+      {/* Apply theme before paint - reads cookie set by middleware/profile */}
+      <script dangerouslySetInnerHTML={{ __html: `
+        try {
+          var t = document.cookie.match(/stc_theme=(dark|light)/);
+          document.documentElement.setAttribute('data-theme', t ? t[1] : 'dark');
+        } catch(e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+      ` }} />
+      {children}</body>
     </html>
   );
 }

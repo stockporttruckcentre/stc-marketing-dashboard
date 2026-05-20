@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Save, Loader, KeyRound, User } from 'lucide-react';
+import { Save, Loader, KeyRound, User, Sun, Moon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
 export function SettingsPanel({ profile }: { profile: Profile }) {
@@ -15,6 +15,15 @@ export function SettingsPanel({ profile }: { profile: Profile }) {
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [savingPw, setSavingPw] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(profile.theme ?? 'dark');
+
+  async function applyTheme(t: 'dark' | 'light') {
+    setTheme(t);
+    document.documentElement.setAttribute('data-theme', t);
+    document.cookie = 'stc_theme=' + t + '; path=/; max-age=' + (60*60*24*365);
+    await supabase.from('profiles').update({ theme: t }).eq('id', profile.id);
+  }
+
   const [pwMsg, setPwMsg] = useState<{ type: 'success' | 'danger'; text: string } | null>(null);
 
   async function saveName(e: React.FormEvent) {
@@ -102,6 +111,25 @@ export function SettingsPanel({ profile }: { profile: Profile }) {
           </div>
         </form>
       </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="card__head"><h3 style={{ margin: 0 }}><Sun size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} /> Appearance</h3></div>
+        <div className="card__body" style={{ paddingTop: 14, paddingBottom: 18 }}>
+          <div className="field__label">Theme</div>
+          <div className="row" style={{ gap: 8, marginTop: 6 }}>
+            <button onClick={() => applyTheme('dark')} className={`btn ${theme === 'dark' ? 'btn--primary' : ''}`}>
+              <Moon size={14} /> Dark
+            </button>
+            <button onClick={() => applyTheme('light')} className={`btn ${theme === 'light' ? 'btn--primary' : ''}`}>
+              <Sun size={14} /> Light
+            </button>
+          </div>
+          <div className="row-item__sub" style={{ marginTop: 8 }}>
+            Saved to your account. Applies on every device the next time you sign in.
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

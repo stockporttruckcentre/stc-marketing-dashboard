@@ -27,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   };
 
   return (
-    <div className="app">
+    <div className="app" data-theme={p.theme ?? "dark"} suppressHydrationWarning>
       <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} />
       <div className="main">
         <TopBar />

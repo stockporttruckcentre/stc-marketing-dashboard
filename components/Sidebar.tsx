@@ -7,6 +7,7 @@ import {
   LayoutDashboard, TrendingUp, Users, Search, Package, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import type { Profile, UserRole } from '@/lib/types';
 
 type Item = { href: string; label: string; Icon: any; roles: UserRole[]; badge?: string; alert?: boolean };
@@ -94,6 +95,7 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
           <div className="sidebar__user-name">{profile.full_name}</div>
           <div className="sidebar__user-role">{profile.role}</div>
         </div>
+        <ThemeToggle profileId={profile.id} initialTheme={profile.theme ?? 'dark'} />
         <form action="/auth/signout" method="post">
           <button type="submit" title="Sign out" className="btn btn--icon" aria-label="Sign out">
             <LogOut size={14} />

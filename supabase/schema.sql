@@ -577,3 +577,12 @@ BEGIN
     BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE contact_addresses; EXCEPTION WHEN duplicate_object THEN NULL; END;
   END IF;
 END $$;
+
+-- =============================================================
+-- ADD-ON: theme preference on profiles
+-- =============================================================
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='profiles' AND column_name='theme') THEN
+    ALTER TABLE profiles ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark' CHECK (theme IN ('dark', 'light'));
+  END IF;
+END $$;

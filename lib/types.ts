@@ -9,6 +9,7 @@ export interface Profile {
   email: string;
   full_name: string;
   role: UserRole;
+  theme: 'dark' | 'light';
   created_at: string;
 }
 
