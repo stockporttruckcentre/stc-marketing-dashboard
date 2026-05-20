@@ -667,12 +667,20 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
 }
 
 function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
+  // Lusha can only fill these contact attributes:
+  const ENRICHABLE_FIELDS = ['company_name','contact_name','email','phone','location','fleet_size'];
+  const canEnrich = !!row.email && ENRICHABLE_FIELDS.includes(field);
+  const enrichTitle = !row.email
+    ? 'Add an email to the row first - Lusha looks contacts up by email'
+    : !ENRICHABLE_FIELDS.includes(field)
+      ? 'Lusha does not provide this field'
+      : 'Look this contact up on Lusha and fill missing details';
   return (
     <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
       <div className="ctx-menu__head">{row.company_name}{row.location && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.location}</span>}</div>
       <button onClick={onView}><Edit2 size={12} /> Open details</button>
       <button onClick={onEdit} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
-      <button onClick={onEnrich}><Mail size={12} /> Enrich from Lusha…</button>
+      <button onClick={onEnrich} disabled={!canEnrich} title={enrichTitle}><Mail size={12} /> Enrich from Lusha…</button>
       <button onClick={onMove}><MoreHorizontal size={12} /> Move to list…</button>
       <hr />
       <button onClick={onDelete} disabled={!canEdit} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
