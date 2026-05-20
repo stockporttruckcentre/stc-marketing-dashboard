@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { findLushaCompanyByDomain, extractDomain, prospectingContactProbe } from '@/lib/lusha';
+import { findLushaCompanyByDomain, findLushaCompanyByDomainDebug, extractDomain, prospectingContactProbe } from '@/lib/lusha';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,13 +45,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ found: false, strategy: 'bad_url', message: `Could not extract a domain from "${websiteUrl}".` });
   }
 
-  const company = await findLushaCompanyByDomain(domain);
+  const dbg = await findLushaCompanyByDomainDebug(domain);
+  const company = dbg.match;
   if (!company) {
     return NextResponse.json({
       found: false,
       strategy: 'domain',
       domainTried: domain,
       message: `Lusha has no record at domain "${domain}". 0 credits would be spent.`,
+      debug: { attempts: dbg.attempts },
     });
   }
 

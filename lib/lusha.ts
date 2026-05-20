@@ -80,26 +80,52 @@ export function extractDomain(raw: string | null | undefined): string {
  * Returns null on no match. Captures size/location/industry like findLushaCompany.
  */
 export async function findLushaCompanyByDomain(domain: string): Promise<{ id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null> {
+  const r = await findLushaCompanyByDomainDebug(domain);
+  return r.match;
+}
+
+export async function findLushaCompanyByDomainDebug(domain: string): Promise<{
+  match: { id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null;
+  attempts: Array<{ shape: string; sent: any; status: number; bodyKeys: string[]; itemCount: number; sample: any }>;
+}> {
   const d = extractDomain(domain);
-  if (!d) return null;
-  const r = await postJson(`${BASE}/prospecting/company/search`, {
-    pages: { page: 0, size: 5 },
-    filters: { companies: { include: { domains: [d] } } },
-  });
-  if (!r.ok) return null;
-  const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
-  const first = Array.isArray(items) ? items[0] : null;
-  const id = first?.id ?? first?.companyId ?? null;
-  if (!id) return null;
-  return {
-    id,
-    name: first?.name ?? first?.companyName ?? d,
-    matchedVariant: d,
-    size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
-    location: first?.location ?? first?.country ?? first?.city ?? null,
-    industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
-    domain: first?.domain ?? first?.website ?? d,
-  };
+  const attempts: any[] = [];
+  if (!d) return { match: null, attempts };
+
+  // Try multiple filter shapes - the Prospecting API has changed names over versions
+  const candidates: Array<{ shape: string; body: any }> = [
+    { shape: 'domains:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { domains: [d] } } } } },
+    { shape: 'mainDomains:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { mainDomains: [d] } } } } },
+    { shape: 'domain:d', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { domain: d } } } } },
+    { shape: 'websites:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { websites: [d] } } } } },
+    { shape: 'urls:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { urls: [d] } } } } },
+  ];
+
+  for (const c of candidates) {
+    const r = await postJson(`${BASE}/prospecting/company/search`, c.body);
+    const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
+    const arr = Array.isArray(items) ? items : (items ? [items] : []);
+    const bodyKeys = r.json && typeof r.json === 'object' ? Object.keys(r.json) : [];
+    attempts.push({ shape: c.shape, sent: c.body.filters, status: r.status, bodyKeys, itemCount: arr.length, sample: arr.slice(0, 1) });
+    if (!r.ok) continue;
+    const first = arr[0];
+    const id = first?.id ?? first?.companyId ?? null;
+    if (id) {
+      return {
+        match: {
+          id,
+          name: first?.name ?? first?.companyName ?? d,
+          matchedVariant: d,
+          size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
+          location: first?.location ?? first?.country ?? first?.city ?? null,
+          industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
+          domain: first?.domain ?? first?.website ?? d,
+        },
+        attempts,
+      };
+    }
+  }
+  return { match: null, attempts };
 }
 
 // ============ Free company lookup with progressive name variants ============
