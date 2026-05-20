@@ -23,6 +23,7 @@ export function TopBar() {
   const router = useRouter();
   const path = usePathname();
   const [balance, setBalance] = useState<number | null>(null);
+  const [breakdown, setBreakdown] = useState<any>(null);
   const [balanceErr, setBalanceErr] = useState<string | null>(null);
   const isCrm = path?.startsWith('/dashboard/crm');
 
@@ -38,7 +39,7 @@ export function TopBar() {
         const res = await fetch('/api/lusha/balance', { cache: 'no-store' });
         const json = await res.json();
         if (!mounted) return;
-        if (res.ok && typeof json.balance === 'number') { setBalance(json.balance); setBalanceErr(null); }
+        if (res.ok && typeof json.balance === 'number') { setBalance(json.balance); setBalanceErr(null); setBreakdown(json.breakdown ?? null); }
         else { setBalance(null); setBalanceErr(json.error || 'no balance'); }
       } catch (e: any) {
         if (!mounted) return;
@@ -68,7 +69,7 @@ export function TopBar() {
       )}
 
       <div className="topbar__right">
-        <div className="lusha" title={balanceErr ? `Lusha: ${balanceErr}` : 'Live Lusha balance'}>
+        <div className="lusha" title={balanceErr ? `Lusha: ${balanceErr}` : (breakdown ? Object.entries(breakdown).map(([k,v]: any) => `${k}: ${v?.remaining ?? '?'} remaining (${v?.used ?? '?'}/${v?.total ?? '?'} used)`).join('\n') : 'Live Lusha balance (account/usage)')}>
           <span className="lusha__dot" />
           <span className="lusha__label">LUSHA</span>
           <span className="lusha__value tnum">

@@ -4,35 +4,23 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// Lusha credit endpoints we'll try in order. Different plans expose different ones.
-const ENDPOINTS = [
-  'https://api.lusha.com/usage',
-  'https://api.lusha.com/v2/account/credits',
-  'https://api.lusha.com/v2/credits/me',
-  'https://api.lusha.com/credits',
-];
+// Lusha account usage endpoint (confirmed via docs.lusha.com/apis/openapi/account-management).
+// Response shape: { usage: { bulkCredits: { total, used, remaining }, ... } }
+// Rate limit: 5 requests / minute.
+const ENDPOINT = 'https://api.lusha.com/account/usage';
 
-function extractBalance(json: any): number | null {
-  if (!json || typeof json !== 'object') return null;
-  // Try a bunch of common shapes
-  const candidates = [
-    json.balance,
-    json.credits,
-    json.remaining,
-    json.creditsRemaining,
-    json.credits_remaining,
-    json.data?.balance,
-    json.data?.credits,
-    json.data?.remaining,
-    json.account?.credits,
-    json.account?.balance,
-    json.usage?.remaining,
-    json.subscription?.credits,
-  ];
-  for (const v of candidates) {
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
+function sumRemaining(usage: any): number | null {
+  if (!usage || typeof usage !== 'object') return null;
+  // Sum 'remaining' across all credit types (bulkCredits, contactCredits, etc.)
+  let total = 0;
+  let found = false;
+  for (const v of Object.values(usage)) {
+    if (v && typeof v === 'object' && typeof (v as any).remaining === 'number') {
+      total += (v as any).remaining;
+      found = true;
+    }
   }
-  return null;
+  return found ? total : null;
 }
 
 export async function GET() {
@@ -43,21 +31,19 @@ export async function GET() {
   const key = process.env.LUSHA_API_KEY;
   if (!key) return NextResponse.json({ error: 'LUSHA_API_KEY not set' }, { status: 500 });
 
-  const tried: { url: string; status: number; sample?: any }[] = [];
-  for (const url of ENDPOINTS) {
-    try {
-      const res = await fetch(url, { headers: { api_key: key }, cache: 'no-store' });
-      let json: any = null;
-      try { json = await res.json(); } catch {}
-      tried.push({ url, status: res.status, sample: res.ok ? json : undefined });
-      if (!res.ok) continue;
-      const balance = extractBalance(json);
-      if (balance != null) return NextResponse.json({ balance, source: url });
-    } catch (e: any) {
-      tried.push({ url, status: -1, sample: e.message });
+  try {
+    const res = await fetch(ENDPOINT, { headers: { api_key: key }, cache: 'no-store' });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      return NextResponse.json({ balance: null, error: `Lusha ${res.status}`, raw: json }, { status: 502 });
     }
+    const balance = sumRemaining(json?.usage);
+    if (balance == null) {
+      return NextResponse.json({ balance: null, error: 'No remaining credits field in response', raw: json }, { status: 502 });
+    }
+    // Return breakdown for the tooltip too
+    return NextResponse.json({ balance, breakdown: json?.usage });
+  } catch (e: any) {
+    return NextResponse.json({ balance: null, error: e.message || 'fetch failed' }, { status: 502 });
   }
-
-  // None worked — return a debug response so we can see what Lusha actually exposes for your plan
-  return NextResponse.json({ balance: null, error: 'Could not detect balance', tried }, { status: 502 });
 }
