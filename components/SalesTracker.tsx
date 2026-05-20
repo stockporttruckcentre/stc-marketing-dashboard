@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench } from 'lucide-react';
 import { ScheduleMeetingModal } from './CrmWorkspace';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -41,37 +41,53 @@ export function SalesTracker({
 }: { list: CrmList; initialContacts: CRMContact[]; profile: Profile }) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<CRMContact[]>(initialContacts);
+  const [side, setSide] = useState<'trailer_sales' | 'maintenance'>('trailer_sales');
+  const [whatFilter, setWhatFilter] = useState<string | null>(null);
   const [tab, setTab] = useState<TrackerTab>('working');
   const [query, setQuery] = useState('');
   const [editingRow, setEditingRow] = useState<CRMContact | null>(null);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // Counts of the CURRENT side only
+  const sideRows = useMemo(() => rows.filter(r => (r.side ?? 'trailer_sales') === side), [rows, side]);
   const counts = useMemo(() => {
-    const c = { all: rows.length, working: 0, customer: 0, lost: 0 } as Record<TrackerTab, number>;
-    for (const r of rows) c[STATUS_TO_TAB[r.status]]++;
+    const c = { all: sideRows.length, working: 0, customer: 0, lost: 0 } as Record<TrackerTab, number>;
+    for (const r of sideRows) c[STATUS_TO_TAB[r.status]]++;
     return c;
-  }, [rows]);
+  }, [sideRows]);
+  const sideCounts = useMemo(() => ({
+    trailer_sales: rows.filter(r => (r.side ?? 'trailer_sales') === 'trailer_sales').length,
+    maintenance:   rows.filter(r => r.side === 'maintenance').length,
+  }), [rows]);
+  // Unique "What" values present in current side (for the maintenance filter chips)
+  const whatValues = useMemo(() => {
+    if (side !== 'maintenance') return [];
+    const set = new Set<string>();
+    for (const r of sideRows) if (r.what) set.add(r.what);
+    return Array.from(set).sort();
+  }, [side, sideRows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows.filter(r => {
+    return sideRows.filter(r => {
       if (tab !== 'all' && STATUS_TO_TAB[r.status] !== tab) return false;
+      if (side === 'maintenance' && whatFilter && (r.what || '').toLowerCase() !== whatFilter.toLowerCase()) return false;
       if (!q) return true;
-      return ([r.company_name, r.contact_name, r.email, r.phone, r.description, r.requirement, r.action]
+      return ([r.company_name, r.contact_name, r.email, r.phone, r.description, r.requirement, r.action, r.what, r.vehicles]
         .filter(Boolean).join(' ').toLowerCase().includes(q));
     });
-  }, [rows, tab, query]);
+  }, [sideRows, side, whatFilter, tab, query]);
 
   const totalEstValue = useMemo(() =>
-    rows.filter(r => STATUS_TO_TAB[r.status] === 'working').reduce((sum, r) => sum + (Number(r.estimated_value) || 0), 0),
-    [rows]);
+    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'working').reduce((sum, r) => sum + (Number(r.estimated_value) || 0), 0),
+    [sideRows]);
   const totalCustomerRevenue = useMemo(() =>
-    rows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0),
-    [rows]);
+    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0),
+    [sideRows]);
   const totalCommission = useMemo(() =>
-    rows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.commission) || 0), 0),
-    [rows]);
+    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.commission) || 0), 0),
+    [sideRows]);
 
   const saveCell = useCallback((params: ValueSetterParams<CRMContact>): boolean => {
     const field = params.colDef.field as keyof CRMContact;
@@ -83,16 +99,18 @@ export function SalesTracker({
   }, [supabase]);
 
   const isCustomerTab = tab === 'customer';
+  const isMaintenance = side === 'maintenance';
 
   const columnDefs = useMemo<ColDef<CRMContact>[]>(() => {
-    const base: ColDef<CRMContact>[] = [
-      { field: 'date_of_enquiry', headerName: 'Enquiry', width: 110,
-        valueFormatter: (p) => fmtDate(p.value), editable: true, valueSetter: saveCell,
-        cellEditor: 'agTextCellEditor' },
-      { field: 'contact_name', headerName: 'Contact', flex: 1, minWidth: 130, editable: true, valueSetter: saveCell },
+    const commonStart: ColDef<CRMContact>[] = [
+      { field: 'date_of_enquiry', headerName: isMaintenance ? 'Last update' : 'Enquiry', width: 110,
+        valueFormatter: (p) => fmtDate(p.value), editable: true, valueSetter: saveCell, cellEditor: 'agTextCellEditor' },
       { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 160, editable: true, valueSetter: saveCell },
+      { field: 'contact_name', headerName: 'Contact', flex: 1, minWidth: 130, editable: true, valueSetter: saveCell },
       { field: 'phone', headerName: 'Phone', width: 140, editable: true, valueSetter: saveCell },
       { field: 'email', headerName: 'Email', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
+    ];
+    const salesMid: ColDef<CRMContact>[] = [
       { field: 'new_or_used', headerName: 'New/Used', width: 110, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'New', 'Used', 'New/Used', 'Used/Refurb', 'Refurb'] } },
       { field: 'estimated_value', headerName: 'Est. value', width: 120, editable: true, valueSetter: saveCell,
@@ -100,8 +118,23 @@ export function SalesTracker({
         valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' } },
       { field: 'source', headerName: 'Source', width: 140, editable: true, valueSetter: saveCell },
       { field: 'description', headerName: 'Description', flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
-      { field: 'requirement', headerName: 'Requirement', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
-      { field: 'action', headerName: 'Action', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
+    ];
+    const maintMid: ColDef<CRMContact>[] = [
+      { field: 'what', headerName: 'What', width: 150, editable: true, valueSetter: saveCell,
+        cellEditor: 'agSelectCellEditor',
+        cellEditorParams: { values: ['', 'Maintenance', 'Trukplan', 'All Services', 'Maintenance and MOT', 'Maintenance and Trukplan', 'Van Maintenance and Repair', 'Accident Repair', 'All Services and Parking'] } },
+      { field: 'category', headerName: 'Cat', width: 70, editable: true, valueSetter: saveCell,
+        cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'A', 'B', 'C'] },
+        cellRenderer: (p: ICellRendererParams<CRMContact, string>) => p.value
+          ? <span className={`maint-cat maint-cat--${p.value.toLowerCase()}`}>{p.value}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span> },
+      { field: 'account_manager', headerName: 'Manager', width: 100, editable: true, valueSetter: saveCell },
+      { field: 'source', headerName: 'Source', width: 130, editable: true, valueSetter: saveCell },
+      { field: 'vehicles', headerName: 'Vehicles', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
+    ];
+    const commonEnd: ColDef<CRMContact>[] = [
+      { field: 'requirement', headerName: 'Requirement', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
+      { field: 'action', headerName: 'Action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
+      ...(isMaintenance ? [{ field: 'next_action' as keyof CRMContact, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
       { field: 'status', headerName: 'Status', width: 120, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
@@ -109,6 +142,7 @@ export function SalesTracker({
           ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{p.value}</span> : null },
       { field: 'notes', headerName: 'Latest update', flex: 1.5, minWidth: 200, editable: true, valueSetter: saveCell },
     ];
+    const base = [...commonStart, ...(isMaintenance ? maintMid : salesMid), ...commonEnd];
     if (isCustomerTab) {
       // Show closing financials only on the Customer tab
       base.splice(7, 0,
@@ -147,7 +181,7 @@ export function SalesTracker({
 
   const [showNewLead, setShowNewLead] = useState(false);
 
-  async function createBlankLead(company: string, websiteUrl: string) {
+  async function createBlankLead(company: string, websiteUrl: string, newSide: 'trailer_sales' | 'maintenance', what: string | null) {
     const today = new Date().toISOString().slice(0, 10);
     const links = websiteUrl.trim()
       ? [{ id: crypto.randomUUID(), label: 'Website', url: websiteUrl.trim(), kind: 'website' as const }]
@@ -155,14 +189,16 @@ export function SalesTracker({
     const { data, error } = await supabase.from('crm_contacts').insert({
       list_id: list.id, company_name: company.trim() || 'New lead', source: 'Manual',
       status: 'lead', date_of_enquiry: today, links,
+      side: newSide, what: newSide === 'maintenance' ? what : null,
     }).select('*').single();
     if (error) { setMessage(error.message); return; }
     setRows(r => [data as CRMContact, ...r]);
+    setSide(newSide);
     setShowNewLead(false);
     setEditingRow(data as CRMContact);
   }
 
-  async function importFromCrm(sourceContact: CRMContact) {
+  async function importFromCrm(sourceContact: CRMContact, newSide: 'trailer_sales' | 'maintenance' = 'trailer_sales', what: string | null = null) {
     // Copy the row's data into a NEW row in the tracker list (preserves the source contact)
     const today = new Date().toISOString().slice(0, 10);
     const { data, error } = await supabase.from('crm_contacts').insert({
@@ -173,6 +209,8 @@ export function SalesTracker({
       phone: sourceContact.phone,
       source: sourceContact.source || 'Imported from CRM',
       status: sourceContact.status === 'lost' ? 'lost' : sourceContact.status === 'customer' ? 'customer' : 'lead',
+      side: newSide,
+      what: newSide === 'maintenance' ? what : null,
       address: sourceContact.address,
       links: sourceContact.links,
       location: sourceContact.location,
@@ -187,6 +225,7 @@ export function SalesTracker({
     }).select('*').single();
     if (error) { setMessage(error.message); return; }
     setRows(r => [data as CRMContact, ...r]);
+    setSide(newSide);
     setShowNewLead(false);
     setEditingRow(data as CRMContact);
   }
@@ -201,14 +240,38 @@ export function SalesTracker({
             <span>{list.name}<span style={{ color: 'var(--stc-red)' }}>.</span></span>
           </h1>
           <div className="page-head__sub">
-            Only you see this list. {rows.length} row{rows.length === 1 ? '' : 's'} ·
-            &nbsp;Pipeline est: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalEstValue)}</strong> ·
-            &nbsp;Customer revenue: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCustomerRevenue)}</strong> ·
-            &nbsp;Commission: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCommission)}</strong>
+            Only you see this list. {sideRows.length} {isMaintenance ? 'maintenance account' : 'trailer-sales lead'}{sideRows.length === 1 ? '' : 's'}
+            {!isMaintenance && <> · Pipeline est: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalEstValue)}</strong> · Customer revenue: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCustomerRevenue)}</strong> · Commission: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCommission)}</strong></>}
           </div>
         </div>
         <button onClick={() => setShowNewLead(true)} className="btn btn--primary"><Plus size={14} /> New lead</button>
       </div>
+
+      {/* Top-level side switcher: Trailer Sales | Maintenance */}
+      <div className="side-toggle">
+        <button onClick={() => { setSide('trailer_sales'); setWhatFilter(null); }}
+          className={`side-toggle__btn ${side === 'trailer_sales' ? 'is-active' : ''}`}>
+          <Briefcase size={14} /> <span>Trailer Sales</span>
+          <span className="side-toggle__count">{sideCounts.trailer_sales}</span>
+        </button>
+        <button onClick={() => setSide('maintenance')}
+          className={`side-toggle__btn ${side === 'maintenance' ? 'is-active' : ''}`}>
+          <Wrench size={14} /> <span>Maintenance</span>
+          <span className="side-toggle__count">{sideCounts.maintenance}</span>
+        </button>
+      </div>
+
+      {isMaintenance && whatValues.length > 0 && (
+        <div className="toolbar" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>WHAT:</span>
+          <button onClick={() => setWhatFilter(null)} className={`news-chip ${whatFilter === null ? 'is-active' : ''}`}>All</button>
+          {whatValues.map(w => (
+            <button key={w} onClick={() => setWhatFilter(w === whatFilter ? null : w)} className={`news-chip ${whatFilter === w ? 'is-active' : ''}`}>
+              {w}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {(['working', 'customer', 'lost', 'all'] as TrackerTab[]).map(t => (
@@ -513,10 +576,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // ===== New lead modal: checks user's accessible CRM contacts for matches before creating =====
 function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
   currentListId: string;
-  onCreateNew: (company: string, websiteUrl: string) => void;
-  onImport: (contact: CRMContact) => void;
+  onCreateNew: (company: string, websiteUrl: string, side: 'trailer_sales' | 'maintenance', what: string | null) => void;
+  onImport: (contact: CRMContact, side: 'trailer_sales' | 'maintenance', what: string | null) => void;
   onClose: () => void;
 }) {
+  const [side, setSide] = useState<'trailer_sales' | 'maintenance'>('trailer_sales');
+  const [what, setWhat] = useState<string>('Maintenance');
   const supabase = useMemo(() => createClient(), []);
   const [company, setCompany] = useState('');
   const [website, setWebsite] = useState('');
@@ -579,6 +644,36 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
           <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
         </div>
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="field">
+            <div className="field__label">What are you tracking?</div>
+            <div className="side-picker">
+              <button type="button" onClick={() => setSide('trailer_sales')}
+                className={`side-picker__opt ${side === 'trailer_sales' ? 'is-active' : ''}`}>
+                <Briefcase size={14} /> <strong>Trailer Sales</strong>
+                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pursuing a deal on trailer / vehicle sales</span>
+              </button>
+              <button type="button" onClick={() => setSide('maintenance')}
+                className={`side-picker__opt ${side === 'maintenance' ? 'is-active' : ''}`}>
+                <Wrench size={14} /> <strong>Maintenance</strong>
+                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Trukplan, MOT, servicing, repairs</span>
+              </button>
+            </div>
+          </div>
+          {side === 'maintenance' && (
+            <Field label="What kind of maintenance work?">
+              <select className="input" value={what} onChange={(e) => setWhat(e.target.value)}>
+                <option>Maintenance</option>
+                <option>Trukplan</option>
+                <option>All Services</option>
+                <option>Maintenance and MOT</option>
+                <option>Maintenance and Trukplan</option>
+                <option>Van Maintenance and Repair</option>
+                <option>Accident Repair</option>
+                <option>All Services and Parking</option>
+                <option>MOT only</option>
+              </select>
+            </Field>
+          )}
           <p style={{ margin: 0, color: 'var(--fg-2)', fontSize: 13 }}>
             We&apos;ll check the CRM first so you don&apos;t duplicate an existing record.
           </p>
@@ -593,7 +688,7 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
               {searching ? <Loader size={12} className="spin" /> : <Search size={12} />} Check CRM
             </button>
             <div className="toolbar__spacer" />
-            <button onClick={() => onCreateNew(company, website)} disabled={!company.trim()} className="btn btn--primary">
+            <button onClick={() => onCreateNew(company, website, side, side === 'maintenance' ? what : null)} disabled={!company.trim()} className="btn btn--primary">
               <Plus size={12} /> Create new
             </button>
           </div>
@@ -622,7 +717,7 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
                           {' · '}<span className={`pill pill--${m.status}`} style={{ fontSize: 10 }}>{m.status}</span>
                         </div>
                       </div>
-                      <button onClick={() => onImport(m)} className="btn btn--sm btn--primary"><LinkIcon size={11} /> Import</button>
+                      <button onClick={() => onImport(m, side, side === 'maintenance' ? what : null)} className="btn btn--sm btn--primary"><LinkIcon size={11} /> Import</button>
                     </div>
                   ))}
                 </div>
