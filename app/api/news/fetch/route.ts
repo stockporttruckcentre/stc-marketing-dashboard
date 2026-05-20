@@ -3,7 +3,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 25;
 
 // Use Google News RSS - reliable, no auth, normalised XML format.
 // Each feed is a search either by-site (publisher-scoped) or by-topic.
@@ -42,19 +42,25 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-  const records: { title: string; source: string; url: string; summary: string | null; published_date: string; image_url: string | null; author: string | null }[] = [];
+  type Record = { title: string; source: string; url: string; summary: string | null; published_date: string; image_url: string | null; author: string | null };
   const debug: { source: string; status: number | string; itemCount: number }[] = [];
 
-  for (const feed of FEEDS) {
+  // Fetch a single feed with strict per-feed timeout so one slow feed can't stall the batch.
+  async function fetchFeed(feed: { source: string; url: string }): Promise<Record[]> {
+    const out: Record[] = [];
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 6000);
     try {
       const res = await fetch(feed.url, {
+        signal: ctrl.signal,
         cache: 'no-store',
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; STC-Dashboard/1.0)',
           'Accept': 'application/rss+xml, application/xml, text/xml',
         },
       });
-      if (!res.ok) { debug.push({ source: feed.source, status: res.status, itemCount: 0 }); continue; }
+      clearTimeout(tid);
+      if (!res.ok) { debug.push({ source: feed.source, status: res.status, itemCount: 0 }); return out; }
       const xml = await res.text();
       const json = parser.parse(xml);
       const itemsRaw = json?.rss?.channel?.item ?? json?.feed?.entry ?? [];
@@ -80,13 +86,19 @@ export async function POST() {
           it.author?.name ?? it.author?.['#text'] ?? it.author ??
           ''
         ).trim() || null;
-        if (title && url) { records.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr, image_url, author }); count++; }
+        if (title && url) { out.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr, image_url, author }); count++; }
       }
       debug.push({ source: feed.source, status: 200, itemCount: count });
     } catch (e: any) {
-      debug.push({ source: feed.source, status: 'fetch_error', itemCount: 0 });
+      clearTimeout(tid);
+      debug.push({ source: feed.source, status: e?.name === 'AbortError' ? 'timeout' : 'fetch_error', itemCount: 0 });
     }
+    return out;
   }
+
+  // Run all feeds in parallel; each has its own 6s ceiling so total stays bounded
+  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
+  const records: Record[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
 
   // Always sweep stale stories first - older than the cutoff cannot live on the site
   const cutoffIso = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -105,26 +117,10 @@ export async function POST() {
     .upsert(records, { onConflict: 'url', ignoreDuplicates: true, count: 'exact' });
   if (insErr) return NextResponse.json({ error: insErr.message, debug }, { status: 500 });
 
-  // Backfill image_url + author on previously-indexed rows that didn't have them
-  let backfilled = 0;
-  for (const r of records) {
-    if (!r.image_url && !r.author) continue;
-    const patch: Record<string, any> = {};
-    if (r.image_url) patch.image_url = r.image_url;
-    if (r.author)    patch.author    = r.author;
-    const { error: updErr, count: updCount } = await supabase
-      .from('news_items')
-      .update(patch, { count: 'exact' })
-      .eq('url', r.url)
-      .or('image_url.is.null,author.is.null'); // only fill blanks, never overwrite
-    if (!updErr && updCount) backfilled += updCount;
-  }
-
   return NextResponse.json({
     added: insCount ?? 0,
     purged: purged ?? 0,
-    backfilled,
-    sources: debug.filter((d) => d.itemCount > 0 && d.source !== '__og_image__').length,
+    sources: debug.filter((d) => d.itemCount > 0).length,
     debug,
   });
 }
