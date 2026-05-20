@@ -103,6 +103,8 @@ export interface NewsItem {
   url: string;
   summary: string | null;
   published_date: string;
+  image_url: string | null;
+  author: string | null;
   created_at: string;
 }
 

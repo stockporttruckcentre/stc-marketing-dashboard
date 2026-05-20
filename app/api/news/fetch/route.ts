@@ -24,7 +24,7 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-  const records: { title: string; source: string; url: string; summary: string | null; published_date: string }[] = [];
+  const records: { title: string; source: string; url: string; summary: string | null; published_date: string; image_url: string | null; author: string | null }[] = [];
   const debug: { source: string; status: number | string; itemCount: number }[] = [];
 
   for (const feed of FEEDS) {
@@ -47,8 +47,23 @@ export async function POST() {
         const url   = String(it.link?.['@_href'] ?? it.link ?? it.guid?.['#text'] ?? it.guid ?? '').trim();
         const pub   = it.pubDate ?? it.published ?? it.updated;
         const dateStr = pub ? new Date(pub).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-        const summary = stripHtml(it.description?.['#text'] ?? it.description ?? it.summary?.['#text'] ?? it.summary ?? '');
-        if (title && url) { records.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr }); count++; }
+        const rawDesc = String(it.description?.['#text'] ?? it.description ?? it.summary?.['#text'] ?? it.summary ?? '');
+        const summary = stripHtml(rawDesc);
+        // Try every common RSS image location, then fall back to first <img> in description
+        const image_url: string | null = (
+          it['media:thumbnail']?.['@_url'] ??
+          it['media:content']?.['@_url'] ??
+          it.enclosure?.['@_url'] ??
+          it['itunes:image']?.['@_href'] ??
+          (rawDesc.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]) ??
+          null
+        );
+        const author: string | null = String(
+          it['dc:creator']?.['#text'] ?? it['dc:creator'] ??
+          it.author?.name ?? it.author?.['#text'] ?? it.author ??
+          ''
+        ).trim() || null;
+        if (title && url) { records.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr, image_url, author }); count++; }
       }
       debug.push({ source: feed.source, status: 200, itemCount: count });
     } catch (e: any) {

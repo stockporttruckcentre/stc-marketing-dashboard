@@ -122,8 +122,13 @@ CREATE TABLE IF NOT EXISTS news_items (
   url TEXT NOT NULL UNIQUE,
   summary TEXT,
   published_date DATE NOT NULL,
+  image_url TEXT,
+  author TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
+-- Backfill columns for existing installs (idempotent)
+ALTER TABLE news_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE news_items ADD COLUMN IF NOT EXISTS author    TEXT;
 CREATE INDEX IF NOT EXISTS idx_news_published ON news_items (published_date DESC);
 
 -- =============================================================
