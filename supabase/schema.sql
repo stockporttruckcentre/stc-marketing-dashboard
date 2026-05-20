@@ -653,3 +653,31 @@ DELETE FROM news_sources WHERE name = 'Road Transport';
 UPDATE news_items   SET source = 'IRTE' WHERE source = 'Transport Engineer';
 UPDATE news_items   SET source = 'RHA'  WHERE source = 'UK HGV / haulage';
 DELETE FROM news_sources WHERE name IN ('Transport Engineer', 'UK HGV / haulage');
+
+
+-- =============================================================
+-- Calendar event meeting features (additive, idempotent)
+-- =============================================================
+ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS contact_id  UUID REFERENCES crm_contacts(id) ON DELETE SET NULL;
+ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS attendees   JSONB DEFAULT '[]'::jsonb NOT NULL;
+ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS visibility  TEXT  DEFAULT 'private' NOT NULL CHECK (visibility IN ('private','team','specific'));
+ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS visible_to  UUID[] DEFAULT '{}'::UUID[] NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_calendar_events_contact ON calendar_events (contact_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_visibility ON calendar_events (visibility);
+
+-- Visibility-aware SELECT policy: creator always sees; team-events visible to all auth; specific-events visible to listed users
+DROP POLICY IF EXISTS "calendar_select"      ON calendar_events;
+DROP POLICY IF EXISTS "calendar_select_v2"   ON calendar_events;
+CREATE POLICY "calendar_select_v2" ON calendar_events FOR SELECT USING (
+  auth.role() = 'authenticated' AND (
+    created_by = auth.uid()
+    OR visibility = 'team'
+    OR (visibility = 'specific' AND auth.uid() = ANY (visible_to))
+  )
+);
+DROP POLICY IF EXISTS "calendar_insert" ON calendar_events;
+CREATE POLICY "calendar_insert" ON calendar_events FOR INSERT WITH CHECK (auth.uid() = created_by);
+DROP POLICY IF EXISTS "calendar_update" ON calendar_events;
+CREATE POLICY "calendar_update" ON calendar_events FOR UPDATE USING (auth.uid() = created_by);
+DROP POLICY IF EXISTS "calendar_delete" ON calendar_events;
+CREATE POLICY "calendar_delete" ON calendar_events FOR DELETE USING (auth.uid() = created_by);

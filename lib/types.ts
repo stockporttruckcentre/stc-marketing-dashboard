@@ -108,6 +108,13 @@ export interface NewsItem {
   created_at: string;
 }
 
+export interface CalendarEventAttendee {
+  user_id?: string;       // present when picked from profiles
+  name: string;
+  email?: string;
+}
+export type CalendarVisibility = 'private' | 'team' | 'specific';
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -117,6 +124,10 @@ export interface CalendarEvent {
   all_day: boolean;
   color: string;
   created_by: string | null;
+  contact_id: string | null;
+  attendees: CalendarEventAttendee[];
+  visibility: CalendarVisibility;
+  visible_to: string[];
   created_at: string;
   updated_at: string;
 }
