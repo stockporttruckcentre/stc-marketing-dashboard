@@ -8,7 +8,7 @@ import Papa from 'papaparse';
 import {
   Plus, Upload, Download, Loader, Trash2, X, Mail, Edit2, MoreHorizontal,
   Globe, Users, UserPlus, Share2, Phone, Building, MapPin, Hash, Send, Home, Star,
-  CalendarPlus, Lock, Globe2, ChevronDown,
+  CalendarPlus, Lock, Globe2, ChevronDown, Calendar,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
@@ -955,6 +955,8 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
   const [showAddLink, setShowAddLink] = useState<null | 'website' | 'linkedin' | 'facebook' | 'instagram' | 'x' | 'other'>(null);
   const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [meetings, setMeetings] = useState<any[]>([]);
+  const [conflictMeeting, setConflictMeeting] = useState<any | null>(null);
   const [alsoOn, setAlsoOn] = useState<{ id: string; name: string; is_global: boolean }[]>([]);
   useEffect(() => { setEdit(contact); }, [contact]);
 
@@ -966,6 +968,16 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
       setLoadingNotes(false);
     })();
   }, [supabase, contact.id]);
+
+  // Load scheduled meetings for this contact
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('calendar_events').select('*').eq('contact_id', contact.id).order('start_at', { ascending: true });
+      if (!cancelled) setMeetings(data ?? []);
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, contact.id, showSchedule]);
 
   // Detect "also on" - other contacts on lists you can see that share email or company+contact
   useEffect(() => {
@@ -1202,6 +1214,78 @@ function ContactDrawer({ contact, profile, canEdit, lists, members, onClose, onC
             ))}
           </div>
         </div>
+
+        {/* Scheduled meetings tied to this contact */}
+        <div className="card" style={{ padding: 14, margin: '14px 0' }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+            <div className="field__label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Calendar size={14} /> SCHEDULED MEETINGS
+            </div>
+            {canEdit && (
+              <button onClick={() => {
+                // Check for any upcoming meeting in next 14d - warn before opening modal
+                const now = Date.now();
+                const wnd = 14 * 86_400_000;
+                const upcoming = meetings.find((m: any) => {
+                  const t = new Date(m.start_at).getTime();
+                  return t > now && (t - now) < wnd;
+                });
+                if (upcoming) { setConflictMeeting(upcoming); return; }
+                setShowSchedule(true);
+              }} className="btn btn--sm btn--primary"><CalendarPlus size={12} /> Schedule</button>
+            )}
+          </div>
+          {meetings.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>No meetings scheduled yet.</div>
+          ) : (
+            <div className="col" style={{ gap: 6 }}>
+              {meetings.map((m: any) => {
+                const date = new Date(m.start_at);
+                const isPast = date.getTime() < Date.now();
+                return (
+                  <div key={m.id} className="row" style={{ gap: 8, padding: '6px 8px', background: 'var(--bg-3)', borderRadius: 6, opacity: isPast ? 0.55 : 1 }}>
+                    <Calendar size={14} style={{ color: isPast ? 'var(--fg-4)' : 'var(--stc-red)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                        {date.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        {isPast && ' · (past)'}
+                        {Array.isArray(m.attendees) && m.attendees.length > 0 && ` · ${m.attendees.length} attendee${m.attendees.length === 1 ? '' : 's'}`}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {conflictMeeting && (
+          <div className="modal-bg" onClick={() => setConflictMeeting(null)} style={{ zIndex: 1100 }}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+              <div className="modal__head">
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  ⚠️ Existing meeting found
+                </h3>
+              </div>
+              <div style={{ padding: 16 }}>
+                <p style={{ marginTop: 0, color: 'var(--fg-2)', fontSize: 13.5 }}>
+                  You already have a meeting with <strong style={{ color: 'var(--fg-1)' }}>{edit.company_name}</strong> within the next 14 days:
+                </p>
+                <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{conflictMeeting.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 4 }}>
+                    {new Date(conflictMeeting.start_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
+                <button onClick={() => setConflictMeeting(null)} className="btn btn--ghost">View existing</button>
+                <button onClick={() => { setConflictMeeting(null); setShowSchedule(true); }} className="btn btn--primary">Schedule anyway</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Manage footer */}
         <div className="drawer__foot">
