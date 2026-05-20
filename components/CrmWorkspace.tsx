@@ -421,7 +421,8 @@ export function CrmWorkspace({
       </div>
 
       {/* Stats */}
-      <div className="stats-grid">
+      <div className="stats-grid stats-grid--5">
+        <Stat label="Total"     value={counts.all} />
         <Stat label="Leads"     value={counts.lead}      accent="info" />
         <Stat label="Contacted" value={counts.contacted} accent="warning" />
         <Stat label="Quoted"    value={counts.quoted}    accent="lusha" />

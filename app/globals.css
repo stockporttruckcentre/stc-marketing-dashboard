@@ -708,10 +708,11 @@ a { color: inherit; text-decoration: none; }
 }
 .stat__label {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--fg-3);
+  color: var(--fg-2);
   margin-bottom: 6px;
 }
 .stat__value {
@@ -1939,3 +1940,7 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 .fleet-row__total { padding: 4px 10px; min-width: 0; }
 .fleet-row__total-label { font-size: 11px; }
 .fleet-row__total-value { font-size: 16px; }
+
+
+.stats-grid--5 { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1100px) { .stats-grid--5 { grid-template-columns: repeat(2, 1fr); } }
