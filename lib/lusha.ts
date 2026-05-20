@@ -51,6 +51,57 @@ export async function enrichByName(firstName: string, lastName: string, companyN
   return r.json;
 }
 
+// ============ Domain utilities ============
+/**
+ * Strip scheme, www, path, query, hash; lowercase. Returns bare hostname.
+ *   "customer.com"                  -> "customer.com"
+ *   "https://customer.com/"         -> "customer.com"
+ *   "https://www.customer.com/path" -> "customer.com"
+ *   "  WWW.Customer.COM  "          -> "customer.com"
+ *   ""                              -> ""
+ */
+export function extractDomain(raw: string | null | undefined): string {
+  let s = String(raw || '').trim().toLowerCase();
+  if (!s) return '';
+  // Add scheme if missing so URL parser works
+  if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+  try {
+    const u = new URL(s);
+    return u.hostname.replace(/^www\./i, '');
+  } catch {
+    // Manual fallback if URL constructor fails (unusual chars etc)
+    return s.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].split('?')[0].split('#')[0];
+  }
+}
+
+/**
+ * Find a Lusha company by domain. FREE — uses /prospecting/company/search with the
+ * supported `domains[]` filter (which the /names[] filter is NOT, hence the 400s).
+ * Returns null on no match. Captures size/location/industry like findLushaCompany.
+ */
+export async function findLushaCompanyByDomain(domain: string): Promise<{ id: string; name: string; matchedVariant: string; size: number | null; location: string | null; industry: string | null; domain: string | null } | null> {
+  const d = extractDomain(domain);
+  if (!d) return null;
+  const r = await postJson(`${BASE}/prospecting/company/search`, {
+    pages: { page: 0, size: 5 },
+    filters: { companies: { include: { domains: [d] } } },
+  });
+  if (!r.ok) return null;
+  const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
+  const first = Array.isArray(items) ? items[0] : null;
+  const id = first?.id ?? first?.companyId ?? null;
+  if (!id) return null;
+  return {
+    id,
+    name: first?.name ?? first?.companyName ?? d,
+    matchedVariant: d,
+    size: first?.size ?? first?.employees ?? first?.employeeCount ?? null,
+    location: first?.location ?? first?.country ?? first?.city ?? null,
+    industry: first?.industry ?? first?.mainIndustry ?? (Array.isArray(first?.industries) ? first.industries[0] : null),
+    domain: first?.domain ?? first?.website ?? d,
+  };
+}
+
 // ============ Free company lookup with progressive name variants ============
 /**
  * Build up to 4 candidate names for a single company, progressively trimmed.
@@ -140,6 +191,45 @@ export async function findLushaCompanyDebug(companyName: string): Promise<{
     }
   }
   return { match: null, attempts };
+}
+
+// ============ Prospecting by resolved company ID ============
+/**
+ * Given a Lusha company ID (already resolved free via /prospecting/company/search by domain),
+ * find the highest-priority sales contact and enrich them.
+ *  - search calls: free
+ *  - one enrich call: 1 credit (only spent when a matching contact is found)
+ */
+export async function prospectingByCompanyId(companyId: string): Promise<any | null> {
+  const roleGroups: string[][] = [
+    ['Sales Director'],
+    ['Sales Manager'],
+    ['Sales Executive', 'Sales Associate', 'Sales Assistant'],
+    ['Head of Sales', 'Business Development Director', 'Business Development Manager'],
+    ['Account Manager', 'Account Director', 'Key Account Manager'],
+    ['Commercial Director', 'Commercial Manager'],
+    ['Managing Director', 'CEO', 'Owner'],
+    ['Fleet Manager', 'Transport Manager'],
+    ['Operations Director', 'Operations Manager'],
+    ['Procurement Manager', 'Procurement Director', 'Buyer'],
+    ['Director'],
+  ];
+  for (const group of roleGroups) {
+    const search = await postJson(`${BASE}/prospecting/contact/search`, {
+      pages: { page: 0, size: 5 },
+      filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } },
+    });
+    if (!search.ok) continue;
+    const found = search.json?.data ?? search.json?.contacts ?? [];
+    const ids: string[] = (Array.isArray(found) ? found : []).map((c: any) => c.id ?? c.contactId).filter(Boolean);
+    if (!ids.length) continue;
+    const enrich = await postJson(`${BASE}/prospecting/contact/enrich`, { contactIds: ids.slice(0, 1) });
+    if (!enrich.ok) continue;
+    const enriched = enrich.json?.data ?? enrich.json?.contacts ?? null;
+    const first = Array.isArray(enriched) ? enriched[0] : enriched;
+    if (first) return { data: first, _via: 'prospecting-by-domain', _role: group[0] };
+  }
+  return null;
 }
 
 // ============ Free contact probe (used by pre-flight check route) ============

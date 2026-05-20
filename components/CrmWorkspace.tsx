@@ -239,12 +239,14 @@ export function CrmWorkspace({
     }
     setEnriching(true); setMessage(null); setEnrichConfirm(null);
     try {
+      const websiteLink = (row.links || []).find((l: any) => l?.kind === 'website' && l?.url);
       const res = await fetch('/api/lusha/enrich', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: row.email,
           company_name: row.company_name,
           contact_name: row.contact_name,
+          website_url: websiteLink?.url || '',
           list_id: selectedListId,
           replace_id: row.id,
           only_fields: fields,
@@ -758,22 +760,27 @@ const ENRICHABLE_FIELD_CHOICES: { key: 'company_name' | 'contact_name' | 'email'
 function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: CRMContact; balance: number | null; onConfirm: (fields: string[]) => void; onCancel: () => void; busy: boolean }) {
   // Pre-flight: ask the server to do a FREE company lookup before we let the user pick fields.
   // No credits are spent until they hit "Spend 1 credit".
-  const [checkState, setCheckState] = useState<'loading' | 'found' | 'not_found' | 'error'>('loading');
+  const [checkState, setCheckState] = useState<'loading' | 'found' | 'not_found' | 'requires_website' | 'error'>('loading');
   const [checkData, setCheckData] = useState<{ lushaName?: string | null; matchedVariant?: string | null; strategy?: string; message?: string; availableFields?: Record<string, boolean>; matchedRole?: string | null; contactCount?: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // Look up the row's website link (kind === 'website') to use as the Lusha lookup key
+        const websiteLink = (row.links || []).find((l: any) => l?.kind === 'website' && l?.url);
+        const websiteUrl = websiteLink?.url || '';
         const res = await fetch('/api/lusha/check', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ company_name: row.company_name, email: row.email }),
+          body: JSON.stringify({ company_name: row.company_name, email: row.email, website_url: websiteUrl }),
         });
         const json = await res.json();
         if (cancelled) return;
         if (!res.ok) { setCheckState('error'); setCheckData({ message: json.error || 'Lusha check failed' }); return; }
         setCheckData(json);
-        setCheckState(json.found ? 'found' : 'not_found');
+        if (!json.found && json.strategy === 'requires_website') setCheckState('requires_website');
+        else if (!json.found && json.strategy === 'bad_url') setCheckState('requires_website');
+        else setCheckState(json.found ? 'found' : 'not_found');
       } catch (e: any) {
         if (!cancelled) { setCheckState('error'); setCheckData({ message: e.message }); }
       }
@@ -834,6 +841,21 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
           </div>
         </div>
       )}
+      {checkState === 'requires_website' && (
+        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-red)' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
+            <strong style={{ color: 'var(--stc-red)' }}>Website URL required</strong>
+            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
+            <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>
+              Open this contact's full view and add a Website link (any URL form works:{' '}
+              <span style={{ color: 'var(--fg-2)' }}>customer.com</span>,{' '}
+              <span style={{ color: 'var(--fg-2)' }}>www.customer.com</span>,{' '}
+              <span style={{ color: 'var(--fg-2)' }}>https://customer.com/</span>).
+            </div>
+          </div>
+        </div>
+      )}
+
       {checkState === 'not_found' && (
         <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-warning, #d4a017)' }}>
           <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>

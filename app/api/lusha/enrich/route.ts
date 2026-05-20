@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { enrichByEmail, enrichByName, prospectingByCompanyAndRoles } from '@/lib/lusha';
+import { enrichByEmail, enrichByName, prospectingByCompanyAndRoles, prospectingByCompanyId, findLushaCompanyByDomain, extractDomain } from '@/lib/lusha';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as {
     email?: string;
     company_name?: string;
+    website_url?: string;
     contact_name?: string;
     list_id?: string;
     replace_id?: string;
@@ -55,8 +56,10 @@ export async function POST(req: NextRequest) {
   const email = (body.email || '').trim();
   const companyName = (body.company_name || '').trim();
   const contactName = (body.contact_name || '').trim();
-  if (!email && !companyName) {
-    return NextResponse.json({ error: 'Need at least an email or a company name to enrich' }, { status: 400 });
+  const websiteUrl  = (body.website_url || '').trim();
+  const domain      = extractDomain(websiteUrl);
+  if (!email && !domain) {
+    return NextResponse.json({ error: 'Need either an email or a website URL on the row to enrich.' }, { status: 400 });
   }
 
   let listId = body.list_id;
@@ -98,10 +101,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 3) prospecting by company + role fallbacks
-  if (!lushaData && companyName) {
+  // 3) prospecting by DOMAIN (preferred - Lusha supports domains[] filter) + role fallbacks
+  if (!lushaData && domain) {
     try {
-      const r = await prospectingByCompanyAndRoles(companyName);
+      const company = await findLushaCompanyByDomain(domain);
+      const r = company ? await prospectingByCompanyId(company.id) : null;
       if (r) { lushaData = r; usedStrategy = `prospecting (${r._role})`; }
       attempts.push({ strategy: 'prospecting', ok: !!r });
     } catch (e: any) {
