@@ -94,11 +94,11 @@ export async function findLushaCompanyByDomainDebug(domain: string): Promise<{
 
   // Try multiple filter shapes - the Prospecting API has changed names over versions
   const candidates: Array<{ shape: string; body: any }> = [
-    { shape: 'domains:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { domains: [d] } } } } },
-    { shape: 'mainDomains:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { mainDomains: [d] } } } } },
-    { shape: 'domain:d', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { domain: d } } } } },
-    { shape: 'websites:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { websites: [d] } } } } },
-    { shape: 'urls:[d]', body: { pages: { page: 0, size: 5 }, filters: { companies: { include: { urls: [d] } } } } },
+    { shape: 'domains:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { domains: [d] } } } } },
+    { shape: 'mainDomains:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { mainDomains: [d] } } } } },
+    { shape: 'domain:d', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { domain: d } } } } },
+    { shape: 'websites:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { websites: [d] } } } } },
+    { shape: 'urls:[d]', body: { pages: { page: 0, size: 10 }, filters: { companies: { include: { urls: [d] } } } } },
   ];
 
   for (const c of candidates) {
@@ -192,7 +192,7 @@ export async function findLushaCompanyDebug(companyName: string): Promise<{
   for (const variant of variants) {
     for (const f of buildFilters(variant)) {
       const r = await postJson(`${BASE}/prospecting/company/search`, {
-        pages: { page: 0, size: 5 },
+        pages: { page: 0, size: 10 },
         ...f.body,
       });
       const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
@@ -243,7 +243,7 @@ export async function prospectingByCompanyId(companyId: string): Promise<any | n
   ];
   for (const group of roleGroups) {
     const search = await postJson(`${BASE}/prospecting/contact/search`, {
-      pages: { page: 0, size: 5 },
+      pages: { page: 0, size: 10 },
       filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } },
     });
     if (!search.ok) continue;
@@ -281,7 +281,7 @@ export async function prospectingContactProbe(companyId: string): Promise<{ foun
   ];
   for (const group of roleGroups) {
     const r = await postJson(`${BASE}/prospecting/contact/search`, {
-      pages: { page: 0, size: 5 },
+      pages: { page: 0, size: 10 },
       filters: { contacts: { include: { companies: { ids: [companyId] }, jobTitles: { values: group } } } },
     });
     if (!r.ok) continue;
@@ -341,7 +341,7 @@ export async function prospectingByCompanyAndRoles(companyName: string): Promise
   for (const group of roleGroups) {
     // Search contacts using the resolved company ID (more reliable than name string)
     const body = {
-      pages: { page: 0, size: 5 },
+      pages: { page: 0, size: 10 },
       filters: {
         contacts: {
           include: {
