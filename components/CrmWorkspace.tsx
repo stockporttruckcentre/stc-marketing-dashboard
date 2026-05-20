@@ -847,7 +847,7 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
             <strong style={{ color: 'var(--stc-red)' }}>Website URL required</strong>
             <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>
-              Open this contact's full view and add a Website link (any URL form works:{' '}
+              Open this contact&apos;s full view and add a Website link (any URL form works:{' '}
               <span style={{ color: 'var(--fg-2)' }}>customer.com</span>,{' '}
               <span style={{ color: 'var(--fg-2)' }}>www.customer.com</span>,{' '}
               <span style={{ color: 'var(--fg-2)' }}>https://customer.com/</span>).
