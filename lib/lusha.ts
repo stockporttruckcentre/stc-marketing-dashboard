@@ -105,8 +105,9 @@ export async function findLushaCompanyByDomainDebug(domain: string): Promise<{
     const r = await postJson(`${BASE}/prospecting/company/search`, c.body);
     const items = r.json?.data ?? r.json?.companies ?? r.json?.results ?? [];
     const arr = Array.isArray(items) ? items : (items ? [items] : []);
-    const bodyKeys = r.json && typeof r.json === 'object' ? Object.keys(r.json) : [];
-    attempts.push({ shape: c.shape, sent: c.body.filters, status: r.status, bodyKeys, itemCount: arr.length, sample: arr.slice(0, 1) });
+    // Raw text of Lusha's response, capped — survives Chrome output filters that strip nested keys
+    const rawText = (r.text || '').slice(0, 500);
+    attempts.push({ shape: c.shape, sentJson: JSON.stringify(c.body.filters).slice(0, 200), status: r.status, rawText, itemCount: arr.length });
     if (!r.ok) continue;
     const first = arr[0];
     const id = first?.id ?? first?.companyId ?? null;
