@@ -158,7 +158,10 @@ export function CrmWorkspace({
         return <span className={`pill pill--${v}`}><span className="pill__dot" />{v}</span>;
       },
     },
-    { field: 'source', headerName: 'Source', width: 110, editable: canEdit, valueSetter: saveCell },
+    { field: 'turnover', headerName: 'Turnover', width: 130, editable: canEdit, valueSetter: saveCell,
+      valueParser: (p) => p.newValue === '' ? null : Number(p.newValue) || null,
+      valueFormatter: (p) => p.value != null ? '£' + Number(p.value).toLocaleString() : '',
+      cellStyle: { fontFamily: '"IBM Plex Mono", monospace' } },
     { field: 'assigned_to', headerName: 'Assigned', width: 130, editable: canEdit, valueSetter: saveCell },
     { field: 'last_contact', headerName: 'Last contact', width: 120, editable: canEdit, valueSetter: saveCell },
     { field: 'notes', headerName: 'Latest note', flex: 1.5, minWidth: 240, editable: canEdit, valueSetter: saveCell,
