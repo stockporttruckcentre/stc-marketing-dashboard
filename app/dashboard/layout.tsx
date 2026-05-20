@@ -18,6 +18,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .from('social_posts').select('*', { count: 'exact', head: true })
     .eq('status', 'pending_review');
 
+  // Sidebar emblem URL — look up the most recent emblem (no-text logo) from brand_assets
+  const { data: emblemRow } = await supabase
+    .from('brand_assets')
+    .select('url')
+    .or('name.ilike.%emblem%,name.ilike.%no text%,name.ilike.%notext%,url.ilike.%emblem%,url.ilike.%notext%,url.ilike.%no_text%')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const emblemUrl: string | null = emblemRow?.url ?? null;
+
   const p = (profile as Profile) ?? {
     id: user.id,
     email: user.email!,
@@ -28,7 +38,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="app" data-theme={p.theme ?? "dark"} suppressHydrationWarning>
-      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} />
+      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
       <div className="main">
         <TopBar />
         <main className="page">{children}</main>

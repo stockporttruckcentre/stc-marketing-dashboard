@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, TrendingUp, Users, Search, Package, Calendar,
@@ -13,7 +12,7 @@ import type { Profile, UserRole } from '@/lib/types';
 type Item = { href: string; label: string; Icon: any; roles: UserRole[]; badge?: string; alert?: boolean };
 type Section = { key: string; label: string; items: Item[] };
 
-export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendingPosts?: number }) {
+export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profile: Profile; pendingPosts?: number; emblemUrl?: string | null }) {
   const path = usePathname();
 
   const sections: Section[] = [
@@ -55,7 +54,12 @@ export function Sidebar({ profile, pendingPosts = 0 }: { profile: Profile; pendi
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <Image src="/assets/logos/notext.jpg" alt="STC" width={38} height={38} />
+        {emblemUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={emblemUrl} alt="STC" width={38} height={38} style={{ borderRadius: 6, objectFit: 'contain' }} />
+        ) : (
+          <div style={{ width: 38, height: 38, borderRadius: 6, background: 'var(--bg-3)' }} />
+        )}
         <div className="sidebar__brand-text">
           <div className="sidebar__brand-title">STOCKPORT TRUCK CENTRE</div>
           <div className="sidebar__brand-sub">Marketing &amp; Sales</div>

@@ -18,11 +18,19 @@ export function BrandKit({
 
   // Logo display order — STC house first, then S&L, then divisions, then seasonal/no-oval last.
   // Matched against the file name in the public URL (case-insensitive).
+  // Matches new uploaded filenames: 'stc blue.png', 'sl white.png', 'Trailers2Go.png', etc.
+  // We lowercase + match substrings, so 'stc_blue', 'STC_Group', 'STC_Letters_no_oval' all work.
   const LOGO_PRIORITY: string[] = [
-    'stc-navy', 'stc-white',
-    'sl-navy',  'sl-white',
-    'group', 'holdings',
-    'notext', 'trailerstogo', 'xmas', 'nooval',
+    'stc_blue', 'stc blue',
+    'stc_white', 'stc white',
+    'sl_blue', 'sl blue',
+    'sl_white', 'sl white',
+    'stc_group', 'group',
+    'holdings',
+    'stc_emblem_no_text', 'emblem',
+    'trailers2go', 'trailers',
+    'xmas',
+    'stc_letters_no_oval', 'no_oval', 'nooval',
   ];
   function logoRank(a: BrandAsset): number {
     const tail = (a.url || '').split('/').pop()?.toLowerCase() || '';
