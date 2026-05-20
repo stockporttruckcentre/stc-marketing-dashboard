@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { CrmListRestore } from '@/components/CrmListRestore';
 import { CrmWorkspace } from '@/components/CrmWorkspace';
 import type { CRMContact, CrmList, Profile } from '@/lib/types';
 
@@ -36,7 +37,9 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
   const { data: members } = await supabase.from('crm_list_members').select('*');
 
   return (
-    <CrmWorkspace
+    <>
+      <CrmListRestore />
+      <CrmWorkspace
       profile={profile as Profile}
       lists={allLists}
       members={(members ?? []) as { list_id: string; user_id: string; can_edit: boolean }[]}
@@ -44,5 +47,6 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
       selectedListId={selectedListId ?? ''}
       initialContacts={contacts}
     />
+    </>
   );
 }

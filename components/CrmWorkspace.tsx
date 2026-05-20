@@ -34,6 +34,16 @@ export function CrmWorkspace({
   const [lists, setLists] = useState<CrmList[]>(initialLists);
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [rows, setRows] = useState<CRMContact[]>(initialContacts);
+
+  // Sync rows when the page server-fetches a different list
+  useEffect(() => {
+    setRows(initialContacts);
+  }, [initialContacts, selectedListId]);
+
+  // Remember last list so the sidebar nav can return you here
+  useEffect(() => {
+    if (selectedListId) try { localStorage.setItem('stc:lastListId', selectedListId); } catch {}
+  }, [selectedListId]);
   const [enrichEmail, setEnrichEmail] = useState('');
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
