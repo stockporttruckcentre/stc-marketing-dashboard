@@ -390,20 +390,16 @@ a { color: inherit; text-decoration: none; }
 .sidebar__section-head {
   font-family: "IBM Plex Mono", monospace;
   font-size: 10.5px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--fg-4);
+  color: var(--fg-2);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-.sidebar__section-head::before {
-  content: "// ";
-  color: var(--stc-red);
-  margin-right: 2px;
-}
+.sidebar__section-head::before { content: ""; }
 .sidebar__nav { display: flex; flex-direction: column; padding: 0 8px; gap: 1px; }
 .sidebar__item {
   display: flex;
@@ -1871,3 +1867,75 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
   cursor: pointer;
 }
 .theme-toggle:hover { color: var(--fg-1); background: var(--bg-card-hover); }
+
+/* ========== CRM SEARCH (centered topbar) ========== */
+.topbar--has-search { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 540px) minmax(220px, 1fr); align-items: center; gap: 16px; }
+.topbar--has-search .topbar__crumbs { justify-self: start; }
+.topbar--has-search .topbar__right { justify-self: end; margin-left: 0; }
+.topbar__search-wrap { width: 100%; max-width: 540px; justify-self: center; position: relative; }
+.topbar__search-wrap--ghost { visibility: hidden; }
+
+.crm-search {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--stc-black-700);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  transition: border-color var(--dur-2) var(--ease-out);
+}
+.crm-search:focus-within { border-color: var(--border-strong); }
+.crm-search input {
+  flex: 1; min-width: 0;
+  background: transparent; border: none; outline: none;
+  font-size: 13px;
+  color: var(--fg-1);
+  font-family: "Inter", sans-serif;
+  letter-spacing: -0.01em;
+}
+.crm-search input::placeholder { color: var(--fg-4); }
+.crm-search .kbd { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--fg-4); background: var(--stc-black-600); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; }
+.crm-search > svg { color: var(--fg-4); flex-shrink: 0; }
+
+.crm-search__dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-3);
+  z-index: 50;
+  overflow: hidden;
+}
+.crm-search__row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none; border-bottom: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg-1);
+}
+.crm-search__row:last-child { border-bottom: none; }
+.crm-search__row.is-active, .crm-search__row:hover { background: var(--bg-card-hover); }
+.crm-search__title { font-size: 13px; font-weight: 500; color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-search__sub { font-size: 11.5px; color: var(--fg-3); margin-top: 2px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-search__empty { padding: 12px; color: var(--fg-3); font-size: 12.5px; text-align: center; }
+
+/* Light-mode tweaks */
+[data-theme="light"] .crm-search { background: #f3f2ef; border-color: var(--border-strong); }
+[data-theme="light"] .crm-search .kbd { background: #fff; }
+
+/* ========== INPUT OVERRIDES — fix textarea crush, fleet shrink ========== */
+textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.45; resize: vertical; }
+/* The address textareas should be tall */
+.drawer textarea.input { min-height: 110px; }
+
+/* Fleet row: let cells shrink fully so the 4th column (Total) doesn't push out */
+.fleet-row .field { min-width: 0; gap: 4px; }
+.fleet-row .field__label { font-size: 11px; letter-spacing: -0.01em; }
+.fleet-row .input { padding: 0 8px; min-width: 0; width: 100%; }
+.fleet-row__total { padding: 4px 10px; min-width: 0; }
+.fleet-row__total-label { font-size: 11px; }
+.fleet-row__total-value { font-size: 16px; }

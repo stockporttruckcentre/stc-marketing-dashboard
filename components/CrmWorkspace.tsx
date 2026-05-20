@@ -78,6 +78,20 @@ export function CrmWorkspace({
     router.push(`/dashboard/crm?${params.toString()}`);
   }
 
+  // If URL has ?contact=<id>, open drawer for it (from TopBar search jump)
+  useEffect(() => {
+    const targetId = searchParams.get('contact');
+    if (!targetId) return;
+    const row = rows.find((r) => r.id === targetId);
+    if (row) {
+      setDrawerRow(row);
+    } else {
+      // Not in current list - fetch it directly
+      supabase.from('crm_contacts').select('*').eq('id', targetId).single()
+        .then(({ data }) => { if (data) setDrawerRow(data as CRMContact); });
+    }
+  }, [searchParams, rows, supabase]);
+
   // Realtime: contacts in this list
   useEffect(() => {
     if (!selectedListId) return;
@@ -1054,7 +1068,14 @@ function AddressList({ contactId, canEdit, legacyAddress, onPrimaryChange }: {
   }
   async function setPrimary(id: string) {
     const { error } = await supabase.from('contact_addresses').update({ is_primary: true }).eq('id', id);
-    if (error) alert(error.message);
+    if (error) { alert(error.message); return; }
+    // Trigger runs in DB, but force a refetch of the contact so the grid + drawer reflect
+    // the new primary city immediately (without waiting on realtime).
+    const { data: refreshed } = await supabase.from('crm_contacts').select('*').eq('id', contactId).single();
+    if (refreshed) {
+      const row = items.find((i) => i.id === id);
+      onPrimaryChange((refreshed as any).address ?? row?.address ?? '', (refreshed as any).location ?? null);
+    }
   }
 
   if (loading) return <div className="row-item__sub">Loading addresses…</div>;
