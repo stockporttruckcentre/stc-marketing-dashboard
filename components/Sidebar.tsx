@@ -63,6 +63,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
         )}
         <div className="sidebar__brand-text">
           <div className="sidebar__brand-title">STC Workspace</div>
+          <div className="sidebar__brand-sub">Marketing &amp; Sales</div>
         </div>
       </div>
 
