@@ -755,3 +755,91 @@ ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS category TEXT;
 ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS vehicles TEXT;
 ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS initials TEXT;
 CREATE INDEX IF NOT EXISTS idx_crm_contacts_side ON crm_contacts (side);
+
+
+-- =============================================================
+-- STOCK TRAILERS (global trailer stock list - replaces trailer_sales)
+-- =============================================================
+CREATE TABLE IF NOT EXISTS stock_trailers (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'in_stock' CHECK (status IN ('new_build','in_stock','sales_order','sold','rental','scrap')),
+  category TEXT,
+  -- Identity
+  stc_no TEXT,
+  supplier TEXT,
+  trade_in BOOLEAN,
+  chassis_number TEXT,
+  ministry_no TEXT,
+  supplier_no TEXT,
+  -- Vehicle
+  received_date DATE,
+  paid_status TEXT,
+  year INTEGER,
+  make TEXT,
+  model TEXT,
+  side_aperture TEXT,
+  colour TEXT,
+  description TEXT,
+  door_type TEXT,
+  mot_date DATE,
+  axle_type TEXT,
+  location TEXT,
+  status_text TEXT,
+  sales_rep TEXT,
+  -- Financials
+  nbv NUMERIC,
+  refurb_costs NUMERIC,
+  refurb_costs_at_sale NUMERIC,
+  total_nbv NUMERIC,
+  -- Sales fields
+  new_or_used TEXT,
+  customer TEXT,
+  order_date DATE,
+  dispatch_date DATE,
+  month DATE,
+  sales_price NUMERIC,
+  profit NUMERIC,
+  profit_pct NUMERIC,
+  trailer_docs TEXT,
+  signed_order TEXT,
+  deposit_received TEXT,
+  paid_in_full TEXT,
+  refurb_update TEXT,
+  refurb_done TEXT,
+  tread_depths TEXT,
+  -- New builds specifics
+  chassis_colour TEXT,
+  body_colour TEXT,
+  expected_delivery DATE,
+  retail_price NUMERIC,
+  sold_price NUMERIC,
+  quote_no TEXT,
+  hyperlink TEXT,
+  -- Notes
+  notes TEXT,
+  jr_notes TEXT,
+  comments TEXT,
+  documents TEXT,
+  fleet_serve_link TEXT,
+  -- Audit
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stock_trailers_status   ON stock_trailers (status);
+CREATE INDEX IF NOT EXISTS idx_stock_trailers_category ON stock_trailers (category);
+CREATE INDEX IF NOT EXISTS idx_stock_trailers_customer ON stock_trailers (customer);
+CREATE INDEX IF NOT EXISTS idx_stock_trailers_stc      ON stock_trailers (stc_no);
+
+ALTER TABLE stock_trailers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "stock_select" ON stock_trailers;
+DROP POLICY IF EXISTS "stock_write"  ON stock_trailers;
+CREATE POLICY "stock_select" ON stock_trailers FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "stock_write"  ON stock_trailers FOR ALL    USING (current_role_safe() IN ('admin','marketer','sales'));
+
+DO $$ BEGIN
+  PERFORM 1 FROM pg_trigger WHERE tgname = 'update_stock_trailers_updated_at';
+  IF NOT FOUND THEN
+    CREATE TRIGGER update_stock_trailers_updated_at BEFORE UPDATE ON stock_trailers
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  END IF;
+END $$;
