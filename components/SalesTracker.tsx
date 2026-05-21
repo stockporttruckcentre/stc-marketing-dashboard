@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
 
 // Tracker has 3 tabs that group the existing CRM statuses
-type TrackerTab = 'all' | 'working' | 'customer' | 'lost';
+type TrackerTab = 'all' | 'working' | 'customer' | 'lost' | 'commission';
 const STATUS_TO_TAB: Record<ContactStatus, TrackerTab> = {
   lead: 'working', contacted: 'working', quoted: 'working', won: 'working',
   customer: 'customer',
@@ -22,12 +22,14 @@ const TAB_LABEL: Record<TrackerTab, string> = {
   working: 'Working',
   customer: 'Customer',
   lost: 'Lost',
+  commission: 'My commission',
 };
 const TAB_HINT: Record<TrackerTab, string> = {
   all: '',
   working: 'Active leads — chasing the deal',
   customer: 'Active customer — ongoing relationship',
   lost: 'Lost — no longer pursuing',
+  commission: 'Your earned commission, summarised',
 };
 
 const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
@@ -66,8 +68,10 @@ export function SalesTracker({
   // Counts of the CURRENT side only
   const sideRows = useMemo(() => rows.filter(r => (r.side ?? 'trailer_sales') === side), [rows, side]);
   const counts = useMemo(() => {
-    const c = { all: sideRows.length, working: 0, customer: 0, lost: 0 } as Record<TrackerTab, number>;
+    const c = { all: sideRows.length, working: 0, customer: 0, lost: 0, commission: 0 } as Record<TrackerTab, number>;
     for (const r of sideRows) c[STATUS_TO_TAB[r.status]]++;
+    // commission tab "count" = number of paid-out sales (rows with commission > 0)
+    c.commission = sideRows.filter(r => Number(r.commission) > 0).length;
     return c;
   }, [sideRows]);
   const sideCounts = useMemo(() => ({
@@ -288,7 +292,7 @@ export function SalesTracker({
       )}
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        {(['working', 'customer', 'lost', 'all'] as TrackerTab[]).map(t => (
+        {(['working', 'customer', 'lost', 'all', 'commission'] as TrackerTab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className={`news-chip ${tab === t ? 'is-active' : ''}`}
             title={TAB_HINT[t]}>
@@ -303,6 +307,9 @@ export function SalesTracker({
 
       {message && <div className="alert alert--info" style={{ marginTop: 12 }}>{message}</div>}
 
+      {tab === 'commission' ? (
+        <CommissionView rows={sideRows} />
+      ) : (
       <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 320px)', marginTop: 14, minHeight: 480 }}>
         <AgGridReact<CRMContact>
           rowData={filtered}
@@ -314,6 +321,7 @@ export function SalesTracker({
           onRowDoubleClicked={(e) => setEditingRow(e.data ?? null)}
         />
       </div>
+      )}
 
       {showNewLead && (
         <NewLeadModal
@@ -915,6 +923,137 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
       <hr />
       <button onClick={onDuplicate}><Copy size={12} /> Duplicate</button>
       <button onClick={onDelete} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
+    </div>
+  );
+}
+
+
+// ===== My Commission tab — KPIs, monthly bars, per-sale table =====
+function CommissionView({ rows }: { rows: CRMContact[] }) {
+  // Only consider rows that actually have commission (closed deals)
+  const sales = useMemo(() => rows.filter(r => Number(r.commission) > 0)
+    .sort((a, b) => (b.dispatch_date || b.order_date || '').localeCompare(a.dispatch_date || a.order_date || '')), [rows]);
+
+  const now = new Date();
+  const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const dKey = (r: CRMContact) => (r.dispatch_date || r.order_date || '').slice(0,7);
+  const thisMonthKey = ym(now);
+  const thisQuarter = Math.floor(now.getMonth() / 3);
+  const thisYear = now.getFullYear();
+
+  const thisMonth = sales.filter(r => dKey(r) === thisMonthKey).reduce((s, r) => s + Number(r.commission || 0), 0);
+  const ytd = sales.filter(r => Number((r.dispatch_date || r.order_date || '').slice(0,4)) === thisYear).reduce((s, r) => s + Number(r.commission || 0), 0);
+  const quarter = sales.filter(r => {
+    const m = Number((r.dispatch_date || r.order_date || '').slice(5,7)) - 1;
+    const y = Number((r.dispatch_date || r.order_date || '').slice(0,4));
+    return y === thisYear && Math.floor(m / 3) === thisQuarter;
+  }).reduce((s, r) => s + Number(r.commission || 0), 0);
+  const allTime = sales.reduce((s, r) => s + Number(r.commission || 0), 0);
+  const avgPerDeal = sales.length ? allTime / sales.length : 0;
+
+  // Last 12 months breakdown for the bar chart
+  const monthly = useMemo(() => {
+    const months: { key: string; label: string; total: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: ym(d), label: d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }), total: 0 });
+    }
+    for (const r of sales) {
+      const k = dKey(r);
+      const m = months.find(x => x.key === k);
+      if (m) m.total += Number(r.commission || 0);
+    }
+    return months;
+  }, [sales, now]);
+  const maxMonthly = Math.max(1, ...monthly.map(m => m.total));
+
+  const QUARTER_LABEL = `Q${thisQuarter + 1} ${thisYear}`;
+
+  return (
+    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* KPI tiles */}
+      <div className="stats-grid stats-grid--5">
+        <KpiTile label="This month" value={fmtMoney(thisMonth)} sub={now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} accent="red" />
+        <KpiTile label="This quarter" value={fmtMoney(quarter)} sub={QUARTER_LABEL} accent="warning" />
+        <KpiTile label="Year to date" value={fmtMoney(ytd)} sub={String(thisYear)} accent="info" />
+        <KpiTile label="All time" value={fmtMoney(allTime)} sub={`${sales.length} closed deal${sales.length === 1 ? '' : 's'}`} accent="success" />
+        <KpiTile label="Avg / deal" value={fmtMoney(avgPerDeal)} sub="Across all closed deals" />
+      </div>
+
+      {/* Last 12 months bar chart */}
+      <div className="card" style={{ padding: 16 }}>
+        <div className="field__label" style={{ marginBottom: 12 }}>LAST 12 MONTHS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 180, padding: '0 4px' }}>
+          {monthly.map(m => {
+            const h = Math.max(2, (m.total / maxMonthly) * 150);
+            const isThisMonth = m.key === thisMonthKey;
+            return (
+              <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', minHeight: 14 }}>
+                  {m.total > 0 ? `£${(m.total/1000).toFixed(1)}k` : ''}
+                </div>
+                <div style={{
+                  width: '100%', maxWidth: 40,
+                  height: h,
+                  background: isThisMonth ? 'var(--stc-red)' : 'rgba(91,141,239,0.5)',
+                  borderRadius: '4px 4px 0 0',
+                  transition: 'height .25s ease',
+                }} />
+                <div style={{ fontSize: 10.5, color: isThisMonth ? 'var(--stc-red)' : 'var(--fg-3)', fontWeight: isThisMonth ? 700 : 500 }}>
+                  {m.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Per-sale list */}
+      <div className="card">
+        <div className="card__head"><h3 style={{ margin: 0 }}>Every closed deal · {sales.length}</h3></div>
+        <div style={{ padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-3)', textAlign: 'left' }}>
+                <th style={{ padding: 10 }}>Dispatch / Order</th>
+                <th style={{ padding: 10 }}>Company</th>
+                <th style={{ padding: 10 }}>Sale price</th>
+                <th style={{ padding: 10 }}>Profit</th>
+                <th style={{ padding: 10, color: 'var(--stc-red)' }}>Commission</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.map(r => (
+                <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="mono" style={{ padding: 10, fontSize: 11.5, color: 'var(--fg-3)' }}>
+                    {(r.dispatch_date || r.order_date || '').slice(0,10) || '—'}
+                  </td>
+                  <td style={{ padding: 10 }}>{r.company_name}</td>
+                  <td className="tnum" style={{ padding: 10 }}>{fmtMoney(r.sale_price)}</td>
+                  <td className="tnum" style={{ padding: 10 }}>{fmtMoney(r.profit)}</td>
+                  <td className="tnum" style={{ padding: 10, fontWeight: 600, color: 'var(--stc-red)' }}>{fmtMoney(r.commission)}</td>
+                </tr>
+              ))}
+              {sales.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)' }}>
+                  No closed deals yet. Commission rolls in here as you Mark-as-Sold from the tracker.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'red'|'success'|'warning'|'info' }) {
+  return (
+    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
+      <div className="stat__bar" />
+      <div className="stat__label">{label}</div>
+      <div className="stat__value tnum">{value}</div>
+      {sub && <div className="stat__sub">{sub}</div>}
     </div>
   );
 }
