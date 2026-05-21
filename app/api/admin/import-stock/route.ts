@@ -61,43 +61,34 @@ export async function POST() {
     // 3) Read records and bulk-insert
     const raw = await readFile(path.join(process.cwd(), 'data', 'stock-import.json'), 'utf-8');
     const records: any[] = JSON.parse(raw);
+    const cols = [
+      'status','category','stc_no','supplier','trade_in',
+      'chassis_number','ministry_no','supplier_no',
+      'received_date','paid_status','year','make','model',
+      'side_aperture','colour','description','door_type',
+      'mot_date','axle_type','location','status_text','sales_rep',
+      'nbv','refurb_costs','refurb_costs_at_sale','total_nbv',
+      'new_or_used','customer','order_date','dispatch_date','month',
+      'sales_price','profit','profit_pct',
+      'trailer_docs','signed_order','deposit_received','paid_in_full',
+      'refurb_update','refurb_done','tread_depths',
+      'chassis_colour','body_colour','expected_delivery',
+      'retail_price','sold_price','quote_no','hyperlink',
+      'notes','jr_notes','comments','documents','fleet_serve_link',
+    ];
+    // Normalise: every row has every key (null where missing). postgres-js bulk insert needs this.
+    const rows = records.map(r => {
+      const obj: any = {};
+      for (const c of cols) obj[c] = r[c] ?? null;
+      return obj;
+    });
+    // Bulk insert in chunks of 200 to keep parameter count under Postgres's 65535 limit (200 x 53 = 10,600 params)
     let inserted = 0;
-    // Batch inserts in chunks of 50 to avoid huge bound parameter lists
-    const chunkSize = 50;
-    for (let i = 0; i < records.length; i += chunkSize) {
-      const batch = records.slice(i, i + chunkSize);
-      for (const r of batch) {
-        await sql`INSERT INTO stock_trailers (
-          status, category, stc_no, supplier, trade_in,
-          chassis_number, ministry_no, supplier_no,
-          received_date, paid_status, year, make, model,
-          side_aperture, colour, description, door_type,
-          mot_date, axle_type, location, status_text, sales_rep,
-          nbv, refurb_costs, refurb_costs_at_sale, total_nbv,
-          new_or_used, customer, order_date, dispatch_date, month,
-          sales_price, profit, profit_pct,
-          trailer_docs, signed_order, deposit_received, paid_in_full,
-          refurb_update, refurb_done, tread_depths,
-          chassis_colour, body_colour, expected_delivery,
-          retail_price, sold_price, quote_no, hyperlink,
-          notes, jr_notes, comments, documents, fleet_serve_link
-        ) VALUES (
-          ${r.status}, ${r.category ?? null}, ${r.stc_no ?? null}, ${r.supplier ?? null}, ${r.trade_in ?? null},
-          ${r.chassis_number ?? null}, ${r.ministry_no ?? null}, ${r.supplier_no ?? null},
-          ${r.received_date ?? null}, ${r.paid_status ?? null}, ${r.year ?? null}, ${r.make ?? null}, ${r.model ?? null},
-          ${r.side_aperture ?? null}, ${r.colour ?? null}, ${r.description ?? null}, ${r.door_type ?? null},
-          ${r.mot_date ?? null}, ${r.axle_type ?? null}, ${r.location ?? null}, ${r.status_text ?? null}, ${r.sales_rep ?? null},
-          ${r.nbv ?? null}, ${r.refurb_costs ?? null}, ${r.refurb_costs_at_sale ?? null}, ${r.total_nbv ?? null},
-          ${r.new_or_used ?? null}, ${r.customer ?? null}, ${r.order_date ?? null}, ${r.dispatch_date ?? null}, ${r.month ?? null},
-          ${r.sales_price ?? null}, ${r.profit ?? null}, ${r.profit_pct ?? null},
-          ${r.trailer_docs ?? null}, ${r.signed_order ?? null}, ${r.deposit_received ?? null}, ${r.paid_in_full ?? null},
-          ${r.refurb_update ?? null}, ${r.refurb_done ?? null}, ${r.tread_depths ?? null},
-          ${r.chassis_colour ?? null}, ${r.body_colour ?? null}, ${r.expected_delivery ?? null},
-          ${r.retail_price ?? null}, ${r.sold_price ?? null}, ${r.quote_no ?? null}, ${r.hyperlink ?? null},
-          ${r.notes ?? null}, ${r.jr_notes ?? null}, ${r.comments ?? null}, ${r.documents ?? null}, ${r.fleet_serve_link ?? null}
-        )`;
-        inserted++;
-      }
+    const chunkSize = 200;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      await sql`INSERT INTO stock_trailers ${sql(chunk, ...cols)}`;
+      inserted += chunk.length;
     }
     return NextResponse.json({ ok: true, totalInFile: records.length, inserted });
   } catch (e: any) {
