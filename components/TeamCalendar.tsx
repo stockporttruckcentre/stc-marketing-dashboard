@@ -196,26 +196,38 @@ export function TeamCalendar({ initialEvents, userId }: { initialEvents: Calenda
           {monthGrid.map((d, i) => {
             const evs = eventsOn(d);
             return (
-              <button key={i}
+              <div key={i}
+                role="button" tabIndex={0}
                 className={`cal__cell${isCurrentMonth(d) ? ' is-cur' : ''}${isToday(d) ? ' is-today' : ''}`}
-                onClick={() => setDayModal({ date: fmtDay(d) })}>
+                onClick={(ev) => {
+                  // Only open the "new event for this day" flow when clicking the empty area,
+                  // not when bubbling up from a chip click
+                  if ((ev.target as HTMLElement).closest('.cal__chip')) return;
+                  setEditing(null);
+                  setDayModal({ date: fmtDay(d) });
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(null); setDayModal({ date: fmtDay(d) }); } }}>
                 <div className="cal__date">{d.getDate()}</div>
                 <div className="cal__events">
                   {evs.slice(0, 4).map((e) => {
                     const isMeeting = inferKind(e) === 'meeting';
                     return (
-                      <div key={e.id}
+                      <button key={e.id} type="button"
                         className={`cal__chip${isMeeting ? ' cal__chip--meeting' : ''}`}
                         style={{ background: `${e.color}22`, color: e.color, borderLeft: `3px solid ${e.color}` }}
-                        onClick={(ev) => { ev.stopPropagation(); setEditing(e); setDayModal({ date: fmtDay(d) }); }}>
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          setEditing(e);
+                          setDayModal({ date: fmtDay(new Date(e.start_at)) });
+                        }}>
                         {isMeeting && <Users size={9} style={{ flexShrink: 0 }} />}
                         <span>{!e.all_day && <span className="cal__chip-time">{fmtTime(e.start_at)} </span>}{e.title}</span>
-                      </div>
+                      </button>
                     );
                   })}
                   {evs.length > 4 && <div className="cal__more">+{evs.length - 4} more</div>}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
