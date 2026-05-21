@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck } from 'lucide-react';
 import { ScheduleMeetingModal } from './CrmWorkspace';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
-import type { CRMContact, ContactStatus, CrmList, Profile } from '@/lib/types';
+import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
 
 // Tracker has 3 tabs that group the existing CRM statuses
 type TrackerTab = 'all' | 'working' | 'customer' | 'lost';
@@ -728,6 +728,129 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
             )
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Stock trailer picker (typeahead by STC No / chassis / make/model) =====
+function StockTrailerPicker({ onPick, onClose }: { onPick: (t: StockTrailer | null) => void; onClose: () => void }) {
+  const supabase = useMemo(() => createClient(), []);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<StockTrailer[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return; }
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      const like = `%${q.trim()}%`;
+      const { data } = await supabase.from('stock_trailers')
+        .select('id, stc_no, chassis_number, year, make, model, status, location, nbv, refurb_costs, refurb_costs_at_sale, category')
+        .or(`stc_no.ilike.${like},chassis_number.ilike.${like},make.ilike.${like},model.ilike.${like}`)
+        .limit(20);
+      setResults((data ?? []) as StockTrailer[]);
+      setSearching(false);
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [q, supabase]);
+
+  return (
+    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal__head">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Truck size={16} style={{ color: 'var(--stc-red)' }} /> Link a stock trailer
+          </h3>
+          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
+        </div>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input className="input" autoFocus placeholder="Search by STC No, chassis, make, model…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="col" style={{ gap: 6, maxHeight: 340, overflowY: 'auto' }}>
+            {searching && <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>Searching…</div>}
+            {!searching && q.trim().length >= 2 && results.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>No matches</div>
+            )}
+            {results.map(t => (
+              <button key={t.id} onClick={() => onPick(t)} className="btn" style={{ justifyContent: 'flex-start', textAlign: 'left', height: 'auto', padding: 10 }}>
+                <Truck size={14} style={{ flexShrink: 0, color: 'var(--stc-red)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.stc_no || t.chassis_number} · {t.year} {t.make} {t.model}</div>
+                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    {t.category} · {t.status} {t.location && `· ${t.location}`}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Mark-as-Sold confirm modal — preview commission before saving =====
+function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
+  trailer: StockTrailer; totalNbv: number; rate: number;
+  onConfirm: (salePrice: number, dispatchDate: string | null) => void;
+  onClose: () => void;
+}) {
+  const [salePrice, setSalePrice] = useState<string>('');
+  const [dispatchDate, setDispatchDate] = useState<string>('');
+  const sp = Number(salePrice) || 0;
+  const profit = sp - totalNbv;
+  const commission = profit * rate;
+  return (
+    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="modal__head">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <PoundSterling size={16} style={{ color: 'var(--stc-red)' }} /> Mark as Sold
+          </h3>
+          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); if (sp > 0) onConfirm(sp, dispatchDate || null); }}
+          style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
+            Trailer <strong style={{ color: 'var(--fg-1)' }}>{trailer.stc_no || trailer.chassis_number}</strong> ({trailer.year} {trailer.make} {trailer.model})
+          </div>
+          <div className="card" style={{ padding: 10, background: 'var(--bg-3)' }}>
+            <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ color: 'var(--fg-3)' }}>Total NBV (locked from stock)</span>
+              <span className="tnum" style={{ fontWeight: 600 }}>£{totalNbv.toLocaleString()}</span>
+            </div>
+          </div>
+          <div className="field">
+            <div className="field__label">Sale price (£)</div>
+            <input className="input" type="number" step="0.01" required autoFocus value={salePrice} onChange={(e) => setSalePrice(e.target.value)} />
+          </div>
+          <div className="field">
+            <div className="field__label">Dispatch date (optional)</div>
+            <input className="input" type="date" value={dispatchDate} onChange={(e) => setDispatchDate(e.target.value)} />
+          </div>
+          {sp > 0 && (
+            <div className="card" style={{ padding: 10, background: 'rgba(46,160,67,0.08)', borderColor: 'rgba(46,160,67,0.3)' }}>
+              <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ color: 'var(--fg-3)' }}>Profit</span>
+                <span className="tnum">£{profit.toLocaleString()}</span>
+              </div>
+              <div className="row" style={{ justifyContent: 'space-between', fontSize: 12, marginTop: 4 }}>
+                <span style={{ color: 'var(--fg-3)' }}>Your commission ({(rate * 100).toFixed(0)}% of profit)</span>
+                <span className="tnum" style={{ fontWeight: 600, color: '#5fb572' }}>£{commission.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
+            This will mark <strong>{trailer.stc_no}</strong> as Sold on the global stock list (customer + sales rep + sale price + dispatch date all pushed). Your commission stays private to your tracker.
+          </div>
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" onClick={onClose} className="btn btn--ghost">Cancel</button>
+            <button type="submit" className="btn btn--primary" disabled={sp <= 0}>
+              <PoundSterling size={14} /> Confirm sale
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
