@@ -62,8 +62,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
           <div style={{ width: 38, height: 38, borderRadius: 6, background: 'var(--bg-3)' }} />
         )}
         <div className="sidebar__brand-text">
-          <div className="sidebar__brand-title">STOCKPORT TRUCK CENTRE</div>
-          <div className="sidebar__brand-sub">Marketing &amp; Sales</div>
+          <div className="sidebar__brand-title">STC Workspace</div>
         </div>
       </div>
 
