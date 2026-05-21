@@ -2225,6 +2225,9 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 .news-chip.is-empty .news-chip__count { background: transparent; }
 [data-theme="light"] .news-chip__count { background: rgba(0,0,0,0.06); color: var(--fg-2); }
 
+/* Sales tracker: Commission tab — 10px left gap from the other tabs and not a round pill. */
+.news-chip--commission { margin-left: 10px; border-radius: 6px; }
+
 
 /* Sales tracker: customer status pill (active customer = ongoing relationship) */
 .pill--customer { background: rgba(46, 160, 67, 0.15); color: #5fb572; border: 1px solid rgba(46, 160, 67, 0.35); }

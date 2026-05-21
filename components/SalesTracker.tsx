@@ -294,7 +294,7 @@ export function SalesTracker({
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         {(['working', 'customer', 'lost', 'all', 'commission'] as TrackerTab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`news-chip ${tab === t ? 'is-active' : ''}`}
+            className={`news-chip ${t === 'commission' ? 'news-chip--commission' : ''} ${tab === t ? 'is-active' : ''}`}
             title={TAB_HINT[t]}>
             {TAB_LABEL[t]} <span className="news-chip__count">{counts[t]}</span>
           </button>
