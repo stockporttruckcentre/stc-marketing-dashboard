@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent } from 'ag-grid-community';
-import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move } from 'lucide-react';
+import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
 
@@ -246,7 +246,7 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
         <button onClick={() => { setTab('all'); setCategory(null); }} className={`news-chip ${tab === 'all' ? 'is-active' : ''}`}>
           All <span className="news-chip__count">{counts.all}</span>
         </button>
-        {STATUS_ORDER.map(s => (
+        {STATUS_ORDER.filter(s => s !== 'sold').map(s => (
           <button key={s} onClick={() => { setTab(s); setCategory(null); }} className={`news-chip ${tab === s ? 'is-active' : ''}`}>
             {s === 'in_stock' && <Package size={11} />}
             {s === 'new_build' && <Wrench size={11} />}
@@ -616,10 +616,11 @@ function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb,
       <div className="ctx-menu__head">{row.stc_no || row.chassis_number || 'Trailer'}{row.year && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.year} {row.make}</span>}</div>
       <button onClick={onView}><Eye size={12} /> Open full view</button>
       <button onClick={onEditCell} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
-      <button onClick={onAddRefurb} disabled={!canEdit}><Wrench size={12} /> Add refurb cost</button>
+      <button onClick={onAddRefurb} disabled={!canEdit}><Paintbrush size={12} /> Add refurb cost</button>
+      <button onClick={() => onMoveStatus('sold')} disabled={!canEdit || row.status === 'sold'}><PoundSterling size={12} /> Mark as Sold</button>
       <hr />
       <div className="ctx-menu__head" style={{ marginTop: 4 }}>Move to status</div>
-      {STATUS_ORDER.map(s => (
+      {STATUS_ORDER.filter(s => s !== 'sold').map(s => (
         <button key={s} onClick={() => onMoveStatus(s)} disabled={!canEdit || s === row.status}>
           {s === 'in_stock' && <Package size={12} />}
           {s === 'new_build' && <Wrench size={12} />}
@@ -646,7 +647,7 @@ function BulkStatusModal({ currentSelectionCount, onPick, onClose }: { currentSe
           <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
         </div>
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {STATUS_ORDER.map(s => (
+          {STATUS_ORDER.filter(s => s !== 'sold').map(s => (
             <button key={s} onClick={() => onPick(s)} className="btn" style={{ justifyContent: 'flex-start', height: 40 }}>
               {s === 'in_stock' && <Package size={14} />}
               {s === 'new_build' && <Wrench size={14} />}
