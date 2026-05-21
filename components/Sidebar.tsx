@@ -7,6 +7,7 @@ import {
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { TruckIcon } from '@/components/TruckIcon';
 import type { Profile, UserRole } from '@/lib/types';
 
 type Item = { href: string; label: string; Icon: any; roles: UserRole[]; badge?: string; alert?: boolean };
@@ -30,7 +31,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
         { href: '/dashboard/crm',    label: 'CRM pipeline',   Icon: Users,    roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/leads',       label: 'Sales tracker', Icon: TrendingUp, roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/finder', label: 'Company finder', Icon: Search,   roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: Package,  roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: TruckIcon, roles: ['admin','marketer','sales','viewer'] },
       ],
     },
     {
