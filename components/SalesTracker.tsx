@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy } from 'lucide-react';
 import { ScheduleMeetingModal } from './CrmWorkspace';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -852,6 +852,55 @@ function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+
+// ===== Right-click context menu for tracker rows =====
+function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveStatus, onDuplicate, onDelete }: {
+  x: number; y: number; row: CRMContact;
+  onView: () => void; onEditCell: () => void;
+  onMarkSold: () => void;
+  onMoveStatus: (s: ContactStatus) => void;
+  onDuplicate: () => void; onDelete: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const m = 8;
+    let l = x, t = y;
+    if (x + r.width + m > window.innerWidth) l = Math.max(m, x - r.width);
+    if (y + r.height + m > window.innerHeight) t = Math.max(m, y - r.height);
+    setPos({ left: l, top: t });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, y]);
+
+  const STATUSES: ContactStatus[] = ['lead','contacted','quoted','won','customer','lost'];
+
+  return (
+    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+      <div className="ctx-menu__head">
+        {row.company_name}
+        {row.contact_name && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.contact_name}</span>}
+      </div>
+      <button onClick={onView}><Eye size={12} /> Open full view</button>
+      <button onClick={onEditCell}><Edit2 size={12} /> Edit this cell</button>
+      {row.side === 'trailer_sales' && row.status !== 'customer' && (
+        <button onClick={onMarkSold}><PoundSterling size={12} /> Mark as Sold…</button>
+      )}
+      <hr />
+      <div className="ctx-menu__head" style={{ marginTop: 4 }}>Move to status</div>
+      {STATUSES.filter(s => s !== row.status).map(s => (
+        <button key={s} onClick={() => onMoveStatus(s)}>
+          <span className={`pill pill--${s}`} style={{ fontSize: 10 }}><span className="pill__dot" />{s}</span>
+        </button>
+      ))}
+      <hr />
+      <button onClick={onDuplicate}><Copy size={12} /> Duplicate</button>
+      <button onClick={onDelete} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
     </div>
   );
 }
