@@ -33,10 +33,14 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
   const [bulkLocation, setBulkLocation] = useState(false);
   const gridRef = useRef<AgGridReact<StockTrailer>>(null);
 
-  // Close context menu on outside click / escape
+  // Close context menu on outside click / escape. We must check the native event target
+  // because React's synthetic stopPropagation doesn't reach document listeners.
   useEffect(() => {
-    function close() { setContextMenu(null); }
-    function key(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+    function close(e: MouseEvent) {
+      if ((e.target as HTMLElement)?.closest?.('.ctx-menu')) return; // click inside menu
+      setContextMenu(null);
+    }
+    function key(e: KeyboardEvent) { if (e.key === 'Escape') setContextMenu(null); }
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key); };
