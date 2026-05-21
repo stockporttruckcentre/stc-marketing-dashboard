@@ -843,3 +843,11 @@ DO $$ BEGIN
       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
   END IF;
 END $$;
+
+
+-- =============================================================
+-- Tracker ↔ Stock linkage + commission auto-calc
+-- =============================================================
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS stock_trailer_id UUID REFERENCES stock_trailers(id) ON DELETE SET NULL;
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 0.10;
+CREATE INDEX IF NOT EXISTS idx_crm_contacts_stock_trailer ON crm_contacts (stock_trailer_id);
