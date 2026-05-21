@@ -609,11 +609,11 @@ export function CrmWorkspace({
       )}
 
             {emptyAreaMenu && (
-        <div className="ctx-menu" style={{ left: emptyAreaMenu.x, top: emptyAreaMenu.y }} onClick={(e) => e.stopPropagation()}>
+        <EdgeAwareCtxMenu x={emptyAreaMenu.x} y={emptyAreaMenu.y}>
           <div className="ctx-menu__head">{selectedList?.name ?? 'CRM'}</div>
           <button onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} disabled={!canEdit}><Plus size={12} /> Add contact</button>
           <button onClick={() => { setEmptyAreaMenu(null); document.querySelector<HTMLInputElement>('input[type=file][accept=".csv"]')?.click(); }} disabled={!canEdit}><Upload size={12} /> Import CSV…</button>
-        </div>
+        </EdgeAwareCtxMenu>
       )}
       {drawerRow && (
         <ContactDrawer
@@ -694,7 +694,46 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
   );
 }
 
+
+// Viewport-aware positioning hook for floating menus. Returns a ref to attach to the menu.
+// After mount, measures the menu and pushes it up/left if it would overflow the viewport.
+function useEdgeAwarePosition(x: number, y: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    let nextLeft = x;
+    let nextTop = y;
+    if (x + rect.width + margin > window.innerWidth) {
+      nextLeft = Math.max(margin, x - rect.width);
+    }
+    if (y + rect.height + margin > window.innerHeight) {
+      nextTop = Math.max(margin, y - rect.height);
+    }
+    if (nextLeft !== pos.left || nextTop !== pos.top) {
+      setPos({ left: nextLeft, top: nextTop });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, y]);
+  return { ref, pos };
+}
+
+
+// Inline wrapper for ctx-menus that auto-flips position to stay in viewport.
+function EdgeAwareCtxMenu({ x, y, className, children }: { x: number; y: number; className?: string; children: React.ReactNode }) {
+  const { ref, pos } = useEdgeAwarePosition(x, y);
+  return (
+    <div ref={ref} className={className ?? 'ctx-menu'} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
+
 function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
+  const { ref, pos } = useEdgeAwarePosition(x, y);
   // Lusha returns these contact attributes:
   const ENRICHABLE_FIELDS = ['company_name','contact_name','email','phone','location','fleet_size'];
   const hasLookupHandle = !!row.email || !!row.company_name;
@@ -707,7 +746,7 @@ function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDe
         ? 'Look this contact up on Lusha by email'
         : 'Lusha will find a contact at ' + row.company_name + ' (Sales Director, MD, Fleet Manager...)';
   return (
-    <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
+    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
       <div className="ctx-menu__head">{row.company_name}{row.location && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.location}</span>}</div>
       <button onClick={onView}><Edit2 size={12} /> Open details</button>
       <button onClick={onEdit} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
@@ -720,8 +759,9 @@ function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDe
 }
 
 function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: { x: number; y: number; lists: CrmList[]; onPick: (id: string) => void; onClose: () => void; mode?: 'move' | 'duplicate' }) {
+  const { ref, pos } = useEdgeAwarePosition(x, y);
   return (
-    <div className="ctx-menu" style={{ left: x, top: y }} onClick={(e) => e.stopPropagation()}>
+    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
       <div className="ctx-menu__head">{mode === 'duplicate' ? 'Duplicate to list' : 'Move to list'}</div>
       {lists.map((l) => (
         <button key={l.id} onClick={() => onPick(l.id)}>
