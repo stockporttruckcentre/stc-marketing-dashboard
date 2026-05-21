@@ -51,11 +51,11 @@ export async function POST() {
     ];
     for (const stmt of ddl) { try { await sql.unsafe(stmt); } catch {} }
 
-    // 2) Skip if data is already there (idempotent guard)
-    const existing = await sql`SELECT COUNT(*)::int AS n FROM stock_trailers`;
-    const before = (existing as any)[0].n;
-    if (before > 0) {
-      return NextResponse.json({ ok: true, alreadyImported: before, note: 'Table already has data; not reimporting' });
+    // 2) Truncate existing data (previous partial import had bad dates - re-importing all fresh)
+    const before = await sql`SELECT COUNT(*)::int AS n FROM stock_trailers`;
+    const beforeCount = (before as any)[0].n;
+    if (beforeCount > 0) {
+      await sql.unsafe('TRUNCATE TABLE stock_trailers');
     }
 
     // 3) Read records and bulk-insert
