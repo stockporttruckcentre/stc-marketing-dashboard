@@ -385,7 +385,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
           </div>
           <button onClick={onClose} className="btn btn--icon"><X size={16} /></button>
         </div>
-        <div className="drawer__body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="drawer__body">
           <div className="split-2">
             <Field label="Contact">
               <input className="input" value={edit.contact_name ?? ''} onChange={(e) => setEdit(s => ({ ...s, contact_name: e.target.value }))} onBlur={(e) => saveField('contact_name', e.target.value)} />

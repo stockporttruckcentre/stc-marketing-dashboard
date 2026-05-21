@@ -260,7 +260,7 @@ function StockDrawer({ row, canEdit, onClose, onSave }: { row: StockTrailer; can
           </div>
           <button onClick={onClose} className="btn btn--icon"><X size={16} /></button>
         </div>
-        <div className="drawer__body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="drawer__body">
           {/* IDENTITY */}
           <Section title="Identity">
             <div className="split-2">
