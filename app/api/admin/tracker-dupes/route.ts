@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const { data: caller } = await supabase.from('profiles').select('role').eq('id', user.id).single();
   if ((caller as any)?.role !== 'admin') return NextResponse.json({ error: 'admin only' }, { status: 403 });
 
-  const body = await req.json().catch(() => ({})) as { target_email?: string; delete?: boolean };
+  const body = await req.json().catch(() => ({})) as { target_email?: string; delete?: boolean; clear_all?: boolean };
   const targetEmail = body.target_email?.trim();
   let targetId = user.id;
   let targetName: string | null = null;
@@ -39,6 +39,12 @@ export async function POST(req: NextRequest) {
       LIMIT 1`;
     if (!listRes.length) return NextResponse.json({ error: 'No Sales tracker list found for that user' }, { status: 404 });
     const listId = listRes[0].id;
+
+    // clear_all: wipe every row from this tracker list (used to reset Alex's tracker after the visualisation import)
+    if (body.clear_all) {
+      const r = await sql`DELETE FROM crm_contacts WHERE list_id = ${listId} RETURNING id`;
+      return NextResponse.json({ target: targetName ?? 'me', listId, cleared: r.length });
+    }
 
     // Group by lowercased company_name, with a separate signature including side+contact for stricter dedup
     const dupGroups = await sql<any[]>`
