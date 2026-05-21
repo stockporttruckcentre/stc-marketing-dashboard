@@ -2286,3 +2286,18 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
   border-color: var(--stc-red); background: rgba(207, 36, 23, 0.08);
 }
 .side-picker__opt > strong { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+
+
+/* Stock trailer status pills */
+.pill--in_stock    { background: rgba(46,160,67,0.15);  color: #5fb572;  border: 1px solid rgba(46,160,67,0.35); }
+.pill--in_stock    .pill__dot { background: #5fb572; }
+.pill--new_build   { background: rgba(91,141,239,0.15); color: #5b8def;  border: 1px solid rgba(91,141,239,0.35); }
+.pill--new_build   .pill__dot { background: #5b8def; }
+.pill--sales_order { background: rgba(245,166,35,0.18); color: #f5a623;  border: 1px solid rgba(245,166,35,0.4); }
+.pill--sales_order .pill__dot { background: #f5a623; }
+.pill--sold        { background: rgba(127,127,127,0.18);color: var(--fg-2); border: 1px solid rgba(127,127,127,0.4); }
+.pill--sold        .pill__dot { background: #888; }
+.pill--rental      { background: rgba(6,182,212,0.18);  color: #06b6d4;  border: 1px solid rgba(6,182,212,0.4); }
+.pill--rental      .pill__dot { background: #06b6d4; }
+.pill--scrap       { background: rgba(207,36,23,0.12);  color: var(--stc-red); border: 1px solid rgba(207,36,23,0.35); }
+.pill--scrap       .pill__dot { background: var(--stc-red); }
