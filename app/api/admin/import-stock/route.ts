@@ -82,12 +82,19 @@ export async function POST() {
       for (const c of cols) obj[c] = r[c] ?? null;
       return obj;
     });
-    // Bulk insert in chunks of 200 to keep parameter count under Postgres's 65535 limit (200 x 53 = 10,600 params)
+    // Bulk insert with manual $N placeholders (1637 rows in chunks of 200; 200*53=10,600 params, under 65535 limit)
     let inserted = 0;
     const chunkSize = 200;
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
-      await sql`INSERT INTO stock_trailers ${sql(chunk, ...cols)}`;
+      const placeholders = chunk.map((_, ri) =>
+        '(' + cols.map((_, ci) => '$' + (ri * cols.length + ci + 1)).join(',') + ')'
+      ).join(',');
+      const values: any[] = chunk.flatMap(r => cols.map(c => (r as any)[c]));
+      await sql.unsafe(
+        `INSERT INTO stock_trailers (${cols.join(',')}) VALUES ${placeholders}`,
+        values,
+      );
       inserted += chunk.length;
     }
     return NextResponse.json({ ok: true, totalInFile: records.length, inserted });
