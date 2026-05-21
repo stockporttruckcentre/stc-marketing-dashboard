@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package } from 'lucide-react';
 import { ScheduleMeetingModal } from './CrmWorkspace';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -269,7 +269,7 @@ export function SalesTracker({
       <div className="side-toggle">
         <button onClick={() => { setSide('trailer_sales'); setWhatFilter(null); }}
           className={`side-toggle__btn ${side === 'trailer_sales' ? 'is-active' : ''}`}>
-          <Briefcase size={14} /> <span>Trailer Sales</span>
+          <Package size={14} /> <span>Trailer Sales</span>
           <span className="side-toggle__count">{sideCounts.trailer_sales}</span>
         </button>
         <button onClick={() => setSide('maintenance')}
@@ -401,7 +401,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
           <div>
             <div className="page-head__eyebrow">Sales · {tab.toUpperCase()}</div>
             <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Briefcase size={20} style={{ color: 'var(--stc-red)' }} />
+              <Package size={20} style={{ color: 'var(--stc-red)' }} />
               {edit.company_name || 'Untitled lead'}
             </h2>
           </div>
@@ -671,7 +671,7 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
             <div className="side-picker">
               <button type="button" onClick={() => setSide('trailer_sales')}
                 className={`side-picker__opt ${side === 'trailer_sales' ? 'is-active' : ''}`}>
-                <Briefcase size={14} /> <strong>Trailer Sales</strong>
+                <Package size={14} /> <strong>Trailer Sales</strong>
                 <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pursuing a deal on trailer / vehicle sales</span>
               </button>
               <button type="button" onClick={() => setSide('maintenance')}
