@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent } from 'ag-grid-community';
-import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling, Send, ArrowRight, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
 
@@ -31,6 +32,9 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
   const [selectedCount, setSelectedCount] = useState(0);
   const [bulkMove, setBulkMove] = useState(false);
   const [bulkLocation, setBulkLocation] = useState(false);
+  const [sendConfirm, setSendConfirm] = useState<{ row: StockTrailer; myEntry: any; others: any[] } | null>(null);
+  const [soldWarning, setSoldWarning] = useState<{ row: StockTrailer; targetStatus: StockStatus; entries: any[] } | null>(null);
+  const router = useRouter();
   const gridRef = useRef<AgGridReact<StockTrailer>>(null);
 
   // Close context menu on outside click / escape. We must check the native event target
@@ -205,6 +209,54 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     setMessage(`Duplicated ${row.stc_no || row.chassis_number || 'row'}`);
   }
 
+  // Check whether this trailer is already on the caller's tracker (or somebody else's), then send.
+  async function sendToTracker(row: StockTrailer, force = false) {
+    if (!force) {
+      const checkRes = await fetch('/api/tracker/check-link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_trailer_id: row.id }),
+      });
+      const j = await checkRes.json();
+      if (j.myEntry || (j.othersEntries && j.othersEntries.length > 0)) {
+        setSendConfirm({ row, myEntry: j.myEntry, others: j.othersEntries || [] });
+        return;
+      }
+    }
+    const sendRes = await fetch('/api/tracker/send-from-stock', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_trailer_id: row.id }),
+    });
+    const j = await sendRes.json();
+    if (!sendRes.ok) { setMessage(j.error || 'Send failed'); return; }
+    setMessage(`Added ${row.stc_no || row.chassis_number || 'trailer'} to your Sales tracker`);
+    setSendConfirm(null);
+  }
+
+  // Intercept status change FROM 'sold' — warn the user about the rep / sale being undone.
+  async function changeStatusWithGuard(row: StockTrailer, newStatus: StockStatus) {
+    if (row.status === 'sold' && newStatus !== 'sold') {
+      const r = await fetch('/api/stock/sold-warning', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_trailer_id: row.id }),
+      });
+      const j = await r.json();
+      if (j.soldEntries && j.soldEntries.length > 0) {
+        setSoldWarning({ row, targetStatus: newStatus, entries: j.soldEntries });
+        return;
+      }
+    }
+    // No warning needed - apply directly
+    await applyStockStatus(row, newStatus);
+  }
+
+  async function applyStockStatus(row: StockTrailer, newStatus: StockStatus) {
+    const { error } = await supabase.from('stock_trailers').update({ status: newStatus }).eq('id', row.id);
+    if (error) { setMessage(error.message); return; }
+    setRows(r => r.map(x => x.id === row.id ? { ...x, status: newStatus } : x));
+    setMessage(`Status updated to ${STATUS_LABEL[newStatus]}`);
+    setSoldWarning(null);
+  }
+
   function onCellContextMenu(e: CellContextMenuEvent<StockTrailer>) {
     if (!e.data) return;
     const me = e.event as MouseEvent;
@@ -333,6 +385,7 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
             setEditing({ row: contextMenu.row, focusField: 'refurb_costs' });
             setContextMenu(null);
           }}
+          onSendToTracker={() => { sendToTracker(contextMenu.row); setContextMenu(null); }}
           onDuplicate={() => { duplicateRow(contextMenu.row); setContextMenu(null); }}
           onDelete={async () => {
             if (!confirm(`Delete ${contextMenu.row.stc_no || contextMenu.row.chassis_number || 'this row'}?`)) return;
@@ -352,6 +405,26 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
         <BulkLocationModal currentSelectionCount={selectedCount} onSave={bulkChangeLocation} onClose={() => setBulkLocation(false)} />
       )}
 
+      {sendConfirm && (
+        <SendToTrackerConfirm
+          row={sendConfirm.row}
+          myEntry={sendConfirm.myEntry}
+          others={sendConfirm.others}
+          onProceed={() => sendToTracker(sendConfirm.row, true)}
+          onClose={() => setSendConfirm(null)}
+        />
+      )}
+
+      {soldWarning && (
+        <SoldTransitionWarning
+          row={soldWarning.row}
+          targetStatus={soldWarning.targetStatus}
+          entries={soldWarning.entries}
+          onProceed={() => applyStockStatus(soldWarning.row, soldWarning.targetStatus)}
+          onClose={() => setSoldWarning(null)}
+        />
+      )}
+
       {editing && <StockDrawer row={editing.row} focusField={editing.focusField} canEdit={canEdit} onClose={() => setEditing(null)} onSave={(patch) => {
         setRows(r => r.map(x => x.id === editing.row.id ? { ...x, ...patch } : x));
         setEditing({ ...editing, row: { ...editing.row, ...patch } });
@@ -366,6 +439,43 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
   const [edit, setEdit] = useState<StockTrailer>(row);
   const [saving, setSaving] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+
+  // Tracker linkage info (does the CURRENT user have this on their tracker?)
+  const [myTrackerRow, setMyTrackerRow] = useState<{ tracker_row_id: string; status: string } | null>(null);
+  const [othersTracking, setOthersTracking] = useState<Array<{ owner_name: string; status: string }>>([]);
+  // Sold-by info (visible to anyone when trailer is sold; never includes commission)
+  const [soldBy, setSoldBy] = useState<{ sold_by: string; customer: string | null; sale_price: number | null; order_date: string | null; dispatch_date: string | null } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await fetch('/api/tracker/check-link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_trailer_id: row.id }),
+      });
+      const j = await r.json();
+      if (!cancelled) {
+        setMyTrackerRow(j.myEntry ?? null);
+        setOthersTracking(j.othersEntries ?? []);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [row.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (edit.status !== 'sold') { setSoldBy(null); return; }
+    (async () => {
+      const r = await fetch('/api/stock/sold-info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_trailer_id: row.id }),
+      });
+      const j = await r.json();
+      if (!cancelled) setSoldBy(j.sale ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [row.id, edit.status]);
 
   // If a focusField was requested (e.g. via right-click "Add refurb cost"), find the matching input,
   // scroll it into view, and focus + select its contents.
@@ -416,6 +526,47 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
           <button onClick={onClose} className="btn btn--icon" style={{ flexShrink: 0 }}><X size={16} /></button>
         </div>
         <div ref={bodyRef} className="drawer__body">
+          {/* Tracker linkage banner — yours, or someone else's */}
+          {myTrackerRow && (
+            <div className="card" style={{ padding: 12, background: 'rgba(46,160,67,0.08)', borderColor: 'rgba(46,160,67,0.35)' }}>
+              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                <Send size={16} style={{ color: '#5fb572', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
+                  This trailer is on <strong>your Sales tracker</strong> at status <strong>{myTrackerRow.status}</strong>.
+                </div>
+                <button onClick={() => router?.push(`/dashboard/leads?contact=${myTrackerRow.tracker_row_id}`)} className="btn btn--sm btn--primary">
+                  View in tracker <ArrowRight size={12} />
+                </button>
+              </div>
+            </div>
+          )}
+          {!myTrackerRow && othersTracking.length > 0 && (
+            <div className="card" style={{ padding: 12, background: 'rgba(91,141,239,0.06)', borderColor: 'rgba(91,141,239,0.3)' }}>
+              <div style={{ fontSize: 12.5 }}>
+                Tracked by: {othersTracking.map((o, i) => (
+                  <span key={i} className="mono" style={{ marginRight: 8 }}>
+                    <strong>{o.owner_name}</strong> ({o.status}){i < othersTracking.length - 1 ? ',' : ''}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Sold by panel - visible to anyone when status is sold (no commission shown) */}
+          {edit.status === 'sold' && soldBy && (
+            <div className="card" style={{ padding: 14, background: 'rgba(127,127,127,0.08)', borderColor: 'var(--border-strong)' }}>
+              <div className="field__label" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--fg-2)' }}>
+                <PoundSterling size={12} /> SALE RECORD
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                <strong>{soldBy.sold_by}</strong> sold this trailer
+                {soldBy.dispatch_date ? ` on ${new Date(soldBy.dispatch_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : soldBy.order_date ? ` on ${new Date(soldBy.order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}
+                {soldBy.customer ? <> to <strong>{soldBy.customer}</strong></> : ''}
+                {soldBy.sale_price ? <> for <strong>£{Number(soldBy.sale_price).toLocaleString()}</strong></> : ''}.
+              </div>
+            </div>
+          )}
+
           {/* IDENTITY */}
           <Section title="Identity">
             <div className="split-2">
@@ -590,10 +741,11 @@ function ComputedBox({ label, value }: { label: string; value: string }) {
 
 
 // ===== Right-click context menu for stock rows =====
-function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb, onMoveStatus, onDuplicate, onDelete, onClose }: {
+function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb, onSendToTracker, onMoveStatus, onDuplicate, onDelete, onClose }: {
   x: number; y: number; row: StockTrailer; canEdit: boolean;
   onView: () => void; onEditCell: () => void;
   onAddRefurb: () => void;
+  onSendToTracker: () => void;
   onMoveStatus: (s: StockStatus) => void;
   onDuplicate: () => void; onDelete: () => void; onClose: () => void;
 }) {
@@ -616,6 +768,7 @@ function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb,
       <div className="ctx-menu__head">{row.stc_no || row.chassis_number || 'Trailer'}{row.year && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.year} {row.make}</span>}</div>
       <button onClick={onView}><Eye size={12} /> Open full view</button>
       <button onClick={onEditCell} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
+      <button onClick={onSendToTracker}><Send size={12} /> Send to my Sales tracker</button>
       <button onClick={onAddRefurb} disabled={!canEdit}><Paintbrush size={12} /> Add refurb cost</button>
       <button onClick={() => onMoveStatus('sold')} disabled={!canEdit || row.status === 'sold'}><PoundSterling size={12} /> Mark as Sold</button>
       <hr />
@@ -684,6 +837,98 @@ function BulkLocationModal({ currentSelectionCount, onSave, onClose }: { current
             <button type="submit" className="btn btn--primary"><MapPin size={14} /> Apply to {currentSelectionCount}</button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Send to tracker — confirms when trailer is already linked to a tracker =====
+function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
+  row: StockTrailer; myEntry: any; others: any[];
+  onProceed: () => void; onClose: () => void;
+}) {
+  return (
+    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="modal__head">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={16} style={{ color: 'var(--stc-warning, #d4a017)' }} /> Already on a tracker
+          </h3>
+          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
+        </div>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>
+            <strong>{row.stc_no || row.chassis_number}</strong> ({row.year} {row.make} {row.model})
+          </p>
+          {myEntry && (
+            <div className="card" style={{ padding: 10, borderColor: 'var(--stc-warning, #d4a017)' }}>
+              <div style={{ fontSize: 12.5 }}>
+                <strong>This trailer is already on your tracker</strong> at status <strong style={{ color: 'var(--stc-red)' }}>{myEntry.status}</strong>.
+              </div>
+            </div>
+          )}
+          {others.map((o, i) => (
+            <div key={i} className="card" style={{ padding: 10, borderColor: 'rgba(91,141,239,0.4)', background: 'rgba(91,141,239,0.06)' }}>
+              <div style={{ fontSize: 12.5 }}>
+                On <strong>{o.owner_name}&apos;s</strong> tracker at status <strong style={{ color: 'var(--stc-red)' }}>{o.status}</strong>.
+                {o.status === 'customer' && <span style={{ color: 'var(--fg-3)' }}> (deal in progress)</span>}
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
+            You can still add it to your tracker — multiple reps can have the same trailer in their pipeline. Whoever marks it Sold first gets the commission.
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
+          <button onClick={onClose} className="btn btn--ghost">Cancel</button>
+          <button onClick={onProceed} className="btn btn--primary"><Send size={14} /> Add anyway</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Sold transition warning — when moving a Sold trailer to another status =====
+function SoldTransitionWarning({ row, targetStatus, entries, onProceed, onClose }: {
+  row: StockTrailer; targetStatus: StockStatus; entries: any[];
+  onProceed: () => void; onClose: () => void;
+}) {
+  const top = entries[0];
+  return (
+    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="modal__head">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={18} style={{ color: 'var(--stc-red)' }} /> Confirm undo of sale
+          </h3>
+          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
+        </div>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>
+            <strong>{row.stc_no || row.chassis_number}</strong> ({row.year} {row.make} {row.model}) is currently <strong style={{ color: 'var(--stc-red)' }}>Sold</strong>.
+          </p>
+          <div className="card" style={{ padding: 12, background: 'rgba(207,36,23,0.06)', borderColor: 'rgba(207,36,23,0.3)' }}>
+            <div style={{ fontSize: 13 }}>
+              <strong>{top.owner_first}</strong> sold this trailer{top.dispatch_date ? ` on ${new Date(top.dispatch_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : top.order_date ? ` on ${new Date(top.order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}
+              {top.sale_price ? ` for £${Number(top.sale_price).toLocaleString()}` : ''}.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 6 }}>
+              Moving this trailer back to <strong style={{ color: 'var(--fg-1)' }}>{STATUS_LABEL[targetStatus]}</strong> will:
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                <li>Affect Sales &amp; Leasing&apos;s revenue figures for the period</li>
+                <li>Reverse any commission allocated to {top.owner_first}</li>
+                <li>The tracker rows linked to this trailer stay as customer (the sale happened — only the trailer status changes)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
+          <button onClick={onClose} className="btn btn--ghost">Cancel</button>
+          <button onClick={onProceed} className="btn btn--primary" style={{ background: 'var(--stc-red)' }}>
+            Yes, change status anyway
+          </button>
+        </div>
       </div>
     </div>
   );

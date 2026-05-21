@@ -71,5 +71,21 @@ export async function POST(req: NextRequest) {
     stockUpdated = true;
   }
 
-  return NextResponse.json({ ok: true, commission, stockUpdated, stock_trailer_id: row.stock_trailer_id });
+  // 3) Cascade to OTHER reps' tracker rows linked to the same stock trailer (first-to-sell rule):
+  // their status becomes 'customer' too, but we do NOT touch their sale_price / commission /
+  // dispatch_date - those stay null since they didn't make the sale. This keeps the dataset
+  // honest: only the seller has commission; everyone else sees 'this is sold now'.
+  let cascadedOthers = 0;
+  if (row.stock_trailer_id) {
+    const { data: others, error: cErr } = await supabase
+      .from('crm_contacts')
+      .update({ status: 'customer' })
+      .eq('stock_trailer_id', row.stock_trailer_id)
+      .neq('id', body.tracker_id)
+      .not('status', 'eq', 'customer')
+      .select('id');
+    if (!cErr && others) cascadedOthers = others.length;
+  }
+
+  return NextResponse.json({ ok: true, commission, stockUpdated, stock_trailer_id: row.stock_trailer_id, cascadedOthers });
 }

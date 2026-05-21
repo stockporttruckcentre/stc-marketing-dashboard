@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
 import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy } from 'lucide-react';
@@ -46,6 +47,19 @@ export function SalesTracker({
   const [tab, setTab] = useState<TrackerTab>('working');
   const [query, setQuery] = useState('');
   const [editingRow, setEditingRow] = useState<CRMContact | null>(null);
+
+  // ?contact=ID deep-link from the stock drawer's "View in tracker" button
+  const sp = useSearchParams();
+  useEffect(() => {
+    const id = sp?.get('contact');
+    if (!id) return;
+    const target = rows.find(r => r.id === id);
+    if (target) {
+      setEditingRow(target);
+      if (target.side) setSide(target.side as any);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp, rows]);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
