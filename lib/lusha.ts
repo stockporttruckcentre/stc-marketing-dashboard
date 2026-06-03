@@ -358,7 +358,13 @@ export async function searchCompanies(opts: {
   limit?: number;
 }) {
   const include: any = {};
-  if (opts.location) include.locations = [{ country: 'United Kingdom', city: opts.location }];
+  if (opts.location) {
+    const loc: any = { country: 'United Kingdom', city: opts.location };
+    // Lusha's prospecting search supports a radius (miles) on a city/location filter.
+    // Sending it lets us widen the search beyond the city's own postcodes.
+    if (opts.radiusMiles && opts.radiusMiles > 0) loc.radius = opts.radiusMiles;
+    include.locations = [loc];
+  }
   if (opts.industryIds && opts.industryIds.length) include.mainIndustriesIds = opts.industryIds;
   if (opts.minEmployees != null && opts.maxEmployees != null) {
     include.sizes = [{ min: opts.minEmployees, max: opts.maxEmployees }];
