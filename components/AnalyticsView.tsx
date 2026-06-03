@@ -5,9 +5,9 @@ import {
   ArrowDownRight, ArrowUpRight, PoundSterling, TrendingUp, Award, Users,
   Package, Briefcase, Activity, Sparkles,
 } from 'lucide-react';
-import { ResponsiveLine } from '@nivo/line';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
+import { ResponsiveLine } from '@nivo/line';
 import type { Profile, StockTrailer, CRMContact, CrmList } from '@/lib/types';
 
 const STC_RED  = '#cf2417';
@@ -223,10 +223,12 @@ export function AnalyticsView({
     return months;
   }, [sold]);
 
-  const nivoLineData = useMemo(() => [
+  const allLineData = useMemo(() => [
     { id: 'Revenue', color: STC_NAVY, data: monthly.map(m => ({ x: m.label, y: m.rev })) },
     { id: 'Profit',  color: POS,      data: monthly.map(m => ({ x: m.label, y: m.profit })) },
   ], [monthly]);
+  const [visibleSeries, setVisibleSeries] = useState<string[]>(['Revenue', 'Profit']);
+  const nivoLineData = useMemo(() => allLineData.filter(s => visibleSeries.includes(s.id)), [allLineData, visibleSeries]);
 
   // Sparkline helper for KPI: small recent series
   const sparkRev = useMemo(() => monthly.slice(-6).map(m => m.rev), [monthly]);
@@ -315,10 +317,16 @@ export function AnalyticsView({
 
   // ===== Stock by make =====
   const byMake = useMemo(() => {
+    const normMake = (raw: string | null | undefined) => {
+      const t = (raw || '').trim();
+      if (!t) return 'Unknown';
+      // Title-case each word so 'Don bur' and 'DON BUR' both -> 'Don Bur'
+      return t.toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase());
+    };
     const map = new Map<string, number>();
     for (const s of stockFiltered) {
-      const m = (s.make || 'Unknown').trim();
-      if (!m) continue;
+      const m = normMake(s.make);
+      if (m === 'Unknown' && !s.make) continue;
       map.set(m, (map.get(m) ?? 0) + 1);
     }
     return Array.from(map.entries())
@@ -392,10 +400,40 @@ export function AnalyticsView({
             </div>
             <div className="an-card__sub">Last 12 months · whole stock list</div>
           </div>
-          <div style={{ height: 320 }}>
+          {/* Click the Revenue / Profit chips to toggle each line on/off */}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginBottom: 6 }}>
+            {[
+              { id: 'Revenue', color: STC_NAVY },
+              { id: 'Profit',  color: POS },
+            ].map(s => {
+              const on = visibleSeries.includes(s.id);
+              return (
+                <button key={s.id}
+                  onClick={() => setVisibleSeries(prev => on ? prev.filter(k => k !== s.id) : [...prev, s.id])}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontSize: 11, fontWeight: 600,
+                    padding: '4px 10px', borderRadius: 7,
+                    background: on ? 'rgba(255,255,255,0.04)' : 'transparent',
+                    border: `1px solid ${on ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.1)'}`,
+                    color: on ? 'var(--an-text-0)' : 'var(--an-text-3)',
+                    cursor: 'pointer', transition: 'all .12s',
+                    textDecoration: on ? 'none' : 'line-through',
+                  }}>
+                  <span style={{
+                    width: 10, height: 10, borderRadius: 50,
+                    background: on ? s.color : 'transparent',
+                    border: on ? 'none' : `1.5px solid ${s.color}`,
+                  }} />
+                  {s.id}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ height: 290 }}>
             <ResponsiveLine
               data={nivoLineData}
-              margin={{ top: 18, right: 30, bottom: 36, left: 64 }}
+              margin={{ top: 12, right: 30, bottom: 36, left: 64 }}
               xScale={{ type: 'point' }}
               yScale={{ type: 'linear', min: 0, max: 'auto', stacked: false }}
               curve="catmullRom"
@@ -409,10 +447,7 @@ export function AnalyticsView({
               colors={(s: any) => s.color}
               lineWidth={2.5}
               theme={nivoTheme()}
-              axisLeft={{
-                tickSize: 0, tickPadding: 10,
-                format: (v: number) => fmtMoneyCompact(v),
-              }}
+              axisLeft={{ tickSize: 0, tickPadding: 10, format: (v: number) => fmtMoneyCompact(v) }}
               axisBottom={{ tickSize: 0, tickPadding: 10 }}
               enableSlices="x"
               sliceTooltip={({ slice }: any) => (

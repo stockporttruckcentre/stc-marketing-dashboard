@@ -13,8 +13,8 @@ export default async function AnalyticsPage() {
   const [profileRes, profilesAllRes, stockRes, trackerRes, listsRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('profiles').select('id, email, full_name, role'),
-    supabase.from('stock_trailers').select('*'),
-    supabase.from('crm_contacts').select('*').not('list_id', 'is', null),
+    supabase.from('stock_trailers').select('*').range(0, 9999),
+    supabase.from('crm_contacts').select('*').not('list_id', 'is', null).range(0, 9999),
     supabase.from('crm_lists').select('*'),
   ]);
 
