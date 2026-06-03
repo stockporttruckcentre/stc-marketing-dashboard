@@ -30,7 +30,7 @@ function fmtDate(iso: string) {
 
 // Per-notice-type visual identity (icon + colour token).
 // Colours are HSL hue strings so we can derive multiple shades (accent / tint / border).
-type TypeMeta = { Icon: React.ComponentType<{ size?: number }>; hue: number; label: string };
+type TypeMeta = { Icon: any; hue: number; label: string };
 const DEFAULT_META: TypeMeta = { Icon: AlertOctagon, hue: 220, label: 'Notice' };
 const TYPE_META: { match: RegExp; meta: TypeMeta }[] = [
   { match: /administration/i,            meta: { Icon: Briefcase,   hue: 222, label: 'Administration' } },
