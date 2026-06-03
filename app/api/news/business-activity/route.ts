@@ -4,24 +4,25 @@ import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
-export const revalidate = 600; // 10 min cache
+export const revalidate = 600;
 
 /**
- * Breaking business activity feed.
- * Pulls UK insolvency / administration / winding-up notices from The Gazette
- * (official statutory publication for UK insolvency notices).
+ * The Gazette - Atom feed for insolvency notices.
+ * Documented URL pattern: /all-notices/notice/data.feed
+ * Category codes (categorycode-all):
+ *   24    Insolvency (covers admin / CVL / winding-up / receivers etc)
+ *   2402  Companies winding-up
+ *   2410  Companies administrations
+ * Pass results-page-size and order-by=publish-date-desc.
  *
- * Then cross-matches each notice's subject company against:
- *   - Customer names on the user's CRM contacts
- *   - Sold-to customer names on stock_trailers
- *
- * Notices that match are flagged as 'urgent' so the dashboard can surface
- * them prominently.
+ * We use the umbrella category (24) so the team sees ALL insolvency activity,
+ * then we surface notices matching our customers at the top.
  */
-
-// The Gazette Atom feed: insolvency notices, all areas.
-// Categories: 24=Insolvency, sub-categories include administration/CVL/winding up.
-const GAZETTE_FEED = 'https://www.thegazette.co.uk/insolvency/notice/data.feed?results-page-size=50';
+const GAZETTE_FEED_URL =
+  'https://www.thegazette.co.uk/all-notices/notice/data.feed' +
+  '?categorycode-all=24' +
+  '&results-page-size=40' +
+  '&order-by=publish-date-desc';
 
 type Notice = {
   id: string;
@@ -31,22 +32,53 @@ type Notice = {
   publishedDate: string;
   url: string;
   summary: string;
+  isCustomer: boolean;
 };
 
-function stripHtml(s: string) {
-  return s ? s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim() : '';
+const NOISE_WORDS_RE = /\b(LIMITED|LTD|PLC|LLP|LP|GROUP|HOLDINGS|UK|COMPANY|COMPANIES|INC|CORP)\b\.?/g;
+function normaliseCo(s: string): string {
+  return s
+    .toUpperCase()
+    .replace(/^RE:\s*/i, '')
+    .replace(/\([^)]*\)\s*$/g, '')
+    .replace(/\bIN\s+(?:ADMINISTRATION|LIQUIDATION|RECEIVERSHIP)\b/gi, '')
+    .replace(NOISE_WORDS_RE, '')
+    .replace(/[,\.\(\)]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-// Pull the company name from a notice title like "JANE LIMITED" or "RE: ACME LTD (in administration)"
-function extractCompany(title: string): string | null {
-  if (!title) return null;
-  let s = title.toUpperCase();
-  s = s.replace(/^RE:\s*/i, '');
-  // Strip trailing parentheticals like "(IN ADMINISTRATION)"
-  s = s.replace(/\([^)]*\)\s*$/g, '').trim();
-  // Strip noise words
-  s = s.replace(/\b(LIMITED|LTD|PLC|LLP|GROUP|HOLDINGS|UK)\b\.?/g, '').replace(/[,\.]/g, ' ').replace(/\s+/g, ' ').trim();
-  return s || null;
+function stripHtml(s: string) {
+  return s ? s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ').trim() : '';
+}
+
+// Atom link can be a single object, array, or string. Find the canonical web link.
+function extractLink(linkField: any): string {
+  if (!linkField) return '';
+  const arr = Array.isArray(linkField) ? linkField : [linkField];
+  // Prefer rel="alternate" or no rel; fall back to first href
+  for (const l of arr) {
+    if (typeof l === 'string') return l;
+    if (l?.['@_rel'] && l['@_rel'] !== 'alternate') continue;
+    if (l?.['@_href']) return l['@_href'];
+  }
+  for (const l of arr) {
+    if (l?.['@_href']) return l['@_href'];
+    if (typeof l === 'string') return l;
+  }
+  return '';
+}
+
+function extractText(field: any): string {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  if (typeof field === 'object') {
+    return field['#text'] ?? field['_'] ?? '';
+  }
+  return String(field);
 }
 
 export async function GET() {
@@ -55,54 +87,75 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   let xml = '';
+  let fetchStatus: number = 0;
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 9000);
-    const res = await fetch(GAZETTE_FEED, {
+    const res = await fetch(GAZETTE_FEED_URL, {
       signal: ctrl.signal,
-      headers: { 'User-Agent': 'STC Marketing Dashboard/1.0 (business activity monitor)' },
+      headers: {
+        'User-Agent': 'STC Marketing Dashboard',
+        'Accept': 'application/atom+xml, application/xml, text/xml, */*',
+      },
       next: { revalidate: 600 },
     });
     clearTimeout(tid);
+    fetchStatus = res.status;
     if (!res.ok) {
-      return NextResponse.json({ notices: [], error: `Gazette fetch failed: ${res.status}` });
+      return NextResponse.json({ notices: [], matchedCount: 0, totalCount: 0, error: `Gazette HTTP ${res.status}` });
     }
     xml = await res.text();
   } catch (e: any) {
-    return NextResponse.json({ notices: [], error: e?.message ?? 'fetch error' });
+    return NextResponse.json({ notices: [], matchedCount: 0, totalCount: 0, error: e?.message ?? 'fetch error' });
   }
 
-  // Parse Atom feed
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+  if (!xml || xml.length < 50) {
+    return NextResponse.json({ notices: [], matchedCount: 0, totalCount: 0, error: 'empty feed', fetchStatus });
+  }
+
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    parseAttributeValue: false,
+    trimValues: true,
+  });
   let parsed: any;
   try {
     parsed = parser.parse(xml);
   } catch (e: any) {
-    return NextResponse.json({ notices: [], error: 'parse error: ' + e?.message });
+    return NextResponse.json({ notices: [], error: 'XML parse failed: ' + (e?.message ?? ''), fetchStatus });
   }
 
-  const entries: any[] = parsed?.feed?.entry ? (Array.isArray(parsed.feed.entry) ? parsed.feed.entry : [parsed.feed.entry]) : [];
+  const feed = parsed?.feed ?? parsed?.['atom:feed'] ?? parsed;
+  const entryRaw = feed?.entry ?? feed?.['atom:entry'] ?? [];
+  const entries: any[] = Array.isArray(entryRaw) ? entryRaw : (entryRaw ? [entryRaw] : []);
 
-  const notices: Notice[] = entries.map((e: any) => {
-    const titleRaw = typeof e.title === 'string' ? e.title : (e.title?.['#text'] ?? '');
-    const summary = stripHtml(typeof e.summary === 'string' ? e.summary : (e.summary?.['#text'] ?? e.content?.['#text'] ?? ''));
-    const link = e.link?.['@_href'] ?? (Array.isArray(e.link) ? e.link[0]?.['@_href'] : e.link) ?? '';
-    const id = e.id ?? link ?? titleRaw;
-    const published = e.published ?? e.updated ?? new Date().toISOString();
-    const category = Array.isArray(e.category) ? e.category[0] : e.category;
-    const noticeType = category?.['@_label'] ?? category?.['@_term'] ?? null;
+  const notices: Omit<Notice, 'isCustomer'>[] = entries.map((e: any, i: number) => {
+    const titleRaw = stripHtml(extractText(e.title));
+    const summary = stripHtml(extractText(e.summary) || extractText(e.content));
+    const link = extractLink(e.link) || '';
+    // Many Gazette IDs are URNs like urn:uuid:... — fall back to link
+    const id = String(extractText(e.id) || link || `entry-${i}`);
+    const published = extractText(e.published) || extractText(e.updated) || extractText(e['atom:published']) || new Date().toISOString();
+    // Notice type can be in <category term="..." label="...">
+    let noticeType: string | null = null;
+    const cat = e.category;
+    if (cat) {
+      const c = Array.isArray(cat) ? cat[0] : cat;
+      noticeType = c?.['@_label'] ?? c?.['@_term'] ?? null;
+    }
     return {
-      id: String(id),
-      title: stripHtml(titleRaw),
-      company: extractCompany(stripHtml(titleRaw)),
+      id,
+      title: titleRaw || 'Notice',
+      company: titleRaw ? normaliseCo(titleRaw) || null : null,
       noticeType,
-      publishedDate: String(published),
-      url: String(link),
-      summary: summary.slice(0, 280),
+      publishedDate: published,
+      url: link.startsWith('http') ? link : (link ? `https://www.thegazette.co.uk${link}` : 'https://www.thegazette.co.uk/'),
+      summary: (summary || '').slice(0, 280),
     };
   }).filter(n => n.title && n.url);
 
-  // Cross-match against customer names (CRM + sold stock)
+  // Cross-match against our customers
   const [{ data: contacts }, { data: stockCustomers }] = await Promise.all([
     supabase.from('crm_contacts').select('company_name'),
     supabase.from('stock_trailers').select('customer').not('customer', 'is', null),
@@ -110,33 +163,30 @@ export async function GET() {
 
   const ourCustomers = new Set<string>();
   for (const c of contacts ?? []) {
-    const n = (c as any).company_name?.toUpperCase().replace(/\b(LIMITED|LTD|PLC|LLP|GROUP|HOLDINGS|UK)\b\.?/g, '').replace(/[,\.]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (n) ourCustomers.add(n);
+    const n = normaliseCo(String((c as any).company_name ?? ''));
+    if (n.length >= 4) ourCustomers.add(n);
   }
   for (const s of stockCustomers ?? []) {
-    const n = (s as any).customer?.toUpperCase().replace(/\b(LIMITED|LTD|PLC|LLP|GROUP|HOLDINGS|UK)\b\.?/g, '').replace(/[,\.]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (n) ourCustomers.add(n);
+    const n = normaliseCo(String((s as any).customer ?? ''));
+    if (n.length >= 4) ourCustomers.add(n);
   }
 
-  const flagged = notices.map(n => {
-    if (!n.company) return { ...n, isCustomer: false };
-    // Match if our customer name appears in the notice company or vice versa (loose)
-    const upper = n.company;
+  const flagged: Notice[] = notices.map(n => {
+    if (!n.company || n.company.length < 4) return { ...n, isCustomer: false };
     let match = false;
     for (const c of ourCustomers) {
-      if (c.length >= 4 && (upper.includes(c) || c.includes(upper))) { match = true; break; }
+      if (c.length >= 4 && (n.company.includes(c) || c.includes(n.company))) { match = true; break; }
     }
     return { ...n, isCustomer: match };
   });
 
-  // Customer matches first, then by date desc
   flagged.sort((a, b) => {
     if (a.isCustomer !== b.isCustomer) return a.isCustomer ? -1 : 1;
     return b.publishedDate.localeCompare(a.publishedDate);
   });
 
   return NextResponse.json({
-    notices: flagged.slice(0, 25),
+    notices: flagged.slice(0, 30),
     matchedCount: flagged.filter(n => n.isCustomer).length,
     totalCount: flagged.length,
     fetchedAt: new Date().toISOString(),

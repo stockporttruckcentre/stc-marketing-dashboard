@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { RefreshCw, ExternalLink, Loader, Trash2, TrendingUp, Search, Calendar, User } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { BusinessActivityStrip } from './BusinessActivityStrip';
 import type { NewsItem, NewsSource, UserRole } from '@/lib/types';
 
 function formatDate(iso: string): string {
@@ -97,6 +98,7 @@ export function IndustryNews({
 
   return (
     <div>
+      <BusinessActivityStrip />
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Workspace · Industry news</div>

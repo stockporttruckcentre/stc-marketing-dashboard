@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { ArrowRight, Calendar, Plus } from 'lucide-react';
-import { BusinessActivityStrip } from '@/components/BusinessActivityStrip';
 import type { Profile, CRMContact, SocialPost, DEPOTS as _ } from '@/lib/types';
 import { DEPOTS } from '@/lib/types';
 
@@ -61,8 +60,6 @@ export default async function DashboardHome() {
         <Stat label="Posts pending"       value={(pending ?? 0).toString()} accent="warning" sub={`${scheduled ?? 0} scheduled`} />
         <Stat label="Total contacts"      value={(allContacts?.length ?? 0).toLocaleString()} accent="lusha" sub={`${counts.won} won · ${counts.lost} lost`} />
       </div>
-
-      <div style={{ marginTop: 18 }}><BusinessActivityStrip /></div>
 
       <div className="split-2" style={{ marginTop: 18 }}>
         <div className="card">
