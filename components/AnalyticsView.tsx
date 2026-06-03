@@ -320,8 +320,15 @@ export function AnalyticsView({
     const normMake = (raw: string | null | undefined) => {
       const t = (raw || '').trim();
       if (!t) return 'Unknown';
-      // Title-case each word so 'Don bur' and 'DON BUR' both -> 'Don Bur'
-      return t.toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase());
+      // Title-case each word, except short all-caps tokens like SDC stay as-is.
+      return t.split(/\s+/).map(w => {
+        // Treat compact 'donbur' as 'Don Bur'
+        const u = w.toUpperCase();
+        if (u === 'DONBUR') return 'Don Bur';
+        if (/^[A-Z]{2,4}$/.test(w)) return w;             // already an acronym
+        if (w.length <= 4 && /^[A-Za-z]+$/.test(w) && w === w.toUpperCase()) return w.toUpperCase();
+        return w.toLowerCase().replace(/^./, c => c.toUpperCase());
+      }).join(' ');
     };
     const map = new Map<string, number>();
     for (const s of stockFiltered) {
