@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { CompanyFinder } from '@/components/CompanyFinder';
 import type { CrmList } from '@/lib/types';
+import './finder.css';
 
 export const dynamic = 'force-dynamic';
 

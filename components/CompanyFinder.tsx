@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Loader, Search, Plus, CheckCircle, Globe, Users, X, MapPin, Building } from 'lucide-react';
+import { Loader, Search, Plus, CheckCircle, Globe, Users, X, MapPin, Building, Sparkles, Briefcase, Hash } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { DEPOTS, type CrmList } from '@/lib/types';
 import { BusinessActivityStrip } from './BusinessActivityStrip';
@@ -113,23 +113,23 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   }
 
   return (
-    <div>
-      <div className="page-head">
+    <div className="cf-hub">
+      <div className="cf-hero">
         <div>
-          <div className="page-head__eyebrow">Sales · Company finder</div>
-          <h1 className="page-head__title"><Search size={26} style={{ color: 'var(--stc-red)' }} /><span>Find prospects<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
-          <div className="page-head__sub">Search any STC depot, custom postcode, or radius via Lusha. Add results in bulk to any CRM list.</div>
+          <div className="cf-hero__eyebrow"><Sparkles size={11} /> Prospecting · Lusha</div>
+          <h1>Find your next customer</h1>
+          <div className="cf-hero__sub">Search any STC depot, custom postcode, or radius via Lusha. Add results in bulk to any CRM list.</div>
         </div>
       </div>
 
-      <div className="toolbar" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div className="cf-tabs" role="tablist">
         <button onClick={() => setTab('finder')}
-          className={`news-chip ${tab === 'finder' ? 'is-active' : ''}`}>
-          Company Finder
+          className={`cf-tab ${tab === 'finder' ? 'is-active' : ''}`}>
+          <Search size={12} /> Company Finder
         </button>
         <button onClick={() => setTab('company')}
-          className={`news-chip ${tab === 'company' ? 'is-active' : ''}`}>
-          Insolvency Updates
+          className={`cf-tab ${tab === 'company' ? 'is-active' : ''}`}>
+          <Briefcase size={12} /> Insolvency Updates
         </button>
       </div>
 
@@ -137,116 +137,120 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         <BusinessActivityStrip />
       ) : (
       <>
-      <div className="finder-hero">
-        <div className="finder-hero__grid">
-          <Field label="LOCATION">
-            <select value={depotKey} onChange={(e) => setDepotKey(e.target.value)} className="input">
+      <div className="cf-card">
+        <div className="cf-search-grid">
+          <CfField label="Location" Icon={MapPin}>
+            <select value={depotKey} onChange={(e) => setDepotKey(e.target.value)} className="cf-input">
               <optgroup label="STC Depots">
                 {DEPOTS.map((d) => <option key={d.name} value={d.name}>STC {d.name}</option>)}
               </optgroup>
               <option value="__custom__">Custom postcode / city…</option>
             </select>
-          </Field>
-          {isCustom ? (
-            <Field label="POSTCODE OR CITY">
+          </CfField>
+          {isCustom && (
+            <CfField label="Postcode or city" Icon={MapPin}>
               <input type="text" value={customPostcode} onChange={(e) => setCustomPostcode(e.target.value)}
                 placeholder="e.g. M1 2AB · Liverpool · Wakefield"
-                className="input" autoFocus />
-            </Field>
-          ) : <span />}
-          <Field label="RADIUS (MI)">
-            <input type="number" min={1} max={300} value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="input" />
-          </Field>
-          <Field label="INDUSTRY">
-            <select value={industry} onChange={(e) => setIndustry(Number(e.target.value))} className="input">
+                className="cf-input" autoFocus />
+            </CfField>
+          )}
+          <CfField label="Radius (miles)" Icon={Hash}>
+            <input type="number" min={1} max={300} value={radius}
+              onChange={(e) => setRadius(Number(e.target.value))} className="cf-input" />
+          </CfField>
+          <CfField label="Industry" Icon={Briefcase}>
+            <select value={industry} onChange={(e) => setIndustry(Number(e.target.value))} className="cf-input">
               {INDUSTRIES.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
             </select>
-          </Field>
-          <Field label="EMPLOYEES MIN">
-            <input type="number" min={1} value={empMin} onChange={(e) => setEmpMin(Number(e.target.value))} className="input" />
-          </Field>
-          <Field label="EMPLOYEES MAX">
-            <input type="number" min={1} value={empMax} onChange={(e) => setEmpMax(Number(e.target.value))} className="input" />
-          </Field>
+          </CfField>
+          <CfField label="Employees · min" Icon={Users}>
+            <input type="number" min={1} value={empMin}
+              onChange={(e) => setEmpMin(Number(e.target.value))} className="cf-input" />
+          </CfField>
+          <CfField label="Employees · max" Icon={Users}>
+            <input type="number" min={1} value={empMax}
+              onChange={(e) => setEmpMax(Number(e.target.value))} className="cf-input" />
+          </CfField>
         </div>
-        <div className="finder-hero__cta">
-          <div className="finder-hero__summary">
-            <MapPin size={14} style={{ verticalAlign: 'text-bottom', marginRight: 4 }} />
-            <strong style={{ color: 'var(--fg-1)' }}>{locationLabel()}</strong>
-            <span style={{ color: 'var(--fg-3)', marginLeft: 6 }}>· within {radius} mi · {empMin}–{empMax} employees</span>
+        <div className="cf-actions">
+          <div className="cf-summary">
+            <MapPin size={13} />
+            <strong>{locationLabel()}</strong>
+            <span className="cf-summary__sub">· within {radius} mi · {empMin}–{empMax} employees</span>
           </div>
-          <button onClick={handleSearch} disabled={searching || (isCustom && !customPostcode.trim())}
-            className="btn btn--primary btn--lg">
-            {searching ? <Loader size={14} className="spin" /> : <Search size={14} />} Search Lusha
+          <button onClick={handleSearch}
+            disabled={searching || (isCustom && !customPostcode.trim())}
+            className="cf-btn-primary">
+            {searching ? <Loader size={14} className="spin" /> : <Search size={14} />}
+            {searching ? 'Searching…' : 'Search Lusha'}
           </button>
         </div>
       </div>
 
-      {message && <div className="alert alert--info" style={{ marginTop: 14 }}>{message}</div>}
+      {message && <div className="alert alert--info" style={{ marginTop: 14, background: 'var(--cf-surface-1)', border: '1px solid var(--cf-border)', borderRadius: 10, padding: 12, color: 'var(--cf-text-1)', fontSize: 13 }}>{message}</div>}
 
       {results.length > 0 && (
-        <div className="card" style={{ marginTop: 14 }}>
-          <div className="card__head">
-            <div className="row" style={{ gap: 12 }}>
-              <input type="checkbox" checked={selected.size === results.length} onChange={toggleAll} />
-              <h3 style={{ margin: 0 }}>{results.length} results</h3>
+        <div className="cf-results">
+          <div className="cf-results__head">
+            <div className="cf-results__title">
+              <input type="checkbox" className="cf-checkbox"
+                checked={selected.size === results.length} onChange={toggleAll} />
+              Results
+              <span className="cf-results__title__count">{results.length}</span>
               {selected.size > 0 && (
-                <span className="mono" style={{ fontSize: 11, color: 'var(--stc-red)' }}>
-                  {`// `}{selected.size} SELECTED
+                <span className="cf-results__title__count" style={{ color: 'var(--cf-stc-red)' }}>
+                  {selected.size} selected
                 </span>
               )}
             </div>
-            <div className="row">
-              {selected.size > 0 && (
-                <button onClick={handleAddBulk} className="btn btn--primary">
-                  <Plus size={14} /> Add {selected.size} to CRM
-                </button>
-              )}
-            </div>
+            {selected.size > 0 && (
+              <button onClick={handleAddBulk} className="cf-bulk-cta">
+                <Plus size={13} /> Add {selected.size} to CRM
+              </button>
+            )}
           </div>
-          <table className="adm-table">
-            <thead>
-              <tr>
-                <th style={{ width: 36 }}></th>
-                <th>Company</th>
-                <th>Employees</th>
-                <th>Location</th>
-                <th>Industry</th>
-                <th>Domain</th>
-                <th style={{ textAlign: 'right' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((c, i) => {
-                const isAdded = added[c.name];
-                const isSelected = selected.has(c.name);
-                return (
-                  <tr key={`${c.name}-${i}`} style={{ background: isSelected ? 'rgba(207,36,23,0.06)' : undefined }}>
-                    <td><input type="checkbox" checked={isSelected} onChange={() => toggleRow(c.name)} disabled={!!isAdded} /></td>
-                    <td style={{ color: 'var(--fg-1)', fontWeight: 500 }}>
-                      <Building size={12} style={{ verticalAlign: 'text-bottom', marginRight: 6, color: 'var(--fg-4)' }} />
-                      {c.name}
-                    </td>
-                    <td className="tnum">{c.employees ?? '—'}</td>
-                    <td>{c.location || '—'}</td>
-                    <td style={{ color: 'var(--fg-3)' }}>{c.industry || '—'}</td>
-                    <td className="mono" style={{ color: 'var(--fg-3)', fontSize: 12 }}>{c.domain || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {isAdded ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--stc-success)', fontSize: 12 }}>
-                          <CheckCircle size={12} /> Added
-                        </span>
-                      ) : (
-                        <button onClick={() => handleAddSingle(c)} className="btn btn--sm">
-                          <Plus size={12} /> Add
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+
+          <div>
+            {results.map((c, i) => {
+              const isAdded = added[c.name];
+              const isSelected = selected.has(c.name);
+              const initials = c.name.split(/\s+/).filter(Boolean).slice(0,2).map(s => s[0]?.toUpperCase() ?? '').join('') || '·';
+              const palette = [
+                ['#ff3b2d', '#cf2417'],
+                ['#4d63ff', '#071458'],
+                ['#22d3ee', '#0ea5e9'],
+                ['#a78bfa', '#7c3aed'],
+                ['#20c997', '#15a085'],
+                ['#f7b500', '#d97706'],
+              ];
+              let h = 0;
+              for (let j = 0; j < c.name.length; j++) h = (h * 31 + c.name.charCodeAt(j)) >>> 0;
+              const [ax, ay] = palette[h % palette.length];
+              return (
+                <div key={`${c.name}-${i}`}
+                  className={`cf-row ${isSelected ? 'is-selected' : ''} ${isAdded ? 'is-added' : ''}`}>
+                  <input type="checkbox" className="cf-checkbox"
+                    checked={isSelected} onChange={() => toggleRow(c.name)} disabled={!!isAdded} />
+                  <div className="cf-row__company" style={{ ['--ax' as any]: ax, ['--ay' as any]: ay } as any}>
+                    <span className="cf-row__company__avatar">{initials}</span>
+                    <span className="cf-row__company__name">{c.name}</span>
+                  </div>
+                  <div className="cf-row__cell">{c.employees != null ? c.employees.toLocaleString() : '—'}</div>
+                  <div className="cf-row__cell">{c.location || '—'}</div>
+                  <div className="cf-row__cell cf-row__cell--muted">{c.industry || '—'}</div>
+                  <div className="cf-row__action">
+                    {isAdded ? (
+                      <span className="cf-row__added"><CheckCircle size={12} /> Added</span>
+                    ) : (
+                      <button onClick={() => handleAddSingle(c)} className="cf-row__add-btn">
+                        <Plus size={11} /> Add
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -273,6 +277,15 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       )}
     </>
       )}
+    </div>
+  );
+}
+
+function CfField({ label, Icon, children }: { label: string; Icon?: any; children: React.ReactNode }) {
+  return (
+    <div className="cf-field">
+      <div className="cf-field__label">{Icon && <Icon size={11} />} {label}</div>
+      {children}
     </div>
   );
 }
