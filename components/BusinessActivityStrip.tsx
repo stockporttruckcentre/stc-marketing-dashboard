@@ -29,6 +29,7 @@ export function BusinessActivityStrip() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [matched, setMatched] = useState(0);
   const [total, setTotal] = useState(0);
+  const [transportCount, setTransportCount] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export function BusinessActivityStrip() {
       setNotices(j.notices ?? []);
       setMatched(j.matchedCount ?? 0);
       setTotal(j.totalCount ?? 0);
+      setTransportCount(j.transportCount ?? 0);
       setFetchedAt(j.fetchedAt ?? null);
     } catch (e: any) {
       setError(e?.message ?? 'load failed');
@@ -70,7 +72,7 @@ export function BusinessActivityStrip() {
           </span>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', display: 'flex', alignItems: 'center', gap: 10 }}>
-              Breaking business activity
+              Company Updates
               {matched > 0 && (
                 <span style={{
                   fontSize: 11, fontWeight: 700, color: '#fff',
@@ -81,7 +83,7 @@ export function BusinessActivityStrip() {
               )}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--fg-3)', marginTop: 2 }}>
-              Live from The Gazette · UK insolvency, administration & winding-up notices · {total} notice{total === 1 ? '' : 's'}
+              London Gazette · UK insolvency, administration Live from The Gazette · UK insolvency, administration & winding-up notices winding-up notices · {total} notice{total === 1 ? '' : 's'}
               {fetchedAt && <> · updated {new Date(fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</>}
             </div>
           </div>

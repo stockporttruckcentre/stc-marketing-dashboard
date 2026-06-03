@@ -27,6 +27,7 @@ export function IndustryNews({
   const [sources] = useState<NewsSource[]>(initialSources);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [tab, setTab] = useState<'industry' | 'company'>('industry');
   const [query, setQuery] = useState('');
   const [activeSource, setActiveSource] = useState<string | null>(null);
 
@@ -98,7 +99,6 @@ export function IndustryNews({
 
   return (
     <div>
-      <BusinessActivityStrip />
       <div className="page-head">
         <div>
           <div className="page-head__eyebrow">Workspace · Industry news</div>
@@ -117,6 +117,21 @@ export function IndustryNews({
         )}
       </div>
 
+      <div className="toolbar" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button onClick={() => setTab('industry')}
+          className={`news-chip ${tab === 'industry' ? 'is-active' : ''}`}>
+          Industry News <span className="news-chip__count">{items.length}</span>
+        </button>
+        <button onClick={() => setTab('company')}
+          className={`news-chip ${tab === 'company' ? 'is-active' : ''}`}>
+          Company Updates
+        </button>
+      </div>
+
+      {tab === 'company' ? (
+        <BusinessActivityStrip />
+      ) : (
+      <>
       <div className="news-toolbar">
         <div className="news-search">
           <Search size={14} />
@@ -204,6 +219,8 @@ export function IndustryNews({
             );
           })}
         </div>
+      )}
+    </>
       )}
     </div>
   );

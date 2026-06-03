@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Loader, Search, Plus, CheckCircle, Globe, Users, X, MapPin, Building } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { DEPOTS, type CrmList } from '@/lib/types';
+import { BusinessActivityStrip } from './BusinessActivityStrip';
 
 // LinkedIn / Lusha numeric industry IDs (mainIndustriesIds)
 const INDUSTRIES = [
@@ -31,6 +32,7 @@ interface FinderResult {
 
 export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   const supabase = useMemo(() => createClient(), []);
+  const [tab, setTab] = useState<'finder' | 'company'>('finder');
   const [depotKey, setDepotKey] = useState<string>('Hyde');
   const [customPostcode, setCustomPostcode] = useState('');
   const [radius, setRadius] = useState(10);
@@ -120,6 +122,21 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         </div>
       </div>
 
+      <div className="toolbar" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button onClick={() => setTab('finder')}
+          className={`news-chip ${tab === 'finder' ? 'is-active' : ''}`}>
+          Company Finder
+        </button>
+        <button onClick={() => setTab('company')}
+          className={`news-chip ${tab === 'company' ? 'is-active' : ''}`}>
+          Company Updates
+        </button>
+      </div>
+
+      {tab === 'company' ? (
+        <BusinessActivityStrip />
+      ) : (
+      <>
       <div className="finder-hero">
         <div className="finder-hero__grid">
           <Field label="LOCATION">
@@ -253,6 +270,8 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
             </div>
           </div>
         </div>
+      )}
+    </>
       )}
     </div>
   );
