@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, TrendingUp, Users, Search, Package, Calendar,
+  LayoutDashboard, BarChart3, TrendingUp, Users, Search, Package, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -21,6 +21,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
       key: 'workspace', label: 'Workspace',
       items: [
         { href: '/dashboard',          label: 'Dashboard',     Icon: LayoutDashboard, roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/analytics', label: 'Analytics',     Icon: BarChart3,       roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/calendar', label: 'Team calendar', Icon: CalendarDays,    roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/news',     label: 'Industry news', Icon: TrendingUp,      roles: ['admin','marketer','sales','viewer'] },
       ],
