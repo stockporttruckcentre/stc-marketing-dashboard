@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ExternalLink, RefreshCw, Activity, ChevronRight } from 'lucide-react';
+import {
+  AlertTriangle, RefreshCw, Activity, ArrowUpRight,
+  Briefcase, Gavel, ScrollText, Coins, Power, UserCog, Shield, AlertOctagon, Trash2, Handshake,
+} from 'lucide-react';
 
 type Notice = {
   id: string;
@@ -25,6 +28,32 @@ function fmtDate(iso: string) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
+// Per-notice-type visual identity (icon + colour token).
+// Colours are HSL hue strings so we can derive multiple shades (accent / tint / border).
+type TypeMeta = { Icon: React.ComponentType<{ size?: number }>; hue: number; label: string };
+const DEFAULT_META: TypeMeta = { Icon: AlertOctagon, hue: 220, label: 'Notice' };
+const TYPE_META: { match: RegExp; meta: TypeMeta }[] = [
+  { match: /administration/i,            meta: { Icon: Briefcase,   hue: 222, label: 'Administration' } },
+  { match: /resolutions for winding up/i,meta: { Icon: Power,       hue: 6,   label: 'Winding-up'      } },
+  { match: /winding[- ]?up orders?/i,    meta: { Icon: Power,       hue: 6,   label: 'Winding-up'      } },
+  { match: /petitions? to wind up/i,     meta: { Icon: Gavel,       hue: 32,  label: 'Petition'        } },
+  { match: /appointment of liquidators/i,meta: { Icon: UserCog,     hue: 350, label: 'Liquidators'     } },
+  { match: /liquidat/i,                  meta: { Icon: Power,       hue: 6,   label: 'Liquidation'     } },
+  { match: /bankruptcy/i,                meta: { Icon: ScrollText,  hue: 350, label: 'Bankruptcy'      } },
+  { match: /notice of intended dividend/i,meta:{ Icon: Coins,       hue: 150, label: 'Dividend'        } },
+  { match: /receivership/i,              meta: { Icon: Shield,      hue: 32,  label: 'Receivership'    } },
+  { match: /voluntary arrangement|cva/i, meta: { Icon: Handshake,   hue: 270, label: 'CVA'             } },
+  { match: /strike off|struck off/i,     meta: { Icon: Trash2,      hue: 215, label: 'Strike-off'      } },
+  { match: /insolven/i,                  meta: { Icon: AlertOctagon,hue: 32,  label: 'Insolvency'      } },
+  { match: /appoint/i,                   meta: { Icon: UserCog,     hue: 270, label: 'Appointment'     } },
+  { match: /meeting/i,                   meta: { Icon: Activity,    hue: 200, label: 'Meeting'         } },
+];
+function metaFor(t: string | null | undefined): TypeMeta {
+  if (!t) return DEFAULT_META;
+  for (const { match, meta } of TYPE_META) if (match.test(t)) return meta;
+  return DEFAULT_META;
+}
+
 const TYPE_GROUPS: { key: string; label: string; match: (t: string | null) => boolean }[] = [
   { key: 'all',           label: 'All',           match: () => true },
   { key: 'admin',         label: 'Administration', match: t => !!t && /admin/i.test(t) },
@@ -38,6 +67,7 @@ export function BusinessActivityStrip() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [matched, setMatched] = useState(0);
   const [total, setTotal] = useState(0);
+  const [transportCount, setTransportCount] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +82,7 @@ export function BusinessActivityStrip() {
       setNotices(j.notices ?? []);
       setMatched(j.matchedCount ?? 0);
       setTotal(j.totalCount ?? 0);
+      setTransportCount(j.transportCount ?? 0);
       setFetchedAt(j.fetchedAt ?? null);
     } catch (e: any) {
       setError(e?.message ?? 'load failed');
@@ -74,7 +105,6 @@ export function BusinessActivityStrip() {
 
   return (
     <div className="iu-wrap">
-      {/* Header */}
       <div className="iu-head">
         <div className="iu-head__title">
           <span className="iu-head__icon"><Activity size={14} /></span>
@@ -87,6 +117,7 @@ export function BusinessActivityStrip() {
         </div>
         <div className="iu-head__sub">
           London Gazette · {total} active notice{total === 1 ? '' : 's'}
+          {transportCount > 0 ? ` · ${transportCount} transport-related` : ''}
           {fetchedAt && <> · updated {new Date(fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</>}
         </div>
         <button onClick={load} disabled={loading} className="iu-refresh" title="Refresh">
@@ -94,7 +125,6 @@ export function BusinessActivityStrip() {
         </button>
       </div>
 
-      {/* Filter chips */}
       <div className="iu-chips">
         {TYPE_GROUPS.map(g => (
           <button key={g.key}
@@ -111,23 +141,46 @@ export function BusinessActivityStrip() {
         <div className="iu-empty">No notices match this filter.</div>
       )}
 
-      {/* Dense grid */}
       <div className="iu-grid">
-        {filtered.map(n => (
-          <a key={n.id} href={n.url} target="_blank" rel="noopener noreferrer"
-            className={`iu-card ${n.isCustomer ? 'iu-card--alert' : ''}`}>
-            <div className="iu-card__row1">
-              {n.isCustomer && <AlertTriangle size={11} className="iu-card__alert" />}
-              <span className="iu-card__type">{n.noticeType ?? 'Notice'}</span>
-              <span className="iu-card__date">{fmtDate(n.publishedDate)}</span>
-            </div>
-            <div className="iu-card__title">{n.title}</div>
-            <div className="iu-card__foot">
-              <span className="iu-card__cta">Read on Gazette</span>
-              <ChevronRight size={12} />
-            </div>
-          </a>
-        ))}
+        {filtered.map(n => {
+          const m = metaFor(n.noticeType);
+          const Icon = m.Icon;
+          const accent = `hsl(${m.hue} 84% 60%)`;
+          const accentDim = `hsla(${m.hue}, 84%, 60%, 0.16)`;
+          const accentBg = `hsla(${m.hue}, 70%, 55%, 0.06)`;
+          const accentBgHover = `hsla(${m.hue}, 70%, 55%, 0.10)`;
+          return (
+            <a key={n.id} href={n.url} target="_blank" rel="noopener noreferrer"
+              className={`iu-card ${n.isCustomer ? 'iu-card--alert' : ''}`}
+              style={{
+                '--accent': accent,
+                '--accent-dim': accentDim,
+                '--accent-bg': n.isCustomer ? 'rgba(207,36,23,0.08)' : accentBg,
+                '--accent-bg-hover': n.isCustomer ? 'rgba(207,36,23,0.14)' : accentBgHover,
+              } as any}>
+              {/* Accent stripe left edge */}
+              <span className="iu-card__stripe" />
+
+              <div className="iu-card__top">
+                <span className="iu-card__icon"><Icon size={14} /></span>
+                <span className="iu-card__type">{m.label}</span>
+                {n.isCustomer && (
+                  <span className="iu-card__alert">
+                    <AlertTriangle size={10} /> Customer
+                  </span>
+                )}
+                <span className="iu-card__date">{fmtDate(n.publishedDate)}</span>
+              </div>
+
+              <div className="iu-card__title">{n.title}</div>
+
+              <div className="iu-card__foot">
+                <span className="iu-card__cta">Read on Gazette</span>
+                <ArrowUpRight size={12} className="iu-card__arrow" />
+              </div>
+            </a>
+          );
+        })}
       </div>
 
       <style jsx>{`
@@ -181,6 +234,7 @@ export function BusinessActivityStrip() {
         .iu-badge--alert {
           background: rgba(207,36,23,0.16); color: var(--stc-red);
         }
+
         .iu-chips {
           display: flex; flex-wrap: wrap; gap: 5px;
           margin: 14px 0 12px;
@@ -204,63 +258,99 @@ export function BusinessActivityStrip() {
           min-width: 14px; text-align: center;
         }
         .iu-chip.is-active .iu-chip__n { background: rgba(255,255,255,0.22); }
+
         .iu-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-          gap: 6px;
+          gap: 8px;
         }
+
+        /* ===== Linear/Neon-style card ===== */
         .iu-card {
-          display: flex; flex-direction: column; gap: 5px;
-          padding: 10px 12px;
-          background: var(--bg-2);
+          position: relative;
+          display: flex; flex-direction: column;
+          padding: 12px 14px 11px 18px;
+          background:
+            radial-gradient(120% 60% at 0% 0%, var(--accent-bg) 0%, transparent 70%),
+            var(--bg-2);
           border: 1px solid var(--border);
-          border-radius: 9px;
+          border-radius: 10px;
           text-decoration: none;
           color: var(--fg-1);
-          transition: all .14s;
-          position: relative;
+          overflow: hidden;
+          transition: transform .15s cubic-bezier(.2,.8,.2,1), border-color .15s, background .15s, box-shadow .2s;
+        }
+        .iu-card__stripe {
+          position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+          background: var(--accent);
+          border-radius: 0 3px 3px 0;
+          opacity: 0.9;
         }
         .iu-card:hover {
-          background: var(--bg-3);
-          border-color: var(--border-strong);
-          transform: translateY(-1px);
+          background:
+            radial-gradient(120% 60% at 0% 0%, var(--accent-bg-hover) 0%, transparent 70%),
+            var(--bg-3);
+          border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px -10px hsl(0 0% 0% / 0.35);
         }
+        .iu-card--alert .iu-card__stripe { background: var(--stc-red); }
         .iu-card--alert {
-          background: rgba(207,36,23,0.05);
-          border-color: rgba(207,36,23,0.35);
+          border-color: rgba(207,36,23,0.45);
         }
-        .iu-card--alert:hover {
-          background: rgba(207,36,23,0.10);
-          border-color: rgba(207,36,23,0.55);
-        }
-        .iu-card__row1 {
+
+        .iu-card__top {
           display: flex; align-items: center; gap: 6px;
+          margin-bottom: 8px;
           font-size: 10.5px;
         }
-        .iu-card__alert { color: var(--stc-red); flex: none; }
+        .iu-card__icon {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 22px; height: 22px; border-radius: 6px;
+          background: var(--accent-dim);
+          color: var(--accent);
+          flex: none;
+        }
         .iu-card__type {
-          color: var(--fg-2); font-weight: 500;
-          padding: 1px 6px; border-radius: 4px;
-          background: var(--bg-3); white-space: nowrap;
-          flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+          font-size: 10.5px; font-weight: 600;
+          color: var(--accent);
+          text-transform: uppercase; letter-spacing: 0.06em;
+          padding: 2px 6px; border-radius: 4px;
+          background: var(--accent-dim);
+          white-space: nowrap;
+        }
+        .iu-card__alert {
+          display: inline-flex; align-items: center; gap: 3px;
+          font-size: 9.5px; font-weight: 700;
+          color: #fff; background: var(--stc-red);
+          padding: 2px 6px; border-radius: 4px;
+          text-transform: uppercase; letter-spacing: 0.05em;
         }
         .iu-card__date {
-          color: var(--fg-3); margin-left: auto; white-space: nowrap; flex: none;
+          margin-left: auto;
+          color: var(--fg-3);
+          white-space: nowrap; flex: none;
         }
         .iu-card__title {
-          font-size: 13px; font-weight: 600;
+          font-size: 13.5px; font-weight: 600;
           color: var(--fg-1);
-          line-height: 1.3;
+          line-height: 1.3; letter-spacing: -0.005em;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
           overflow: hidden;
+          margin-bottom: 8px;
         }
         .iu-card__foot {
           display: flex; align-items: center; justify-content: space-between;
           margin-top: auto;
-          font-size: 10.5px; color: var(--fg-3);
-          padding-top: 4px;
+          font-size: 11px; color: var(--fg-3);
         }
-        .iu-card__cta { font-weight: 500; }
+        .iu-card__cta { font-weight: 500; transition: color .14s; }
+        .iu-card__arrow { transition: transform .15s cubic-bezier(.2,.8,.2,1); }
+        .iu-card:hover .iu-card__cta { color: var(--accent); }
+        .iu-card:hover .iu-card__arrow { color: var(--accent); transform: translate(2px, -2px); }
+        .iu-card--alert:hover .iu-card__cta,
+        .iu-card--alert:hover .iu-card__arrow { color: var(--stc-red); }
+
         .iu-empty {
           padding: 22px; text-align: center;
           color: var(--fg-3); font-size: 12px;
