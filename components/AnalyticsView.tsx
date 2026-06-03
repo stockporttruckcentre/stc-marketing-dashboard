@@ -421,8 +421,8 @@ export function AnalyticsView({
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     fontSize: 11, fontWeight: 600,
                     padding: '4px 10px', borderRadius: 7,
-                    background: on ? 'rgba(255,255,255,0.04)' : 'transparent',
-                    border: `1px solid ${on ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.1)'}`,
+                    background: on ? 'var(--an-surface-1)' : 'transparent',
+                    border: `1px solid ${on ? 'var(--an-border-strong)' : 'var(--an-border)'}`,
                     color: on ? 'var(--an-text-0)' : 'var(--an-text-3)',
                     cursor: 'pointer', transition: 'all .12s',
                     textDecoration: on ? 'none' : 'line-through',
@@ -716,17 +716,23 @@ function Spark({ data, color }: { data: number[]; color: string }) {
 }
 
 function nivoTheme() {
+  const isLight = typeof document !== 'undefined'
+    && document.documentElement.getAttribute('data-theme') === 'light';
+  const text = isLight ? 'rgba(15,19,38,0.65)'   : 'rgba(255,255,255,0.5)';
+  const text2 = isLight ? 'rgba(15,19,38,0.78)'  : 'rgba(255,255,255,0.6)';
+  const grid = isLight ? 'rgba(15,19,38,0.08)'   : 'rgba(255,255,255,0.05)';
+  const crosshair = isLight ? 'rgba(15,19,38,0.18)' : 'rgba(255,255,255,0.2)';
   return {
     background: 'transparent',
-    text: { fill: 'rgba(255,255,255,0.5)', fontSize: 11 },
+    text: { fill: text, fontSize: 11 },
     axis: {
       domain: { line: { stroke: 'transparent' } },
-      ticks: { line: { stroke: 'transparent' }, text: { fill: 'rgba(255,255,255,0.5)', fontSize: 11 } },
-      legend: { text: { fill: 'rgba(255,255,255,0.6)', fontSize: 11 } },
+      ticks: { line: { stroke: 'transparent' }, text: { fill: text, fontSize: 11 } },
+      legend: { text: { fill: text2, fontSize: 11 } },
     },
-    grid: { line: { stroke: 'rgba(255,255,255,0.05)', strokeDasharray: '3 3' } },
-    legends: { text: { fill: 'rgba(255,255,255,0.6)', fontSize: 11 } },
+    grid: { line: { stroke: grid, strokeDasharray: '3 3' } },
+    legends: { text: { fill: text2, fontSize: 11 } },
     tooltip: { container: { background: 'transparent', boxShadow: 'none' } },
-    crosshair: { line: { stroke: 'rgba(255,255,255,0.2)', strokeDasharray: '3 3' } },
+    crosshair: { line: { stroke: crosshair, strokeDasharray: '3 3' } },
   };
 }
