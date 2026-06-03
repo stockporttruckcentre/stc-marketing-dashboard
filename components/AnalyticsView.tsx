@@ -81,30 +81,50 @@ function inWindow(dStr: string | null | undefined, start: Date, end: Date) {
 // ===== Rep name normalisation =====
 // Build a set of valid sales-team names + their nicknames/initials,
 // derived from the profiles table (excludes Gareth/admins/CEOs unless they're in 'sales').
+// Reps who close deals but don't have (or no longer need) a portal login.
+// These names still need to count in revenue / leaderboards.
+const EXTRA_REPS: { full_name: string; aliases: string[]; hasLogin: boolean }[] = [
+  { full_name: 'Lucy',          aliases: ['lucy'],                            hasLogin: false },
+  { full_name: 'David Reay',    aliases: ['david', 'dave', 'david reay', 'dr', 'd.reay'], hasLogin: true },
+  { full_name: 'Paul Townsend', aliases: ['paul t', 'paul townsend', 'pt'],   hasLogin: false },
+];
+
 function buildRepIndex(profiles: Profile[]) {
-  const reps = profiles.filter(p => p.role === 'sales' || p.role === 'marketer');
-  const byKey = new Map<string, string>();   // normalised key -> canonical display name
-  for (const p of reps) {
+  // Profile reps = anyone who actually sells. Includes admin (Gareth) + sales + marketer.
+  const profileReps = profiles.filter(p => p.role === 'sales' || p.role === 'marketer' || p.role === 'admin');
+  const reps: { id: string; full_name: string; email?: string | null; hasLogin: boolean }[] = [];
+  const byKey = new Map<string, string>();
+
+  for (const p of profileReps) {
     const full = (p.full_name || p.email?.split('@')[0] || '').trim();
     if (!full) continue;
+    reps.push({ id: p.id, full_name: full, email: p.email, hasLogin: true });
     const tokens = full.split(/\s+/);
     const first = tokens[0];
     const last = tokens[tokens.length - 1];
     const initial1 = first[0]?.toUpperCase() ?? '';
     const initial2 = last[0]?.toUpperCase() ?? '';
-    const candidates = new Set([
+    for (const c of [
       full.toLowerCase(),
       first.toLowerCase(),
       `${first} ${last}`.toLowerCase(),
       `${initial1}${initial2}`.toLowerCase(),
       `${initial1}.${initial2}.`.toLowerCase(),
       `${first[0]}${last}`.toLowerCase(),
-    ]);
-    for (const c of candidates) byKey.set(c, full);
+    ]) byKey.set(c, full);
+  }
+
+  // Extra reps without a portal account (Lucy, ex-staff etc) still appear if not collision
+  for (const er of EXTRA_REPS) {
+    // Don't double-add if a profile already covers them
+    if (Array.from(byKey.values()).some(v => v.toLowerCase() === er.full_name.toLowerCase())) continue;
+    reps.push({ id: 'noauth:' + er.full_name, full_name: er.full_name, hasLogin: er.hasLogin });
+    byKey.set(er.full_name.toLowerCase(), er.full_name);
+    for (const a of er.aliases) byKey.set(a.toLowerCase(), er.full_name);
   }
   return { reps, byKey };
 }
-const NON_REPS = new Set(['stc', 'stock', 'admin', 'support', 'office', 'workshop', 'house', 'n/a', 'tbd', 'unassigned', '']);
+const NON_REPS = new Set(['stc', 'stock', 'admin', 'support', 'office', 'workshop', 'house', 'n/a', 'tbd', 'unassigned', '-', '—', '?', '']);
 function canonicalRep(raw: string | null | undefined, idx: ReturnType<typeof buildRepIndex>): string | null {
   if (!raw) return null;
   const norm = raw.trim().toLowerCase();
@@ -226,7 +246,7 @@ export function AnalyticsView({
     const map = new Map<string, { rep: string; revenue: number; profit: number; deals: number }>();
     // Seed every known rep so people with 0 deals still appear
     for (const p of repIdx.reps) {
-      const name = p.full_name || (p.email?.split('@')[0] ?? '');
+      const name = p.full_name;
       if (name) map.set(name, { rep: name, revenue: 0, profit: 0, deals: 0 });
     }
     for (const s of soldInPeriod) {
@@ -335,7 +355,7 @@ export function AnalyticsView({
           <select className="an-select" value={repFilter} onChange={(e) => setRepFilter(e.target.value)}>
             <option value="ALL">Whole team</option>
             {repIdx.reps.map(p => (
-              <option key={p.id} value={p.full_name || ''}>{p.full_name || p.email}</option>
+              <option key={p.id} value={p.full_name}>{p.full_name}{p.hasLogin ? '' : ' (no login)'}</option>
             ))}
           </select>
         </div>

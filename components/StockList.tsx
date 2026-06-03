@@ -298,7 +298,7 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
         <button onClick={() => { setTab('all'); setCategory(null); }} className={`news-chip ${tab === 'all' ? 'is-active' : ''}`}>
           All <span className="news-chip__count">{counts.all}</span>
         </button>
-        {(STATUS_ORDER.filter(s => s !== 'sold') as StockStatus[]).map(s => (
+        {STATUS_ORDER.map(s => (
           <button key={s} onClick={() => { setTab(s); setCategory(null); }} className={`news-chip ${tab === s ? 'is-active' : ''}`}>
             {s === 'in_stock' && <Package size={11} />}
             {s === 'new_build' && <Wrench size={11} />}
@@ -773,7 +773,7 @@ function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb,
       <button onClick={() => onMoveStatus('sold')} disabled={!canEdit || row.status === 'sold'}><PoundSterling size={12} /> Mark as Sold</button>
       <hr />
       <div className="ctx-menu__head" style={{ marginTop: 4 }}>Move to status</div>
-      {(STATUS_ORDER.filter(s => s !== 'sold') as StockStatus[]).map(s => (
+      {STATUS_ORDER.map(s => (
         <button key={s} onClick={() => onMoveStatus(s)} disabled={!canEdit || s === row.status}>
           {s === 'in_stock' && <Package size={12} />}
           {s === 'new_build' && <Wrench size={12} />}
@@ -800,7 +800,7 @@ function BulkStatusModal({ currentSelectionCount, onPick, onClose }: { currentSe
           <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
         </div>
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {(STATUS_ORDER.filter(s => s !== 'sold') as StockStatus[]).map(s => (
+          {STATUS_ORDER.map(s => (
             <button key={s} onClick={() => onPick(s)} className="btn" style={{ justifyContent: 'flex-start', height: 40 }}>
               {s === 'in_stock' && <Package size={14} />}
               {s === 'new_build' && <Wrench size={14} />}
