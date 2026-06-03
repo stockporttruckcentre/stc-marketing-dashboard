@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { AnalyticsView } from '@/components/AnalyticsView';
 import type { Profile, StockTrailer, CRMContact, CrmList } from '@/lib/types';
+import './analytics.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,10 +10,9 @@ export default async function AnalyticsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-
-  // Pull everything in parallel
-  const [stockRes, trackerRes, listsRes] = await Promise.all([
+  const [profileRes, profilesAllRes, stockRes, trackerRes, listsRes] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase.from('profiles').select('id, email, full_name, role'),
     supabase.from('stock_trailers').select('*'),
     supabase.from('crm_contacts').select('*').not('list_id', 'is', null),
     supabase.from('crm_lists').select('*'),
@@ -20,7 +20,8 @@ export default async function AnalyticsPage() {
 
   return (
     <AnalyticsView
-      currentUser={(profile as Profile) ?? null}
+      currentUser={(profileRes.data as Profile) ?? null}
+      teamProfiles={(profilesAllRes.data ?? []) as Profile[]}
       stock={(stockRes.data ?? []) as StockTrailer[]}
       tracker={(trackerRes.data ?? []) as CRMContact[]}
       lists={(listsRes.data ?? []) as CrmList[]}
