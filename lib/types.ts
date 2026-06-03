@@ -174,12 +174,13 @@ export interface ContactAddress {
 }
 
 export const DEPOTS = [
-  { name: 'Bredbury',   lat: 53.4225, lng: -2.1289, nearestCity: 'Manchester' },
-  { name: 'Hyde',       lat: 53.4500, lng: -2.0747, nearestCity: 'Manchester' },
-  { name: 'Dukinfield', lat: 53.4783, lng: -2.0833, nearestCity: 'Manchester' },
-  { name: 'Haydock',    lat: 53.4731, lng: -2.6519, nearestCity: 'St Helens'  },
-  { name: 'Birkenhead', lat: 53.3934, lng: -3.0150, nearestCity: 'Birkenhead' },
-  { name: 'Atherton',   lat: 53.5219, lng: -2.4925, nearestCity: 'Wigan'      },
+  // postcode goes here once Alex confirms; for now keeping lat/lng + name only.
+  { name: 'Bredbury',   lat: 53.4225, lng: -2.1289 },
+  { name: 'Hyde',       lat: 53.4500, lng: -2.0747 },
+  { name: 'Dukinfield', lat: 53.4783, lng: -2.0833 },
+  { name: 'Haydock',    lat: 53.4731, lng: -2.6519 },
+  { name: 'Birkenhead', lat: 53.3934, lng: -3.0150 },
+  { name: 'Atherton',   lat: 53.5219, lng: -2.4925 },
 ] as const;
 
 export interface NewsSource {

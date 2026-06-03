@@ -59,9 +59,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       const res = await fetch('/api/lusha/search', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          location: isCustom
-            ? customPostcode
-            : (DEPOTS.find(d => d.name === depotKey)?.nearestCity ?? depotKey),
+          location: isCustom ? customPostcode : depotKey,
           radiusMiles: radius, industryIds: [industry],
           minEmployees: empMin, maxEmployees: empMax, limit: 25,
         }),
