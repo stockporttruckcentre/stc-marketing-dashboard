@@ -23,14 +23,10 @@ export const maxDuration = 25;
 const GAZETTE_FEED_URL = 'https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc';
 const GAZETTE_JSON_URL = 'https://www.thegazette.co.uk/all-notices/notice/data.json?categorycode-all=24&results-page-size=80&order-by=publish-date-desc';
 const GAZETTE_STRATEGIES: { url: string; type: 'json' | 'atom' }[] = [
-  // 1. Direct Gazette (works occasionally if their WAF rotates IPs)
-  { url: GAZETTE_FEED_URL, type: 'atom' },
-  { url: GAZETTE_JSON_URL, type: 'json' },
-  // 2. AllOrigins raw relay
-  { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(GAZETTE_FEED_URL), type: 'atom' },
-  { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(GAZETTE_JSON_URL), type: 'json' },
-  // 3. CodeTabs relay
+  // CodeTabs relay first - proven working, returns full Atom XML in <2s
   { url: 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(GAZETTE_FEED_URL), type: 'atom' },
+  // Direct as a fallback (Gazette WAF currently 202s these but may relax)
+  { url: GAZETTE_FEED_URL, type: 'atom' },
 ];
 
 const TRANSPORT_KEYWORDS = [
@@ -115,7 +111,7 @@ async function tryStrategy(strategy: { url: string; type: 'json' | 'atom' }, par
   diagnostics.push(diag);
   try {
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 10000);
+    const tid = setTimeout(() => ctrl.abort(), 8000);
     const res = await fetch(strategy.url, {
       signal: ctrl.signal,
       headers: {
