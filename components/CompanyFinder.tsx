@@ -63,7 +63,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         body: JSON.stringify({
           location: isCustom
             ? customPostcode
-            : (DEPOTS.find(d => d.name === depotKey)?.postcode ?? depotKey),
+            : (DEPOTS.find(d => d.name === depotKey)?.lushaCity ?? depotKey),
           radiusMiles: radius,
           ...(industry > 0 ? { industryIds: [industry] } : {}),
           minEmployees: empMin, maxEmployees: empMax, limit: 25,
