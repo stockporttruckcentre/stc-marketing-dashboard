@@ -232,6 +232,7 @@
 }
 .an-grid--equal {
   grid-template-columns: 1fr 1fr;
+  align-items: stretch;
 }
 .an-grid--three {
   grid-template-columns: 1fr 1fr 1fr;
@@ -246,6 +247,8 @@
   border-radius: var(--an-radius);
   padding: 16px 16px 12px;
   animation: an-fadeUp .5s ease both;
+  display: flex;
+  flex-direction: column;
 }
 .an-card__head {
   display: flex;
@@ -328,6 +331,13 @@
   display: block; font-size: 10.5px; font-weight: 500; color: var(--an-text-2);
   margin-top: 1px;
 }
+
+
+.an-board__row.is-active {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ax) 14%, transparent), color-mix(in srgb, var(--ay) 4%, transparent));
+  border-color: var(--an-border-strong);
+}
+.an-board__row.is-dim { background: transparent; }
 
 /* ===== Pipeline funnel ===== */
 .an-funnel { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }

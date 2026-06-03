@@ -187,11 +187,11 @@ export function AnalyticsView({
   const avgDeal = dealsP ? revP / dealsP : 0;
   const margin  = revP ? profitP / revP : 0;
 
-  // Commission from tracker
-  const commissionP = tracker.reduce((s, c) =>
-    inWindow(c.dispatch_date ?? c.order_date, pStart, pEnd) ? s + (Number(c.commission) || 0) : s, 0);
-  const commissionPrev = tracker.reduce((s, c) =>
-    inWindow(c.dispatch_date ?? c.order_date, ppStart, ppEnd) ? s + (Number(c.commission) || 0) : s, 0);
+  // Commission = 10% of profit across ALL sold trailers (whole-dashboard accurate figure,
+  // independent of what's been entered manually on the Sales Tracker)
+  const COMMISSION_RATE = 0.10;
+  const commissionP    = profitP    * COMMISSION_RATE;
+  const commissionPrev = profitPrev * COMMISSION_RATE;
 
   // Pipeline
   const activeCustomers = tracker.filter(c => c.status === 'customer').length;
@@ -224,7 +224,7 @@ export function AnalyticsView({
   }, [sold]);
 
   const allLineData = useMemo(() => [
-    { id: 'Revenue', color: STC_NAVY, data: monthly.map(m => ({ x: m.label, y: m.rev })) },
+    { id: 'Revenue', color: CYAN, data: monthly.map(m => ({ x: m.label, y: m.rev })) },
     { id: 'Profit',  color: POS,      data: monthly.map(m => ({ x: m.label, y: m.profit })) },
   ], [monthly]);
   const [visibleSeries, setVisibleSeries] = useState<string[]>(['Revenue', 'Profit']);
@@ -243,26 +243,31 @@ export function AnalyticsView({
     return Array.from(map.values()).slice(-6);
   }, [sold, monthly]);
 
-  // ===== Sales leaderboard (per canonical rep, in-period) =====
+  // ===== Sales leaderboard — ALWAYS shows whole team, regardless of rep filter.
+  // Selecting a rep just highlights that row; other rows stay visible (greyed via UI).
   const leaderboard = useMemo(() => {
-    const map = new Map<string, { rep: string; revenue: number; profit: number; deals: number }>();
-    // Seed every known rep so people with 0 deals still appear
+    const map = new Map<string, { rep: string; revenue: number; profit: number; commission: number; deals: number }>();
     for (const p of repIdx.reps) {
       const name = p.full_name;
-      if (name) map.set(name, { rep: name, revenue: 0, profit: 0, deals: 0 });
+      if (name) map.set(name, { rep: name, revenue: 0, profit: 0, commission: 0, deals: 0 });
     }
-    for (const s of soldInPeriod) {
+    // Use unfiltered stockEnriched, in-period, not stockFiltered
+    const allSoldInPeriod = stockEnriched.filter(s => s.status === 'sold' && inWindow(s.dispatch_date ?? s.order_date, pStart, pEnd));
+    for (const s of allSoldInPeriod) {
       const r = s._repCanonical;
       if (!r) continue;
-      const e = map.get(r) ?? { rep: r, revenue: 0, profit: 0, deals: 0 };
+      const e = map.get(r) ?? { rep: r, revenue: 0, profit: 0, commission: 0, deals: 0 };
       e.revenue += Number(s.sales_price || 0);
       e.profit  += Number(s.profit || 0);
       e.deals   += 1;
       map.set(r, e);
     }
+    // Commission = 10% of profit per rep
+    for (const e of map.values()) e.commission = e.profit * 0.10;
     return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
-  }, [soldInPeriod, repIdx]);
+  }, [stockEnriched, repIdx, pStart, pEnd]);
   const teamRevTotal = leaderboard.reduce((s, r) => s + r.revenue, 0);
+  const teamCommissionTotal = leaderboard.reduce((s, r) => s + r.commission, 0);
 
   // ===== Pipeline funnel data =====
   const funnel = useMemo(() => {
@@ -410,7 +415,7 @@ export function AnalyticsView({
           {/* Click the Revenue / Profit chips to toggle each line on/off */}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginBottom: 6 }}>
             {[
-              { id: 'Revenue', color: STC_NAVY },
+              { id: 'Revenue', color: CYAN },
               { id: 'Profit',  color: POS },
             ].map(s => {
               const on = visibleSeries.includes(s.id);
@@ -540,10 +545,14 @@ export function AnalyticsView({
             ) : leaderboard.map((r, i) => {
               const [a, b] = accentFor(r.rep);
               const pct = teamRevTotal ? r.revenue / teamRevTotal : 0;
+              const isFiltered = repFilter !== 'ALL';
+              const isActive = repFilter === r.rep;
+              const isDim = isFiltered && !isActive;
               return (
-                <div key={r.rep} className="an-board__row" style={{ '--ax': a, '--ay': b } as any}
-                     onClick={() => setRepFilter(r.rep === repFilter ? 'ALL' : r.rep)}
-                     title={`Click to filter to ${r.rep}`}>
+                <div key={r.rep} className={`an-board__row ${isActive ? 'is-active' : ''} ${isDim ? 'is-dim' : ''}`}
+                     style={{ '--ax': a, '--ay': b, opacity: isDim ? 0.4 : 1 } as any}
+                     onClick={() => setRepFilter(isActive ? 'ALL' : r.rep)}
+                     title={isActive ? 'Click again to clear filter' : `Click to focus on ${r.rep}`}>
                   <div className="an-board__rank">#{i + 1}</div>
                   <div>
                     <div className="an-board__name">
@@ -558,7 +567,7 @@ export function AnalyticsView({
                     {r.deals}<small>deal{r.deals === 1 ? '' : 's'}</small>
                   </div>
                   <div className="an-board__val">
-                    {fmtMoneyCompact(r.revenue)}<small>{fmtMoneyCompact(r.profit)} profit</small>
+                    {fmtMoneyCompact(r.revenue)}<small>{fmtMoneyCompact(r.commission)} comm</small>
                   </div>
                 </div>
               );
@@ -620,7 +629,7 @@ export function AnalyticsView({
             </div>
             <div className="an-card__sub">{byMake.length} makes in stock</div>
           </div>
-          <div style={{ height: Math.max(220, byMake.length * 34) }}>
+          <div style={{ flex: 1, minHeight: 360 }}>
             <ResponsiveBar
               data={byMake}
               indexBy="make"
