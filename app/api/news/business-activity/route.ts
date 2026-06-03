@@ -17,15 +17,20 @@ export const maxDuration = 25;
  * Optional transport relevance keywords boost transport / haulage notices
  * to the top, then customer matches go above those.
  */
-// Gazette uses an anti-bot WAF that returns HTTP 202 with empty body to plain
-// server-side fetches. We try multiple strategies in order until one returns
-// real content: their JSON endpoint, then the Atom .feed, then a fall-back proxy.
+// Gazette serves real browsers but 202s direct Vercel fetches. Route via free
+// third-party HTTP relays (AllOrigins, codetabs) that re-issue the request from
+// different IPs that don't trip the anti-bot WAF.
+const GAZETTE_FEED_URL = 'https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc';
+const GAZETTE_JSON_URL = 'https://www.thegazette.co.uk/all-notices/notice/data.json?categorycode-all=24&results-page-size=80&order-by=publish-date-desc';
 const GAZETTE_STRATEGIES: { url: string; type: 'json' | 'atom' }[] = [
-  { url: 'https://www.thegazette.co.uk/all-notices/notice/data.json?categorycode-all=24&results-page-size=80&order-by=publish-date-desc', type: 'json' },
-  { url: 'https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc', type: 'atom' },
-  // Public CORS/HTTP relay as last resort. corsproxy.io re-issues the request
-  // with its own residential-looking IPs.
-  { url: 'https://corsproxy.io/?url=' + encodeURIComponent('https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc'), type: 'atom' },
+  // 1. Direct Gazette (works occasionally if their WAF rotates IPs)
+  { url: GAZETTE_FEED_URL, type: 'atom' },
+  { url: GAZETTE_JSON_URL, type: 'json' },
+  // 2. AllOrigins raw relay
+  { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(GAZETTE_FEED_URL), type: 'atom' },
+  { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(GAZETTE_JSON_URL), type: 'json' },
+  // 3. CodeTabs relay
+  { url: 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(GAZETTE_FEED_URL), type: 'atom' },
 ];
 
 const TRANSPORT_KEYWORDS = [
