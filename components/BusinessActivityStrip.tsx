@@ -83,7 +83,7 @@ export function BusinessActivityStrip() {
               )}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--fg-3)', marginTop: 2 }}>
-              London Gazette · UK insolvency, administration Live from The Gazette · UK insolvency, administration & winding-up notices winding-up notices · {total} notice{total === 1 ? '' : 's'}
+              London Gazette · UK insolvency, administration & winding-up notices · {total} notice{total === 1 ? '' : 's'}{transportCount > 0 ? ` · ${transportCount} transport-related` : ''}
               {fetchedAt && <> · updated {new Date(fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</>}
             </div>
           </div>

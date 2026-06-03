@@ -82,23 +82,30 @@ function noticeTypeFromTitle(t: string): string | null {
   return null;
 }
 
+type FetchDiag = { url: string; status: number | string; bytes: number; sample: string; error?: string };
+const diagnostics: FetchDiag[] = [];
+
 async function fetchGazetteFeed(url: string, parser: XMLParser): Promise<Omit<Notice, 'isCustomer' | 'isTransport'>[]> {
+  const diag: FetchDiag = { url, status: 'pending', bytes: 0, sample: '' };
+  diagnostics.push(diag);
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 10000);
     const res = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        // Browser-like UA so Gazette doesn't return 403 to a bare server agent
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/atom+xml, application/xml, text/xml, */*',
         'Accept-Language': 'en-GB,en;q=0.9',
       },
-      next: { revalidate: 600 },
+      cache: 'no-store',
     });
     clearTimeout(tid);
-    if (!res.ok) return [];
+    diag.status = res.status;
     const xml = await res.text();
+    diag.bytes = xml.length;
+    diag.sample = xml.slice(0, 300);
+    if (!res.ok) return [];
     if (!xml || xml.length < 100) return [];
 
     const parsed = parser.parse(xml);
@@ -129,7 +136,9 @@ async function fetchGazetteFeed(url: string, parser: XMLParser): Promise<Omit<No
         summary: (summary || '').slice(0, 300),
       };
     }).filter(n => n.title && n.url);
-  } catch {
+  } catch (e: any) {
+    diag.status = 'error';
+    diag.error = e?.message ?? String(e);
     return [];
   }
 }
@@ -139,6 +148,7 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
+  diagnostics.length = 0;
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', trimValues: true });
   const merged = (await Promise.all(FEEDS.map(u => fetchGazetteFeed(u, parser)))).flat();
 
@@ -192,5 +202,6 @@ export async function GET() {
     totalCount: flagged.length,
     fetchedAt: new Date().toISOString(),
     source: 'thegazette.co.uk',
+    diagnostics,
   });
 }
