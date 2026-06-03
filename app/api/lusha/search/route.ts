@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   let raw: any = null;
+  let lushaError: string | null = null;
   try {
     raw = await searchCompanies({
       location: body.location,
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
       limit: body.limit ?? 25,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Lusha error' }, { status: 502 });
+    lushaError = e.message || 'Lusha error';
   }
 
   const companies = (raw?.data ?? raw?.companies ?? []).map((c: any) => ({
@@ -43,5 +44,27 @@ export async function POST(req: NextRequest) {
     industry: c.industry ?? null,
   }));
 
-  return NextResponse.json({ companies });
+  return NextResponse.json({
+    companies,
+    _diag: {
+      sentTo: 'POST https://api.lusha.com/prospecting/company/search',
+      sentBody: {
+        pages: { page: 0, size: body.limit ?? 25 },
+        filters: { companies: { include: {
+          locations: body.location ? [{ country: 'United Kingdom', city: body.location }] : undefined,
+          mainIndustriesIds: industryIds,
+          sizes: (body.minEmployees != null && body.maxEmployees != null) ? [{ min: body.minEmployees, max: body.maxEmployees }] : undefined,
+        } } },
+      },
+      lushaError,
+      rawKeys: raw ? Object.keys(raw) : [],
+      rawSample: raw ? JSON.stringify(raw).slice(0, 1500) : null,
+      arrayLengths: {
+        data: Array.isArray(raw?.data) ? raw.data.length : null,
+        companies: Array.isArray(raw?.companies) ? raw.companies.length : null,
+        results: Array.isArray(raw?.results) ? raw.results.length : null,
+      },
+      totalResults: raw?.totalResults ?? raw?.total ?? null,
+    },
+  });
 }
