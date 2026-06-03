@@ -8,6 +8,7 @@ import { BusinessActivityStrip } from './BusinessActivityStrip';
 
 // LinkedIn / Lusha numeric industry IDs (mainIndustriesIds)
 const INDUSTRIES = [
+  { id: 0,   label: 'All industries (recommended)' },
   { id: 116, label: 'Transportation, Logistics & Storage' },
   { id: 92,  label: 'Truck Transportation' },
   { id: 93,  label: 'Warehousing & Storage' },
@@ -36,9 +37,9 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   const [depotKey, setDepotKey] = useState<string>('Hyde');
   const [customPostcode, setCustomPostcode] = useState('');
   const [radius, setRadius] = useState(10);
-  const [industry, setIndustry] = useState<number>(INDUSTRIES[0].id);
-  const [empMin, setEmpMin] = useState(10);
-  const [empMax, setEmpMax] = useState(200);
+  const [industry, setIndustry] = useState<number>(0);
+  const [empMin, setEmpMin] = useState(1);
+  const [empMax, setEmpMax] = useState(10000);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<FinderResult[]>([]);
   const [added, setAdded] = useState<Record<string, string>>({}); // name -> list_id added to
@@ -61,7 +62,8 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           location: isCustom ? customPostcode : depotKey,
-          radiusMiles: radius, industryIds: [industry],
+          radiusMiles: radius,
+          ...(industry > 0 ? { industryIds: [industry] } : {}),
           minEmployees: empMin, maxEmployees: empMax, limit: 25,
         }),
       });

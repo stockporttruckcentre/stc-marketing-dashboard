@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       location: body.location,
       radiusMiles: body.radiusMiles,
       industryIds,
-      minEmployees: body.minEmployees,
-      maxEmployees: body.maxEmployees,
+      minEmployees: (body.minEmployees === 1 && body.maxEmployees >= 10000) ? undefined : body.minEmployees,
+      maxEmployees: (body.minEmployees === 1 && body.maxEmployees >= 10000) ? undefined : body.maxEmployees,
       limit: body.limit ?? 25,
     });
   } catch (e: any) {
