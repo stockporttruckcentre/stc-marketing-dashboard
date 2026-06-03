@@ -43,6 +43,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   const [results, setResults] = useState<FinderResult[]>([]);
   const [added, setAdded] = useState<Record<string, string>>({}); // name -> list_id added to
   const [message, setMessage] = useState<string | null>(null);
+  const [diag, setDiag] = useState<any>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [listPickerFor, setListPickerFor] = useState<{ kind: 'single'; company: FinderResult } | { kind: 'bulk'; companies: FinderResult[] } | null>(null);
 
@@ -67,6 +68,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Search failed');
       setResults(json.companies);
+      setDiag(json._diag ?? null);
       setMessage(`Found ${json.companies.length} companies within ${radius} mi of ${locationLabel()}`);
     } catch (e: any) {
       setMessage(e.message); setResults([]);
@@ -188,6 +190,12 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       </div>
 
       {message && <div className="alert alert--info" style={{ marginTop: 14, background: 'var(--cf-surface-1)', border: '1px solid var(--cf-border)', borderRadius: 10, padding: 12, color: 'var(--cf-text-1)', fontSize: 13 }}>{message}</div>}
+      {diag && (
+        <details style={{ marginTop: 10, background: 'var(--cf-surface-0)', border: '1px solid var(--cf-border)', borderRadius: 10, padding: 12, fontSize: 12, color: 'var(--cf-text-2)' }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--cf-text-1)', fontWeight: 600 }}>Lusha diagnostics (click to expand)</summary>
+          <pre style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11.5, lineHeight: 1.4 }}>{JSON.stringify(diag, null, 2)}</pre>
+        </details>
+      )}
 
       {results.length > 0 && (
         <div className="cf-results">
