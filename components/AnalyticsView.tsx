@@ -404,7 +404,7 @@ export function AnalyticsView({
 
       {/* Hero line chart + Stock donut */}
       <div className="an-grid">
-        <div className="an-card" style={{ minHeight: 380 }}>
+        <div className="an-card">
           <div className="an-card__head">
             <div className="an-card__title">
               <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 50, background: STC_NAVY, boxShadow: `0 0 0 3px ${STC_NAVY}22` }} />
@@ -442,7 +442,7 @@ export function AnalyticsView({
               );
             })}
           </div>
-          <div style={{ height: 290 }}>
+          <div style={{ flex: 1, minHeight: 290 }}>
             <ResponsiveLine
               data={nivoLineData}
               margin={{ top: 12, right: 30, bottom: 36, left: 64 }}
