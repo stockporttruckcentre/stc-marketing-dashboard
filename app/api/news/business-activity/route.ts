@@ -17,9 +17,15 @@ export const maxDuration = 25;
  * Optional transport relevance keywords boost transport / haulage notices
  * to the top, then customer matches go above those.
  */
-const GAZETTE_BASE = 'https://www.thegazette.co.uk/all-notices/notice/data.feed';
-const FEEDS = [
-  `${GAZETTE_BASE}?categorycode-all=24&results-page-size=80&order-by=publish-date-desc`,
+// Gazette uses an anti-bot WAF that returns HTTP 202 with empty body to plain
+// server-side fetches. We try multiple strategies in order until one returns
+// real content: their JSON endpoint, then the Atom .feed, then a fall-back proxy.
+const GAZETTE_STRATEGIES: { url: string; type: 'json' | 'atom' }[] = [
+  { url: 'https://www.thegazette.co.uk/all-notices/notice/data.json?categorycode-all=24&results-page-size=80&order-by=publish-date-desc', type: 'json' },
+  { url: 'https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc', type: 'atom' },
+  // Public CORS/HTTP relay as last resort. corsproxy.io re-issues the request
+  // with its own residential-looking IPs.
+  { url: 'https://corsproxy.io/?url=' + encodeURIComponent('https://www.thegazette.co.uk/all-notices/notice/data.feed?categorycode-all=24&results-page-size=80&order-by=publish-date-desc'), type: 'atom' },
 ];
 
 const TRANSPORT_KEYWORDS = [
@@ -82,38 +88,60 @@ function noticeTypeFromTitle(t: string): string | null {
   return null;
 }
 
-type FetchDiag = { url: string; status: number | string; bytes: number; sample: string; error?: string };
+type FetchDiag = { url: string; type: string; status: number | string; bytes: number; sample: string; error?: string; matched?: number };
 const diagnostics: FetchDiag[] = [];
 
-async function fetchGazetteFeed(url: string, parser: XMLParser): Promise<Omit<Notice, 'isCustomer' | 'isTransport'>[]> {
-  const diag: FetchDiag = { url, status: 'pending', bytes: 0, sample: '' };
+function parseAtomEntries(parsed: any) {
+  const feed = parsed?.feed ?? parsed?.['atom:feed'] ?? parsed;
+  const entryRaw = feed?.entry ?? feed?.['atom:entry'] ?? [];
+  return Array.isArray(entryRaw) ? entryRaw : (entryRaw ? [entryRaw] : []);
+}
+
+function entriesFromJson(json: any): any[] {
+  // Gazette JSON-SIMPLE: { entries: [...], paging:{} } OR  it serialises Atom entries
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json?.entries)) return json.entries;
+  if (Array.isArray(json?.feed?.entry)) return json.feed.entry;
+  return [];
+}
+
+async function tryStrategy(strategy: { url: string; type: 'json' | 'atom' }, parser: XMLParser): Promise<Omit<Notice, 'isCustomer' | 'isTransport'>[]> {
+  const diag: FetchDiag = { url: strategy.url, type: strategy.type, status: 'pending', bytes: 0, sample: '' };
   diagnostics.push(diag);
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 10000);
-    const res = await fetch(url, {
+    const res = await fetch(strategy.url, {
       signal: ctrl.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/atom+xml, application/xml, text/xml, */*',
+        'Accept': strategy.type === 'json' ? 'application/json, */*' : 'application/atom+xml, application/xml, text/xml, */*',
         'Accept-Language': 'en-GB,en;q=0.9',
+        'Cache-Control': 'no-cache',
       },
       cache: 'no-store',
     });
     clearTimeout(tid);
     diag.status = res.status;
-    const xml = await res.text();
-    diag.bytes = xml.length;
-    diag.sample = xml.slice(0, 300);
-    if (!res.ok) return [];
-    if (!xml || xml.length < 100) return [];
+    const body = await res.text();
+    diag.bytes = body.length;
+    diag.sample = body.slice(0, 300);
+    if (!res.ok || !body || body.length < 80) return [];
 
-    const parsed = parser.parse(xml);
-    const feed = parsed?.feed ?? parsed?.['atom:feed'] ?? parsed;
-    const entryRaw = feed?.entry ?? feed?.['atom:entry'] ?? [];
-    const entries: any[] = Array.isArray(entryRaw) ? entryRaw : (entryRaw ? [entryRaw] : []);
-
-    return entries.map((e: any, i: number) => {
+    let entries: any[] = [];
+    if (strategy.type === 'json') {
+      try {
+        const j = JSON.parse(body);
+        entries = entriesFromJson(j);
+      } catch {
+        // Some endpoints return Atom even when .json is requested — try parsing as XML
+        entries = parseAtomEntries(parser.parse(body));
+      }
+    } else {
+      entries = parseAtomEntries(parser.parse(body));
+    }
+    const parsed = { _entries: entries };
+    const out = entries.map((e: any, i: number) => {
       const title = stripHtml(typeof e.title === 'string' ? e.title : (e.title?.['#text'] ?? ''));
       const summary = stripHtml(typeof e.summary === 'string' ? e.summary : (e.summary?.['#text'] ?? e.content?.['#text'] ?? ''));
       const link = extractLink(e.link);
@@ -136,6 +164,8 @@ async function fetchGazetteFeed(url: string, parser: XMLParser): Promise<Omit<No
         summary: (summary || '').slice(0, 300),
       };
     }).filter(n => n.title && n.url);
+    diag.matched = out.length;
+    return out;
   } catch (e: any) {
     diag.status = 'error';
     diag.error = e?.message ?? String(e);
@@ -150,7 +180,11 @@ export async function GET() {
 
   diagnostics.length = 0;
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', trimValues: true });
-  const merged = (await Promise.all(FEEDS.map(u => fetchGazetteFeed(u, parser)))).flat();
+  let merged: Omit<Notice, 'isCustomer' | 'isTransport'>[] = [];
+  for (const strategy of GAZETTE_STRATEGIES) {
+    merged = await tryStrategy(strategy, parser);
+    if (merged.length > 0) break;
+  }
 
   // Dedupe by URL
   const seen = new Set<string>();
