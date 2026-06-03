@@ -129,7 +129,7 @@ function ForgotModal({ initialEmail, onClose }: { initialEmail: string; onClose:
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h2 className="dot-red" style={{ margin: 0 }}>Reset your password</h2>
-            <div className="sub">We'll email you a link to set a new one.</div>
+            <div className="sub">We&apos;ll email you a link to set a new one.</div>
           </div>
           <button onClick={onClose} className="btn btn--icon"><X size={16} /></button>
         </div>

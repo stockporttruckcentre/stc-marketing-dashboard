@@ -15,7 +15,6 @@ export default function ResetPasswordPage() {
 
 function ResetForm() {
   const router = useRouter();
-  const supabase = createClient();
   const [ready, setReady] = useState(false);
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -24,6 +23,7 @@ function ResetForm() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    const supabase = createClient();
     const hash = typeof window !== 'undefined' ? window.location.hash : '';
     if (hash && hash.includes('type=recovery')) {
       const params = new URLSearchParams(hash.slice(1));
@@ -46,7 +46,7 @@ function ResetForm() {
       if (data.session) setReady(true);
       else setError('No active password-reset session. Click the link in your reset email again to start over.');
     });
-  }, [supabase]);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,6 +54,7 @@ function ResetForm() {
     if (pw.length < 1) { setError('Enter a new password.'); return; }
     if (pw !== pw2) { setError("Passwords don't match."); return; }
     setLoading(true);
+    const supabase = createClient();
     const { error } = await supabase.auth.updateUser({ password: pw });
     setLoading(false);
     if (error) { setError(error.message); return; }
