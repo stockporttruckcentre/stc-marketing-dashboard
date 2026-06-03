@@ -255,11 +255,26 @@ export async function GET() {
 
   const insolvencyOnly = flagged.filter(n => isInsolvencyType(n.noticeType));
 
+  // Dedupe per company - keep most recent notice per normalized company name
+  const byCompany = new Map<string, typeof insolvencyOnly[number]>();
+  for (const n of insolvencyOnly) {
+    const key = n.company || n.title;
+    const existing = byCompany.get(key);
+    if (!existing || existing.publishedDate < n.publishedDate) {
+      byCompany.set(key, n);
+    }
+  }
+  const deduped = Array.from(byCompany.values()).sort((a, b) => {
+    if (a.isCustomer !== b.isCustomer) return a.isCustomer ? -1 : 1;
+    if (a.isTransport !== b.isTransport) return a.isTransport ? -1 : 1;
+    return b.publishedDate.localeCompare(a.publishedDate);
+  });
+
   return NextResponse.json({
-    notices: insolvencyOnly.slice(0, 60),
-    matchedCount: insolvencyOnly.filter(n => n.isCustomer).length,
-    transportCount: insolvencyOnly.filter(n => n.isTransport).length,
-    totalCount: insolvencyOnly.length,
+    notices: deduped.slice(0, 60),
+    matchedCount: deduped.filter(n => n.isCustomer).length,
+    transportCount: deduped.filter(n => n.isTransport).length,
+    totalCount: deduped.length,
     rawCount: flagged.length,
     fetchedAt: new Date().toISOString(),
     source: 'thegazette.co.uk',

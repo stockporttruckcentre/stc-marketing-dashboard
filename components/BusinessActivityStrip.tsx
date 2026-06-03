@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { AlertTriangle, ExternalLink, RefreshCw, Activity, Building2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ExternalLink, RefreshCw, Activity, ChevronRight } from 'lucide-react';
 
 type Notice = {
   id: string;
@@ -22,17 +22,26 @@ function fmtDate(iso: string) {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
   if (diff < 7) return `${diff}d ago`;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+
+const TYPE_GROUPS: { key: string; label: string; match: (t: string | null) => boolean }[] = [
+  { key: 'all',           label: 'All',           match: () => true },
+  { key: 'admin',         label: 'Administration', match: t => !!t && /admin/i.test(t) },
+  { key: 'liquidation',   label: 'Liquidation',    match: t => !!t && /liquid/i.test(t) },
+  { key: 'winding',       label: 'Winding-up',     match: t => !!t && /winding/i.test(t) },
+  { key: 'bankruptcy',    label: 'Bankruptcy',     match: t => !!t && /bankrupt/i.test(t) },
+  { key: 'dividends',     label: 'Dividends',      match: t => !!t && /dividend/i.test(t) },
+];
 
 export function BusinessActivityStrip() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [matched, setMatched] = useState(0);
   const [total, setTotal] = useState(0);
-  const [transportCount, setTransportCount] = useState(0);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>('all');
 
   async function load() {
     setLoading(true); setError(null);
@@ -43,7 +52,6 @@ export function BusinessActivityStrip() {
       setNotices(j.notices ?? []);
       setMatched(j.matchedCount ?? 0);
       setTotal(j.totalCount ?? 0);
-      setTransportCount(j.transportCount ?? 0);
       setFetchedAt(j.fetchedAt ?? null);
     } catch (e: any) {
       setError(e?.message ?? 'load failed');
@@ -53,136 +61,213 @@ export function BusinessActivityStrip() {
   }
   useEffect(() => { load(); }, []);
 
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const g of TYPE_GROUPS) c[g.key] = notices.filter(n => g.match(n.noticeType)).length;
+    return c;
+  }, [notices]);
+
+  const filtered = useMemo(() => {
+    const g = TYPE_GROUPS.find(x => x.key === filter) ?? TYPE_GROUPS[0];
+    return notices.filter(n => g.match(n.noticeType));
+  }, [notices, filter]);
+
   return (
-    <div style={{
-      background: 'var(--bg-1)',
-      border: '1px solid var(--border)',
-      borderRadius: 14,
-      padding: 18,
-      marginBottom: 18,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'rgba(207,36,23,0.12)', color: 'var(--stc-red)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <Activity size={18} />
-          </span>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', display: 'flex', alignItems: 'center', gap: 10 }}>
-              Company Updates
-              {matched > 0 && (
-                <span style={{
-                  fontSize: 11, fontWeight: 700, color: '#fff',
-                  background: 'var(--stc-red)', padding: '2px 8px', borderRadius: 8,
-                }}>
-                  {matched} customer{matched === 1 ? '' : 's'} affected
-                </span>
-              )}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-3)', marginTop: 2 }}>
-              London Gazette · UK insolvency, administration & winding-up notices · {total} notice{total === 1 ? '' : 's'}{transportCount > 0 ? ` · ${transportCount} transport-related` : ''}
-              {fetchedAt && <> · updated {new Date(fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</>}
-            </div>
-          </div>
+    <div className="iu-wrap">
+      {/* Header */}
+      <div className="iu-head">
+        <div className="iu-head__title">
+          <span className="iu-head__icon"><Activity size={14} /></span>
+          <h2>Insolvency Updates</h2>
+          {matched > 0 && (
+            <span className="iu-badge iu-badge--alert">
+              <AlertTriangle size={11} /> {matched} customer{matched === 1 ? '' : 's'} affected
+            </span>
+          )}
         </div>
-        <button onClick={load} disabled={loading} className="btn btn--ghost btn--sm" title="Refresh">
-          <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh
+        <div className="iu-head__sub">
+          London Gazette · {total} active notice{total === 1 ? '' : 's'}
+          {fetchedAt && <> · updated {new Date(fetchedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</>}
+        </div>
+        <button onClick={load} disabled={loading} className="iu-refresh" title="Refresh">
+          <RefreshCw size={13} className={loading ? 'spin' : ''} />
         </button>
       </div>
 
-      {error && (
-        <div style={{ fontSize: 12, color: 'var(--fg-3)', padding: 10, background: 'var(--bg-2)', borderRadius: 8 }}>
-          Feed unavailable: {error}. Vercel will retry on next refresh.
-        </div>
-      )}
-      {!loading && !error && notices.length === 0 && (
-        <div style={{ fontSize: 12, color: 'var(--fg-3)', padding: 10 }}>No recent notices.</div>
+      {/* Filter chips */}
+      <div className="iu-chips">
+        {TYPE_GROUPS.map(g => (
+          <button key={g.key}
+            onClick={() => setFilter(g.key)}
+            className={`iu-chip ${filter === g.key ? 'is-active' : ''}`}>
+            {g.label}
+            <span className="iu-chip__n">{counts[g.key] ?? 0}</span>
+          </button>
+        ))}
+      </div>
+
+      {error && <div className="iu-empty">Feed unavailable: {error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="iu-empty">No notices match this filter.</div>
       )}
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-        gap: 10,
-      }}>
-        {notices.map(n => (
+      {/* Dense grid */}
+      <div className="iu-grid">
+        {filtered.map(n => (
           <a key={n.id} href={n.url} target="_blank" rel="noopener noreferrer"
-            style={{
-              display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              padding: '12px 14px', borderRadius: 10,
-              background: n.isCustomer ? 'rgba(207,36,23,0.06)' : 'var(--bg-2)',
-              border: `1px solid ${n.isCustomer ? 'rgba(207,36,23,0.45)' : 'var(--border)'}`,
-              textDecoration: 'none',
-              color: 'var(--fg-1)',
-              transition: 'transform .12s, background .14s, border-color .14s',
-              minHeight: 122,
-            }}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.background = n.isCustomer ? 'rgba(207,36,23,0.10)' : 'var(--bg-3)';
-              el.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.background = n.isCustomer ? 'rgba(207,36,23,0.06)' : 'var(--bg-2)';
-              el.style.transform = 'none';
-            }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-                {n.isCustomer && (
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    fontSize: 10, fontWeight: 700, color: 'var(--stc-red)',
-                    background: 'rgba(207,36,23,0.18)', padding: '2px 6px', borderRadius: 4,
-                    textTransform: 'uppercase', letterSpacing: '0.04em',
-                  }}>
-                    <AlertTriangle size={10} /> Our customer
-                  </span>
-                )}
-                {n.noticeType && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600,
-                    color: 'var(--fg-2)', background: 'var(--bg-3)',
-                    padding: '2px 6px', borderRadius: 4,
-                  }}>
-                    {n.noticeType}
-                  </span>
-                )}
-              </div>
-              <div style={{
-                fontSize: 13.5, fontWeight: 600, color: 'var(--fg-1)',
-                lineHeight: 1.35,
-                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                marginBottom: 4,
-              }}>
-                <Building2 size={12} style={{ verticalAlign: 'middle', marginRight: 4, color: 'var(--fg-3)' }} />
-                {n.title}
-              </div>
-              {n.summary && (
-                <div style={{
-                  fontSize: 11.5, color: 'var(--fg-2)',
-                  lineHeight: 1.45,
-                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                  marginTop: 4,
-                }}>
-                  {n.summary}
-                </div>
-              )}
+            className={`iu-card ${n.isCustomer ? 'iu-card--alert' : ''}`}>
+            <div className="iu-card__row1">
+              {n.isCustomer && <AlertTriangle size={11} className="iu-card__alert" />}
+              <span className="iu-card__type">{n.noticeType ?? 'Notice'}</span>
+              <span className="iu-card__date">{fmtDate(n.publishedDate)}</span>
             </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginTop: 10, fontSize: 10.5, color: 'var(--fg-3)',
-            }}>
-              <span>{fmtDate(n.publishedDate)}</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                Read on Gazette <ExternalLink size={10} />
-              </span>
+            <div className="iu-card__title">{n.title}</div>
+            <div className="iu-card__foot">
+              <span className="iu-card__cta">Read on Gazette</span>
+              <ChevronRight size={12} />
             </div>
           </a>
         ))}
       </div>
+
+      <style jsx>{`
+        .iu-wrap {
+          margin: 0 0 18px;
+          padding: 16px 18px 18px;
+          background: var(--bg-1);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+        }
+        .iu-head {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: center;
+          gap: 8px;
+          row-gap: 2px;
+        }
+        .iu-head__title {
+          display: flex; align-items: center; gap: 10px;
+          grid-column: 1 / 2; grid-row: 1 / 2;
+        }
+        .iu-head__title h2 {
+          font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+          color: var(--fg-1); margin: 0;
+        }
+        .iu-head__icon {
+          width: 26px; height: 26px; border-radius: 8px;
+          background: rgba(207,36,23,0.12); color: var(--stc-red);
+          display: inline-flex; align-items: center; justify-content: center;
+          flex: none;
+        }
+        .iu-head__sub {
+          grid-column: 1 / 2; grid-row: 2 / 3;
+          font-size: 11px; color: var(--fg-3);
+          margin-left: 36px;
+        }
+        .iu-refresh {
+          grid-column: 2 / 3; grid-row: 1 / 3;
+          width: 32px; height: 32px; border-radius: 8px;
+          background: var(--bg-2); border: 1px solid var(--border);
+          color: var(--fg-2);
+          display: inline-flex; align-items: center; justify-content: center;
+          cursor: pointer; transition: all .14s;
+        }
+        .iu-refresh:hover { background: var(--bg-3); color: var(--fg-1); }
+        .iu-badge {
+          display: inline-flex; align-items: center; gap: 4px;
+          font-size: 10.5px; font-weight: 600;
+          padding: 3px 8px; border-radius: 999px;
+        }
+        .iu-badge--alert {
+          background: rgba(207,36,23,0.16); color: var(--stc-red);
+        }
+        .iu-chips {
+          display: flex; flex-wrap: wrap; gap: 5px;
+          margin: 14px 0 12px;
+        }
+        .iu-chip {
+          background: var(--bg-2); border: 1px solid var(--border);
+          color: var(--fg-2);
+          padding: 5px 10px; border-radius: 7px;
+          font-size: 11.5px; font-weight: 500;
+          cursor: pointer; transition: all .14s;
+          display: inline-flex; align-items: center; gap: 6px;
+        }
+        .iu-chip:hover { background: var(--bg-3); color: var(--fg-1); }
+        .iu-chip.is-active {
+          background: var(--stc-navy); border-color: var(--stc-navy); color: #fff;
+        }
+        .iu-chip__n {
+          background: rgba(0,0,0,0.18);
+          font-size: 10px; font-weight: 700;
+          padding: 1px 5px; border-radius: 4px;
+          min-width: 14px; text-align: center;
+        }
+        .iu-chip.is-active .iu-chip__n { background: rgba(255,255,255,0.22); }
+        .iu-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: 6px;
+        }
+        .iu-card {
+          display: flex; flex-direction: column; gap: 5px;
+          padding: 10px 12px;
+          background: var(--bg-2);
+          border: 1px solid var(--border);
+          border-radius: 9px;
+          text-decoration: none;
+          color: var(--fg-1);
+          transition: all .14s;
+          position: relative;
+        }
+        .iu-card:hover {
+          background: var(--bg-3);
+          border-color: var(--border-strong);
+          transform: translateY(-1px);
+        }
+        .iu-card--alert {
+          background: rgba(207,36,23,0.05);
+          border-color: rgba(207,36,23,0.35);
+        }
+        .iu-card--alert:hover {
+          background: rgba(207,36,23,0.10);
+          border-color: rgba(207,36,23,0.55);
+        }
+        .iu-card__row1 {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 10.5px;
+        }
+        .iu-card__alert { color: var(--stc-red); flex: none; }
+        .iu-card__type {
+          color: var(--fg-2); font-weight: 500;
+          padding: 1px 6px; border-radius: 4px;
+          background: var(--bg-3); white-space: nowrap;
+          flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis;
+        }
+        .iu-card__date {
+          color: var(--fg-3); margin-left: auto; white-space: nowrap; flex: none;
+        }
+        .iu-card__title {
+          font-size: 13px; font-weight: 600;
+          color: var(--fg-1);
+          line-height: 1.3;
+          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .iu-card__foot {
+          display: flex; align-items: center; justify-content: space-between;
+          margin-top: auto;
+          font-size: 10.5px; color: var(--fg-3);
+          padding-top: 4px;
+        }
+        .iu-card__cta { font-weight: 500; }
+        .iu-empty {
+          padding: 22px; text-align: center;
+          color: var(--fg-3); font-size: 12px;
+        }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }

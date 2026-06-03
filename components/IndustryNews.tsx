@@ -124,7 +124,7 @@ export function IndustryNews({
         </button>
         <button onClick={() => setTab('company')}
           className={`news-chip ${tab === 'company' ? 'is-active' : ''}`}>
-          Company Updates
+          Insolvency Updates
         </button>
       </div>
 
