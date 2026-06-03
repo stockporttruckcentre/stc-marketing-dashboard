@@ -178,6 +178,29 @@ async function tryStrategy(strategy: { url: string; type: 'json' | 'atom' }, par
   }
 }
 
+
+const INSOLVENCY_TYPES = new Set<string>([
+  'Administration', 'Liquidation', 'Winding up',
+  'Winding-Up Orders', 'Insolvency', 'Receivership', 'CVA',
+  'Appointment of Liquidators', 'Resolutions for Winding Up',
+  'Notice of Intended Dividends', 'Bankruptcy Orders', 'Strike off',
+  'Notice of Meetings', 'Meetings of Creditors', 'Notice of Appointment',
+  'Petitions to Wind Up (Companies)', 'Notice of Voluntary Arrangement',
+]);
+const NON_INSOLVENCY_TYPES = new Set<string>([
+  'Deceased Estates', 'Town and Country Planning', 'Road Traffic Acts',
+  'Highways', 'Crown Office', 'Other Notices', 'Transport Acts',
+  'Cinemas', 'Charities', 'Awards', 'State', 'Royal',
+]);
+function isInsolvencyType(t: string | null): boolean {
+  if (!t) return false;
+  if (NON_INSOLVENCY_TYPES.has(t)) return false;
+  if (INSOLVENCY_TYPES.has(t)) return true;
+  // Fall back to keyword sniffing for unseen variants
+  const u = t.toLowerCase();
+  return /admin|liquid|winding|insolven|receiv|cva|bankrupt|strike off|voluntary arrang|dividend|creditor/i.test(u);
+}
+
 export async function GET() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -234,11 +257,14 @@ export async function GET() {
     return b.publishedDate.localeCompare(a.publishedDate);
   });
 
+  const insolvencyOnly = flagged.filter(n => isInsolvencyType(n.noticeType));
+
   return NextResponse.json({
-    notices: flagged.slice(0, 60),
-    matchedCount: flagged.filter(n => n.isCustomer).length,
-    transportCount: flagged.filter(n => n.isTransport).length,
-    totalCount: flagged.length,
+    notices: insolvencyOnly.slice(0, 60),
+    matchedCount: insolvencyOnly.filter(n => n.isCustomer).length,
+    transportCount: insolvencyOnly.filter(n => n.isTransport).length,
+    totalCount: insolvencyOnly.length,
+    rawCount: flagged.length,
     fetchedAt: new Date().toISOString(),
     source: 'thegazette.co.uk',
     diagnostics,
