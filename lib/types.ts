@@ -174,13 +174,13 @@ export interface ContactAddress {
 }
 
 export const DEPOTS = [
-  // postcode goes here once Alex confirms; for now keeping lat/lng + name only.
-  { name: 'Bredbury',   lat: 53.4225, lng: -2.1289 },
-  { name: 'Hyde',       lat: 53.4500, lng: -2.0747 },
-  { name: 'Dukinfield', lat: 53.4783, lng: -2.0833 },
-  { name: 'Haydock',    lat: 53.4731, lng: -2.6519 },
-  { name: 'Birkenhead', lat: 53.3934, lng: -3.0150 },
-  { name: 'Atherton',   lat: 53.5219, lng: -2.4925 },
+  // Postcodes are the SK14/SK6/etc outcode areas Lusha's prospecting search expects.
+  { name: 'Bredbury',   postcode: 'SK6 2QU',  lat: 53.4225, lng: -2.1289 },
+  { name: 'Hyde',       postcode: 'SK14 4QY', lat: 53.4500, lng: -2.0747 },
+  { name: 'Dukinfield', postcode: 'SK16 4UH', lat: 53.4783, lng: -2.0833 },
+  { name: 'Haydock',    postcode: 'WA11 9XG', lat: 53.4731, lng: -2.6519 },
+  { name: 'Birkenhead', postcode: 'CH41 9HX', lat: 53.3934, lng: -3.0150 },
+  { name: 'Atherton',   postcode: 'M46 0SU',  lat: 53.5219, lng: -2.4925 },
 ] as const;
 
 export interface NewsSource {

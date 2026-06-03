@@ -358,7 +358,13 @@ export async function searchCompanies(opts: {
   limit?: number;
 }) {
   const include: any = {};
-  if (opts.location) include.locations = [{ country: 'United Kingdom', city: opts.location }];
+  if (opts.location) {
+    // Send as zipCode (postcode) — this is what Lusha's prospecting search actually uses for radius lookups,
+    // not city. Their UI screen shows this filter shape directly.
+    const loc: any = { country: 'United Kingdom', zipCode: opts.location };
+    if (opts.radiusMiles && opts.radiusMiles > 0) loc.distance = opts.radiusMiles;
+    include.locations = [loc];
+  }
   if (opts.industryIds && opts.industryIds.length) include.mainIndustriesIds = opts.industryIds;
   if (opts.minEmployees != null && opts.maxEmployees != null) {
     include.sizes = [{ min: opts.minEmployees, max: opts.maxEmployees }];
