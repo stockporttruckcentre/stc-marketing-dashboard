@@ -79,6 +79,22 @@ it. One had been sitting in the Lusha dialog since before the ban existed.
 
 ---
 
+## The CRM is built to a written spec
+
+`docs/source/crm-page-scope.md` is the per page CRM build spec, derived from the
+Tom, Dave and Alex meeting, with provenance on every item. It covers every tab.
+
+**Read section 1 before doing anything on the CRM tab, and the relevant section
+before touching any other tab.** `docs/crm-scope-compliance.md` tracks what is
+built against it and is updated as part of the work, not afterwards.
+
+`docs/source/` holds documents received from the business, stored exactly as they
+arrived. Nothing in that folder is edited, reformatted or tidied, and **it is the
+one exception to the em dash ban below.** The ban governs prose written for this
+repository. It does not govern a document somebody else wrote.
+
+---
+
 ## The design system is mandatory for CRM work
 
 `design-system/` is the STC UI kit. **It governs every piece of CRM interface

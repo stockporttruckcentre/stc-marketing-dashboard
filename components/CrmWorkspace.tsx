@@ -7,8 +7,7 @@ import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEve
 import Papa from 'papaparse';
 import {
   Plus, Upload, Download, Loader, Trash2, X, Mail, Edit2, MoreHorizontal,
-  Globe, Users, UserPlus, Share2, Phone, Building, MapPin, Hash, Send, Home, Star,
-  CalendarPlus, Lock, Globe2, ChevronDown, Calendar,
+  Globe, Users, UserPlus, Send, Star, Search, ChevronDown, SearchX,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
@@ -16,13 +15,45 @@ import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
 import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker';
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
-import { Figure, Card, Button, Alert, PageHead } from '@/components/kit/primitives';
-import { Modal, Field, TextInput, OptionCard, Checkbox } from '@/components/kit/forms';
+import { Figure, Button, Alert, Badge, type Tone } from '@/components/kit/primitives';
+import { Modal, Field, TextInput, Select, OptionCard, Checkbox } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
 } from '@/lib/crm/ownership';
+import { capabilitiesFor, defaultScopeKind, roleLabel, type CrmCapabilities } from '@/lib/crm/permissions';
+import { ukDateShort } from '@/lib/format/date';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
+
+const STATUS_TONE: Record<string, Tone> = {
+  lead: 'info', contacted: 'warning', quoted: 'accent',
+  won: 'success', customer: 'success', lost: 'neutral',
+};
+
+const TONE_COLOR: Record<Tone, string> = {
+  neutral: 'var(--text-subtle)', info: 'var(--info)', success: 'var(--success)',
+  warning: 'var(--warning)', danger: 'var(--danger)', accent: 'var(--accent)',
+};
+
+/**
+ * The kit's table badge, drawn inline because an AG Grid cell renderer
+ * cannot inherit the kit's own Badge sizing without fighting the row's
+ * 36px line box.
+ */
+function GridBadge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, height: 20, padding: '0 8px',
+      borderRadius: 'var(--r-sm)', color: TONE_COLOR[tone],
+      background: 'color-mix(in srgb, currentColor 13%, transparent)',
+      fontSize: 11, fontWeight: 600, letterSpacing: '0.01em',
+      textTransform: 'capitalize', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: 'var(--r-full)', background: 'currentColor' }} />
+      {children}
+    </span>
+  );
+}
 
 type Member = { list_id: string; user_id: string; can_edit: boolean };
 
@@ -72,20 +103,43 @@ export function CrmWorkspace({
   const [promptSchedule, setPromptSchedule] = useState<CRMContact | null>(null);
   const [promptProposal, setPromptProposal] = useState<CRMContact | null>(null);
   const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [search, setSearch] = useState('');
+
+  /**
+   * What this person may do here. Derived from role today, overridden per
+   * user by the admin panel when it exists. Every gate on this screen
+   * reads from this one set rather than testing role in place, so the
+   * panel is a single swap rather than a hunt.
+   */
+  const caps: CrmCapabilities = useMemo(() => capabilitiesFor(profile), [profile]);
+  const defaultScope = useMemo(() => defaultScopeKind(caps), [caps]);
+
+  const selectedIds = useCallback(
+    () => gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [],
+    [],
+  );
 
   /**
    * Whose accounts you are looking at. Kept in the URL so a filtered view
    * can be sent to somebody, and remembered so a rep who lives in their
    * own portfolio does not reset to everyone's on every visit.
    */
-  const [scope, setScope] = useState<Scope>(() => scopeFromParam(searchParams.get('who')));
+  const [scope, setScope] = useState<Scope>(() => {
+    const fromUrl = searchParams.get('who');
+    // The CRM opens on your own accounts. The shared pipeline is mostly
+    // other people's work, and starting there means scrolling past all of
+    // it to reach the handful you actually owe a call today.
+    return fromUrl ? scopeFromParam(fromUrl) : { kind: 'mine' };
+  });
   useEffect(() => {
     const fromUrl = searchParams.get('who');
     if (fromUrl) { setScope(scopeFromParam(fromUrl)); return; }
     try {
       const saved = localStorage.getItem('stc:crmScope');
       if (saved) setScope(scopeFromParam(saved));
-    } catch {}
+      else setScope({ kind: defaultScopeKind(capabilitiesFor(profile)) });
+    } catch { setScope({ kind: defaultScopeKind(capabilitiesFor(profile)) }); }
     // Reading the saved scope is a first-load concern only. Re-running it
     // on every URL change would fight the user's own clicks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,11 +155,17 @@ export function CrmWorkspace({
 
   const selectedList = lists.find((l) => l.id === selectedListId);
   const isOwner = selectedList ? selectedList.owner_id === profile.id : false;
-  const canEdit = selectedList?.is_global
+  /**
+   * Two gates, and both have to pass. Your role has to allow editing at
+   * all, and this particular list has to be one you can write to. A read
+   * only viewer on a list shared with them is still a read only viewer.
+   */
+  const listWritable = selectedList?.is_global
     ? true
     : isOwner ||
       members.some((m) => m.list_id === selectedListId && m.user_id === profile.id && m.can_edit) ||
       profile.role === 'admin';
+  const canEdit = listWritable && capabilitiesFor(profile).has('crm.edit');
 
   const myLists = lists.filter((l) => !l.is_global && l.owner_id === profile.id);
   const sharedLists = lists.filter((l) => !l.is_global && l.owner_id !== profile.id);
@@ -113,10 +173,18 @@ export function CrmWorkspace({
 
   const owners = useMemo(() => ownerOptions(profiles), [profiles]);
   const ambiguousFirstNames = useMemo(() => ownersAmbiguous(profiles), [profiles]);
-  const visibleRows = useMemo(
-    () => applyScope(rows, scope, profile, profiles),
-    [rows, scope, profile, profiles],
-  );
+  const visibleRows = useMemo(() => {
+    const scoped = applyScope(rows, scope, profile, profiles);
+    const q = search.trim().toLowerCase();
+    if (!q) return scoped;
+    // Every field somebody would plausibly recognise a company by. Not a
+    // clever search: this is the one on the table, and the toolbar upstairs
+    // is where a question gets asked.
+    return scoped.filter((r) => [
+      r.company_name, r.contact_name, r.email, r.phone,
+      r.location, r.assigned_to, r.status, r.source, r.notes,
+    ].some((v) => v && String(v).toLowerCase().includes(q)));
+  }, [rows, scope, profile, profiles, search]);
   const unassignedCount = useMemo(
     () => rows.filter((r) => !ownerKey(r.assigned_to)).length,
     [rows],
@@ -189,19 +257,19 @@ export function CrmWorkspace({
       checkboxSelection: canEdit, headerCheckboxSelection: canEdit, headerCheckboxSelectionFilteredOnly: true,
       sortable: false, filter: false, editable: false, suppressMenu: true,
     },
-    { field: 'company_name', headerName: 'Company', flex: 1.4, minWidth: 200, editable: canEdit, valueSetter: saveCell,
+    { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 180, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
-        <span style={{ fontWeight: 500, color: 'var(--fg-1)' }}>{p.value}</span> },
-    { field: 'contact_name', headerName: 'Contact', flex: 1, minWidth: 150, editable: canEdit, valueSetter: saveCell },
-    { field: 'email', headerName: 'Email', flex: 1.2, minWidth: 220, editable: canEdit, valueSetter: saveCell,
+        <span style={{ fontWeight: 500, color: 'var(--text)' }}>{p.value}</span> },
+    { field: 'contact_name', headerName: 'Contact', flex: 0.9, minWidth: 130, editable: canEdit, valueSetter: saveCell },
+    { field: 'email', headerName: 'Email', flex: 1.1, minWidth: 190, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
-        p.value ? <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }}>{p.value}</span>
-                : <span style={{ color: 'var(--fg-4)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
+        p.value ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{p.value}</span>
+                : <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
     { field: 'phone', headerName: 'Phone', width: 140, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
-        p.value ? <span style={{ fontFamily: '"IBM Plex Mono", monospace', fontSize: 12 }}>{p.value}</span>
-                : <span style={{ color: 'var(--fg-4)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
-    { field: 'location', headerName: 'Location', width: 140, editable: canEdit, valueSetter: saveCell },
+        p.value ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{p.value}</span>
+                : <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
+    { field: 'location', headerName: 'Location', width: 120, editable: canEdit, valueSetter: saveCell },
     { field: 'fleet_size', headerName: 'Fleet', width: 80, editable: false,
       valueGetter: (p) => {
         const r = p.data!;
@@ -211,20 +279,24 @@ export function CrmWorkspace({
         return null;
       },
       cellRenderer: (p: ICellRendererParams<CRMContact, number>) =>
-        p.value == null ? <span style={{ color: 'var(--fg-4)' }}>—</span> : <span className="tnum">{p.value}</span>
+        p.value == null
+          ? <span style={{ color: 'var(--text-subtle)' }}>—</span>
+          : <span>{p.value}</span>
     },
     { field: 'status', headerName: 'Status', width: 130, editable: canEdit, valueSetter: saveCell,
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: STATUSES },
+      // The kit's table badge: 20px tall, tinted fill, a 6px dot and the
+      // tone doing the talking. The old one was the app's legacy pill.
       cellRenderer: (p: ICellRendererParams<CRMContact, ContactStatus>) => {
         const v = p.value as ContactStatus | undefined;
         if (!v) return null;
-        return <span className={`pill pill--${v}`}><span className="pill__dot" />{v}</span>;
+        return <GridBadge tone={STATUS_TONE[v] ?? 'neutral'}>{v}</GridBadge>;
       },
     },
-    { field: 'turnover', headerName: 'Turnover', width: 130, editable: canEdit, valueSetter: saveCell,
+    { field: 'turnover', headerName: 'Turnover', width: 115, editable: canEdit, valueSetter: saveCell,
       valueParser: (p) => p.newValue === '' ? null : Number(p.newValue) || null,
       valueFormatter: (p) => p.value != null ? '£' + Number(p.value).toLocaleString() : '',
-      cellStyle: { fontFamily: '"IBM Plex Mono", monospace' } },
+      cellStyle: { fontFamily: 'var(--mono)' } },
     /* A picker, not a text box. Everything typed in here before today
        reads as a different person to the portfolio filter, so new values
        are chosen from the real list of people instead. */
@@ -232,16 +304,24 @@ export function CrmWorkspace({
       cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', ...owners] },
       cellRenderer: (p: ICellRendererParams<CRMContact, string>) => p.value
         ? <span>{p.value}</span>
-        : <span style={{ color: 'var(--fg-4)' }}>Unassigned</span> },
-    { field: 'last_contact', headerName: 'Last contact', width: 120, editable: canEdit, valueSetter: saveCell },
-    { field: 'notes', headerName: 'Latest note', flex: 1.5, minWidth: 240, editable: canEdit, valueSetter: saveCell,
+        : <span style={{ color: 'var(--text-subtle)' }}>Unassigned</span> },
+    // Dates are read, not parsed. A raw 2026-08-11 in a column somebody
+    // scans for "who have I not called" is doing them no favours.
+    { field: 'last_contact', headerName: 'Last contact', width: 130, editable: canEdit, valueSetter: saveCell,
+      cellRenderer: (p: ICellRendererParams<CRMContact, string>) => p.value
+        ? <span>{ukDateShort(p.value)}</span>
+        : <span style={{ color: 'var(--text-subtle)' }}>—</span> },
+    { field: 'notes', headerName: 'Latest note', flex: 1.4, minWidth: 200, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) => p.value
-        ? <span style={{ color: 'var(--fg-2)' }}>{p.value}</span>
-        : <span style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>Click the row to add a note</span> },
+        ? <span style={{ color: 'var(--text-muted)' }}>{p.value}</span>
+        : <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic' }}>Click the row to add a note</span> },
   ], [canEdit, saveCell, owners]);
 
+  /* Sortable, resizable, and no per column menu button. A funnel icon on
+     every header is a lot of furniture for a filter almost nobody opens,
+     and the search box in the toolbar does the same job in one place. */
   const defaultColDef: ColDef = useMemo(() => ({
-    resizable: true, sortable: true, filter: true, floatingFilter: false, suppressMenu: false,
+    resizable: true, sortable: true, filter: false, floatingFilter: false, suppressMenu: true,
   }), []);
 
   // ---- Lusha balance fetch (for confirm modal) ----
@@ -367,9 +447,28 @@ export function CrmWorkspace({
     });
   }
 
-  async function handleAddRow(name?: string) {
+  /**
+   * Dave's complaint was that adding a record inline is fiddly: you are
+   * typing into a 36px grid cell with no idea which columns matter. The
+   * modal asks for the four things that make a record useful and leaves
+   * the rest to the drawer.
+   *
+   * The owner defaults to whoever is adding it, because an account
+   * created with no owner is an account nobody chases.
+   */
+  async function handleAddRow(fields?: Partial<CRMContact>) {
+    setShowAddContact(false);
     const { data, error } = await supabase.from('crm_contacts')
-      .insert({ company_name: name?.trim() || 'New company', status: 'lead', source: 'manual', list_id: selectedListId })
+      .insert({
+        company_name: fields?.company_name?.trim() || 'New company',
+        contact_name: fields?.contact_name?.trim() || null,
+        email: fields?.email?.trim() || null,
+        phone: fields?.phone?.trim() || null,
+        assigned_to: caps.has('crm.edit') ? (fields?.assigned_to ?? profile.full_name) : null,
+        status: 'lead',
+        source: 'manual',
+        list_id: selectedListId,
+      })
       .select('*').single();
     if (error) { setMessage(error.message); return; }
     setRows((r) => [data as CRMContact, ...r]);
@@ -496,206 +595,249 @@ export function CrmWorkspace({
   const listOwnerName = profiles.find((p) => p.id === selectedList?.owner_id)?.full_name;
 
   return (
-    <div>
-      <div className="kit">
-        <PageHead
-          eyebrow={listIsGlobal
-            ? 'Sales, global CRM'
-            : `Sales, ${listOwnerName === profile.full_name ? 'your list' : `${listOwnerName ?? 'an unowned'} list`}`}
-          title={<>
-            <Users size={25} style={{ color: 'var(--accent)' }} />
-            <span>{selectedList?.name ?? 'CRM'}</span>
-          </>}
-          sub={<>
-            {scope.kind === 'all'
-              ? `${rows.length} contacts`
-              : `${visibleRows.length} of ${rows.length} contacts, ${scopeLabel}`}
-            {', '}
-            {listIsGlobal ? 'live, visible to everyone' : 'private to the owner and anyone it is shared with'}
-          </>}
-        />
-      </div>
+    /* One kit scope for the whole tab, and only one.
+       Putting `.kit` on individual clusters is what produced the bands of
+       slightly-different dark: `.kit` paints `var(--bg)`, so every wrapper
+       laid its own canvas over the page and every seam showed. The page is
+       kit or it is not. This one is.
 
-      {/* Lists. The global one is pinned first because it is the one
-          everybody shares, and personal lists follow in the order they
-          were made. */}
-      <div className="kit" style={{
-        display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-        borderBottom: '1px solid var(--border)', paddingBottom: 9, marginBottom: 14,
-      }}>
-        {globalList && (
-          <ListTab
-            active={selectedListId === globalList.id}
-            onClick={() => selectList(globalList.id)}
-            icon={<Globe size={14} />}
-            label="Global CRM"
-          />
-        )}
-        {(myLists.length > 0 || sharedLists.length > 0) && (
-          <span style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 3px' }} />
-        )}
-        {myLists.map((l) => (
-          <ListTab key={l.id} active={selectedListId === l.id} onClick={() => selectList(l.id)}
-            icon={<Users size={14} />} label={l.name} />
-        ))}
-        {sharedLists.map((l) => (
-          <ListTab key={l.id} active={selectedListId === l.id} onClick={() => selectList(l.id)}
-            icon={<Share2 size={14} />} label={l.name} note="Shared" />
-        ))}
-        <ListTab onClick={() => setShowNewList(true)} icon={<Plus size={14} />} label="New list" dashed />
-        {selectedList && !selectedList.is_global && selectedList.owner_id === profile.id && (
-          <>
-            <span style={{ flex: 1 }} />
-            <Button size="sm" variant="secondary" onClick={() => setShowShare(selectedList)}>
-              <UserPlus size={12} /> Share
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => deleteList(selectedList.id)} aria-label="Delete this list">
-              <Trash2 size={12} />
-            </Button>
-          </>
-        )}
-      </div>
+       Fixed height rather than natural flow so the table gets everything
+       left over. 52px top bar, 24px page padding above, 56px below. */
+    <div className="kit" style={{
+      height: 'calc(100vh - 132px)',
+      minHeight: 520,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      background: 'transparent',
+    }}>
 
-      {/* Whose accounts. The first thing a rep wants and the last thing a
-          manager wants forced on them, so it is a switch rather than a
-          rule about who you are. */}
-      <div className="kit" style={{
-        marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      {/* ---- header. Title left, the actions that are always available
+              right, which is the kit's own header shape and the reason the
+              top right no longer sits empty. ---- */}
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r-md)', padding: '14px 16px',
+        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
       }}>
-        <ScopeSwitch
-          scope={scope}
-          onChange={changeScope}
-          profiles={profiles}
-          me={profile}
-          unassignedCount={unassignedCount}
-        />
-        {scope.kind !== 'all' && (
-          <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-            Showing {visibleRows.length} of {rows.length} on this list
-          </span>
-        )}
-        {ambiguousFirstNames.length > 0 && (
-          <span style={{ fontSize: 12, color: 'var(--warning)' }}>
-            Two people share the first name {ambiguousFirstNames.join(' and ')}, so rows
-            assigned to just that name are left out of both portfolios. Set an owner on
-            them to fix it.
-          </span>
-        )}
-      </div>
+        <span style={{
+          width: 40, height: 40, borderRadius: 'var(--r)', flex: 'none',
+          background: 'var(--bg-subtle)', color: 'var(--accent)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Users size={20} />
+        </span>
 
-      {/* Toolbar. Add contact is the primary action and sits last, where
-          the eye finishes. The selection bar takes over the middle only
-          when there is a selection to act on. */}
-      <div className="kit" style={{
-        marginTop: 12, display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
-      }}>
-        {canEdit && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <TextInput
-              type="email"
-              value={enrichEmail}
-              onChange={setEnrichEmail}
-              placeholder="email@company.com to look up"
-              style={{ width: 260 }}
-            />
-            <Button variant="secondary" onClick={handleEnrichInput} disabled={enriching || !enrichEmail}>
-              {enriching ? <Loader size={14} className="spin" /> : <Plus size={14} />} Enrich and add
-            </Button>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+            <h1 style={{
+              margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
+              letterSpacing: '-0.03em', color: 'var(--text)', lineHeight: 1.2,
+            }}>{selectedList?.name ?? 'CRM'}</h1>
+            {listIsGlobal
+              ? <Badge tone="info" dot>Shared</Badge>
+              : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
+            <Badge tone="neutral">{roleLabel(profile.role)}</Badge>
           </div>
-        )}
+          <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginTop: 3 }}>
+            {scope.kind === 'all'
+              ? `${rows.length} contacts.`
+              : `${scopeLabel}: ${visibleRows.length} of ${rows.length} contacts.`}
+            {' '}
+            {listIsGlobal ? 'Everyone can see this list.' : 'Only the owner and anyone it is shared with.'}
+          </div>
+        </div>
 
-        <span style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {caps.has('crm.import') && (
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              height: 28, padding: '0 10px', borderRadius: 'var(--r)', cursor: 'pointer',
+              border: '1px solid var(--border-strong)', background: 'var(--surface)',
+              color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+              letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+            }}>
+              {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import CSV
+              <input type="file" accept=".csv" hidden onChange={(e) => {
+                const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '';
+              }} />
+            </label>
+          )}
+          {caps.has('crm.export') && (
+            <Button size="sm" variant="secondary" onClick={handleExport}>
+              <Download size={13} /> Export{selectedCount > 0 ? ` (${selectedCount})` : ''}
+            </Button>
+          )}
+          {caps.has('crm.create') && (
+            <Button size="sm" variant="primary" onClick={() => setShowAddContact(true)}>
+              <Plus size={13} /> Add contact
+            </Button>
+          )}
+        </div>
+      </div>
 
-        {selectedCount > 0 && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap',
-            padding: '4px 5px 4px 11px', borderRadius: 'var(--r)',
-            border: '1px solid var(--border-strong)', background: 'var(--surface-sunken)',
+      {/* ---- pipeline at a glance.
+
+              The kit's stat strip puts no colour on the value: a rule
+              separated row, Panton label above a Panton number, and any
+              qualifier as small subtle text beside it. Colouring five
+              numbers five ways was rule one broken twice over, and it
+              made a quoted count of zero shout in red. ---- */}
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r-md)', display: 'flex', flexWrap: 'wrap', overflow: 'hidden',
+      }}>
+        {[
+          { label: 'Total', value: counts.all, note: 'in this view' },
+          { label: 'Leads', value: counts.lead, note: 'not yet approached' },
+          { label: 'Contacted', value: counts.contacted, note: 'in conversation' },
+          { label: 'Quoted', value: counts.quoted, note: 'awaiting a decision' },
+          { label: 'Won', value: counts.won, note: `${counts.lost} lost` },
+        ].map((f, i) => (
+          <div key={f.label} style={{
+            flex: '1 1 140px', minWidth: 0, padding: '13px 18px',
+            display: 'flex', flexDirection: 'column', gap: 4,
+            borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
           }}>
             <span style={{
               fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
-              letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)',
-            }}>{selectedCount} selected</span>
-            <Button size="sm" variant="ghost" onClick={bulkEnrich}><Mail size={12} /> Enrich</Button>
-            {canEdit && (
-              <Button size="sm" variant="ghost"
-                onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [] })}>
-                <UserPlus size={12} /> Assign
-              </Button>
-            )}
-            <Button size="sm" variant="ghost"
-              onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'move' })}>
-              <MoreHorizontal size={12} /> Move
-            </Button>
-            {selectedCount <= 10 && (
-              <Button size="sm" variant="ghost"
-                onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'duplicate' })}>
-                <Plus size={12} /> Duplicate
-              </Button>
-            )}
-            <Button size="sm" variant="danger" onClick={bulkDelete}><Trash2 size={12} /> Delete</Button>
+              letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+            }}>{f.label}</span>
+            <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+              <span style={{
+                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 24,
+                letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums',
+                color: 'var(--text)', lineHeight: 1.1,
+              }}>{f.value}</span>
+              <span style={{
+                fontSize: 11.5, color: 'var(--text-subtle)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{f.note}</span>
+            </span>
           </div>
-        )}
-
-        {canEdit && (
-          <label style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            height: 32, padding: '0 13px', borderRadius: 'var(--r)', cursor: 'pointer',
-            border: '1px solid var(--border-strong)', background: 'var(--surface)',
-            color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 13, fontWeight: 500,
-            letterSpacing: '-0.01em',
-          }}>
-            {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Import CSV
-            <input type="file" accept=".csv" hidden onChange={(e) => {
-              const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '';
-            }} />
-          </label>
-        )}
-        <Button variant="secondary" onClick={handleExport}>
-          <Download size={14} /> Export{selectedCount > 0 ? ` (${selectedCount})` : ''}
-        </Button>
-        {canEdit && (
-          <Button variant="accent" onClick={() => handleAddRow()}>
-            <Plus size={14} /> Add contact
-          </Button>
-        )}
+        ))}
       </div>
 
-      <div className="kit" style={{ fontSize: 11.5, color: 'var(--text-subtle)', margin: '8px 0 10px' }}>
-        Click a row to open it. Right click any cell to edit, enrich, move or delete it.
-      </div>
-
-      {message && <div className="kit" style={{ marginBottom: 12 }}><Alert tone="info">{message}</Alert></div>}
-
-      {/* An empty grid under a filter looks like a broken list. Say which
-          filter did it and offer the way back in one click. */}
-      {visibleRows.length === 0 && rows.length > 0 && scope.kind !== 'all' && (
-        <div className="kit" style={{
-          marginBottom: 12, padding: '13px 15px', borderRadius: 'var(--r-md)',
-          border: '1px dashed var(--border-strong)', background: 'var(--surface-sunken)',
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: 13.5, color: 'var(--text)' }}>
-            {scope.kind === 'unassigned'
-              ? `Every one of the ${rows.length} accounts on this list has an owner.`
-              : `None of the ${rows.length} accounts on this list are assigned to ${scope.kind === 'mine' ? 'you' : scopeLabel}. Use the Assigned column, or select rows and press Assign.`}
+      {/* ---- one toolbar. Whose accounts, which list, and a search, all on
+              a single line. This was three stacked rows and it read as
+              three, because it was. The bulk bar below replaces it rather
+              than adding a fourth. ---- */}
+      {selectedCount > 0 ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 11, flexWrap: 'wrap',
+          padding: '9px 14px', borderRadius: 'var(--r-md)',
+          background: 'var(--primary)', color: 'var(--primary-fg)',
+        }} className="crm-bulk-bar">
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {selectedCount} {selectedCount === 1 ? 'contact' : 'contacts'} selected
           </span>
-          <button onClick={() => changeScope({ kind: 'all' })} style={{
-            height: 30, padding: '0 12px', borderRadius: 'var(--r)',
-            border: '1px solid var(--border)', background: 'var(--surface)',
-            color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 13,
-          }}>Show everyone</button>
+          <span style={{ width: 1, height: 18, background: 'var(--bar-line)' }} />
+          {caps.has('crm.enrich') && <InverseButton icon={<Mail size={13} />} label="Enrich" onClick={bulkEnrich} />}
+          {caps.has('crm.assign') && (
+            <InverseButton icon={<UserPlus size={13} />} label="Assign"
+              onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds() })} />
+          )}
+          {caps.has('crm.edit') && (
+            <InverseButton icon={<MoreHorizontal size={13} />} label="Add to a list"
+              onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds(), mode: 'move' })} />
+          )}
+          {caps.has('crm.create') && selectedCount <= 10 && (
+            <InverseButton icon={<Plus size={13} />} label="Copy to a list"
+              onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds(), mode: 'duplicate' })} />
+          )}
+          {caps.has('crm.delete') && <InverseButton icon={<Trash2 size={13} />} label="Delete" onClick={bulkDelete} danger />}
+          <span style={{ flex: 1 }} />
+          <button onClick={() => gridRef.current?.api.deselectAll()} aria-label="Clear selection"
+            style={{ display: 'flex', border: 'none', background: 'transparent', color: 'inherit', opacity: 0.75, cursor: 'pointer' }}>
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+          padding: '10px 14px', borderRadius: 'var(--r-md)',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', height: 28, width: 210,
+            background: 'var(--surface)', border: '1px solid var(--border-strong)',
+            borderRadius: 'var(--r)',
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', paddingLeft: 10, color: 'var(--text-subtle)' }}>
+              <Search size={14} />
+            </span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search this list"
+              style={{
+                flex: 1, minWidth: 0, height: '100%', padding: '0 10px 0 8px',
+                background: 'transparent', color: 'var(--text)', border: 0, outline: 0,
+                fontFamily: 'var(--inter)', fontSize: 12, letterSpacing: '-0.01em',
+              }}
+            />
+          </div>
+
+          <ScopeSwitch
+            scope={scope}
+            onChange={changeScope}
+            profiles={profiles}
+            me={profile}
+            caps={caps}
+            unassignedCount={unassignedCount}
+          />
+
+          <ListPicker
+            lists={lists}
+            selectedId={selectedListId}
+            onSelect={selectList}
+            onNew={caps.has('crm.manageLists') ? () => setShowNewList(true) : undefined}
+          />
+
+          {(search || scope.kind !== defaultScope) && (
+            <button onClick={() => { setSearch(''); changeScope({ kind: defaultScope }); }} style={{
+              background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+              color: 'var(--accent)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+              textDecoration: 'underline', textUnderlineOffset: 3,
+            }}>Clear</button>
+          )}
+
+          <span style={{ flex: 1 }} />
+
+          {selectedList && !selectedList.is_global && selectedList.owner_id === profile.id && caps.has('crm.manageLists') && (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setShowShare(selectedList)}>
+                <UserPlus size={12} /> Share
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => deleteList(selectedList.id)} aria-label="Delete this list">
+                <Trash2 size={12} />
+              </Button>
+            </>
+          )}
         </div>
       )}
 
-      <div className="ag-theme-quartz-dark"
+      {message && <Alert tone="info">{message}</Alert>}
+
+      {ambiguousFirstNames.length > 0 && scope.kind === 'mine' && (
+        <Alert tone="warning">
+          Two people share the first name {ambiguousFirstNames.join(' and ')}, so rows
+          assigned to just that name are left out of both portfolios. Set an owner on
+          them to fix it.
+        </Alert>
+      )}
+
+      {/* ---- the table, taking everything that is left ---- */}
+      <div
+        className="kit-grid ag-theme-quartz"
         onContextMenu={(e) => {
           const target = e.target as HTMLElement;
           if (target.closest('.ag-row') || target.closest('.ag-header-cell')) return;
           e.preventDefault();
           setEmptyAreaMenu({ x: e.clientX, y: e.clientY });
         }}
-        style={{ height: 'calc(100vh - 420px)', minHeight: 400, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+        style={{ flex: 1, minHeight: 260 }}
+      >
         <AgGridReact<CRMContact>
           ref={gridRef}
           rowData={visibleRows}
@@ -711,7 +853,16 @@ export function CrmWorkspace({
           onSelectionChanged={onSelectionChanged}
           onRowClicked={onRowClicked}
           preventDefaultOnContextMenu
+          noRowsOverlayComponent={NoRows}
+          noRowsOverlayComponentParams={{
+            scope, scopeLabel, total: rows.length, search,
+            onClear: () => { setSearch(''); changeScope({ kind: 'all' }); },
+          }}
         />
+      </div>
+
+      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+        Click a row to open it. Right click any cell to edit, enrich, move or delete it.
       </div>
 
       {assignMenu && (
@@ -720,6 +871,17 @@ export function CrmWorkspace({
           owners={owners} me={profile.full_name}
           onPick={(name) => assignRows(assignMenu.rowIds, name)}
           onClose={() => setAssignMenu(null)}
+        />
+      )}
+
+      {showAddContact && (
+        <AddContactModal
+          owners={owners}
+          me={profile.full_name}
+          canAssign={caps.has('crm.assign')}
+          listName={selectedList?.name ?? 'this list'}
+          onCreate={handleAddRow}
+          onClose={() => setShowAddContact(false)}
         />
       )}
 
@@ -846,103 +1008,228 @@ export function CrmWorkspace({
 
 // ============ subcomponents ============
 
-/* =============================================================
-   Whose accounts.
-
-   Three of the four choices are one click, because "mine" is the one a
-   rep uses every day and "unassigned" is the one that stops accounts
-   quietly belonging to nobody. Looking at a named colleague's portfolio
-   is behind the picker: it is a manager's action, not a daily one.
-   ============================================================= */
-/** One list. Active carries the accent underline; the rest are quiet. */
-function ListTab({ active, onClick, icon, label, note, dashed }: {
-  active?: boolean; onClick: () => void; icon: React.ReactNode;
-  label: string; note?: string; dashed?: boolean;
+/** A button on the navy bulk bar. Borders only, so the bar stays one object. */
+function InverseButton({ icon, label, onClick, danger }: {
+  icon: React.ReactNode; label: string;
+  onClick: (e: React.MouseEvent) => void; danger?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px',
-        borderRadius: 'var(--r)', cursor: 'pointer',
-        border: dashed ? '1px dashed var(--border-strong)' : `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-        background: active ? 'var(--accent)' : 'transparent',
-        color: active ? '#fff' : 'var(--text-muted)',
-        fontFamily: 'var(--inter)', fontSize: 13, fontWeight: active ? 600 : 500,
-        letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+        display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
+        background: 'transparent', cursor: 'pointer', borderRadius: 'var(--r)',
+        color: danger ? 'var(--bar-danger)' : 'inherit',
+        border: `1px solid ${danger ? 'var(--bar-danger)' : 'var(--bar-line)'}`,
+        fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
       }}
-    >
-      {icon}
-      {label}
-      {note && (
-        <span style={{
-          fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
-          color: active ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)',
-        }}>{note}</span>
-      )}
-    </button>
+    >{icon}{label}</button>
   );
 }
 
-function ScopeSwitch({ scope, onChange, profiles, me, unassignedCount }: {
+/**
+ * Which list.
+ *
+ * This was a row of tabs of its own, which is a lot of furniture for
+ * something most people change twice a week. As a select it costs one
+ * control on a line that already existed, and it still reads when
+ * somebody has fifteen lists rather than three.
+ */
+function ListPicker({ lists, selectedId, onSelect, onNew }: {
+  lists: CrmList[]; selectedId: string;
+  onSelect: (id: string) => void; onNew?: () => void;
+}) {
+  const global = lists.filter((l) => l.is_global);
+  const mine = lists.filter((l) => !l.is_global);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', height: 28, position: 'relative',
+        background: 'var(--surface)', border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--r)',
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', paddingLeft: 9, color: 'var(--text-subtle)' }}>
+          {lists.find((l) => l.id === selectedId)?.is_global ? <Globe size={13} /> : <Users size={13} />}
+        </span>
+        <select
+          value={selectedId}
+          onChange={(e) => onSelect(e.target.value)}
+          style={{
+            appearance: 'none', background: 'transparent', border: 0, outline: 0,
+            color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+            padding: '0 26px 0 7px', height: '100%', cursor: 'pointer', maxWidth: 190,
+          }}
+        >
+          {global.length > 0 && (
+            <optgroup label="Shared">
+              {global.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </optgroup>
+          )}
+          {mine.length > 0 && (
+            <optgroup label="Lists">
+              {mine.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </optgroup>
+          )}
+        </select>
+        <span style={{
+          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+          pointerEvents: 'none', color: 'var(--text-subtle)', display: 'flex',
+        }}><ChevronDown size={13} /></span>
+      </div>
+      {onNew && (
+        <button onClick={onNew} title="New list" aria-label="New list" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 28, height: 28, borderRadius: 'var(--r)', cursor: 'pointer',
+          border: '1px dashed var(--border-strong)', background: 'transparent',
+          color: 'var(--text-muted)',
+        }}><Plus size={13} /></button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the grid shows when it has nothing to draw.
+ *
+ * The kit's rule is that an empty state says what the thing is, why it is
+ * empty, and the one action that fills it. "No Rows To Show", the grid's
+ * own default, manages none of the three and reads as a fault.
+ */
+function NoRows({ scope, scopeLabel, total, search, onClear }: {
+  scope: Scope; scopeLabel: string; total: number; search: string; onClear: () => void;
+}) {
+  const filtered = total > 0;
+  const what = !filtered
+    ? 'This list has no contacts yet.'
+    : search
+      ? `Nothing on this list matches "${search}".`
+      : scope.kind === 'unassigned'
+        ? `All ${total} accounts on this list have an owner.`
+        : `None of the ${total} accounts on this list are assigned to ${scope.kind === 'mine' ? 'you' : scopeLabel}.`;
+  const why = !filtered
+    ? 'Add one, or bring a spreadsheet in with Import CSV.'
+    : search
+      ? 'Company, contact, email, phone, town, owner and notes are all searched.'
+      : scope.kind === 'unassigned'
+        ? 'Nothing is going unclaimed, which is the point of this view.'
+        : 'Set the Assigned column on a row, or select rows and press Assign.';
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9,
+      padding: '30px 24px', textAlign: 'center', pointerEvents: 'auto',
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: 'var(--r-full)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg-subtle)', color: 'var(--text-subtle)',
+      }}>
+        {filtered ? <SearchX size={19} /> : <Users size={19} />}
+      </span>
+      <div style={{
+        fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 15,
+        letterSpacing: '-0.02em', color: 'var(--text)',
+      }}>{what}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', maxWidth: '46ch', lineHeight: 1.5 }}>{why}</div>
+      {filtered && <Button size="sm" variant="secondary" onClick={onClear}>Show everything</Button>}
+    </div>
+  );
+}
+
+/* =============================================================
+   Whose accounts.
+
+   Mine is the default and the one a rep uses all day. Unassigned is how
+   an account stops quietly belonging to nobody, so it carries a count.
+
+   The other two are gated. Seeing the shared pipeline needs CRM rights,
+   which is how the meeting described it. Reading a named colleague's
+   portfolio is a manager's action and is hidden entirely rather than
+   shown disabled, because an option you can see but never use is just a
+   daily reminder of what you are not.
+   ============================================================= */
+function ScopeSwitch({ scope, onChange, profiles, me, caps, unassignedCount }: {
   scope: Scope;
   onChange: (s: Scope) => void;
   profiles: Profile[];
   me: Profile;
+  caps: CrmCapabilities;
   unassignedCount: number;
 }) {
   const others = profiles.filter((p) => p.id !== me.id && p.full_name);
   const active = (k: Scope['kind']) => scope.kind === k;
+  const ownsAccounts = caps.has('crm.edit');
 
   const seg = (on: boolean): React.CSSProperties => ({
-    height: 30, padding: '0 12px', border: 'none', cursor: 'pointer',
-    background: on ? 'var(--accent)' : 'transparent',
-    color: on ? '#fff' : 'var(--text-muted)',
-    fontFamily: 'var(--inter)', fontSize: 13, fontWeight: on ? 600 : 400,
-    display: 'inline-flex', alignItems: 'center', gap: 6,
+    height: 26, padding: '0 11px', border: 'none', cursor: 'pointer',
+    background: on ? 'var(--primary)' : 'transparent',
+    color: on ? 'var(--primary-fg)' : 'var(--text-muted)',
+    fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+    display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
   });
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
       <div style={{
-        display: 'inline-flex', alignItems: 'center',
-        border: '1px solid var(--border)', borderRadius: 'var(--r)',
+        display: 'inline-flex', alignItems: 'center', height: 28,
+        border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
         overflow: 'hidden', background: 'var(--surface)',
       }}>
-        <button style={seg(active('all'))} onClick={() => onChange({ kind: 'all' })}>
-          <Users size={13} /> Everyone
-        </button>
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
-        <button style={seg(active('mine'))} onClick={() => onChange({ kind: 'mine' })}>
-          <Star size={13} /> My accounts
-        </button>
-        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
-        <button style={seg(active('unassigned'))} onClick={() => onChange({ kind: 'unassigned' })}>
-          Unassigned
-          {unassignedCount > 0 && (
-            <span style={{
-              fontSize: 11, fontVariantNumeric: 'tabular-nums',
-              padding: '1px 6px', borderRadius: 999,
-              background: active('unassigned') ? 'rgba(255,255,255,0.22)' : 'var(--surface-sunken)',
-              color: active('unassigned') ? '#fff' : 'var(--text-subtle)',
-            }}>{unassignedCount}</span>
-          )}
-        </button>
+        {ownsAccounts && (
+          <>
+            <button style={seg(active('mine'))} onClick={() => onChange({ kind: 'mine' })}>
+              <Star size={12} /> Mine
+            </button>
+            <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+          </>
+        )}
+        {caps.has('crm.viewGlobal') && (
+          <button style={seg(active('all'))} onClick={() => onChange({ kind: 'all' })}>
+            <Users size={12} /> Everyone
+          </button>
+        )}
+        {ownsAccounts && (
+          <>
+            <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+            <button style={seg(active('unassigned'))} onClick={() => onChange({ kind: 'unassigned' })}>
+              Unassigned
+              {unassignedCount > 0 && (
+                <span style={{
+                  fontSize: 10, fontVariantNumeric: 'tabular-nums',
+                  padding: '1px 5px', borderRadius: 'var(--r-full)',
+                  background: active('unassigned') ? 'rgba(255,255,255,0.22)' : 'var(--bg-subtle)',
+                  color: active('unassigned') ? 'inherit' : 'var(--text-subtle)',
+                }}>{unassignedCount}</span>
+              )}
+            </button>
+          </>
+        )}
       </div>
 
-      {others.length > 0 && (
-        <select
-          value={scope.kind === 'person' ? scope.id : ''}
-          onChange={(e) => onChange(e.target.value ? { kind: 'person', id: e.target.value } : { kind: 'all' })}
-          style={{
-            height: 32, padding: '0 9px', border: '1px solid var(--border)',
-            borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
-            fontFamily: 'var(--inter)', fontSize: 13,
-          }}
-        >
-          <option value="">Someone else...</option>
-          {others.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-        </select>
+      {caps.has('crm.viewOthers') && others.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', height: 28, position: 'relative',
+          background: 'var(--surface)', border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--r)',
+        }}>
+          <select
+            value={scope.kind === 'person' ? scope.id : ''}
+            onChange={(e) => onChange(e.target.value ? { kind: 'person', id: e.target.value } : { kind: 'mine' })}
+            style={{
+              appearance: 'none', background: 'transparent', border: 0, outline: 0,
+              color: scope.kind === 'person' ? 'var(--text)' : 'var(--text-muted)',
+              fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+              padding: '0 24px 0 10px', height: '100%', cursor: 'pointer',
+            }}
+          >
+            <option value="">A colleague</option>
+            {others.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          </select>
+          <span style={{
+            position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)',
+            pointerEvents: 'none', color: 'var(--text-subtle)', display: 'flex',
+          }}><ChevronDown size={13} /></span>
+        </div>
       )}
     </div>
   );
@@ -967,6 +1254,81 @@ function AssignMenu({ x, y, count, owners, me, onPick, onClose }: {
         <MenuItem label="Clear the owner" onClick={() => onPick(null)} />
       </EdgeAwareCtxMenu>
     </>
+  );
+}
+
+/* =============================================================
+   Add a contact.
+
+   Dave's complaint was that the inline row is fiddly: you type into a
+   36px grid cell with no sense of which of twenty columns matter. This
+   asks for the four fields that make a record worth having and leaves
+   everything else to the drawer, which is where the detail belongs.
+
+   Only the company name is required. A prospect scribbled off a phone
+   call often is just a name, and refusing to save it is how notes end up
+   back on paper.
+   ============================================================= */
+function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }: {
+  owners: string[];
+  me: string;
+  canAssign: boolean;
+  listName: string;
+  onCreate: (fields: Partial<CRMContact>) => void;
+  onClose: () => void;
+}) {
+  const [company, setCompany] = useState('');
+  const [contact, setContact] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [owner, setOwner] = useState(me);
+
+  function submit() {
+    if (!company.trim()) return;
+    onCreate({
+      company_name: company, contact_name: contact,
+      email, phone, assigned_to: owner,
+    });
+  }
+
+  return (
+    <Modal
+      title="Add a contact"
+      description={`Goes onto ${listName}. You can fill in the rest on the record itself.`}
+      onClose={onClose}
+      width={480}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={!company.trim()}>
+            <Plus size={14} /> Add contact
+          </Button>
+        </>
+      }
+    >
+      <Field label="Company">
+        <TextInput value={company} onChange={setCompany} placeholder="Bredbury Haulage Ltd" />
+      </Field>
+      <Field label="Contact name" hint="Who you actually speak to.">
+        <TextInput value={contact} onChange={setContact} placeholder="Optional" />
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Email">
+          <TextInput type="email" value={email} onChange={setEmail} placeholder="Optional" />
+        </Field>
+        <Field label="Phone">
+          <TextInput value={phone} onChange={setPhone} placeholder="Optional" />
+        </Field>
+      </div>
+      {canAssign && owners.length > 1 && (
+        <Field label="Owner" hint="Whose portfolio this lands in.">
+          <Select value={owner} onChange={setOwner}>
+            <option value={me}>{me} (me)</option>
+            {owners.filter((o) => o !== me).map((o) => <option key={o} value={o}>{o}</option>)}
+          </Select>
+        </Field>
+      )}
+    </Modal>
   );
 }
 
@@ -1155,7 +1517,7 @@ function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDe
       <MenuItem icon={<Edit2 size={13} />} label="Open details" onClick={onView} />
       <MenuItem icon={<Edit2 size={13} />} label="Edit this cell" onClick={onEdit} disabled={!canEdit} />
       <MenuItem icon={<Mail size={13} />} label="Enrich from Lusha" onClick={onEnrich} disabled={!canEnrich} title={enrichTitle} />
-      <MenuItem icon={<MoreHorizontal size={13} />} label="Move to list" onClick={onMove} />
+      <MenuItem icon={<MoreHorizontal size={13} />} label="Move onto another list" onClick={onMove} />
       <MenuRule />
       <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} disabled={!canEdit} danger />
     </EdgeAwareCtxMenu>
@@ -1167,7 +1529,7 @@ function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: {
 }) {
   return (
     <EdgeAwareCtxMenu x={x} y={y} width={232}>
-      <MenuHead>{mode === 'duplicate' ? 'Duplicate to list' : 'Move to list'}</MenuHead>
+      <MenuHead>{mode === 'duplicate' ? 'Copy onto which list' : 'Move onto which list'}</MenuHead>
       {lists.map((l) => (
         <MenuItem
           key={l.id}
@@ -1176,9 +1538,14 @@ function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: {
           onClick={() => onPick(l.id)}
         />
       ))}
+      <div style={{ padding: '2px 9px 7px', fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+        {mode === 'duplicate'
+          ? 'The contact stays where it is and a copy goes onto the other list.'
+          : 'This changes which list the contact sits on. It is not a won or lost outcome.'}
+      </div>
       {lists.length === 0 && (
         <div style={{ padding: '7px 9px', fontSize: 12.5, color: 'var(--text-subtle)' }}>
-          There are no other lists to move it to.
+          There are no other lists to move it onto.
         </div>
       )}
       <MenuRule />

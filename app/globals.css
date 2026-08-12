@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* =========================================================
-   STOCKPORT TRUCK CENTRE — Colors & Type Foundations
+   STOCKPORT TRUCK CENTRE: Colors & Type Foundations
    ---------------------------------------------------------
    Two-mode system. Default is DARK (Linear/Neon territory)
    because the dashboard lives in dark mode. NAVY is the
@@ -11,7 +11,7 @@
    ========================================================= */
 
 /* ---------- FONTS ---------- */
-/* Panton (display) — uploaded by the brand. Used for headlines,
+/* Panton (display): uploaded by the brand. Used for headlines,
    numbers, all-caps eyebrows. Body type is Inter w/ -0.02em. */
 @font-face {
   font-family: "Panton";
@@ -68,7 +68,7 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
 /* =========================================================
-   PALETTE — raw tokens
+   PALETTE: raw tokens
    ========================================================= */
 :root {
   /* Brand */
@@ -77,7 +77,7 @@
   --stc-red-300:    #ff5347;
   --stc-red-glow:   rgba(207, 36, 23, 0.32);
 
-  --stc-navy:       #071458;        /* deep navy — secondary surface */
+  --stc-navy:       #071458;        /* deep navy, secondary surface */
   --stc-navy-800:   #0a1a6e;
   --stc-navy-700:   #142a8c;
   --stc-navy-300:   #5b6bc9;
@@ -101,7 +101,7 @@
   --stc-fg-4:       #5a6088;        /* muted */
   --stc-fg-5:       #3a4070;        /* faintest */
 
-  /* Status — Excel/CRM grade so they read in dense tables */
+  /* Status, Excel/CRM grade so they read in dense tables */
   --stc-success:    #2ecc71;
   --stc-success-bg: rgba(46, 204, 113, 0.12);
   --stc-warning:    #f5a623;
@@ -118,11 +118,11 @@
   --stc-marketing:  #5b8def;        /* marketing = electric blue */
   --stc-marketing-soft: rgba(91, 141, 239, 0.10);
 
-  /* Lusha enrichment indicator (purple — third-party data) */
+  /* Lusha enrichment indicator (purple, third-party data) */
   --stc-lusha:      #a065ff;
   --stc-lusha-soft: rgba(160, 101, 255, 0.12);
 
-  /* Light-mode tokens — only used for "marketing surface" pages */
+  /* Light-mode tokens, only used for "marketing surface" pages */
   --stc-bg-light:   #f5f6fb;
   --stc-card-light: #ffffff;
   --stc-fg-light-1: #0a1133;
@@ -130,7 +130,7 @@
 }
 
 /* =========================================================
-   SEMANTIC TOKENS — what you actually use in components
+   SEMANTIC TOKENS: what you actually use in components
    ========================================================= */
 :root {
   --bg:              var(--stc-black-900);
@@ -153,7 +153,7 @@
   --border-strong:   var(--stc-line-2);
   --border-accent:   var(--stc-line-red);
 
-  /* Radii — tight & corporate; nothing over 12px except big cards */
+  /* Radii, tight & corporate; nothing over 12px except big cards */
   --r-1: 4px;
   --r-2: 6px;
   --r-3: 8px;
@@ -178,7 +178,7 @@
   --s-9: 56px;
   --s-10: 72px;
 
-  /* Motion — fast & precise. No bouncing. */
+  /* Motion, fast & precise. No bouncing. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.7, 0, 0.3, 1);
   --dur-1: 90ms;     /* hover */
@@ -201,7 +201,7 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 
-/* Display — Panton ExtraBold w/ tight tracking, sentence-cased w/ red dot */
+/* Display, Panton ExtraBold w/ tight tracking, sentence-cased w/ red dot */
 .stc-display, h1.display {
   font-family: "Panton", "Inter", sans-serif;
   font-weight: 800;
@@ -212,7 +212,7 @@ html, body {
 }
 .stc-display .dot, h1.display .dot { color: var(--stc-red); }
 
-/* Headings — Panton SemiBold/Bold, tight tracking */
+/* Headings, Panton SemiBold/Bold, tight tracking */
 h1 {
   font-family: "Panton", sans-serif;
   font-weight: 700;
@@ -254,7 +254,7 @@ p {
   letter-spacing: -0.02em;
 }
 
-/* Eyebrow — small, all-caps, letter-spaced, often in red */
+/* Eyebrow, small, all-caps, letter-spaced, often in red */
 .eyebrow {
   font-family: "Inter", sans-serif;
   font-weight: 600;
@@ -266,7 +266,7 @@ p {
 }
 .eyebrow--muted { color: var(--fg-3); }
 
-/* Label — UI control labels, sentence-cased */
+/* Label, UI control labels, sentence-cased */
 .label, label {
   font-family: "Inter", sans-serif;
   font-weight: 500;
@@ -275,7 +275,7 @@ p {
   color: var(--fg-3);
 }
 
-/* Mono — for numbers, IDs, timestamps, "//"-prefixed dispatch labels */
+/* Mono, for numbers, IDs, timestamps, "//"-prefixed dispatch labels */
 code, .mono {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
@@ -284,7 +284,7 @@ code, .mono {
 }
 .tnum { font-variant-numeric: tabular-nums; }
 
-/* Dispatch label — the iconic "// SECTION" style from socials */
+/* Dispatch label, the iconic "// SECTION" style from socials */
 .dispatch-label {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 11px;
@@ -307,7 +307,7 @@ code, .mono {
 
 /* ========== UI KIT (from design system) ========== */
 /* =========================================================
-   STC Dashboard — app-specific styles.
+   STC Dashboard, app-specific styles.
    Builds on colors_and_type.css (already loaded).
    Layout chrome, table styles, controls.
    ========================================================= */
@@ -325,7 +325,7 @@ a { color: inherit; text-decoration: none; }
 
 ::selection { background: var(--stc-red); color: white; }
 
-/* Scrollbars — thin, dark */
+/* Scrollbars, thin, dark */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--stc-black-500); border-radius: 5px; border: 2px solid var(--bg); }
@@ -1775,7 +1775,7 @@ a { color: inherit; text-decoration: none; }
 .preview__img { width: 100%; max-height: 360px; object-fit: cover; display: block; }
 .preview__foot { display: flex; padding: 8px 12px; font-size: 12px; }
 
-/* X platform — slightly tighter */
+/* X platform, slightly tighter */
 .preview--x .preview__body { font-size: 14px; }
 
 /* Instagram aspect: square */
@@ -1804,7 +1804,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 .fleet-row__total-value { font-family: "IBM Plex Mono", monospace; font-size: 18px; color: var(--fg-1); font-weight: 600; }
 
 /* =========================================================
-   LIGHT MODE (LinkedIn-style — warm off-white, careful greys)
+   LIGHT MODE (LinkedIn-style, warm off-white, careful greys)
    Triggered by data-theme="light" on .app or html
    ========================================================= */
 [data-theme="light"], html[data-theme="light"] {
@@ -1835,7 +1835,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
   --shadow-2: 0 1px 0 rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.08);
   --shadow-3: 0 1px 0 rgba(0,0,0,0.04), 0 12px 30px rgba(0,0,0,0.12);
 
-  /* keep STC red as primary accent — works in both modes */
+  /* keep STC red as primary accent, works in both modes */
   --accent: var(--stc-red);
   --accent-fg: #ffffff;
 
@@ -1862,7 +1862,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 [data-theme="light"] .topbar__search input { background: #f3f2ef; border-color: var(--border); color: rgba(0, 0, 0, 0.85); }
 [data-theme="light"] .topbar__search .kbd { background: #fff; border-color: var(--border); color: rgba(0, 0, 0, 0.5); }
 
-/* App background — no dot grid in light mode (looks busy) */
+/* App background, no dot grid in light mode (looks busy) */
 [data-theme="light"] .app::before { display: none; }
 
 /* Buttons */
@@ -1936,7 +1936,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 [data-theme="light"] .cal__cell.is-cur { color: rgba(0, 0, 0, 0.85); }
 [data-theme="light"] .cal__cell.is-today { background: rgba(207, 36, 23, 0.04); }
 
-/* Login background — keep navy gradient or warm light? In light: very light grey, no dot grid */
+/* Login background, keep navy gradient or warm light? In light: very light grey, no dot grid */
 [data-theme="light"] .login-bg { background: #f4f2ee; }
 [data-theme="light"] .login-bg::before { display: none; }
 
@@ -1953,7 +1953,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 [data-theme="light"] .fleet-row__total { background: #f3f2ef; border-color: var(--border); }
 
 /* Avatar gradient stays red */
-/* Pill colour adjustments — base colours work but make backgrounds slightly stronger */
+/* Pill colour adjustments, base colours work but make backgrounds slightly stronger */
 [data-theme="light"] .pill { color: rgba(0,0,0,0.85); }
 [data-theme="light"] .pill--lead       { background: rgba(91,141,239,0.14);  color: #0a4eb0; }
 [data-theme="light"] .pill--contacted  { background: rgba(245,166,35,0.18);  color: #9a6500; }
@@ -2035,7 +2035,7 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 [data-theme="light"] .crm-search { background: #f3f2ef; border-color: var(--border-strong); }
 [data-theme="light"] .crm-search .kbd { background: #fff; }
 
-/* ========== INPUT OVERRIDES — fix textarea crush, fleet shrink ========== */
+/* ========== INPUT OVERRIDES: fix textarea crush, fleet shrink ========== */
 textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.45; resize: vertical; }
 /* The address textareas should be tall */
 .drawer textarea.input { min-height: 110px; }
@@ -2053,7 +2053,7 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 @media (max-width: 1100px) { .stats-grid--5 { grid-template-columns: repeat(2, 1fr); } }
 
 /* ========================================================== */
-/*  INDUSTRY NEWS — masonry card wall                           */
+/*  INDUSTRY NEWS: masonry card wall                           */
 /* ========================================================== */
 .news-toolbar {
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
@@ -2085,7 +2085,7 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
   background: var(--stc-navy); color: #fff; border-color: var(--stc-navy);
 }
 
-/* True masonry via CSS columns — variable card heights, no gaps */
+/* True masonry via CSS columns, variable card heights, no gaps */
 .news-grid {
   column-count: 4;
   column-gap: 14px;
@@ -2225,7 +2225,7 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 .news-chip.is-empty .news-chip__count { background: transparent; }
 [data-theme="light"] .news-chip__count { background: rgba(0,0,0,0.06); color: var(--fg-2); }
 
-/* Sales tracker: Commission tab — 10px left gap from the other tabs and not a round pill. */
+/* Sales tracker: Commission tab, 10px left gap from the other tabs and not a round pill. */
 .news-chip--commission { margin-left: 10px; border-radius: 6px; }
 
 

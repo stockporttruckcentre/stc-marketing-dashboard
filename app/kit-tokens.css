@@ -159,3 +159,103 @@
   letter-spacing: -0.01em;
 }
 .kit :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* -------------------------------------------------------------
+   AG Grid, wearing the kit.
+
+   The table in reference/03-data.html is not a different table from
+   this one. It is a 34px header in --bg-subtle carrying Panton at
+   10.5px with .13em tracking, 36px rows separated by a single
+   --border hairline, 12.5px Inter cells, and the whole thing inside a
+   6px rounded box with one border and nothing else. All of that is
+   expressible in quartz's own variables, so this is configuration
+   rather than a fight with the grid's stylesheet.
+
+   Scoped to .kit-grid so no other table in the app is touched.
+   ------------------------------------------------------------- */
+.kit-grid.ag-theme-quartz,
+.kit-grid.ag-theme-quartz-dark {
+  --ag-font-family: var(--inter);
+  --ag-font-size: 12.5px;
+
+  --ag-background-color: var(--surface);
+  --ag-foreground-color: var(--text);
+  --ag-data-color: var(--text);
+  --ag-secondary-foreground-color: var(--text-muted);
+  --ag-disabled-foreground-color: var(--text-subtle);
+
+  --ag-header-background-color: var(--bg-subtle);
+  --ag-header-foreground-color: var(--text-subtle);
+  --ag-header-height: 34px;
+  --ag-row-height: 36px;
+  --ag-list-item-height: 30px;
+
+  --ag-border-color: var(--border);
+  --ag-secondary-border-color: var(--border);
+  --ag-borders: none;
+  --ag-borders-secondary: 1px solid var(--border);
+  --ag-border-radius: var(--r);
+  --ag-cell-horizontal-padding: 12px;
+
+  --ag-row-hover-color: var(--bg-subtle);
+  --ag-selected-row-background-color: var(--surface-sunken);
+  --ag-range-selection-border-color: var(--focus);
+  --ag-input-focus-border-color: var(--focus);
+  --ag-input-focus-box-shadow: 0 0 0 3px rgba(61, 82, 144, 0.16);
+  --ag-active-color: var(--accent);
+  --ag-checkbox-checked-color: var(--accent);
+  --ag-checkbox-unchecked-color: var(--border-strong);
+  --ag-checkbox-background-color: var(--surface);
+
+  --ag-menu-background-color: var(--surface-raised);
+  --ag-menu-border-color: var(--border);
+  --ag-panel-background-color: var(--surface-raised);
+  --ag-panel-border-color: var(--border);
+  --ag-control-panel-background-color: var(--surface);
+  --ag-popup-shadow: var(--shadow-3);
+  --ag-card-shadow: var(--shadow-3);
+
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+/* Panton, uppercase, wide. Rule 4: labels with authority, never below 11px,
+   so 10.5px in the reference gets rounded up rather than copied down. */
+.kit-grid .ag-header-cell-text {
+  font-family: var(--panton);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+/* Borders before shadows: rows are separated by a hairline, not a fill. */
+.kit-grid .ag-row { border-bottom: 1px solid var(--border); }
+.kit-grid .ag-row-last { border-bottom: none; }
+.kit-grid .ag-header { border-bottom: 1px solid var(--border); }
+
+/* Numbers line up or they are not numbers. */
+.kit-grid .ag-cell { font-variant-numeric: tabular-nums; }
+
+/* The grid draws its own focus ring; the kit's is the one that should show. */
+.kit-grid .ag-cell-focus:not(.ag-cell-range-selected) {
+  border-color: var(--focus) !important;
+}
+
+/* No divider stripes between headers. The kit's table header is a single
+   unbroken band; those lines are quartz's resize handles showing through.
+   The handle stays draggable, it just stops drawing itself. */
+.kit-grid .ag-header-cell-resize::after { display: none !important; }
+
+/* -------------------------------------------------------------
+   The bulk action bar.
+
+   It is filled with --primary, which the kit inverts between themes:
+   navy in light, white in dark. So everything drawn on top of it has to
+   invert the other way, or the hairlines vanish and the delete label
+   washes out. Light red on navy, heavy red on white.
+   ------------------------------------------------------------- */
+.crm-bulk-bar { --bar-line: rgba(255,255,255,0.30); --bar-danger: #F49189; }
+[data-stc-theme="dark"] .crm-bulk-bar,
+[data-theme="dark"] .crm-bulk-bar { --bar-line: rgba(9,22,58,0.20); --bar-danger: #B31F14; }
