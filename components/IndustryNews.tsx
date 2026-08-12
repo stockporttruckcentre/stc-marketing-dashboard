@@ -3,6 +3,9 @@
 import { useMemo, useState } from 'react';
 import { RefreshCw, ExternalLink, Loader, Trash2, TrendingUp, Search, Calendar, User } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import {
+  Button, Chip, Tabs, SearchInput, Alert, PageHead, EmptyState, Label,
+} from '@/components/kit/primitives';
 import { BusinessActivityStrip } from './BusinessActivityStrip';
 import type { NewsItem, NewsSource, UserRole } from '@/lib/types';
 
@@ -99,77 +102,78 @@ export function IndustryNews({
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <div className="page-head__eyebrow">Workspace · Industry news</div>
-          <h1 className="page-head__title">
-            <TrendingUp size={26} style={{ color: 'var(--stc-red)' }} />
-            <span>News<span style={{ color: 'var(--stc-red)' }}>.</span></span>
-          </h1>
-          <div className="page-head__sub">
-            {items.length} stor{items.length === 1 ? 'y' : 'ies'} indexed across {sourceList.length} publication{sourceList.length === 1 ? '' : 's'}.
-          </div>
-        </div>
-        {canRefresh && (
-          <button onClick={refresh} disabled={refreshing} className="btn btn--primary">
-            {refreshing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />} Refresh feeds
-          </button>
-        )}
-      </div>
+      {/* Controls and type come from the kit. The grid and the cards below
+          are untouched: that layout is signed off. */}
+      <div className="kit">
+        <PageHead
+          eyebrow="Workspace · Industry news"
+          title={<><TrendingUp size={25} style={{ color: 'var(--accent)' }} />News</>}
+          sub={`${items.length} stor${items.length === 1 ? 'y' : 'ies'} indexed across ${sourceList.length} publication${sourceList.length === 1 ? '' : 's'}`}
+          action={canRefresh && (
+            <Button variant="accent" onClick={refresh} disabled={refreshing}>
+              {refreshing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
+              {refreshing ? 'Refreshing' : 'Refresh feeds'}
+            </Button>
+          )}
+        />
 
-      <div className="toolbar" style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-        <button onClick={() => setTab('industry')}
-          className={`news-chip ${tab === 'industry' ? 'is-active' : ''}`}>
-          Industry News <span className="news-chip__count">{items.length}</span>
-        </button>
-        <button onClick={() => setTab('company')}
-          className={`news-chip ${tab === 'company' ? 'is-active' : ''}`}>
-          Insolvency Updates
-        </button>
+        <div style={{ marginBottom: 16 }}>
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { key: 'industry' as const, label: 'Industry news', count: items.length },
+              { key: 'company' as const, label: 'Insolvency updates' },
+            ]}
+          />
+        </div>
       </div>
 
       {tab === 'company' ? (
         <BusinessActivityStrip />
       ) : (
       <>
-      <div className="news-toolbar">
-        <div className="news-search">
-          <Search size={14} />
-          <input
+      <div className="kit" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <SearchInput
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search headlines, summaries, publications…"
+            onChange={setQuery}
+            placeholder="Search headlines, summaries, publications"
+            icon={<Search size={14} />}
           />
+          <Label>{filtered.length} shown</Label>
         </div>
-        <div className="news-chips">
-          <button
-            className={`news-chip ${activeSource === null ? 'is-active' : ''}`}
-            onClick={() => setActiveSource(null)}>
-            All
-          </button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <Chip active={activeSource === null} onClick={() => setActiveSource(null)}>All</Chip>
           {sourceList.map(src => {
             const n = itemCountBySource.get(src) || 0;
             return (
-              <button
+              <Chip
                 key={src}
-                className={`news-chip ${activeSource === src ? 'is-active' : ''} ${n === 0 ? 'is-empty' : ''}`}
+                active={activeSource === src}
+                count={n}
+                empty={n === 0}
                 onClick={() => setActiveSource(activeSource === src ? null : src)}
-                title={n === 0 ? `${src} — no stories in the last 14 days` : `${src} — ${n} stor${n === 1 ? 'y' : 'ies'}`}>
-                {src}
-                <span className="news-chip__count">{n}</span>
-              </button>
+                title={n === 0 ? `${src}, no stories in the last 14 days` : `${src}, ${n} stor${n === 1 ? 'y' : 'ies'}`}
+              >{src}</Chip>
             );
           })}
         </div>
       </div>
 
-      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
+      {message && <div className="kit" style={{ marginBottom: 14 }}><Alert tone="info">{message}</Alert></div>}
 
       {filtered.length === 0 ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--fg-3)' }}>
-          {items.length === 0
-            ? <>No stories yet. Click <strong style={{ color: 'var(--fg-1)' }}>Refresh feeds</strong> to pull the latest.</>
-            : <>No stories match your filter.</>}
+        <div className="kit">
+          <EmptyState
+            what={items.length === 0 ? 'No stories have been pulled yet.' : 'Nothing matches that filter.'}
+            why={items.length === 0
+              ? 'The trade feeds are read on demand rather than on a schedule. Pulling them now fills this page.'
+              : 'Try a different publication, or clear the search to see everything from the last fortnight.'}
+            action={items.length === 0
+              ? (canRefresh ? <Button variant="accent" onClick={refresh} disabled={refreshing}>Refresh feeds</Button> : undefined)
+              : <Button variant="secondary" onClick={() => { setQuery(''); setActiveSource(null); }}>Clear filters</Button>}
+          />
         </div>
       ) : (
         <div className="news-grid">

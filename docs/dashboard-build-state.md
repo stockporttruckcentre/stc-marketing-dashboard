@@ -119,6 +119,23 @@ than assuming: "gold" fuzzy-matching "sold", words inside company names
 voting on intent, and three free-text slots all filling with the same
 name.
 
+## Kit rollout so far
+
+| Screen | State |
+|---|---|
+| Dashboard | Fully kit-native. Wrapped in `.kit`, built from `components/kit/primitives` |
+| News | Controls and type only. `PageHead`, `Button`, `Tabs`, `Chip`, `SearchInput`, `Alert` and `EmptyState` are kit; the card grid is deliberately untouched because that layout is signed off |
+| Everything else | Untouched, on the original theme |
+
+The News conversion is the pattern for a signed-off screen: put `.kit` on
+the control clusters rather than the page, so kit tokens reach the buttons
+and type without recolouring the layout underneath. `app/globals.css` was
+not modified, which is what guarantees the cards still render as approved.
+
+Primitives now cover: `Button` `Chip` `Tabs` `SearchInput` `Alert`
+`PageHead` `SectionHead` `Label` `Card` `Kpi` `Figure` `Bar` `Badge`
+`Row` `EmptyState` `NotProvisioned` `Skeleton`.
+
 ## What to do next, in order
 
 1. **Run `supabase/migrations/001_dashboard.sql`.** Nothing depends on it to

@@ -296,3 +296,142 @@ export const compactMoney = (n: number) => {
   if (Math.abs(v) >= 1_000) return '£' + Math.round(v / 1_000) + 'k';
   return '£' + v;
 };
+
+/* ---------- controls added for the News surface ---------- */
+
+/**
+ * Filter chip with an optional count. Used where a row of toggles filters
+ * a list. `empty` dims a chip whose filter would return nothing, so the
+ * full set of publications can still be shown.
+ */
+export function Chip({
+  active, count, empty, onClick, title, children,
+}: {
+  active?: boolean; count?: number; empty?: boolean;
+  onClick?: () => void; title?: string; children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 7,
+        height: 28, padding: '0 11px', borderRadius: 'var(--r)',
+        border: `1px solid ${active ? 'var(--border-emphasis)' : 'var(--border)'}`,
+        background: active ? 'var(--bg-subtle)' : 'var(--surface)',
+        color: active ? 'var(--text)' : 'var(--text-muted)',
+        fontFamily: 'var(--inter)', fontSize: 12.5,
+        fontWeight: active ? 600 : 500,
+        opacity: empty && !active ? 0.5 : 1,
+        cursor: 'pointer', whiteSpace: 'nowrap',
+        transition: `background 120ms ${EASE}, border-color 120ms ${EASE}`,
+      }}
+    >
+      {children}
+      {count != null && (
+        <span style={{
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+          fontVariantNumeric: 'tabular-nums',
+          color: active ? 'var(--accent)' : 'var(--text-subtle)',
+        }}>{count}</span>
+      )}
+    </button>
+  );
+}
+
+/** Underline tabs, per the kit's navigation page. */
+export function Tabs<T extends string>({
+  value, onChange, tabs,
+}: { value: T; onChange: (v: T) => void; tabs: { key: T; label: string; count?: number }[] }) {
+  return (
+    <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)' }}>
+      {tabs.map((t) => {
+        const on = t.key === value;
+        return (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            aria-selected={on}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              height: 34, padding: '0 13px', border: 'none', background: 'transparent',
+              borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`,
+              color: on ? 'var(--text)' : 'var(--text-muted)',
+              fontFamily: 'var(--inter)', fontSize: 13, fontWeight: on ? 600 : 500,
+              cursor: 'pointer', marginBottom: -1,
+              transition: `color 120ms ${EASE}, border-color 120ms ${EASE}`,
+            }}
+          >
+            {t.label}
+            {t.count != null && (
+              <span style={{
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+                color: on ? 'var(--accent)' : 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums',
+              }}>{t.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Text input with a leading icon. 32px, per the kit's density. */
+export function SearchInput({
+  value, onChange, placeholder, icon,
+}: { value: string; onChange: (v: string) => void; placeholder?: string; icon?: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      height: 32, padding: '0 10px', borderRadius: 'var(--r)',
+      border: '1px solid var(--border-strong)', background: 'var(--surface)',
+      flex: 1, minWidth: 180,
+    }}>
+      {icon && <span style={{ color: 'var(--text-subtle)', display: 'flex', flexShrink: 0 }}>{icon}</span>}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
+          color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 13,
+        }}
+      />
+    </div>
+  );
+}
+
+/** Inline notice. Tone carries the meaning; the rule carries the weight. */
+export function Alert({ tone = 'info', children }: { tone?: Tone; children: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 9,
+      padding: '10px 13px', borderRadius: 'var(--r)',
+      background: 'var(--surface-sunken)',
+      border: '1px solid var(--border)',
+      borderLeft: `2px solid ${TONE_FG[tone]}`,
+      fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5,
+    }}>{children}</div>
+  );
+}
+
+/** Page heading: eyebrow, Panton title, one line of context. */
+export function PageHead({
+  eyebrow, title, sub, action,
+}: { eyebrow: string; title: ReactNode; sub?: ReactNode; action?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 18 }}>
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <Label>{eyebrow}</Label>
+        <h1 style={{
+          margin: '6px 0 0', fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 30,
+          lineHeight: 1.15, letterSpacing: '-0.03em', color: 'var(--text)',
+          display: 'flex', alignItems: 'center', gap: 9,
+        }}>{title}</h1>
+        {sub && <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginTop: 5 }}>{sub}</div>}
+      </div>
+      {action}
+    </div>
+  );
+}
