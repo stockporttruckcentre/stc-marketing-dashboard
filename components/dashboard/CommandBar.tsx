@@ -31,10 +31,30 @@ const EXAMPLES = [
 ];
 
 /**
+ * The same ideas, short enough to finish inside a top bar. The long ones
+ * clip mid word at this width, which teaches nothing and looks broken.
+ */
+const SHORT_EXAMPLES = [
+  'how many trailers are in stock',
+  'schedule a call for Dave on Thursday',
+  'open Bredbury Haulage',
+  'add a trailer to the stocklist',
+  'what have we sold this month',
+];
+
+/**
  * `seed` lets the quick action buttons drive this bar instead of each
  * one growing its own modal. Bump the nonce to re-apply the same text.
  */
-export function CommandBar({ seed }: { seed?: { text: string; nonce: number } }) {
+export function CommandBar({ seed, variant = 'panel' }: {
+  seed?: { text: string; nonce: number };
+  /**
+   * `panel` is the dashboard card. `bar` is the compact form that lives
+   * in the top bar on every page: a 30px input whose results float below
+   * it rather than growing the header.
+   */
+  variant?: 'panel' | 'bar';
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
@@ -66,13 +86,31 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
 
   // A quick action button was pressed. Drop its phrasing in and hand the
   // user the caret so they finish the sentence.
-  useEffect(() => {
-    if (!seed?.text) return;
-    setText(seed.text);
+  const seedWith = useCallback((phrase: string) => {
+    setText(phrase);
     setStage('idle'); setOutcome(null); setChoices(null); setAsking(null);
     const el = inputRef.current;
     if (el) { el.focus(); requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length)); }
-  }, [seed?.nonce, seed?.text]);
+  }, []);
+
+  useEffect(() => {
+    if (seed?.text) seedWith(seed.text);
+  }, [seed?.nonce, seed?.text, seedWith]);
+
+  /**
+   * Now that the bar lives in the layout's top bar, the quick actions on
+   * the dashboard are in a different tree and cannot pass a prop to it.
+   * An event is the seam. Anything anywhere can say "put this in the
+   * command bar" without knowing where the bar currently is.
+   */
+  useEffect(() => {
+    function onSeed(e: Event) {
+      const phrase = (e as CustomEvent<string>).detail;
+      if (typeof phrase === 'string' && phrase.trim()) seedWith(phrase);
+    }
+    window.addEventListener('stc:command', onSeed as EventListener);
+    return () => window.removeEventListener('stc:command', onSeed as EventListener);
+  }, [seedWith]);
 
   // Live understanding, so the bar shows it is following along. Two
   // characters is enough: "cr" should already be offering something.
@@ -83,7 +121,42 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
   const preview = parsed && parsed.confidence >= 6 ? parsed : null;
   // Everything the app can do, ranked against what has been typed. This is
   // what stops a bare word like "meeting" hitting a dead end.
-  const suggestions = useMemo(() => suggestFeatures(text, 5), [text]);
+  const features = useMemo(() => suggestFeatures(text, 5), [text]);
+
+  /**
+   * Records that match what has been typed.
+   *
+   * The top bar used to carry a second input that did nothing but this:
+   * type a company, jump to its record. Folding it in here is what let
+   * that input go, rather than running two search boxes in a 52px bar.
+   *
+   * Deliberately last in the list. A bare word is more often a place you
+   * want to go than a company you want to open, and a live lookup that
+   * outranks the navigation makes the bar feel like it is guessing.
+   */
+  const [records, setRecords] = useState<Suggestion[]>([]);
+  useEffect(() => {
+    const q = text.trim();
+    if (q.length < 3 || stage !== 'idle') { setRecords([]); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/command/lookup?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
+        const json = await res.json();
+        if (cancelled) return;
+        setRecords((json.contacts ?? []).map((c: any) => ({
+          kind: 'feature' as const,
+          label: c.company_name,
+          sub: [c.contact_name, c.location, c.list_name].filter(Boolean).join(' · ') || 'Open this record',
+          path: `/dashboard/crm?list=${c.list_id}&contact=${c.id}`,
+          score: 0,
+        })));
+      } catch { if (!cancelled) setRecords([]); }
+    }, 180);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [text, stage]);
+
+  const suggestions = useMemo(() => [...features, ...records].slice(0, 7), [features, records]);
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
@@ -250,16 +323,30 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
 
   const understood = preview?.intent ?? result?.intent ?? null;
 
+  const bar = variant === 'bar';
+  /** Is there anything below the input worth floating? */
+  const hasPanel =
+    (stage === 'idle' && text.trim().length >= 2) ||
+    stage === 'choosing' || stage === 'asking' || stage === 'ready' ||
+    stage === 'running' || stage === 'done' || stage === 'answered';
+
   return (
     <div className="kit" style={{
       background: 'var(--surface)',
       border: '1px solid var(--border)',
       borderRadius: 'var(--r-md)',
-      overflow: 'hidden',
+      overflow: bar ? 'visible' : 'hidden',
+      position: bar ? 'relative' : undefined,
+      width: '100%',
     }}>
       {/* the input */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', height: 52 }}>
-        <Search size={17} style={{ color: understood ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        gap: bar ? 8 : 10,
+        padding: bar ? '0 10px' : '0 14px',
+        height: bar ? 30 : 52,
+      }}>
+        <Search size={bar ? 14 : 17} style={{ color: understood ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
         <input
           ref={inputRef}
           value={text}
@@ -275,17 +362,17 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
               else submit();
             } else if (e.key === 'Escape') reset();
           }}
-          placeholder={EXAMPLES[exampleIdx]}
+          placeholder={(bar ? SHORT_EXAMPLES : EXAMPLES)[exampleIdx]}
           style={{
-            flex: 1, minWidth: 0, height: 40, border: 'none', outline: 'none',
+            flex: 1, minWidth: 0, height: bar ? 28 : 40, border: 'none', outline: 'none',
             background: 'transparent', color: 'var(--text)',
-            fontFamily: 'var(--inter)', fontSize: 14.5, letterSpacing: '-0.01em',
+            fontFamily: 'var(--inter)', fontSize: bar ? 12.5 : 14.5, letterSpacing: '-0.01em',
           }}
         />
         {text && (
           <button onClick={reset} aria-label="Clear"
             style={{ border: 'none', background: 'transparent', color: 'var(--text-subtle)', cursor: 'pointer', display: 'flex' }}>
-            <X size={15} />
+            <X size={bar ? 13 : 15} />
           </button>
         )}
         <kbd style={{
@@ -294,275 +381,561 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
           padding: '2px 6px', flexShrink: 0,
         }}>Ctrl K</kbd>
       </div>
+      {bar
+        /* In the top bar the panel cannot push the page around, so it
+           floats under the input as a dropdown. Same content, same
+           states, different container. */
+        ? (hasPanel && (
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 80,
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: "var(--r-md)", boxShadow: "var(--shadow-3)", overflow: "hidden",
+            maxHeight: "70vh", overflowY: "auto",
+          }}>
+            <div style={{ marginTop: -1 }}>
 
-      {/* what it thinks you meant, and everything else it could be */}
-      {stage === 'idle' && text.trim().length >= 2 && (
-        <div style={{ borderTop: '1px solid var(--border)' }}>
-          {useQuery && plan && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-              padding: '9px 14px', background: 'var(--surface-sunken)',
-              borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
-              outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
-              outlineOffset: -2,
-            }}>
-              <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
-                <CornerDownLeft size={12} /> to answer
-              </span>
-            </div>
-          )}
-          {!useQuery && preview?.intent && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-              padding: '9px 14px', background: 'var(--surface-sunken)',
-              borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
-              outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
-              outlineOffset: -2,
-            }}>
-              <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
-              {preview.filled.map((f) => (
-                <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
-              ))}
-              {preview.missing.map((m) => (
-                <Badge key={m.key} tone="warning">{m.label}?</Badge>
-              ))}
-              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
-                <CornerDownLeft size={12} /> to run
-              </span>
-            </div>
-          )}
-
-          {suggestions.map((s, i) => (
-            <button
-              key={`${s.kind}-${s.label}`}
-              onMouseDown={(e) => { e.preventDefault(); takeSuggestion(s); }}
-              onMouseEnter={() => setCursor(i)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                textAlign: 'left', minHeight: 38, padding: '7px 14px',
-                border: 'none', borderBottom: i === suggestions.length - 1 ? 'none' : '1px solid var(--border)',
-                background: cursor === i ? 'var(--bg-subtle)' : 'transparent',
-                color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
-              }}
-            >
-              {s.kind === 'feature'
-                ? <ArrowRight size={13} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
-                : <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
-              <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{s.label}</span>
-              <span style={{
-                fontSize: 12, color: 'var(--text-subtle)', overflow: 'hidden',
-                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{s.sub}</span>
-            </button>
-          ))}
-
-          {!preview?.intent && suggestions.length === 0 && (
-            <div style={{ padding: '11px 14px' }}>
-              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
-                Nothing matches that yet. Things that work:
+        {/* what it thinks you meant, and everything else it could be */}
+        {stage === 'idle' && text.trim().length >= 2 && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+            {useQuery && plan && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {EXAMPLES.slice(0, 3).map((ex) => (
-                  <button key={ex} onMouseDown={(e) => { e.preventDefault(); setText(ex); inputRef.current?.focus(); }}
-                    style={{
-                      textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer',
-                      color: 'var(--text-subtle)', fontSize: 12, fontFamily: 'var(--inter)', padding: 0,
-                    }}>
-                    {ex}
-                  </button>
+            )}
+            {!useQuery && preview?.intent && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
+                {preview.filled.map((f) => (
+                  <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
                 ))}
+                {preview.missing.map((m) => (
+                  <Badge key={m.key} tone="warning">{m.label}?</Badge>
+                ))}
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to run
+                </span>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {/* disambiguation */}
-      {stage === 'choosing' && choices && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-          <Label>{choices.label}</Label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-            {choices.candidates.map((c) => (
-              <button key={c.id} onClick={() => pickCandidate(c)}
+            {suggestions.map((s, i) => (
+              <button
+                key={`${s.kind}-${s.label}`}
+                onMouseDown={(e) => { e.preventDefault(); takeSuggestion(s); }}
+                onMouseEnter={() => setCursor(i)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-                  minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                  border: '1px solid var(--border)', background: 'var(--surface)',
-                  color: 'var(--text)', cursor: 'pointer', fontSize: 13,
-                }}>
-                <span style={{ fontWeight: 600, flex: 1 }}>{c.label}</span>
-                {c.sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{c.sub}</span>}
-                {c.status && <Badge tone="neutral">{c.status}</Badge>}
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                  textAlign: 'left', minHeight: 38, padding: '7px 14px',
+                  border: 'none', borderBottom: i === suggestions.length - 1 ? 'none' : '1px solid var(--border)',
+                  background: cursor === i ? 'var(--bg-subtle)' : 'transparent',
+                  color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
+                }}
+              >
+                {s.kind === 'feature'
+                  ? <ArrowRight size={13} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                  : <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{s.label}</span>
+                <span style={{
+                  fontSize: 12, color: 'var(--text-subtle)', overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{s.sub}</span>
               </button>
             ))}
-            {choices.allowNew && (
-              <button onClick={() => pickCandidate(null)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
-                  minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                  border: '1px dashed var(--border-strong)', background: 'transparent',
-                  color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
-                }}>
-                Add it as a new record instead
-              </button>
+
+            {!preview?.intent && suggestions.length === 0 && (
+              <div style={{ padding: '11px 14px' }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
+                  Nothing matches that yet. Things that work:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {EXAMPLES.slice(0, 3).map((ex) => (
+                    <button key={ex} onMouseDown={(e) => { e.preventDefault(); setText(ex); inputRef.current?.focus(); }}
+                      style={{
+                        textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer',
+                        color: 'var(--text-subtle)', fontSize: 12, fontFamily: 'var(--inter)', padding: 0,
+                      }}>
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* one question at a time */}
-      {stage === 'asking' && asking && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-          <Label>{asking.ask}</Label>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <input
-              autoFocus value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); answerSlot(); } }}
-              placeholder={asking.label}
-              style={{
-                flex: 1, height: 32, padding: '0 10px', borderRadius: 'var(--r)',
-                border: '1px solid var(--border-strong)', background: 'var(--surface)',
-                color: 'var(--text)', fontSize: 13, fontFamily: 'var(--inter)',
-              }}
-            />
-            <Button variant="primary" onClick={answerSlot} disabled={!answer.trim()}>Continue</Button>
-            <Button variant="ghost" onClick={reset}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {/* confirm before writing */}
-      {stage === 'ready' && result?.intent && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-          <Label>About to {result.intent.title.toLowerCase()}</Label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 12px' }}>
-            {result.intent.slots.map((s) => {
-              const v = slots[s.key === 'contact' ? (slots.contactLabel ? 'contactLabel' : 'contact') : s.key];
-              if (v == null || v === '') return null;
-              const display = typeof v === 'object'
-                ? (v.amount ? `£${Number(v.amount).toLocaleString()}${v.per === 'unit' ? ' per unit' : ''}` : JSON.stringify(v))
-                : String(v);
-              return <Badge key={s.key} tone="info">{s.label}: {display}</Badge>;
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant={result.intent.writes ? 'accent' : 'primary'} onClick={run}>
-              {result.intent.writes ? 'Confirm' : 'Run'} <ArrowRight size={13} />
-            </Button>
-            <Button variant="ghost" onClick={reset}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {stage === 'running' && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Working on it</span>
-        </div>
-      )}
-
-      {/* the answer to a question */}
-      {stage === 'answered' && answered && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-          <Label>{answered.summary}</Label>
-
-          {answered.kind === 'number' && (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-              <span style={{
-                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-              }}>
-                {answered.money
-                  ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
-                  : Number(answered.value).toLocaleString()}
-              </span>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                {answered.money
-                  ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
-                  : answered.entity}
-              </span>
-            </div>
-          )}
-
-          {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {answered.sample.map((s: any) => (
-                <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
-                  <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
-                </div>
+        {/* disambiguation */}
+        {stage === 'choosing' && choices && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{choices.label}</Label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+              {choices.candidates.map((c) => (
+                <button key={c.id} onClick={() => pickCandidate(c)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
+                    border: '1px solid var(--border)', background: 'var(--surface)',
+                    color: 'var(--text)', cursor: 'pointer', fontSize: 13,
+                  }}>
+                  <span style={{ fontWeight: 600, flex: 1 }}>{c.label}</span>
+                  {c.sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{c.sub}</span>}
+                  {c.status && <Badge tone="neutral">{c.status}</Badge>}
+                </button>
               ))}
-              {answered.value > answered.sample.length && (
-                <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-                  and {answered.value - answered.sample.length} more
-                </div>
+              {choices.allowNew && (
+                <button onClick={() => pickCandidate(null)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
+                    border: '1px dashed var(--border-strong)', background: 'transparent',
+                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
+                  }}>
+                  Add it as a new record instead
+                </button>
               )}
             </div>
-          )}
-
-          {answered.kind === 'grouped' && (
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(() => {
-                const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
-                return answered.groups.map((g: any) => {
-                  const v = answered.measure === 'count' ? g.count : g.total;
-                  return (
-                    <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
-                      <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
-                      <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
-                      </div>
-                      <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                        {answered.measure === 'count' ? v.toLocaleString()
-                          : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
-                      </span>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
-              See them <ArrowRight size={12} />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* what happened, and where it went */}
-      {stage === 'done' && outcome && (
-        <div style={{
-          borderTop: '1px solid var(--border)', padding: 14,
-          borderLeft: `2px solid ${outcome.ok ? 'var(--success)' : 'var(--warning)'}`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-            {outcome.ok
-              ? <Check size={15} style={{ color: 'var(--success)', marginTop: 2, flexShrink: 0 }} />
-              : <X size={15} style={{ color: 'var(--warning)', marginTop: 2, flexShrink: 0 }} />}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{outcome.message}</div>
-              {outcome.detail && (
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>{outcome.detail}</div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                {outcome.link && (
-                  <Button variant="primary" size="sm" onClick={() => router.push(outcome.link!.href)}>
-                    {outcome.link.label} <ArrowRight size={12} />
-                  </Button>
+        {/* one question at a time */}
+        {stage === 'asking' && asking && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{asking.ask}</Label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <input
+                autoFocus value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); answerSlot(); } }}
+                placeholder={asking.label}
+                style={{
+                  flex: 1, height: 32, padding: '0 10px', borderRadius: 'var(--r)',
+                  border: '1px solid var(--border-strong)', background: 'var(--surface)',
+                  color: 'var(--text)', fontSize: 13, fontFamily: 'var(--inter)',
+                }}
+              />
+              <Button variant="primary" onClick={answerSlot} disabled={!answer.trim()}>Continue</Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* confirm before writing */}
+        {stage === 'ready' && result?.intent && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>About to {result.intent.title.toLowerCase()}</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 12px' }}>
+              {result.intent.slots.map((s) => {
+                const v = slots[s.key === 'contact' ? (slots.contactLabel ? 'contactLabel' : 'contact') : s.key];
+                if (v == null || v === '') return null;
+                const display = typeof v === 'object'
+                  ? (v.amount ? `£${Number(v.amount).toLocaleString()}${v.per === 'unit' ? ' per unit' : ''}` : JSON.stringify(v))
+                  : String(v);
+                return <Badge key={s.key} tone="info">{s.label}: {display}</Badge>;
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant={result.intent.writes ? 'accent' : 'primary'} onClick={run}>
+                {result.intent.writes ? 'Confirm' : 'Run'} <ArrowRight size={13} />
+              </Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {stage === 'running' && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Working on it</span>
+          </div>
+        )}
+
+        {/* the answer to a question */}
+        {stage === 'answered' && answered && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{answered.summary}</Label>
+
+            {answered.kind === 'number' && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
+                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+                }}>
+                  {answered.money
+                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
+                    : Number(answered.value).toLocaleString()}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {answered.money
+                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
+                    : answered.entity}
+                </span>
+              </div>
+            )}
+
+            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {answered.sample.map((s: any) => (
+                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
+                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
+                  </div>
+                ))}
+                {answered.value > answered.sample.length && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+                    and {answered.value - answered.sample.length} more
+                  </div>
                 )}
-                <Button variant="ghost" size="sm" onClick={reset}>Do something else</Button>
+              </div>
+            )}
+
+            {answered.kind === 'grouped' && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(() => {
+                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
+                  return answered.groups.map((g: any) => {
+                    const v = answered.measure === 'count' ? g.count : g.total;
+                    return (
+                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
+                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
+                        </div>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                          {answered.measure === 'count' ? v.toLocaleString()
+                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
+                See them <ArrowRight size={12} />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
+            </div>
+          </div>
+        )}
+
+        {/* what happened, and where it went */}
+        {stage === 'done' && outcome && (
+          <div style={{
+            borderTop: '1px solid var(--border)', padding: 14,
+            borderLeft: `2px solid ${outcome.ok ? 'var(--success)' : 'var(--warning)'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+              {outcome.ok
+                ? <Check size={15} style={{ color: 'var(--success)', marginTop: 2, flexShrink: 0 }} />
+                : <X size={15} style={{ color: 'var(--warning)', marginTop: 2, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{outcome.message}</div>
+                {outcome.detail && (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>{outcome.detail}</div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  {outcome.link && (
+                    <Button variant="primary" size="sm" onClick={() => router.push(outcome.link!.href)}>
+                      {outcome.link.label} <ArrowRight size={12} />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={reset}>Do something else</Button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+            </div>
+          </div>
+        ))
+        : <>
+
+        {/* what it thinks you meant, and everything else it could be */}
+        {stage === 'idle' && text.trim().length >= 2 && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+            {useQuery && plan && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
+              </div>
+            )}
+            {!useQuery && preview?.intent && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
+                {preview.filled.map((f) => (
+                  <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
+                ))}
+                {preview.missing.map((m) => (
+                  <Badge key={m.key} tone="warning">{m.label}?</Badge>
+                ))}
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to run
+                </span>
+              </div>
+            )}
+
+            {suggestions.map((s, i) => (
+              <button
+                key={`${s.kind}-${s.label}`}
+                onMouseDown={(e) => { e.preventDefault(); takeSuggestion(s); }}
+                onMouseEnter={() => setCursor(i)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                  textAlign: 'left', minHeight: 38, padding: '7px 14px',
+                  border: 'none', borderBottom: i === suggestions.length - 1 ? 'none' : '1px solid var(--border)',
+                  background: cursor === i ? 'var(--bg-subtle)' : 'transparent',
+                  color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
+                }}
+              >
+                {s.kind === 'feature'
+                  ? <ArrowRight size={13} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                  : <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{s.label}</span>
+                <span style={{
+                  fontSize: 12, color: 'var(--text-subtle)', overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{s.sub}</span>
+              </button>
+            ))}
+
+            {!preview?.intent && suggestions.length === 0 && (
+              <div style={{ padding: '11px 14px' }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
+                  Nothing matches that yet. Things that work:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {EXAMPLES.slice(0, 3).map((ex) => (
+                    <button key={ex} onMouseDown={(e) => { e.preventDefault(); setText(ex); inputRef.current?.focus(); }}
+                      style={{
+                        textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer',
+                        color: 'var(--text-subtle)', fontSize: 12, fontFamily: 'var(--inter)', padding: 0,
+                      }}>
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* disambiguation */}
+        {stage === 'choosing' && choices && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{choices.label}</Label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+              {choices.candidates.map((c) => (
+                <button key={c.id} onClick={() => pickCandidate(c)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
+                    border: '1px solid var(--border)', background: 'var(--surface)',
+                    color: 'var(--text)', cursor: 'pointer', fontSize: 13,
+                  }}>
+                  <span style={{ fontWeight: 600, flex: 1 }}>{c.label}</span>
+                  {c.sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{c.sub}</span>}
+                  {c.status && <Badge tone="neutral">{c.status}</Badge>}
+                </button>
+              ))}
+              {choices.allowNew && (
+                <button onClick={() => pickCandidate(null)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
+                    border: '1px dashed var(--border-strong)', background: 'transparent',
+                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
+                  }}>
+                  Add it as a new record instead
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* one question at a time */}
+        {stage === 'asking' && asking && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{asking.ask}</Label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <input
+                autoFocus value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); answerSlot(); } }}
+                placeholder={asking.label}
+                style={{
+                  flex: 1, height: 32, padding: '0 10px', borderRadius: 'var(--r)',
+                  border: '1px solid var(--border-strong)', background: 'var(--surface)',
+                  color: 'var(--text)', fontSize: 13, fontFamily: 'var(--inter)',
+                }}
+              />
+              <Button variant="primary" onClick={answerSlot} disabled={!answer.trim()}>Continue</Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* confirm before writing */}
+        {stage === 'ready' && result?.intent && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>About to {result.intent.title.toLowerCase()}</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 12px' }}>
+              {result.intent.slots.map((s) => {
+                const v = slots[s.key === 'contact' ? (slots.contactLabel ? 'contactLabel' : 'contact') : s.key];
+                if (v == null || v === '') return null;
+                const display = typeof v === 'object'
+                  ? (v.amount ? `£${Number(v.amount).toLocaleString()}${v.per === 'unit' ? ' per unit' : ''}` : JSON.stringify(v))
+                  : String(v);
+                return <Badge key={s.key} tone="info">{s.label}: {display}</Badge>;
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant={result.intent.writes ? 'accent' : 'primary'} onClick={run}>
+                {result.intent.writes ? 'Confirm' : 'Run'} <ArrowRight size={13} />
+              </Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {stage === 'running' && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Working on it</span>
+          </div>
+        )}
+
+        {/* the answer to a question */}
+        {stage === 'answered' && answered && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+            <Label>{answered.summary}</Label>
+
+            {answered.kind === 'number' && (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
+                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+                }}>
+                  {answered.money
+                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
+                    : Number(answered.value).toLocaleString()}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  {answered.money
+                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
+                    : answered.entity}
+                </span>
+              </div>
+            )}
+
+            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {answered.sample.map((s: any) => (
+                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
+                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
+                  </div>
+                ))}
+                {answered.value > answered.sample.length && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+                    and {answered.value - answered.sample.length} more
+                  </div>
+                )}
+              </div>
+            )}
+
+            {answered.kind === 'grouped' && (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(() => {
+                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
+                  return answered.groups.map((g: any) => {
+                    const v = answered.measure === 'count' ? g.count : g.total;
+                    return (
+                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
+                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
+                        </div>
+                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                          {answered.measure === 'count' ? v.toLocaleString()
+                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
+                See them <ArrowRight size={12} />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
+            </div>
+          </div>
+        )}
+
+        {/* what happened, and where it went */}
+        {stage === 'done' && outcome && (
+          <div style={{
+            borderTop: '1px solid var(--border)', padding: 14,
+            borderLeft: `2px solid ${outcome.ok ? 'var(--success)' : 'var(--warning)'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+              {outcome.ok
+                ? <Check size={15} style={{ color: 'var(--success)', marginTop: 2, flexShrink: 0 }} />
+                : <X size={15} style={{ color: 'var(--warning)', marginTop: 2, flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{outcome.message}</div>
+                {outcome.detail && (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>{outcome.detail}</div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  {outcome.link && (
+                    <Button variant="primary" size="sm" onClick={() => router.push(outcome.link!.href)}>
+                      {outcome.link.label} <ArrowRight size={12} />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={reset}>Do something else</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+          </>}
     </div>
   );
 }

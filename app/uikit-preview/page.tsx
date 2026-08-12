@@ -16,6 +16,7 @@
    ============================================================= */
 import { notFound } from 'next/navigation';
 import { CrmWorkspace } from '@/components/CrmWorkspace';
+import { TopBar } from '@/components/TopBar';
 import type { CRMContact, CrmList, Profile } from '@/lib/types';
 
 const profile: Profile = { id: 'u1', email: 'alex@stc.co.uk', full_name: 'Alex Ellis', role: 'sales', theme: 'dark', created_at: '' };
@@ -53,6 +54,7 @@ export default function Preview() {
   return (
     <div className="app" style={{ display: 'flex' }}>
       <div className="main" style={{ flex: 1, width: '100%' }}>
+        <TopBar />
         <main className="page" style={{ maxWidth: 'none' }}>
           <CrmWorkspace
             profile={profile} lists={lists} members={[]} profiles={others}

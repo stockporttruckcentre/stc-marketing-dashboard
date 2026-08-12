@@ -10,7 +10,6 @@ import {
   Card, Kpi, Figure, Badge, Button, EmptyState, NotProvisioned, Label, SectionHead, Row,
   money, compactMoney,
 } from '@/components/kit/primitives';
-import { CommandBar } from './CommandBar';
 import type { Profile } from '@/lib/types';
 
 /* =============================================================
@@ -36,7 +35,6 @@ export function RepDashboard({ profile }: { profile: Profile }) {
   const [error, setError] = useState<string | null>(null);
   const [staleDays, setStaleDays] = useState(7);
   const [showAllStale, setShowAllStale] = useState(false);
-  const [seed, setSeed] = useState<{ text: string; nonce: number } | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +46,10 @@ export function RepDashboard({ profile }: { profile: Profile }) {
     return () => { cancelled = true; };
   }, [staleDays]);
 
-  const fire = (text: string) => setSeed({ text, nonce: Date.now() });
+  // The command bar lives in the layout's top bar now, so this asks for
+  // it by name rather than passing it a prop it can no longer reach.
+  const fire = (text: string) =>
+    window.dispatchEvent(new CustomEvent('stc:command', { detail: text }));
   const firstName = (profile.full_name || '').split(' ')[0] || 'there';
   const greet = () => {
     const h = new Date().getHours();
@@ -84,7 +85,6 @@ export function RepDashboard({ profile }: { profile: Profile }) {
       </div>
 
       {/* ---- the toolbar. The spine of the page: every quick action feeds it ---- */}
-      <CommandBar seed={seed} />
 
       {error && (
         <Card style={{ borderLeft: '2px solid var(--danger)' }}>
