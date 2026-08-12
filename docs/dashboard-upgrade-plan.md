@@ -39,6 +39,10 @@ So role-based rendering has nothing to key off. Options:
 
 Either way the Team screen (`components/AdminPanel.tsx`) needs a second dropdown.
 
+**A granular permissions system is coming.** Read "What the admin panel and SSO
+change" below before implementing this. The column still gets added, but nothing
+should read it directly.
+
 ### 2. Role-driven rendering is not a security boundary until a known bug is fixed
 
 The exec view shows company-wide revenue, team pipeline by rep, and per-account
@@ -129,6 +133,132 @@ Either it existed in a system this repo replaced, or the dead bell button read a
 a broken feature. Practical effect: **budget widget 7 as a full build** (table,
 RLS, write points, panel UI, read/unread, dismissal), not a bug fix. It is the
 single most under-estimated item in the Tier 1 list.
+
+---
+
+## What the admin panel and MS365 SSO change
+
+Two things are landing near this build: a granular permissions and roles admin
+panel, and Microsoft 365 SSO. Both touch the dashboard directly. One of them
+carries a data-loss risk that has nothing to do with the dashboard at all.
+
+### The permissions panel: build an accessor, not a column reference
+
+The plan above adds `dashboard_variant`. If a granular permission model arrives
+weeks later, that column becomes a second source of truth for "what is this
+person allowed to see", which is exactly the failure already documented in the
+ownership section below. Do not repeat it in the permissions domain.
+
+Still add the column, because the dashboard cannot wait for the permission model
+to be designed. But **no widget, page or route may read it directly.** Put one
+accessor in front of it from the first commit:
+
+```ts
+// lib/permissions.ts
+export type DashboardVariant = 'rep' | 'exec' | 'support';
+export function getDashboardVariant(profile: Profile): DashboardVariant { ... }
+```
+
+When the permission system lands, that function changes and nothing else does.
+If instead `profile.dashboard_variant` is read in nine widgets, the migration is
+a nine-file change plus whatever was missed.
+
+The same applies in the database. Nineteen RLS policies currently hardcode role
+strings, in four combinations:
+
+| Test | Policies |
+|---|---|
+| `current_role_safe() IN ('admin','marketer')` | 6 |
+| `current_role_safe() IN ('admin','marketer','sales')` | 4 |
+| `current_role_safe() = 'admin'` | 4 |
+| `current_role_safe() IN ('admin','sales')` | 1 |
+
+A capability model means rewriting all nineteen. That is much cheaper if the new
+model exposes a function with the same shape, for example
+`has_capability('crm.write')`, so each policy is a one-line substitution rather
+than a redesign. Worth agreeing that signature before the panel is built.
+
+Two more points for the panel itself:
+
+- **Whatever table holds permissions must not be self-writable.** The
+  `profiles_update_self` fix in prerequisite 2 is not a one-off patch, it is the
+  pattern the entire permission system depends on. Fix it first and reuse it.
+- **Decide whether permissions are assigned per user or mapped from Entra
+  groups.** If SSO is Azure AD, group membership can drive capabilities, which
+  makes the admin panel a group-to-capability mapping screen rather than a
+  per-person one. That is a different product. Decide before it is built.
+
+### SSO: the identity migration is the risk, not the login
+
+Adding Azure AD as a Supabase auth provider is configuration, not a rewrite. The
+danger is what happens to existing users.
+
+Six tables key off `auth.users.id`:
+
+| Column | On delete | What is lost |
+|---|---|---|
+| `profiles.id` | CASCADE | The whole profile row |
+| `crm_lists.owner_id` | SET NULL | Tracker ownership |
+| `crm_list_members.user_id` | CASCADE | Every share |
+| `maint_accounts.owner_id` | CASCADE | **The maintenance accounts themselves** |
+| `contact_notes.author_id` | SET NULL | Who wrote every note |
+| `calendar_events.created_by` | SET NULL | Event ownership |
+
+If SSO mints new user IDs and the old email and password users are deleted, that
+table is the damage report. The worst case is not theoretical: `crm_lists.owner_id`
+goes null, and the `lists_select` policy only returns lists where
+`owner_id = auth.uid()`, so **every rep is locked out of their own sales tracker**
+while the rows sit intact in the database. `maint_accounts` rows are deleted
+outright.
+
+So the rule for the SSO cutover is:
+
+1. Link Azure identities to the existing `auth.users` rows by email so the UUIDs
+   are retained. Do not create parallel accounts.
+2. **Do not delete the old auth users**, even after everyone has signed in via
+   SSO. Nothing is gained and six foreign keys are pointed at them.
+3. Verify on a copy first. Sign in as one rep via SSO and confirm their tracker,
+   notes and meetings still resolve before rolling it out.
+
+Three smaller items that will bite on day one:
+
+- `handle_new_user()` reads `raw_user_meta_data->>'full_name'`. Entra sends
+  `name`. Without a trigger update, every SSO user is created with the part of
+  their email before the at sign as their display name, which then shows on the
+  leaderboard and in note authorship.
+- The password change form in `components/SettingsPanel.tsx` re-authenticates
+  with `signInWithPassword` and calls `updateUser`. Under SSO it is meaningless
+  and should be hidden for federated users.
+- **SSO does not close the seeded password problem on its own.** The `123`
+  passwords remain valid until email and password sign-in is actually disabled
+  in Supabase. Two doors, one lock.
+
+### SSO unblocks widget 6, and changes how it should be built
+
+This is the good news. Azure AD sign-in and Microsoft Graph are the same OAuth
+flow, so calendar scopes can be requested at sign-in. Widget 6's dependency and
+the SSO work are the same work, which means meetings can move earlier than Tier 2
+if SSO lands first.
+
+One technical constraint shapes the design. Supabase returns `provider_token` and
+`provider_refresh_token` at sign-in but does not refresh provider tokens for you.
+That splits the widget in two:
+
+- **"My meetings today", while the user is signed in.** Works on the user's own
+  delegated token. Straightforward.
+- **Delegated meetings and any background sync.** Reading Dave's diary when Tom
+  booked it, or refreshing meetings on a schedule, needs application-level Graph
+  permissions through a separate Azure app registration and the client
+  credentials flow. This is a different piece of work with a different approval
+  path, since application-wide calendar access usually needs tenant admin
+  consent.
+
+That raises a question the plan cannot answer on its own: **is Outlook the master
+for meetings, or is the CRM?** If Outlook is master, the `owner_user_id` column
+and the calendar policy rewrite described below change shape entirely, because
+`calendar_events` becomes a mirror keyed by Graph event ID rather than the
+system of record. Answer this before writing the calendar migration, because the
+two designs are not compatible.
 
 ---
 
@@ -270,7 +400,7 @@ above lands. `Blocked` means it needs an external system that does not exist yet
 | 3 | Proposals in flight, split | Same rows, grouped. Prospective vs existing needs a rule: recommend existing = the company has any row at status `customer` or a linked sold `stock_trailers` row; otherwise prospective | Ready, needs the rule confirmed |
 | 4 | Top 5 stuck by revenue | Widget 2's query, `LIMIT 5`. Build as one query with two consumers, not two queries | Ready after `last_activity_at` |
 | 5 | My portfolio | New `account_ownership`. Metrics: account count, open proposals, revenue MTD/YTD from tracker rows at `customer` with `sale_price` | Ready after schema and backfill |
-| 6 | Meetings today / this week | `calendar_events` now, Microsoft Graph `/me/events` later | Blocked on M365 SSO. Ship CRM-only first |
+| 6 | Meetings today / this week | `calendar_events` now, Microsoft Graph `/me/events` later | Moves with SSO, not after it. Own diary is easy; delegated diaries need app-level Graph consent |
 | 7 | Notifications | New `notifications` table plus write points | Full build, not a restore |
 | 8 | Revenue vs target | `revenue_targets` plus tracker `sale_price`. Radar/gauge per Tom | Needs targets loaded. Protean only improves the actuals |
 | 9 | Quick actions bar | Routes to existing screens. Add prospect and Generate proposal are Tier 1 | Ready. Natural-language search stays a placeholder |
@@ -295,21 +425,33 @@ The spec's tiering is sound. Two changes, both driven by findings above.
 
 **Tier 0, before any widget.** Not in the original list, but Tier 1 depends on it.
 
-1. Fix `profiles_update_self` so the variant column is not self-writable.
-2. Add `dashboard_variant` and the Team screen control for it.
+1. Fix `profiles_update_self` so the variant column is not self-writable. This is
+   also the pattern the coming permission system depends on, so it is worth doing
+   properly rather than patching.
+2. Add `dashboard_variant`, the Team screen control, and the
+   `getDashboardVariant()` accessor. Nothing reads the column directly.
 3. Add `last_activity_at` and write it from the note, status and action paths.
 4. Confirm the live schema matches `supabase/schema.sql`. The file references
    `is_list_member_safe()`, which is defined nowhere in the repo, so the file
    and production have already diverged. Dump the real schema before writing
    migrations against this one.
+5. Agree the capability function signature with whoever is designing the
+   permissions panel, so the nineteen role-hardcoded policies can be migrated by
+   substitution later rather than redesigned.
 
 **Tier 1, soft launch.** Widgets 1, 2, 3, 4, 5, 7, 9, plus role rendering with a
 basic exec view. Note that widget 7 is a full build and widget 5 needs the
 ownership backfill, so this tier is larger than the widget count suggests.
 
-**Tier 2, weeks 3 to 8.** Widget 6 (CRM calendar first, Graph when SSO lands,
-delegation policies rewritten), widget 8 (once targets are loaded by hand,
+**Tier 2, weeks 3 to 8.** Widget 6, widget 8 (once targets are loaded by hand,
 independent of Protean), and the full exec view.
+
+Widget 6 is now tied to the SSO date rather than sitting behind it. If SSO lands
+during Tier 1, the user's own meetings can ship with it, because the calendar
+scope comes from the same sign-in. Delegated diaries stay in Tier 2 or later,
+since they need a separate Azure app registration and probably tenant admin
+consent. Do not write the calendar migration until the Outlook-or-CRM master
+question is answered.
 
 **Tier 3.** Natural-language search. Custom colour themes.
 
@@ -347,6 +489,14 @@ guessed.
    added, call logged, action completed, status changed. Confirm that opening a
    record or fixing a typo should not count, which is the whole point of the
    column.
+7. **Is Outlook or the CRM the master for meetings?** This decides whether
+   `calendar_events` gains an owner column and a policy rewrite, or becomes a
+   mirror keyed by Graph event ID. The two designs are not compatible, so this
+   is needed before the calendar migration is written, not after.
+8. **Are permissions assigned per user, or mapped from Entra groups?** With
+   Azure AD SSO arriving alongside the admin panel, group membership could drive
+   capabilities. That makes the panel a mapping screen rather than a per-person
+   one, which is a different build.
 
 ---
 
