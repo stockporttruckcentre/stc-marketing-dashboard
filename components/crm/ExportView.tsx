@@ -5,6 +5,7 @@ import {
   Printer, FileSpreadsheet, FileText, Copy, Mail, Check, Loader, ArrowLeft,
 } from 'lucide-react';
 import { Button, Label, Badge, Alert } from '@/components/kit/primitives';
+import { exportEmailHtml } from '@/lib/crm/export-email-html';
 import type { ExportModel } from '@/lib/crm/export-model';
 
 /* =============================================================
@@ -42,9 +43,16 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
     setTimeout(() => { setBusy(null); flash(format); }, 900);
   }
 
-  async function copy() {
-    setBusy('copy');
-    const html = document.getElementById('export-doc')?.innerHTML ?? '';
+  /**
+   * Put the email-safe version on the clipboard.
+   *
+   * Not the markup on screen: that uses CSS custom properties and grid,
+   * neither of which Outlook understands, so pasting it produces a stack
+   * of unstyled text. `exportEmailHtml` renders the same model as inline
+   * styled tables, which is what survives Word's rendering engine.
+   */
+  async function putOnClipboard(): Promise<boolean> {
+    const html = exportEmailHtml(m);
     const text = plainText(m);
     try {
       if (navigator.clipboard && (window as any).ClipboardItem) {
@@ -57,21 +65,43 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
       } else {
         await navigator.clipboard.writeText(text);
       }
-      flash('copy');
+      return true;
     } catch {
-      setNote('The browser refused clipboard access. Select the document and copy manually.');
+      setNote('The browser refused clipboard access. Select the document below and copy it manually.');
+      return false;
     }
+  }
+
+  async function copy() {
+    setBusy('copy');
+    if (await putOnClipboard()) flash('copy');
     setBusy(null);
   }
 
-  function email() {
-    // A real PDF attachment has to be assembled and sent server side.
-    // Until Microsoft sign-in is connected there is no mailbox to send
-    // from, so this opens a draft with the summary inline instead.
-    const body = encodeURIComponent(plainText(m));
+  /**
+   * Email keeps the sender's own signature, which rules out the obvious
+   * approaches. A mailto body is plain text only, and a draft created
+   * through Graph does not pick up an Outlook signature either, because
+   * Outlook only inserts one when a person starts a new message in the
+   * client.
+   *
+   * So: formatted HTML onto the clipboard, then open a blank compose.
+   * The signature is already sitting there and the body pastes in above
+   * it, formatted. One click and one paste, and it looks like the page.
+   *
+   * The tidier version, where the ribbon add-in drops this straight into
+   * an open compose with no paste at all, is noted in the build state doc
+   * for when the Office add-in is built.
+   */
+  async function email() {
+    setBusy('email');
+    const copied = await putOnClipboard();
     const subject = encodeURIComponent(`${m.company} account summary`);
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
-    setNote('Opened a draft with the summary in the body. Sending it as a PDF attachment needs the Microsoft mail connection, which is not live yet.');
+    window.location.href = `mailto:?subject=${subject}`;
+    setBusy(null);
+    if (copied) {
+      setNote('Formatted copy is on your clipboard and a blank message is open. Paste it above your signature: it keeps the layout you see here.');
+    }
   }
 
   return (
@@ -105,8 +135,8 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
         <Button variant="secondary" onClick={copy} disabled={busy === 'copy'}>
           {done === 'copy' ? <Check size={14} /> : <Copy size={14} />} {done === 'copy' ? 'Copied' : 'Copy'}
         </Button>
-        <Button variant="secondary" onClick={email}>
-          <Mail size={14} /> Email
+        <Button variant="secondary" onClick={email} disabled={busy === 'email'}>
+          {busy === 'email' ? <Loader size={14} className="spin" /> : <Mail size={14} />} Email
         </Button>
 
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-subtle)' }}>
@@ -220,13 +250,17 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
 
       <style>{`
         @media print {
-          .export-bar { display: none !important; }
+          /* Anything that is not the document is hidden, including app
+             chrome that might wrap this page in future. */
+          .export-bar, .sidebar, .topbar, nav, header.topbar { display: none !important; }
+          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
           .kit { background: #fff !important; }
           #export-doc {
             border: none !important; border-radius: 0 !important;
-            padding: 0 !important; max-width: none !important;
+            padding: 0 !important; max-width: none !important; width: 100% !important;
           }
           .export-section { break-inside: avoid; page-break-inside: avoid; }
+          a { color: #09163A !important; text-decoration: none !important; }
           @page { margin: 16mm; }
         }
       `}</style>

@@ -10,6 +10,7 @@
    the customer is and where the relationship stands, not with database
    columns in schema order.
    ============================================================= */
+import { ukDate, ukDateTimeLong, ukDateTime } from '@/lib/format/date';
 import type { CRMContact, ContactNote, ContactAddress, CrmList } from '@/lib/types';
 
 export type ExportField = { label: string; value: string; numeric?: number | null };
@@ -30,8 +31,7 @@ export type ExportModel = {
 const gbp = (n: number | null | undefined) =>
   n == null ? '' : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(Number(n));
 
-const dateOnly = (s: string | null | undefined) =>
-  s ? new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+const dateOnly = (s: string | null | undefined) => ukDate(s);
 
 export function buildExportModel(
   c: CRMContact,
@@ -46,9 +46,7 @@ export function buildExportModel(
     company: c.company_name,
     subtitle: [c.contact_name, c.location, list?.name].filter(Boolean).join(' · '),
     status: c.status,
-    generatedAt: new Date().toLocaleString('en-GB', {
-      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-    }),
+    generatedAt: ukDateTimeLong(new Date()),
     generatedBy,
     sections: [
       {
@@ -91,7 +89,7 @@ export function buildExportModel(
     links: (c.links ?? []).map((l) => ({ label: l.label, url: l.url, kind: l.kind })),
     notes: notes.map((n) => ({
       author: n.author_name,
-      at: new Date(n.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      at: ukDateTime(n.created_at),
       atISO: n.created_at,
       text: n.text,
     })),

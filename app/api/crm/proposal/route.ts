@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,8 +59,8 @@ export async function POST(req: NextRequest) {
     location: c.location,
     assigned_to: fullName,
     requirement: kind.replace('_', ' '),
-    date_of_enquiry: new Date().toISOString().slice(0, 10),
-    last_contact: new Date().toISOString().slice(0, 10),
+    date_of_enquiry: ukToday(),
+    last_contact: ukToday(),
   }).select('id').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

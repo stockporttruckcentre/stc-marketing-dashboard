@@ -252,7 +252,7 @@ export function ContactDrawer({
                     {[
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
                       { label: 'Copy to another list', on: () => setMovePickerOpen('duplicate') },
-                      { label: 'Export or share', on: () => window.open(`/dashboard/crm/export/${contact.id}`, '_blank', 'noopener') },
+                      { label: 'Export or share', on: () => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener') },
                     ].map((a) => (
                       <button key={a.label} onClick={() => { setOverflowOpen(false); a.on(); }}
                         style={menuItem}>{a.label}</button>

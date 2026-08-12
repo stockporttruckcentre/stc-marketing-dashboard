@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { ukDateTimeLong, ukDayTime, ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
       const { data, error } = await supabase.from('crm_contacts').insert({
         company_name: name, status: 'lead', source: 'Command bar',
         list_id: listId, assigned_to: fullName,
-        date_of_enquiry: new Date().toISOString().slice(0, 10),
+        date_of_enquiry: ukToday(),
       }).select('id, company_name').single();
       if (error) return NextResponse.json<Result>({ ok: false, message: error.message });
 
@@ -122,9 +123,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json<Result>({
         ok: true,
-        message: `Call with ${who} booked for ${when.toLocaleString('en-GB', {
-          weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
-        })}.`,
+        message: `Call with ${who} booked for ${ukDateTimeLong(when)}.`,
         detail: 'It is private to your calendar. Open it to invite anyone else.',
         link: { href: `/dashboard/calendar?event=${(data as any).id}`, label: 'Open the calendar' },
       });
@@ -167,10 +166,10 @@ export async function POST(req: NextRequest) {
         vehicles: count ? String(count) : null,
         estimated_value: estimated,
         assigned_to: fullName,
-        date_of_enquiry: new Date().toISOString().slice(0, 10),
+        date_of_enquiry: ukToday(),
         // Not last_activity_at: that column only exists once the dashboard
         // migration has been run, and this has to work either way.
-        last_contact: new Date().toISOString().slice(0, 10),
+        last_contact: ukToday(),
       }).select('id, company_name').single();
       if (error) return NextResponse.json<Result>({ ok: false, message: error.message });
 
@@ -259,7 +258,7 @@ export async function POST(req: NextRequest) {
           ? 'Nothing in your diary for that period.'
           : `${rows.length} meeting${rows.length === 1 ? '' : 's'} coming up.`,
         detail: rows.slice(0, 5).map((r) =>
-          `${new Date(r.start_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} ${r.title}`,
+          `${ukDayTime(r.start_at)} ${r.title}`,
         ).join(' · ') || undefined,
         link: { href: '/dashboard/calendar', label: 'Open the calendar' },
       });

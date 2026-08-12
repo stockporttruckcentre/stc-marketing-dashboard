@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     await supabase.from('crm_contacts')
-      .update({ last_contact: new Date().toISOString().slice(0, 10) })
+      .update({ last_contact: ukToday() })
       .eq('id', contact_id);
     return NextResponse.json({
       ok: true, queued: false,
