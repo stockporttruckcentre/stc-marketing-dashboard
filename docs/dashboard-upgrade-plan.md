@@ -39,9 +39,10 @@ So role-based rendering has nothing to key off. Options:
 
 Either way the Team screen (`components/AdminPanel.tsx`) needs a second dropdown.
 
-**A granular permissions system is coming.** Read "What the admin panel and SSO
-change" below before implementing this. The column still gets added, but nothing
-should read it directly.
+**A granular permissions system is coming, and the platform is moving off
+Supabase.** Read "The platform move changes this build" below before implementing
+this. The column still gets added, but nothing should read it directly, and the
+capability model behind it should not depend on `auth.uid()`.
 
 ### 2. Role-driven rendering is not a security boundary until a known bug is fixed
 
@@ -136,129 +137,180 @@ single most under-estimated item in the Tier 1 list.
 
 ---
 
-## What the admin panel and MS365 SSO change
+## The platform move changes this build more than the spec does
 
-Two things are landing near this build: a granular permissions and roles admin
-panel, and Microsoft 365 SSO. Both touch the dashboard directly. One of them
-carries a data-loss risk that has nothing to do with the dashboard at all.
+Three things are now confirmed, and together they matter more to the dashboard
+than anything in the meeting notes:
 
-### The permissions panel: build an accessor, not a column reference
+1. The CRM leaves Supabase for **local PostgreSQL on your own servers**.
+2. **SSO comes after that move**, not with it.
+3. Permissions are **CRM-native**. Entra handles who you are, the CRM handles
+   what you may do, because IT owns Entra and you need full admin control here.
 
-The plan above adds `dashboard_variant`. If a granular permission model arrives
-weeks later, that column becomes a second source of truth for "what is this
-person allowed to see", which is exactly the failure already documented in the
-ownership section below. Do not repeat it in the permissions domain.
+Point 3 is straightforwardly good news and closes an open question. Points 1 and
+2 are the ones that reshape the build.
 
-Still add the column, because the dashboard cannot wait for the permission model
-to be designed. But **no widget, page or route may read it directly.** Put one
-accessor in front of it from the first commit:
+### What leaving Supabase actually costs
 
-```ts
-// lib/permissions.ts
-export type DashboardVariant = 'rep' | 'exec' | 'support';
-export function getDashboardVariant(profile: Profile): DashboardVariant { ... }
+Supabase is not the database in this app. It is the database, the auth service,
+the API layer, the realtime engine and the file storage, and the code leans on
+all five. Measured against the current tree:
+
+| What Supabase provides | Uses in this codebase | On plain PostgreSQL |
+|---|---|---|
+| Postgres | Everything | Straight swap. The easy part |
+| **PostgREST (browser to database)** | **75 `supabase.from()` calls inside client components** | **Does not exist. Every one becomes a server API call** |
+| `auth.uid()` / `auth.role()` in RLS | 36 policy expressions | Rewrite to read a session variable |
+| Supabase Auth | 9 distinct methods, 29 `getUser()` calls, 6 foreign keys to `auth.users` | Replaced wholesale |
+| Realtime | 3 subscriptions covering `crm_contacts`, `calendar_events`, `contact_addresses` | No equivalent. Needs `LISTEN`/`NOTIFY` plus sockets, or polling |
+| Storage | Brand kit and social planner uploads | Local disk or S3-compatible store |
+| PostgREST query DSL | ~36 constructs (`.or()`, embedded `crm_lists(name)`, `count: 'exact'`, `.range()`, `.maybeSingle()`) | Hand-written SQL. Not a driver swap |
+
+**The 75 number is the headline.** Today the browser talks to the database
+directly, and RLS is what makes that safe. There is no PostgREST in front of a
+local PostgreSQL server, and exposing that server to browsers over the internet
+is not an option anyway. So every one of those calls has to move behind a
+server-side API route. That is not a port, it is a re-architecture of how the
+front end gets its data, and it lands on the CRM grid, the tracker, the stock
+list and the calendar, which are the four heaviest screens in the product.
+
+### Which means the dashboard has a sequencing decision to make now
+
+Building the dashboard's nine widgets in the current browser-direct style adds
+roughly thirty more calls to the seventy-five that already have to be rewritten.
+Waiting for the migration instead delays a soft-launch blocker by months.
+
+**Recommendation: build every dashboard widget against server-side API routes
+from the first commit, even while still on Supabase.** No widget calls the
+database from the browser. Three reasons:
+
+1. The exec view has to work this way regardless. RLS deliberately hides each
+   rep's tracker, so company-wide aggregation was always going to be server-side.
+   Half the dashboard is already being built in the post-migration style.
+2. When the platform moves, the swap happens inside those routes. The widgets do
+   not change at all.
+3. It is the same principle as the permissions accessor: put the seam in once,
+   in one layer, rather than in nine places later.
+
+The cost is real but small: server routes plus a fetch layer instead of direct
+queries, and realtime on the dashboard becomes polling or is dropped. The saving
+is not having to rewrite the newest screen in the product weeks after shipping it.
+
+### Consider whether you need to leave Supabase, or only to leave their servers
+
+Worth separating two decisions that are easy to merge. "Move to local
+PostgreSQL" and "stop using Supabase" are not the same thing. The whole Supabase
+stack is open source and can be self-hosted on your own hardware with Docker,
+which would keep auth, RLS, PostgREST, realtime and storage working almost
+unchanged, and turn most of the table above into an infrastructure task rather
+than a rewrite.
+
+There may be good reasons to reject that: IT policy, wanting no third-party
+software in the stack, support arrangements, or simply preferring plain
+PostgreSQL you fully understand. This is not a recommendation either way. But the
+difference between the two paths is months of engineering, so it is worth being a
+deliberate choice rather than a side effect of the phrase "moving to local
+servers".
+
+### The interim auth gap
+
+SSO arrives after the move. Supabase Auth leaves with the move. Something has to
+authenticate people in between, and it is easy to plan around this gap without
+noticing it exists.
+
+**Recommendation: replace Supabase Auth with a self-hosted auth library at
+migration time, configured with username and password to start.** When SSO
+lands, Microsoft becomes an additional identity provider on the same library and
+the same users table. That makes SSO a configuration change rather than a second
+auth migration.
+
+Doing it the other way, patching in something temporary and replacing it when SSO
+arrives, means migrating identity twice, and identity migrations are where the
+data-loss risk lives.
+
+### The UUID warning moves forward, it does not go away
+
+The last version of this plan warned that SSO could orphan every rep's tracker if
+new user IDs were minted. That risk now belongs to the **Supabase to local
+migration**, which happens sooner.
+
+Six tables key off `auth.users.id`: profiles, tracker list ownership, list
+sharing, maintenance accounts, note authorship and calendar event ownership. Two
+of those cascade on delete, so getting it wrong destroys data rather than just
+detaching it. Worst case is unchanged: tracker ownership goes null, the policy
+that returns a rep's own lists checks exactly that field, and every rep is locked
+out of their own pipeline while the rows sit intact.
+
+**So the migration rule is: export `auth.users` and keep the existing UUIDs as
+the primary keys in the new `users` table.** Do not let the new system generate
+fresh IDs. Verify by signing in as one rep on a restored copy and confirming
+their tracker, notes and meetings all resolve before cutting over.
+
+### Design the permission model for plain PostgreSQL, not for Supabase
+
+Since permissions are CRM-native and the platform is moving, the capability model
+should be written now in a form that survives the move. Concretely, avoid
+`auth.uid()` in anything new. Use a session variable that both platforms can set:
+
+```sql
+-- works on Supabase (set from the request) and on plain PostgreSQL (SET LOCAL)
+CREATE OR REPLACE FUNCTION app_user_id() RETURNS UUID LANGUAGE SQL STABLE AS $$
+  SELECT NULLIF(current_setting('app.user_id', true), '')::uuid
+$$;
+
+CREATE OR REPLACE FUNCTION has_capability(cap TEXT) RETURNS BOOLEAN
+  LANGUAGE SQL STABLE SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM user_capabilities uc
+    WHERE uc.user_id = app_user_id() AND uc.capability = cap
+  )
+$$;
 ```
 
-When the permission system lands, that function changes and nothing else does.
-If instead `profile.dashboard_variant` is read in nine widgets, the migration is
-a nine-file change plus whatever was missed.
+Every new policy then reads `has_capability('crm.write')` rather than a hardcoded
+role list, and the 36 existing `auth.uid()` and `auth.role()` expressions become
+a mechanical substitution at migration time instead of a redesign.
 
-The same applies in the database. Nineteen RLS policies currently hardcode role
-strings, in four combinations:
+One decision to take deliberately: **does RLS survive the move, or does
+authorization move into the application?** Keeping RLS on plain PostgreSQL means
+setting the user context on every connection checkout, which is a real
+requirement to get right with a connection pool, and the failure modes are
+silent. Dropping RLS means rewriting the entire authorization model in
+TypeScript, with no database-level safety net. Given RLS is currently the only
+authorization layer this app has, keeping it is the safer path, but it needs the
+connection layer built carefully.
 
-| Test | Policies |
-|---|---|
-| `current_role_safe() IN ('admin','marketer')` | 6 |
-| `current_role_safe() IN ('admin','marketer','sales')` | 4 |
-| `current_role_safe() = 'admin'` | 4 |
-| `current_role_safe() IN ('admin','sales')` | 1 |
+### Meetings: the CRM being master resolves the design, and creates a firewall problem
 
-A capability model means rewriting all nineteen. That is much cheaper if the new
-model exposes a function with the same shape, for example
-`has_capability('crm.write')`, so each policy is a one-line substitution rather
-than a redesign. Worth agreeing that signature before the panel is built.
+The CRM being the system of record settles it. The `owner_user_id` column and the
+calendar policy rewrite described below are the right design, and
+`calendar_events` stays authoritative. Add three columns for the sync itself:
+`graph_event_id`, `graph_etag`, `last_synced_at`.
 
-Two more points for the panel itself:
+"Perfect sync" is the hard part, and two things about it are worth knowing before
+it is scheduled.
 
-- **Whatever table holds permissions must not be self-writable.** The
-  `profiles_update_self` fix in prerequisite 2 is not a one-off patch, it is the
-  pattern the entire permission system depends on. Fix it first and reuse it.
-- **Decide whether permissions are assigned per user or mapped from Entra
-  groups.** If SSO is Azure AD, group membership can drive capabilities, which
-  makes the admin panel a group-to-capability mapping screen rather than a
-  per-person one. That is a different product. Decide before it is built.
+**A two-way sync needs loop protection.** The CRM writes to Outlook, Microsoft
+notifies the CRM of the change, the CRM writes again. Every two-way calendar sync
+has to break that cycle, usually by storing the etag of the version it just
+wrote and ignoring notifications that match. Conflict resolution also needs a
+rule: if the same meeting is edited on both sides between syncs, the CRM wins as
+master, but that has to be a decision written down rather than an accident of
+implementation.
 
-### SSO: the identity migration is the risk, not the login
+**Change notifications need a publicly reachable endpoint, and the CRM is moving
+behind your firewall.** Microsoft Graph pushes changes by calling an HTTPS URL it
+can reach from the internet. A server on the local network cannot receive that.
+The options are a DMZ or reverse-proxied endpoint, or falling back to polling
+delta queries on a timer, which is simpler but makes "perfect" into "within a few
+minutes". This is a network and IT question, not an application one, and it needs
+raising early because it affects how the local hosting is set up.
 
-Adding Azure AD as a Supabase auth provider is configuration, not a rewrite. The
-danger is what happens to existing users.
-
-Six tables key off `auth.users.id`:
-
-| Column | On delete | What is lost |
-|---|---|---|
-| `profiles.id` | CASCADE | The whole profile row |
-| `crm_lists.owner_id` | SET NULL | Tracker ownership |
-| `crm_list_members.user_id` | CASCADE | Every share |
-| `maint_accounts.owner_id` | CASCADE | **The maintenance accounts themselves** |
-| `contact_notes.author_id` | SET NULL | Who wrote every note |
-| `calendar_events.created_by` | SET NULL | Event ownership |
-
-If SSO mints new user IDs and the old email and password users are deleted, that
-table is the damage report. The worst case is not theoretical: `crm_lists.owner_id`
-goes null, and the `lists_select` policy only returns lists where
-`owner_id = auth.uid()`, so **every rep is locked out of their own sales tracker**
-while the rows sit intact in the database. `maint_accounts` rows are deleted
-outright.
-
-So the rule for the SSO cutover is:
-
-1. Link Azure identities to the existing `auth.users` rows by email so the UUIDs
-   are retained. Do not create parallel accounts.
-2. **Do not delete the old auth users**, even after everyone has signed in via
-   SSO. Nothing is gained and six foreign keys are pointed at them.
-3. Verify on a copy first. Sign in as one rep via SSO and confirm their tracker,
-   notes and meetings still resolve before rolling it out.
-
-Three smaller items that will bite on day one:
-
-- `handle_new_user()` reads `raw_user_meta_data->>'full_name'`. Entra sends
-  `name`. Without a trigger update, every SSO user is created with the part of
-  their email before the at sign as their display name, which then shows on the
-  leaderboard and in note authorship.
-- The password change form in `components/SettingsPanel.tsx` re-authenticates
-  with `signInWithPassword` and calls `updateUser`. Under SSO it is meaningless
-  and should be hidden for federated users.
-- **SSO does not close the seeded password problem on its own.** The `123`
-  passwords remain valid until email and password sign-in is actually disabled
-  in Supabase. Two doors, one lock.
-
-### SSO unblocks widget 6, and changes how it should be built
-
-This is the good news. Azure AD sign-in and Microsoft Graph are the same OAuth
-flow, so calendar scopes can be requested at sign-in. Widget 6's dependency and
-the SSO work are the same work, which means meetings can move earlier than Tier 2
-if SSO lands first.
-
-One technical constraint shapes the design. Supabase returns `provider_token` and
-`provider_refresh_token` at sign-in but does not refresh provider tokens for you.
-That splits the widget in two:
-
-- **"My meetings today", while the user is signed in.** Works on the user's own
-  delegated token. Straightforward.
-- **Delegated meetings and any background sync.** Reading Dave's diary when Tom
-  booked it, or refreshing meetings on a schedule, needs application-level Graph
-  permissions through a separate Azure app registration and the client
-  credentials flow. This is a different piece of work with a different approval
-  path, since application-wide calendar access usually needs tenant admin
-  consent.
-
-That raises a question the plan cannot answer on its own: **is Outlook the master
-for meetings, or is the CRM?** If Outlook is master, the `owner_user_id` column
-and the calendar policy rewrite described below change shape entirely, because
-`calendar_events` becomes a mirror keyed by Graph event ID rather than the
-system of record. Answer this before writing the calendar migration, because the
-two designs are not compatible.
+**Writing into other people's calendars still needs IT.** Delegated meetings, Tom
+booking in Dave's diary, require application-level Graph permissions and tenant
+admin consent. You control CRM permissions, but this specific piece still depends
+on the same IT team that owns Entra. Worth flagging now so it is not discovered
+at integration time.
 
 ---
 
@@ -437,7 +489,11 @@ The spec's tiering is sound. Two changes, both driven by findings above.
    migrations against this one.
 5. Agree the capability function signature with whoever is designing the
    permissions panel, so the nineteen role-hardcoded policies can be migrated by
-   substitution later rather than redesigned.
+   substitution later rather than redesigned. Write it against `app_user_id()`,
+   not `auth.uid()`, so it survives the platform move.
+6. Decide the dashboard's data-access rule before widget one: server-side API
+   routes only, no browser-direct queries. This is what keeps the dashboard out
+   of the 75-call rewrite when the platform moves.
 
 **Tier 1, soft launch.** Widgets 1, 2, 3, 4, 5, 7, 9, plus role rendering with a
 basic exec view. Note that widget 7 is a full build and widget 5 needs the
@@ -489,14 +545,23 @@ guessed.
    added, call logged, action completed, status changed. Confirm that opening a
    record or fixing a typo should not count, which is the whole point of the
    column.
-7. **Is Outlook or the CRM the master for meetings?** This decides whether
-   `calendar_events` gains an owner column and a policy rewrite, or becomes a
-   mirror keyed by Graph event ID. The two designs are not compatible, so this
-   is needed before the calendar migration is written, not after.
-8. **Are permissions assigned per user, or mapped from Entra groups?** With
-   Azure AD SSO arriving alongside the admin panel, group membership could drive
-   capabilities. That makes the panel a mapping screen rather than a per-person
-   one, which is a different build.
+7. ~~Is Outlook or the CRM master for meetings?~~ **Answered: the CRM.** The
+   owner column and policy rewrite stand, plus three sync columns.
+8. ~~Are permissions mapped from Entra groups?~~ **Answered: no.** Entra
+   authenticates, the CRM authorises. The capability model is yours.
+9. **Does RLS survive the move to plain PostgreSQL, or does authorization move
+   into the application?** Keeping RLS means setting user context on every
+   connection checkout, with silent failure modes. Dropping it means rewriting
+   the only authorization layer this app has in TypeScript. Recommend keeping
+   it, but the connection layer has to be built for it.
+10. **Is the requirement local PostgreSQL, or no Supabase at all?** Self-hosting
+    the Supabase stack on your own hardware keeps auth, RLS, PostgREST, realtime
+    and storage working. The difference between the two paths is months of work,
+    so it should be a deliberate choice.
+11. **How does Graph reach a server behind the firewall?** Change notifications
+    need a publicly reachable HTTPS endpoint. Either a DMZ endpoint or polling
+    on a timer. This is a network decision that affects how "perfect sync" is
+    specified.
 
 ---
 
