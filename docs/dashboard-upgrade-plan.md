@@ -9,6 +9,41 @@ this file is the translation.
 
 ---
 
+## If you are building CRM changes this week, read only this
+
+Most of this document is about things that have not happened yet: the move to
+local PostgreSQL, SSO, the permissions panel, the Outlook ribbon. **None of it
+should slow down CRM work now.** Do not design around SSO, Entra, Graph
+subscriptions or the add-in. Those are decisions, not blockers, and they are
+weeks from mattering.
+
+Two habits are worth keeping while you work, because both are free today and
+expensive to undo later:
+
+1. **New screens fetch through `/api/`, not from the browser.** There are already
+   75 browser-direct database calls that have to be rewritten when the platform
+   moves. Do not add to the pile. If a change this week adds a new panel, page or
+   widget that loads data, give it a server route. If you are editing inside an
+   existing screen that already queries directly, stay consistent with that file
+   rather than half-converting it. Consistency inside a file beats purity.
+2. **New tables get their policies written against a helper, not `auth.uid()`
+   inline.** A one-line difference now. It is only a small saving, so do not
+   contort anything for it, but take it where it is free.
+
+One thing that is worth doing now on its own merit, unrelated to any of the
+above: **fix `profiles_update_self`.** It is a live privilege-escalation hole on
+the system running today, not a migration concern. It does not need to wait for
+anything.
+
+And one warning to hand to whoever runs the platform migration, whenever that
+is: **keep the existing user UUIDs.** Six tables key off `auth.users.id` and two
+of them cascade on delete. Letting the new system mint fresh IDs is the one
+mistake in this whole document that destroys data rather than costing time.
+
+Everything else here can be read when it becomes relevant.
+
+---
+
 ## Read this first: five things the spec assumes that are not true yet
 
 The meeting notes describe a system slightly different from the one that exists.
