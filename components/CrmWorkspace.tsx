@@ -15,6 +15,8 @@ import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
 import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker';
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
+import { ImportDialog } from '@/components/crm/ImportDialog';
+import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { Figure, Button, Alert, Badge, type Tone } from '@/components/kit/primitives';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox } from '@/components/kit/forms';
 import {
@@ -104,6 +106,7 @@ export function CrmWorkspace({
   const [promptProposal, setPromptProposal] = useState<CRMContact | null>(null);
   const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
   const [showAddContact, setShowAddContact] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [search, setSearch] = useState('');
 
   /**
@@ -426,25 +429,31 @@ export function CrmWorkspace({
     URL.revokeObjectURL(url);
   }
 
-  async function handleImport(file: File) {
+  /**
+   * The commit half of the import. Everything before this point is the
+   * dialog: parsing, mapping, duplicate checking and the review. By the
+   * time a row arrives here the user has seen it and its values are
+   * already the right shape for the column, so this only has to write.
+   */
+  async function commitImport(records: Record<string, any>[]) {
     setImporting(true); setMessage(null);
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          const res = await fetch('/api/crm/import', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rows: results.data, list_id: selectedListId }),
-          });
-          const json = await res.json();
-          if (!res.ok) throw new Error(json.error || 'Import failed');
-          setMessage(`Imported ${json.inserted} contacts`);
-          const { data } = await supabase.from('crm_contacts').select('*').eq('list_id', selectedListId).order('updated_at', { ascending: false });
-          setRows((data ?? []) as CRMContact[]);
-        } catch (e: any) { setMessage(e.message); }
-        finally { setImporting(false); }
-      },
-    });
+    try {
+      const res = await fetch('/api/crm/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: records, list_id: selectedListId, mapped: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Import failed');
+      setMessage(`Imported ${json.inserted} ${json.inserted === 1 ? 'contact' : 'contacts'}`);
+      const { data } = await supabase.from('crm_contacts').select('*')
+        .eq('list_id', selectedListId).order('updated_at', { ascending: false });
+      setRows((data ?? []) as CRMContact[]);
+      return { inserted: json.inserted as number };
+    } catch (e: any) {
+      return { inserted: 0, error: e.message as string };
+    } finally {
+      setImporting(false);
+    }
   }
 
   /**
@@ -650,18 +659,9 @@ export function CrmWorkspace({
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {caps.has('crm.import') && (
-            <label style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              height: 28, padding: '0 10px', borderRadius: 'var(--r)', cursor: 'pointer',
-              border: '1px solid var(--border-strong)', background: 'var(--surface)',
-              color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
-              letterSpacing: '-0.01em', whiteSpace: 'nowrap',
-            }}>
-              {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import CSV
-              <input type="file" accept=".csv" hidden onChange={(e) => {
-                const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '';
-              }} />
-            </label>
+            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)} disabled={importing}>
+              {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
+            </Button>
           )}
           {caps.has('crm.export') && (
             <Button size="sm" variant="secondary" onClick={handleExport}>
@@ -874,6 +874,16 @@ export function CrmWorkspace({
         />
       )}
 
+      {showImport && (
+        <ImportDialog
+          dict={CRM_CONTACTS}
+          listName={selectedList?.name ?? 'this list'}
+          existing={rows.map((r) => ({ id: r.id, company_name: r.company_name, email: r.email }))}
+          onCommit={commitImport}
+          onClose={() => setShowImport(false)}
+        />
+      )}
+
       {showAddContact && (
         <AddContactModal
           owners={owners}
@@ -962,8 +972,8 @@ export function CrmWorkspace({
           <MenuHead>{selectedList?.name ?? 'CRM'}</MenuHead>
           <MenuItem icon={<Plus size={13} />} label="Add contact" disabled={!canEdit}
             onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} />
-          <MenuItem icon={<Upload size={13} />} label="Import CSV" disabled={!canEdit}
-            onClick={() => { setEmptyAreaMenu(null); document.querySelector<HTMLInputElement>('input[type=file][accept=".csv"]')?.click(); }} />
+          <MenuItem icon={<Upload size={13} />} label="Import a spreadsheet" disabled={!caps.has('crm.import')}
+            onClick={() => { setEmptyAreaMenu(null); setShowImport(true); }} />
         </EdgeAwareCtxMenu>
       )}
       {nextActionFor && (
