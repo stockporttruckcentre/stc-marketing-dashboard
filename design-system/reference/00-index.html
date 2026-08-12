@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:'Panton';src:url('../fonts/Panton-Regular.otf') format('opentype');font-weight:400;font-display:swap}
+@font-face{font-family:'Panton';src:url('../fonts/Panton-SemiBold.otf') format('opentype');font-weight:600;font-display:swap}
+@font-face{font-family:'Panton';src:url('../fonts/Panton-Bold.ttf') format('truetype');font-weight:700;font-display:swap}
+@font-face{font-family:'Panton';src:url('../fonts/Panton-ExtraBold.otf') format('opentype');font-weight:800;font-display:swap}
+:root{
+--navy-950:#050D26;--navy-900:#09163A;--navy-800:#13224F;--navy-700:#1E2F63;--navy-600:#2B3F78;--navy-500:#3D5290;--navy-400:#5A6DA8;--navy-300:#8492C0;--navy-200:#B4BDD8;--navy-100:#D9DEEC;--navy-50:#EFF2F8;
+--red-900:#7A150D;--red-800:#9C1B11;--red-700:#B31F14;--red-600:#CF2417;--red-500:#E03B2E;--red-400:#EC6055;--red-300:#F49189;--red-200:#F9C3BE;--red-100:#FCE3E1;--red-50:#FDF2F1;
+--n-0:#FFFFFF;--n-25:#FBFBFA;--n-50:#F7F7F5;--n-100:#EFEFEC;--n-200:#E2E2DE;--n-300:#CBCBC6;--n-400:#A3A39D;--n-500:#7A7A74;--n-600:#5B5B56;--n-700:#43433F;--n-800:#2B2B28;--n-900:#1A1A18;
+--success:#1F9E3C;--warning:#C77A06;--danger:#B31F14;--info:#2B3F78;
+--bg:#F7F7F5;--bg-subtle:#EFEFEC;--surface:#FFFFFF;--surface-raised:#FFFFFF;--surface-sunken:#F7F7F5;--surface-inverse:#09163A;
+--border:#E2E2DE;--border-strong:#CBCBC6;--border-emphasis:#09163A;
+--text:#09163A;--text-muted:#46527A;--text-subtle:#7A7A74;--text-inverse:#FFFFFF;
+--primary:#09163A;--primary-hover:#13224F;--primary-fg:#FFFFFF;
+--accent:#CF2417;--accent-hover:#B31F14;--accent-fg:#FFFFFF;
+--focus:#3D5290;
+--shadow-1:0 1px 2px rgba(9,22,58,0.06);--shadow-2:0 2px 6px rgba(9,22,58,0.08);--shadow-3:0 8px 20px rgba(9,22,58,0.10);--shadow-4:0 20px 44px rgba(9,22,58,0.14);
+--r-sm:2px;--r:4px;--r-md:6px;--r-lg:8px;--r-full:999px;
+--panton:'Panton',sans-serif;--inter:'Inter',system-ui,sans-serif;
+}
+[data-stc-theme="dark"]{
+--bg:#050D26;--bg-subtle:#13224F;--surface:#09163A;--surface-raised:#1E2F63;--surface-sunken:#050D26;--surface-inverse:#FFFFFF;
+--border:#1E2F63;--border-strong:#2B3F78;--border-emphasis:#5A6DA8;
+--text:#FFFFFF;--text-muted:#B4BDD8;--text-subtle:#8492C0;--text-inverse:#09163A;
+--primary:#FFFFFF;--primary-hover:#D9DEEC;--primary-fg:#09163A;
+--accent:#E03B2E;--accent-hover:#EC6055;--accent-fg:#FFFFFF;
+--focus:#8492C0;--success:#3ECF6B;--warning:#E8A33D;--danger:#EC6055;--info:#8492C0;
+--shadow-1:0 1px 2px rgba(0,0,0,0.35);--shadow-2:0 2px 6px rgba(0,0,0,0.4);--shadow-3:0 8px 20px rgba(0,0,0,0.45);--shadow-4:0 20px 44px rgba(0,0,0,0.5);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text)}
+a{color:var(--accent);text-decoration:none}
+a:hover{color:var(--accent-hover)}
+</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+</helmet>
+
+<div style="min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--inter);letter-spacing:-0.01em">
+
+  <header style="position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--border);backdrop-filter:saturate(1.4)">
+    <div style="max-width:1440px;margin:0 auto;padding:0 40px;height:64px;display:flex;align-items:center;gap:20px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <img src="../assets/stc-emblem.png" alt="STC" style="height:30px">
+        <span style="width:1px;height:26px;background:var(--border)"></span>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <span style="font-family:var(--panton);font-weight:800;font-size:15px;letter-spacing:-0.02em;line-height:1.1">STC Design System</span>
+          <span style="font-size:10px;font-weight:600;letter-spacing:0.16em;color:var(--text-subtle)">COMPONENT LIBRARY</span>
+        </div>
+      </div>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.1em;color:var(--text-subtle);border:1px solid var(--border);padding:4px 9px;border-radius:var(--r)">v1.0</span>
+      <button onClick="{{ toggleTheme }}" style="display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;cursor:pointer;letter-spacing:0.02em" style-hover="background:var(--bg-subtle);border-color:var(--border-emphasis)">
+        <span style="width:9px;height:9px;border-radius:var(--r-full);background:var(--accent)"></span>{{ themeLabel }}
+      </button>
+    </div>
+  </header>
+
+  <section style="max-width:1440px;margin:0 auto;padding:64px 40px 0">
+    <div style="display:flex;gap:56px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <span style="font-family:var(--panton);font-weight:700;font-size:12px;letter-spacing:0.24em;color:var(--accent)">FOUNDATIONS TO FULL SCREENS</span>
+        <h1 style="margin:18px 0 0;font-family:var(--panton);font-weight:800;font-size:56px;line-height:1.0;letter-spacing:-0.04em;max-width:15ch">A component library that could only be STC.</h1>
+        <p style="margin:22px 0 0;font-size:16px;line-height:1.6;color:var(--text-muted);max-width:62ch">A general purpose interface library, built from the same primitives as the presentation, the social pack, the banners and the desk pad: STC Navy and Red, Panton for headings, Inter for interface text, and a quiet, dense, hard-working layout. Product agnostic, so it serves any tool STC builds. Restrained by design, so the brand carries the screen rather than decorating it.</p>
+        <div style="display:flex;gap:10px;margin-top:28px;flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:600;color:var(--text-muted)">Light and dark</span>
+          <span style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:600;color:var(--text-muted)">Compact density</span>
+          <span style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:600;color:var(--text-muted)">4px corner language</span>
+          <span style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:600;color:var(--text-muted)">WCAG AA contrast</span>
+        </div>
+      </div>
+      <div style="flex:none;width:380px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-2);overflow:hidden">
+        <div style="height:4px;background:var(--accent)"></div>
+        <div style="padding:20px 22px 22px">
+          <span style="font-family:var(--panton);font-weight:700;font-size:11px;letter-spacing:0.18em;color:var(--text-subtle)">CORE PALETTE</span>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:34px;height:34px;border-radius:var(--r);background:#09163A;border:1px solid var(--border)"></span><div style="flex:1;display:flex;flex-direction:column"><span style="font-size:13px;font-weight:600">STC Navy</span><span style="font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">#09163A</span></div></div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:34px;height:34px;border-radius:var(--r);background:#CF2417"></span><div style="flex:1;display:flex;flex-direction:column"><span style="font-size:13px;font-weight:600">STC Red</span><span style="font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">#CF2417</span></div></div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:34px;height:34px;border-radius:var(--r);background:#F7F7F5;border:1px solid var(--border-strong)"></span><div style="flex:1;display:flex;flex-direction:column"><span style="font-size:13px;font-weight:600">Paper</span><span style="font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">#F7F7F5</span></div></div>
+            <div style="display:flex;align-items:center;gap:12px"><span style="width:34px;height:34px;border-radius:var(--r);background:#050D26"></span><div style="flex:1;display:flex;flex-direction:column"><span style="font-size:13px;font-weight:600">Ink, dark canvas</span><span style="font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">#050D26</span></div></div>
+          </div>
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+            <span style="font-family:var(--panton);font-weight:800;font-size:20px;letter-spacing:-0.02em">Panton <span style="font-weight:400;font-size:13px;color:var(--text-subtle);font-family:var(--inter)">headings, 700 and 800</span></span>
+            <span style="font-size:15px;font-weight:500">Inter <span style="font-size:13px;color:var(--text-subtle)">interface and body, 400 to 700</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section style="max-width:1440px;margin:0 auto;padding:56px 40px 0">
+    <div style="display:flex;align-items:baseline;gap:16px;padding-bottom:14px;border-bottom:2px solid var(--border-emphasis)">
+      <h2 style="margin:0;font-family:var(--panton);font-weight:800;font-size:22px;letter-spacing:-0.02em">The library</h2>
+      <span style="font-size:13px;color:var(--text-subtle)">Six pages. Point Claude Code at one at a time.</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:24px">
+      <sc-for list="{{ sections }}" as="s" hint-placeholder-count="6">
+        <a href="{{ s.href }}" style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:0;overflow:hidden;color:var(--text);box-shadow:var(--shadow-1);transition:box-shadow 160ms cubic-bezier(0.2,0,0,1),border-color 160ms" style-hover="box-shadow:var(--shadow-3);border-color:var(--border-emphasis)">
+          <span style="height:3px;background:var(--accent)"></span>
+          <span style="display:flex;flex-direction:column;padding:20px 22px 22px;gap:10px;flex:1">
+            <span style="display:flex;align-items:baseline;justify-content:space-between">
+              <span style="font-family:var(--panton);font-weight:700;font-size:11px;letter-spacing:0.18em;color:var(--accent)">{{ s.num }}</span>
+              <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:var(--text-subtle)">{{ s.count }}</span>
+            </span>
+            <span style="font-family:var(--panton);font-weight:800;font-size:21px;letter-spacing:-0.025em;line-height:1.1;color:var(--text)">{{ s.title }}</span>
+            <span style="font-size:13px;line-height:1.5;color:var(--text-muted)">{{ s.blurb }}</span>
+            <span style="margin-top:auto;padding-top:14px;display:flex;flex-wrap:wrap;gap:5px">
+              <sc-for list="{{ s.tags }}" as="t" hint-placeholder-count="4">
+                <span style="font-size:11px;font-weight:500;color:var(--text-subtle);background:var(--bg-subtle);border:1px solid var(--border);padding:2px 7px;border-radius:var(--r-sm)">{{ t }}</span>
+              </sc-for>
+            </span>
+          </span>
+        </a>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="max-width:1440px;margin:0 auto;padding:56px 40px 0">
+    <div style="display:flex;align-items:baseline;gap:16px;padding-bottom:14px;border-bottom:2px solid var(--border-emphasis)">
+      <h2 style="margin:0;font-family:var(--panton);font-weight:800;font-size:22px;letter-spacing:-0.02em">Principles</h2>
+      <span style="font-size:13px;color:var(--text-subtle)">The rules that keep it from drifting back to generic.</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:26px;margin-top:24px">
+      <div style="display:flex;flex-direction:column;gap:9px;border-top:3px solid var(--border-emphasis);padding-top:16px">
+        <span style="font-family:var(--panton);font-weight:800;font-size:12px;letter-spacing:0.14em;color:var(--accent)">01</span>
+        <span style="font-family:var(--panton);font-weight:700;font-size:17px;letter-spacing:-0.02em">Navy acts, red points</span>
+        <span style="font-size:13px;line-height:1.5;color:var(--text-muted)">Navy carries primary actions and structure. Red is reserved for the one thing that matters on a screen, and for destructive intent. A screen with three red buttons has none.</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:9px;border-top:3px solid var(--border-emphasis);padding-top:16px">
+        <span style="font-family:var(--panton);font-weight:800;font-size:12px;letter-spacing:0.14em;color:var(--accent)">02</span>
+        <span style="font-family:var(--panton);font-weight:700;font-size:17px;letter-spacing:-0.02em">Density is a feature</span>
+        <span style="font-size:13px;line-height:1.5;color:var(--text-muted)">Built for tools people work in all day: tables, schedules, long lists. 32px controls, 36px rows, 14px base text. Whitespace goes between groups, not inside them.</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:9px;border-top:3px solid var(--border-emphasis);padding-top:16px">
+        <span style="font-family:var(--panton);font-weight:800;font-size:12px;letter-spacing:0.14em;color:var(--accent)">03</span>
+        <span style="font-family:var(--panton);font-weight:700;font-size:17px;letter-spacing:-0.02em">Borders before shadows</span>
+        <span style="font-size:13px;line-height:1.5;color:var(--text-muted)">Structure comes from 1px rules and honest alignment. Elevation is for things that genuinely float: menus, dialogs, popovers, drag states.</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:9px;border-top:3px solid var(--border-emphasis);padding-top:16px">
+        <span style="font-family:var(--panton);font-weight:800;font-size:12px;letter-spacing:0.14em;color:var(--accent)">04</span>
+        <span style="font-family:var(--panton);font-weight:700;font-size:17px;letter-spacing:-0.02em">Panton earns its size</span>
+        <span style="font-size:13px;line-height:1.5;color:var(--text-muted)">Panton is for headings, numbers and labels that need authority. Everything a user reads at length is Inter. Never set Panton below 11px.</span>
+      </div>
+    </div>
+  </section>
+
+  <footer style="max-width:1440px;margin:64px auto 0;padding:24px 40px 56px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline">
+    <span style="font-size:12px;font-weight:600;letter-spacing:0.12em;color:var(--text-subtle)">STOCKPORT TRUCK CENTRE &middot; DESIGN SYSTEM</span>
+    <span style="font-size:12px;color:var(--text-subtle)">stc-uk.com</span>
+  </footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Light&quot;,&quot;Dark&quot;],&quot;default&quot;:&quot;Light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  state = { theme: 'light' };
+
+  componentDidMount() {
+    let t = null;
+    try { t = localStorage.getItem('stc-ui-theme'); } catch (e) {}
+    const next = t === 'dark' || t === 'light' ? t : (this.props.defaultTheme === 'Dark' ? 'dark' : 'light');
+    this.setState({ theme: next });
+    document.documentElement.setAttribute('data-stc-theme', next);
+  }
+
+  componentDidUpdate() {
+    document.documentElement.setAttribute('data-stc-theme', this.state.theme);
+  }
+
+  renderVals() {
+    const S = (num, title, blurb, count, href, tags) => ({ num, title, blurb, count, href, tags });
+    return {
+      themeLabel: this.state.theme === 'dark' ? 'Dark' : 'Light',
+      toggleTheme: () => this.setState(s => {
+        const theme = s.theme === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem('stc-ui-theme', theme); } catch (e) {}
+        return { theme };
+      }),
+      sections: [
+        S('01', 'Foundations', 'Colour scales, semantic tokens for both themes, type ramp, spacing, radius, elevation, motion and the Tailwind config.', '9 groups', '01-foundations.html', ['Colour', 'Type', 'Spacing', 'Tokens']),
+        S('02', 'Forms and inputs', 'Buttons through to comboboxes and multi-step forms, with every state: rest, hover, focus, disabled, loading, invalid.', '32 components', '02-forms.html', ['Buttons', 'Inputs', 'Selects', 'Validation']),
+        S('03', 'Data display', 'Tables, KPI cards, charts, status badges, avatars, timelines and the empty states that stop a new account looking broken.', '30 components', '03-data.html', ['Tables', 'Charts', 'Badges', 'Empty states']),
+        S('04', 'Navigation', 'App shell, sidebar, topbar, command palette, tabs, breadcrumbs, steppers and pagination.', '21 components', '04-navigation.html', ['Sidebar', 'Tabs', 'Command', 'Breadcrumbs']),
+        S('05', 'Feedback and overlays', 'Dialogs, drawers, popovers, tooltips, toasts, banners, skeletons and progress.', '18 components', '05-feedback.html', ['Dialogs', 'Toasts', 'Skeletons', 'Alerts']),
+        S('06', 'Patterns', 'Composed screens that prove the parts work together: app shell, dashboard, list and detail, settings, and the page furniture every screen inherits.', '4 full screens', '06-patterns.html', ['App shell', 'Dashboard', 'List detail', 'Settings'])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
