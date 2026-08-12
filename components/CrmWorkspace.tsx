@@ -17,6 +17,9 @@ import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
 import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker';
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
 import { Figure, Card } from '@/components/kit/primitives';
+import {
+  applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
+} from '@/lib/crm/ownership';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
@@ -67,6 +70,33 @@ export function CrmWorkspace({
   const [nextActionFor, setNextActionFor] = useState<CRMContact | null>(null);
   const [promptSchedule, setPromptSchedule] = useState<CRMContact | null>(null);
   const [promptProposal, setPromptProposal] = useState<CRMContact | null>(null);
+  const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
+
+  /**
+   * Whose accounts you are looking at. Kept in the URL so a filtered view
+   * can be sent to somebody, and remembered so a rep who lives in their
+   * own portfolio does not reset to everyone's on every visit.
+   */
+  const [scope, setScope] = useState<Scope>(() => scopeFromParam(searchParams.get('who')));
+  useEffect(() => {
+    const fromUrl = searchParams.get('who');
+    if (fromUrl) { setScope(scopeFromParam(fromUrl)); return; }
+    try {
+      const saved = localStorage.getItem('stc:crmScope');
+      if (saved) setScope(scopeFromParam(saved));
+    } catch {}
+    // Reading the saved scope is a first-load concern only. Re-running it
+    // on every URL change would fight the user's own clicks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function changeScope(next: Scope) {
+    setScope(next);
+    try { localStorage.setItem('stc:crmScope', scopeToParam(next)); } catch {}
+    const params = new URLSearchParams(searchParams.toString());
+    if (next.kind === 'all') params.delete('who'); else params.set('who', scopeToParam(next));
+    router.replace(`/dashboard/crm?${params.toString()}`, { scroll: false });
+  }
 
   const selectedList = lists.find((l) => l.id === selectedListId);
   const isOwner = selectedList ? selectedList.owner_id === profile.id : false;
@@ -79,6 +109,21 @@ export function CrmWorkspace({
   const myLists = lists.filter((l) => !l.is_global && l.owner_id === profile.id);
   const sharedLists = lists.filter((l) => !l.is_global && l.owner_id !== profile.id);
   const globalList = lists.find((l) => l.is_global);
+
+  const owners = useMemo(() => ownerOptions(profiles), [profiles]);
+  const ambiguousFirstNames = useMemo(() => ownersAmbiguous(profiles), [profiles]);
+  const visibleRows = useMemo(
+    () => applyScope(rows, scope, profile, profiles),
+    [rows, scope, profile, profiles],
+  );
+  const unassignedCount = useMemo(
+    () => rows.filter((r) => !ownerKey(r.assigned_to)).length,
+    [rows],
+  );
+  const scopeLabel = scope.kind === 'mine' ? 'My accounts'
+    : scope.kind === 'unassigned' ? 'Unassigned'
+    : scope.kind === 'person' ? (profiles.find((p) => p.id === scope.id)?.full_name ?? 'A colleague')
+    : 'Everyone';
 
   function selectList(id: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -179,13 +224,20 @@ export function CrmWorkspace({
       valueParser: (p) => p.newValue === '' ? null : Number(p.newValue) || null,
       valueFormatter: (p) => p.value != null ? '£' + Number(p.value).toLocaleString() : '',
       cellStyle: { fontFamily: '"IBM Plex Mono", monospace' } },
-    { field: 'assigned_to', headerName: 'Assigned', width: 130, editable: canEdit, valueSetter: saveCell },
+    /* A picker, not a text box. Everything typed in here before today
+       reads as a different person to the portfolio filter, so new values
+       are chosen from the real list of people instead. */
+    { field: 'assigned_to', headerName: 'Assigned', width: 140, editable: canEdit, valueSetter: saveCell,
+      cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', ...owners] },
+      cellRenderer: (p: ICellRendererParams<CRMContact, string>) => p.value
+        ? <span>{p.value}</span>
+        : <span style={{ color: 'var(--fg-4)' }}>Unassigned</span> },
     { field: 'last_contact', headerName: 'Last contact', width: 120, editable: canEdit, valueSetter: saveCell },
     { field: 'notes', headerName: 'Latest note', flex: 1.5, minWidth: 240, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) => p.value
         ? <span style={{ color: 'var(--fg-2)' }}>{p.value}</span>
         : <span style={{ color: 'var(--fg-4)', fontStyle: 'italic' }}>Click the row to add a note</span> },
-  ], [canEdit, saveCell]);
+  ], [canEdit, saveCell, owners]);
 
   const defaultColDef: ColDef = useMemo(() => ({
     resizable: true, sortable: true, filter: true, floatingFilter: false, suppressMenu: false,
@@ -275,7 +327,10 @@ export function CrmWorkspace({
   // ---- CSV ----
   function handleExport() {
     const sel = gridRef.current?.api.getSelectedRows() ?? [];
-    const data = sel.length ? sel : rows;
+    // What is on screen, not what is in the list. Exporting everyone's
+    // accounts from a view filtered to yours is the kind of surprise that
+    // ends up in somebody's inbox.
+    const data = sel.length ? sel : visibleRows;
     const csv = Papa.unparse(data.map((r) => ({
       company_name: r.company_name, contact_name: r.contact_name, email: r.email,
       phone: r.phone, location: r.location, fleet_size: r.fleet_size, status: r.status,
@@ -413,10 +468,27 @@ export function CrmWorkspace({
 
   // ---- counts ----
   const counts = useMemo(() => {
-    const c = { all: rows.length, lead: 0, contacted: 0, quoted: 0, won: 0, lost: 0 } as Record<string, number>;
-    rows.forEach((r) => { c[r.status] = (c[r.status] ?? 0) + 1; });
+    const c = { all: visibleRows.length, lead: 0, contacted: 0, quoted: 0, won: 0, lost: 0 } as Record<string, number>;
+    visibleRows.forEach((r) => { c[r.status] = (c[r.status] ?? 0) + 1; });
     return c;
-  }, [rows]);
+  }, [visibleRows]);
+
+  /**
+   * Set the owner on a set of rows, writing the canonical profile name so
+   * the match is exact from here on. Passing null clears it, which is how
+   * an account goes back into the unassigned pile for somebody to pick up.
+   */
+  async function assignRows(rowIds: string[], name: string | null) {
+    setAssignMenu(null);
+    if (!rowIds.length) return;
+    const { error } = await supabase.from('crm_contacts')
+      .update({ assigned_to: name }).in('id', rowIds);
+    if (error) { setMessage(error.message); return; }
+    setRows((rs) => rs.map((r) => (rowIds.includes(r.id) ? { ...r, assigned_to: name } : r)));
+    setMessage(name
+      ? `Assigned ${rowIds.length} ${rowIds.length === 1 ? 'account' : 'accounts'} to ${name}`
+      : `Cleared the owner on ${rowIds.length} ${rowIds.length === 1 ? 'account' : 'accounts'}`);
+  }
 
   // Visual: distinct color/icon for current list
   const listIsGlobal = selectedList?.is_global;
@@ -433,7 +505,12 @@ export function CrmWorkspace({
             <Users size={26} style={{ color: 'var(--stc-red)' }} />
             <span>{selectedList?.name ?? 'CRM'}<span style={{ color: 'var(--stc-red)' }}>.</span></span>
           </h1>
-          <div className="page-head__sub">{rows.length} contacts · {listIsGlobal ? 'realtime · visible to everyone' : 'private to owner + shared members'}</div>
+          <div className="page-head__sub">
+            {scope.kind === 'all'
+              ? `${rows.length} contacts`
+              : `${visibleRows.length} of ${rows.length} contacts · ${scopeLabel}`}
+            {' · '}{listIsGlobal ? 'realtime · visible to everyone' : 'private to owner + shared members'}
+          </div>
         </div>
       </div>
 
@@ -493,8 +570,35 @@ export function CrmWorkspace({
         </Card>
       </div>
 
+      {/* Whose accounts. The first thing a rep wants and the last thing a
+          manager wants forced on them, so it is a switch rather than a
+          rule about who you are. */}
+      <div className="kit" style={{
+        marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      }}>
+        <ScopeSwitch
+          scope={scope}
+          onChange={changeScope}
+          profiles={profiles}
+          me={profile}
+          unassignedCount={unassignedCount}
+        />
+        {scope.kind !== 'all' && (
+          <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+            Showing {visibleRows.length} of {rows.length} on this list
+          </span>
+        )}
+        {ambiguousFirstNames.length > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--warning)' }}>
+            Two people share the first name {ambiguousFirstNames.join(' and ')}, so rows
+            assigned to just that name are left out of both portfolios. Set an owner on
+            them to fix it.
+          </span>
+        )}
+      </div>
+
       {/* Toolbar */}
-      <div className="toolbar" style={{ marginTop: 14 }}>
+      <div className="toolbar" style={{ marginTop: 12 }}>
         {canEdit && (
           <div className="row">
             <input type="email" placeholder="email@company.com to enrich"
@@ -509,6 +613,11 @@ export function CrmWorkspace({
           <div className="row" style={{ background: 'var(--stc-danger-bg)', padding: '4px 10px', borderRadius: 'var(--r-2)', border: '1px solid rgba(207,36,23,0.3)' }}>
             <span className="mono" style={{ fontSize: 11, color: 'var(--stc-red-300)' }}>{selectedCount} SELECTED</span>
             <button onClick={bulkEnrich} className="btn btn--sm"><Mail size={12} /> Enrich</button>
+            {canEdit && (
+              <button onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [] })} className="btn btn--sm">
+                <UserPlus size={12} /> Assign…
+              </button>
+            )}
             <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'move' })} className="btn btn--sm"><MoreHorizontal size={12} /> Move…</button>
             {selectedCount <= 10 && (
               <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'duplicate' })} className="btn btn--sm"><Plus size={12} /> Duplicate…</button>
@@ -534,6 +643,27 @@ export function CrmWorkspace({
 
       {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
 
+      {/* An empty grid under a filter looks like a broken list. Say which
+          filter did it and offer the way back in one click. */}
+      {visibleRows.length === 0 && rows.length > 0 && scope.kind !== 'all' && (
+        <div className="kit" style={{
+          marginBottom: 12, padding: '13px 15px', borderRadius: 'var(--r-md)',
+          border: '1px dashed var(--border-strong)', background: 'var(--surface-sunken)',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 13.5, color: 'var(--text)' }}>
+            {scope.kind === 'unassigned'
+              ? `Every one of the ${rows.length} accounts on this list has an owner.`
+              : `None of the ${rows.length} accounts on this list are assigned to ${scope.kind === 'mine' ? 'you' : scopeLabel}. Use the Assigned column, or select rows and press Assign.`}
+          </span>
+          <button onClick={() => changeScope({ kind: 'all' })} style={{
+            height: 30, padding: '0 12px', borderRadius: 'var(--r)',
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 13,
+          }}>Show everyone</button>
+        </div>
+      )}
+
       <div className="ag-theme-quartz-dark"
         onContextMenu={(e) => {
           const target = e.target as HTMLElement;
@@ -544,7 +674,7 @@ export function CrmWorkspace({
         style={{ height: 'calc(100vh - 420px)', minHeight: 400, borderRadius: 'var(--r-3)', border: '1px solid var(--border)', overflow: 'hidden' }}>
         <AgGridReact<CRMContact>
           ref={gridRef}
-          rowData={rows}
+          rowData={visibleRows}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
           rowSelection="multiple"
@@ -559,6 +689,15 @@ export function CrmWorkspace({
           preventDefaultOnContextMenu
         />
       </div>
+
+      {assignMenu && (
+        <AssignMenu
+          x={assignMenu.x} y={assignMenu.y} count={assignMenu.rowIds.length}
+          owners={owners} me={profile.full_name}
+          onPick={(name) => assignRows(assignMenu.rowIds, name)}
+          onClose={() => setAssignMenu(null)}
+        />
+      )}
 
       {showNewList && <NewListModal onCreate={createList} onClose={() => setShowNewList(false)} />}
       {showShare && <ShareModal list={showShare} profiles={profiles.filter((p) => p.id !== profile.id)} members={members.filter((m) => m.list_id === showShare.id)} onShare={shareList} onUnshare={unshareList} onClose={() => setShowShare(null)} />}
@@ -688,6 +827,123 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
       <div className="stat__label">{label}</div>
       <div className="stat__value tnum">{value}</div>
     </div>
+  );
+}
+
+/* =============================================================
+   Whose accounts.
+
+   Three of the four choices are one click, because "mine" is the one a
+   rep uses every day and "unassigned" is the one that stops accounts
+   quietly belonging to nobody. Looking at a named colleague's portfolio
+   is behind the picker: it is a manager's action, not a daily one.
+   ============================================================= */
+function ScopeSwitch({ scope, onChange, profiles, me, unassignedCount }: {
+  scope: Scope;
+  onChange: (s: Scope) => void;
+  profiles: Profile[];
+  me: Profile;
+  unassignedCount: number;
+}) {
+  const others = profiles.filter((p) => p.id !== me.id && p.full_name);
+  const active = (k: Scope['kind']) => scope.kind === k;
+
+  const seg = (on: boolean): React.CSSProperties => ({
+    height: 30, padding: '0 12px', border: 'none', cursor: 'pointer',
+    background: on ? 'var(--accent)' : 'transparent',
+    color: on ? '#fff' : 'var(--text-muted)',
+    fontFamily: 'var(--inter)', fontSize: 13, fontWeight: on ? 600 : 400,
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+  });
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center',
+        border: '1px solid var(--border)', borderRadius: 'var(--r)',
+        overflow: 'hidden', background: 'var(--surface)',
+      }}>
+        <button style={seg(active('all'))} onClick={() => onChange({ kind: 'all' })}>
+          <Users size={13} /> Everyone
+        </button>
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+        <button style={seg(active('mine'))} onClick={() => onChange({ kind: 'mine' })}>
+          <Star size={13} /> My accounts
+        </button>
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+        <button style={seg(active('unassigned'))} onClick={() => onChange({ kind: 'unassigned' })}>
+          Unassigned
+          {unassignedCount > 0 && (
+            <span style={{
+              fontSize: 11, fontVariantNumeric: 'tabular-nums',
+              padding: '1px 6px', borderRadius: 999,
+              background: active('unassigned') ? 'rgba(255,255,255,0.22)' : 'var(--surface-sunken)',
+              color: active('unassigned') ? '#fff' : 'var(--text-subtle)',
+            }}>{unassignedCount}</span>
+          )}
+        </button>
+      </div>
+
+      {others.length > 0 && (
+        <select
+          value={scope.kind === 'person' ? scope.id : ''}
+          onChange={(e) => onChange(e.target.value ? { kind: 'person', id: e.target.value } : { kind: 'all' })}
+          style={{
+            height: 32, padding: '0 9px', border: '1px solid var(--border)',
+            borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
+            fontFamily: 'var(--inter)', fontSize: 13,
+          }}
+        >
+          <option value="">Someone else...</option>
+          {others.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function AssignMenu({ x, y, count, owners, me, onPick, onClose }: {
+  x: number; y: number; count: number; owners: string[]; me: string;
+  onPick: (name: string | null) => void; onClose: () => void;
+}) {
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+      <div className="kit" style={{
+        position: 'fixed', left: Math.min(x, window.innerWidth - 250), top: y, zIndex: 61,
+        width: 230, maxHeight: 340, overflowY: 'auto',
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 5,
+      }}>
+        <div style={{
+          padding: '7px 9px 8px', fontSize: 11, letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: 'var(--text-subtle)',
+          fontFamily: 'var(--panton)', fontWeight: 700,
+        }}>
+          Assign {count} {count === 1 ? 'account' : 'accounts'}
+        </div>
+        {me && <MenuRow label={`${me} (me)`} onClick={() => onPick(me)} />}
+        {owners.filter((o) => o !== me).map((o) => <MenuRow key={o} label={o} onClick={() => onPick(o)} />)}
+        <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />
+        <MenuRow label="Clear the owner" onClick={() => onPick(null)} muted />
+      </div>
+    </>
+  );
+}
+
+function MenuRow({ label, onClick, muted }: { label: string; onClick: () => void; muted?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left', border: 'none',
+        background: 'transparent', cursor: 'pointer', padding: '7px 9px',
+        borderRadius: 'var(--r-sm)', fontFamily: 'var(--inter)', fontSize: 13,
+        color: muted ? 'var(--text-subtle)' : 'var(--text)',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-sunken)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >{label}</button>
   );
 }
 
