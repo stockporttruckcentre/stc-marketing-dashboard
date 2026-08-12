@@ -1,18 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, CalendarPlus, Users, Mail, Lock, Globe2, ChevronDown, UserCheck } from 'lucide-react';
+import { X, CalendarPlus, Users, Mail, Lock, Globe2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { Button, Label, Badge } from '@/components/kit/primitives';
+import { Button, Alert } from '@/components/kit/primitives';
+import { Modal, Field, TextInput, TextArea, Select, Segmented, OptionCard, Checkbox } from '@/components/kit/forms';
 import type { CRMContact, Profile } from '@/lib/types';
 
 /* =============================================================
-   Schedule a meeting.
+   Schedule a call or a meeting.
 
    Moved out of CrmWorkspace so the contact drawer can own it without a
    circular import, and given the delegation the meeting asked for: Tom
    takes a call while Dave is away and books the follow-up in Dave's
    diary, so it has to land on the right person.
+
+   Now built on the kit. The old version was the app's legacy modal:
+   11px labels, a wall of same-weight fields, and a visibility step whose
+   three options were styled as ordinary buttons even though choosing one
+   is the whole point of the screen.
 
    Two caveats worth knowing, both documented in the dashboard plan:
    the event carries owner_user_id only once the dashboard migration has
@@ -21,7 +27,6 @@ import type { CRMContact, Profile } from '@/lib/types';
    booked for them. The picker still records the intent correctly.
    ============================================================= */
 
-// ===== Schedule meeting modal =====
 export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }: {
   contact: CRMContact;
   profile: Profile;
@@ -30,6 +35,7 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [profiles, setProfiles] = useState<Profile[]>(allProfiles);
+
   // A call and a site visit are booked the same way but are not the same
   // thing, and the diary reads badly when everything is called a meeting.
   const [kind, setKind] = useState<'call' | 'meeting'>('call');
@@ -40,10 +46,14 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
     setKind(k);
     if (!titleEdited) setTitle(`${k === 'call' ? 'Call' : 'Meeting'} with ${contact.company_name}`);
   }
-  // Default: tomorrow 10:00 for 1 hour
+
+  // Tomorrow at 10, for an hour. Nobody books a meeting for right now.
   const tomorrow = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); return d; }, []);
   const oneHourLater = useMemo(() => { const d = new Date(tomorrow); d.setHours(d.getHours() + 1); return d; }, [tomorrow]);
-  function toLocalISO(d: Date) { const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  function toLocalISO(d: Date) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
   const [start, setStart] = useState(toLocalISO(tomorrow));
   const [end, setEnd] = useState(toLocalISO(oneHourLater));
   const [description, setDescription] = useState('');
@@ -51,47 +61,47 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
     { user_id: profile.id, name: profile.full_name, email: profile.email },
   ]);
   const [attendeeInput, setAttendeeInput] = useState('');
+
   // Whose diary this lands in. Tom takes a call while Dave is away and
   // books the follow-up for Dave, so the owner is not always the creator.
   const [ownerId, setOwnerId] = useState<string>(profile.id);
-  const [step, setStep] = useState<'form' | 'visibility' | 'saving'>('form');
+  const [step, setStep] = useState<'form' | 'visibility'>('form');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load profiles for the team picker
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from('profiles').select('id, email, full_name, role').order('full_name');
-      setProfiles((data ?? []) as Profile[]);
+      if (data?.length) setProfiles(data as Profile[]);
     })();
   }, [supabase]);
 
   function addAttendeeFromText() {
     const t = attendeeInput.trim();
     if (!t) return;
-    // Try match against profiles by name or email
     const lower = t.toLowerCase();
-    const match = profiles.find(p => p.full_name.toLowerCase() === lower || p.email.toLowerCase() === lower);
-    if (match && !attendees.some(a => a.user_id === match.id)) {
-      setAttendees(a => [...a, { user_id: match.id, name: match.full_name, email: match.email }]);
-    } else if (!match && !attendees.some(a => (a.email || a.name).toLowerCase() === lower)) {
-      // Free text, so treat as a guest. If it looks like an email, store it as one.
+    const match = profiles.find((p) => p.full_name?.toLowerCase() === lower || p.email?.toLowerCase() === lower);
+    if (match && !attendees.some((a) => a.user_id === match.id)) {
+      setAttendees((a) => [...a, { user_id: match.id, name: match.full_name, email: match.email }]);
+    } else if (!match && !attendees.some((a) => (a.email || a.name).toLowerCase() === lower)) {
+      // Free text, so treat it as a guest. If it looks like an email, store it as one.
       const isEmail = /@/.test(t);
-      setAttendees(a => [...a, isEmail ? { name: t, email: t } : { name: t }]);
+      setAttendees((a) => [...a, isEmail ? { name: t, email: t } : { name: t }]);
     }
     setAttendeeInput('');
   }
 
   function removeAttendee(idx: number) {
-    setAttendees(a => a.filter((_, i) => i !== idx));
+    setAttendees((a) => a.filter((_, i) => i !== idx));
   }
 
   function addProfile(p: Profile) {
-    if (attendees.some(a => a.user_id === p.id)) return;
-    setAttendees(a => [...a, { user_id: p.id, name: p.full_name, email: p.email }]);
+    if (attendees.some((a) => a.user_id === p.id)) return;
+    setAttendees((a) => [...a, { user_id: p.id, name: p.full_name, email: p.email }]);
   }
 
   async function save(visibility: 'private' | 'team' | 'specific', visibleTo: string[]) {
-    setStep('saving'); setError(null);
+    setSaving(true); setError(null);
     const startISO = new Date(start).toISOString();
     const endISO = end ? new Date(end).toISOString() : null;
     const delegated = ownerId !== profile.id;
@@ -115,204 +125,225 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
       visible_to: delegated && visibility === 'private' ? [ownerId] : seeAlso,
     };
 
-    let { error } = await supabase.from('calendar_events').insert(payload);
+    let { error: err } = await supabase.from('calendar_events').insert(payload);
     // owner_user_id only exists once the dashboard migration has run.
-    if (error && /owner_user_id/.test(error.message)) {
+    if (err && /owner_user_id/.test(err.message)) {
       const { owner_user_id, ...withoutOwner } = payload;
-      ({ error } = await supabase.from('calendar_events').insert(withoutOwner));
+      ({ error: err } = await supabase.from('calendar_events').insert(withoutOwner));
     }
-    if (error) { setError(error.message); setStep('visibility'); return; }
+    setSaving(false);
+    if (err) { setError(err.message); return; }
     onClose();
   }
 
   if (step === 'visibility') {
     return <VisibilityPicker
-      profiles={profiles.filter(p => p.id !== profile.id)}
+      kind={kind}
+      profiles={profiles.filter((p) => p.id !== profile.id)}
+      saving={saving}
       onCancel={() => setStep('form')}
       onSave={save}
       error={error}
     />;
   }
 
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <CalendarPlus size={16} style={{ color: 'var(--stc-red)' }} /> Schedule
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="field">
-            <div className="field__label">Customer</div>
-            <input className="input" value={contact.company_name} readOnly style={{ background: 'var(--bg-3)', color: 'var(--fg-2)' }} />
-          </div>
-          <div className="field">
-            <div className="field__label">What is it</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {([['call', 'Call'], ['meeting', 'Meeting']] as const).map(([k, label]) => (
-                <button
-                  key={k} type="button" onClick={() => pickKind(k)}
-                  style={{
-                    flex: 1, height: 34, borderRadius: 'var(--r-2)', cursor: 'pointer',
-                    border: `1px solid ${kind === k ? 'var(--stc-red)' : 'var(--border)'}`,
-                    background: kind === k ? 'rgba(207,36,23,0.08)' : 'transparent',
-                    color: kind === k ? 'var(--fg-1)' : 'var(--fg-2)',
-                    fontSize: 13, fontWeight: kind === k ? 600 : 500,
-                  }}
-                >{label}</button>
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <div className="field__label">Title</div>
-            <input className="input" value={title}
-              onChange={(e) => { setTitle(e.target.value); setTitleEdited(true); }} required />
-          </div>
-          <div className="split-2">
-            <div className="field">
-              <div className="field__label">Starts</div>
-              <input type="datetime-local" className="input" value={start} onChange={(e) => setStart(e.target.value)} required />
-            </div>
-            <div className="field">
-              <div className="field__label">Ends</div>
-              <input type="datetime-local" className="input" value={end} onChange={(e) => setEnd(e.target.value)} />
-            </div>
-          </div>
-          <div className="field">
-            <div className="field__label">Whose diary</div>
-            <select
-              className="input"
-              value={ownerId}
-              onChange={(e) => setOwnerId(e.target.value)}
-            >
-              <option value={profile.id}>{profile.full_name} (you)</option>
-              {profiles.filter((p) => p.id !== profile.id).map((p) => (
-                <option key={p.id} value={p.id}>{p.full_name}</option>
-              ))}
-            </select>
-            {ownerId !== profile.id && (
-              <div style={{ fontSize: 11.5, color: 'var(--fg-3)', marginTop: 6, lineHeight: 1.5 }}>
-                Booked by you, owned by {profiles.find((p) => p.id === ownerId)?.full_name}.
-                It will be shared with them automatically. Pushing it to their Outlook
-                needs the Microsoft calendar sync, which is not connected yet.
-              </div>
-            )}
-          </div>
+  const owner = profiles.find((p) => p.id === ownerId);
+  const others = profiles.filter((p) => p.id !== profile.id);
+  const unadded = profiles.filter((p) => !attendees.some((a) => a.user_id === p.id));
 
-          <div className="field">
-            <div className="field__label">Participants</div>
-            <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-              {attendees.map((a, i) => (
-                <span key={i} className="pill" style={{ fontSize: 11 }}>
-                  {a.user_id ? <Users size={11} /> : <Mail size={11} />} {a.name}
-                  <button onClick={() => removeAttendee(i)} className="btn btn--icon btn--sm" style={{ marginLeft: 4 }}><X size={10} /></button>
-                </span>
-              ))}
-            </div>
-            <input
-              className="input"
-              placeholder="Type a team member name, email, or external guest name then Enter"
-              value={attendeeInput}
-              onChange={(e) => setAttendeeInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAttendeeFromText(); } }}
-              list="profile-suggest"
-            />
-            <datalist id="profile-suggest">
-              {profiles.map(p => <option key={p.id} value={p.full_name} />)}
-            </datalist>
-            {profiles.length > 0 && (
-              <div className="row" style={{ flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Team:</span>
-                {profiles.filter(p => !attendees.some(a => a.user_id === p.id)).map(p => (
-                  <button key={p.id} type="button" onClick={() => addProfile(p)} className="btn btn--sm" style={{ fontSize: 11 }}>+ {p.full_name}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="field">
-            <div className="field__label">Description</div>
-            <textarea className="input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Agenda, links, prep notes..." />
-          </div>
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
-          <button onClick={onClose} className="btn btn--ghost">Cancel</button>
-          <button
-            onClick={() => setStep('visibility')}
-            className="btn btn--primary"
-            disabled={!title.trim() || !start}>
-            Confirm <ChevronDown size={12} style={{ transform: 'rotate(-90deg)' }} />
-          </button>
-        </div>
+  return (
+    <Modal
+      title="Schedule"
+      description={`With ${contact.company_name}`}
+      onClose={onClose}
+      width={560}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={() => setStep('visibility')} disabled={!title.trim() || !start}>
+            Continue <ArrowRight size={14} />
+          </Button>
+        </>
+      }
+    >
+      <Field label="What is it">
+        <Segmented
+          value={kind}
+          onChange={pickKind}
+          options={[
+            { value: 'call', label: 'Call' },
+            { value: 'meeting', label: 'Meeting' },
+          ]}
+        />
+      </Field>
+
+      <Field label="Title">
+        <TextInput value={title} onChange={(v) => { setTitle(v); setTitleEdited(true); }} />
+      </Field>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Starts">
+          <TextInput type="datetime-local" value={start} onChange={setStart} />
+        </Field>
+        <Field label="Ends">
+          <TextInput type="datetime-local" value={end} onChange={setEnd} />
+        </Field>
       </div>
-    </div>
+
+      <Field
+        label="Whose diary"
+        hint={ownerId !== profile.id
+          ? `Booked by you, owned by ${owner?.full_name ?? 'them'}. It is shared with them automatically. Pushing it to their Outlook needs the Microsoft calendar sync, which is not connected yet.`
+          : undefined}
+      >
+        <Select value={ownerId} onChange={setOwnerId}>
+          <option value={profile.id}>{profile.full_name} (you)</option>
+          {others.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+        </Select>
+      </Field>
+
+      <Field label="Participants">
+        {attendees.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 7 }}>
+            {attendees.map((a, i) => (
+              <span key={i} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 4px 0 9px',
+                borderRadius: 'var(--r-full)', border: '1px solid var(--border-strong)',
+                background: 'var(--surface-sunken)', fontSize: 12, color: 'var(--text)',
+              }}>
+                {a.user_id ? <Users size={11} /> : <Mail size={11} />}
+                {a.name}
+                <button onClick={() => removeAttendee(i)} aria-label={`Remove ${a.name}`} style={{
+                  display: 'flex', border: 'none', background: 'transparent', cursor: 'pointer',
+                  color: 'var(--text-subtle)', padding: 3,
+                }}><X size={11} /></button>
+              </span>
+            ))}
+          </div>
+        )}
+        <TextInput
+          value={attendeeInput}
+          onChange={setAttendeeInput}
+          placeholder="A colleague, an email address, or a guest name, then Enter"
+          list="profile-suggest"
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAttendeeFromText(); } }}
+        />
+        <datalist id="profile-suggest">
+          {profiles.map((p) => <option key={p.id} value={p.full_name} />)}
+        </datalist>
+        {unadded.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 7, alignItems: 'center' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>Add:</span>
+            {unadded.map((p) => (
+              <button key={p.id} type="button" onClick={() => addProfile(p)} style={{
+                height: 24, padding: '0 9px', borderRadius: 'var(--r-full)',
+                border: '1px dashed var(--border-strong)', background: 'transparent',
+                color: 'var(--text-muted)', cursor: 'pointer',
+                fontFamily: 'var(--inter)', fontSize: 12,
+              }}>{p.full_name}</button>
+            ))}
+          </div>
+        )}
+      </Field>
+
+      <Field label="Description">
+        <TextArea value={description} onChange={setDescription} rows={3} placeholder="Agenda, links, prep notes" />
+      </Field>
+    </Modal>
   );
 }
 
-export function VisibilityPicker({ profiles, onCancel, onSave, error }: {
+/* =============================================================
+   Who sees it.
+
+   Its own step rather than another field, because this is the decision
+   with consequences outside the room and the old version buried it in a
+   row of identical buttons. Each option says what it actually does.
+   ============================================================= */
+export function VisibilityPicker({ kind, profiles, saving, onCancel, onSave, error }: {
+  kind?: 'call' | 'meeting';
   profiles: Profile[];
+  saving?: boolean;
   onCancel: () => void;
   onSave: (visibility: 'private' | 'team' | 'specific', visibleTo: string[]) => void;
   error: string | null;
 }) {
   const [choice, setChoice] = useState<'private' | 'team' | 'specific'>('private');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
   function toggle(id: string) {
-    const n = new Set(selected); if (n.has(id)) n.delete(id); else n.add(id); setSelected(n);
+    const n = new Set(selected);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setSelected(n);
   }
+
+  const noun = kind === 'meeting' ? 'meeting' : 'call';
+
   return (
-    <div className="modal-bg">
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0 }}>Who sees this meeting?</h3>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button onClick={() => setChoice('private')} className="btn" style={{ justifyContent: 'flex-start', height: 56, padding: 12, borderColor: choice === 'private' ? 'var(--stc-red)' : undefined }}>
-            <Lock size={14} /> <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: 600 }}>Just my calendar</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>Only you can see this event</div>
-            </div>
-          </button>
-          <button onClick={() => setChoice('specific')} className="btn" style={{ justifyContent: 'flex-start', height: 56, padding: 12, borderColor: choice === 'specific' ? 'var(--stc-red)' : undefined }}>
-            <Users size={14} /> <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: 600 }}>Specific people&apos;s calendars</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pick which teammates can see it</div>
-            </div>
-          </button>
-          <button onClick={() => setChoice('team')} className="btn" style={{ justifyContent: 'flex-start', height: 56, padding: 12, borderColor: choice === 'team' ? 'var(--stc-red)' : undefined }}>
-            <Globe2 size={14} /> <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: 600 }}>Everyone&apos;s calendar</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>All team members will see this event</div>
-            </div>
-          </button>
-
-          {choice === 'specific' && (
-            <div className="card" style={{ marginTop: 8, padding: 10, maxHeight: 220, overflowY: 'auto' }}>
-              <div className="field__label" style={{ marginBottom: 6 }}>Pick teammates</div>
-              {profiles.map(p => (
-                <label key={p.id} className="row" style={{ padding: '6px 4px', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
-                  <span style={{ fontSize: 13 }}>{p.full_name}</span>
-                  <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)' }}>{p.email}</span>
-                </label>
-              ))}
-              {profiles.length === 0 && <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>No other team members.</div>}
-            </div>
-          )}
-
-          {error && <div className="alert alert--error" style={{ marginTop: 8 }}>{error}</div>}
-        </div>
-        <div className="row" style={{ justifyContent: 'space-between', padding: '0 16px 16px', gap: 8 }}>
-          <button onClick={onCancel} className="btn btn--ghost">Back</button>
-          <button
+    <Modal
+      title={`Who sees this ${noun}?`}
+      description="Calendars are shared across the team, so this is worth a moment."
+      onClose={onCancel}
+      width={480}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel}><ArrowLeft size={14} /> Back</Button>
+          <span style={{ flex: 1 }} />
+          <Button
+            variant="primary"
             onClick={() => onSave(choice, choice === 'specific' ? Array.from(selected) : [])}
-            className="btn btn--primary"
-            disabled={choice === 'specific' && selected.size === 0}>
-            <CalendarPlus size={14} /> Schedule
-          </button>
-        </div>
+            disabled={saving || (choice === 'specific' && selected.size === 0)}
+          >
+            <CalendarPlus size={14} /> {saving ? 'Scheduling' : 'Schedule'}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <OptionCard
+          selected={choice === 'private'}
+          onSelect={() => setChoice('private')}
+          icon={<Lock size={15} />}
+          title="Just my calendar"
+          description="Nobody else sees it, including the people invited to it."
+        />
+        <OptionCard
+          selected={choice === 'specific'}
+          onSelect={() => setChoice('specific')}
+          icon={<Users size={15} />}
+          title="Chosen colleagues"
+          description="Pick who it appears for. The diary owner is always included."
+        />
+        <OptionCard
+          selected={choice === 'team'}
+          onSelect={() => setChoice('team')}
+          icon={<Globe2 size={15} />}
+          title="Everyone"
+          description="It shows on the team calendar for all staff."
+        />
       </div>
-    </div>
+
+      {choice === 'specific' && (
+        <div style={{
+          padding: '11px 13px', borderRadius: 'var(--r)',
+          border: '1px solid var(--border)', background: 'var(--surface)',
+          maxHeight: 220, overflowY: 'auto',
+        }}>
+          {profiles.length === 0
+            ? <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>There is nobody else on the system yet.</span>
+            : profiles.map((p) => (
+              <Checkbox
+                key={p.id}
+                checked={selected.has(p.id)}
+                onChange={() => toggle(p.id)}
+                label={p.full_name}
+                hint={p.email}
+              />
+            ))}
+        </div>
+      )}
+
+      {error && <Alert tone="danger">{error}</Alert>}
+    </Modal>
   );
 }

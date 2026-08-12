@@ -16,7 +16,8 @@ import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
 import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker';
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
-import { Figure, Card } from '@/components/kit/primitives';
+import { Figure, Card, Button, Alert, PageHead } from '@/components/kit/primitives';
+import { Modal, Field, TextInput, OptionCard, Checkbox } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
 } from '@/lib/crm/ownership';
@@ -496,78 +497,63 @@ export function CrmWorkspace({
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <div className="page-head__eyebrow">
-            {listIsGlobal ? 'Sales · Global CRM (team-shared)' : `Sales · My CRM list · owned by ${listOwnerName ?? 'nobody'}`}
-          </div>
-          <h1 className="page-head__title">
-            <Users size={26} style={{ color: 'var(--stc-red)' }} />
-            <span>{selectedList?.name ?? 'CRM'}<span style={{ color: 'var(--stc-red)' }}>.</span></span>
-          </h1>
-          <div className="page-head__sub">
+      <div className="kit">
+        <PageHead
+          eyebrow={listIsGlobal
+            ? 'Sales, global CRM'
+            : `Sales, ${listOwnerName === profile.full_name ? 'your list' : `${listOwnerName ?? 'an unowned'} list`}`}
+          title={<>
+            <Users size={25} style={{ color: 'var(--accent)' }} />
+            <span>{selectedList?.name ?? 'CRM'}</span>
+          </>}
+          sub={<>
             {scope.kind === 'all'
               ? `${rows.length} contacts`
-              : `${visibleRows.length} of ${rows.length} contacts · ${scopeLabel}`}
-            {' · '}{listIsGlobal ? 'realtime · visible to everyone' : 'private to owner + shared members'}
-          </div>
-        </div>
+              : `${visibleRows.length} of ${rows.length} contacts, ${scopeLabel}`}
+            {', '}
+            {listIsGlobal ? 'live, visible to everyone' : 'private to the owner and anyone it is shared with'}
+          </>}
+        />
       </div>
 
-      {/* List bar - global pinned, personal on right */}
-      <div className="list-bar">
+      {/* Lists. The global one is pinned first because it is the one
+          everybody shares, and personal lists follow in the order they
+          were made. */}
+      <div className="kit" style={{
+        display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+        borderBottom: '1px solid var(--border)', paddingBottom: 9, marginBottom: 14,
+      }}>
         {globalList && (
-          <button onClick={() => selectList(globalList.id)} className={`list-bar__tab list-bar__tab--global${selectedListId === globalList.id ? ' is-active' : ''}`}>
-            <Globe size={14} /> Global CRM
-          </button>
+          <ListTab
+            active={selectedListId === globalList.id}
+            onClick={() => selectList(globalList.id)}
+            icon={<Globe size={14} />}
+            label="Global CRM"
+          />
         )}
         {(myLists.length > 0 || sharedLists.length > 0) && (
-          <span className="list-bar__divider" />
+          <span style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 3px' }} />
         )}
         {myLists.map((l) => (
-          <button key={l.id} onClick={() => selectList(l.id)} className={`list-bar__tab${selectedListId === l.id ? ' is-active' : ''}`}>
-            <Users size={14} /> {l.name}
-          </button>
+          <ListTab key={l.id} active={selectedListId === l.id} onClick={() => selectList(l.id)}
+            icon={<Users size={14} />} label={l.name} />
         ))}
         {sharedLists.map((l) => (
-          <button key={l.id} onClick={() => selectList(l.id)} className={`list-bar__tab${selectedListId === l.id ? ' is-active' : ''}`}>
-            <Share2 size={14} /> {l.name}
-            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 4 }}>SHARED</span>
-          </button>
+          <ListTab key={l.id} active={selectedListId === l.id} onClick={() => selectList(l.id)}
+            icon={<Share2 size={14} />} label={l.name} note="Shared" />
         ))}
-        <button onClick={() => setShowNewList(true)} className="list-bar__tab list-bar__tab--new">
-          <Plus size={14} /> New list
-        </button>
+        <ListTab onClick={() => setShowNewList(true)} icon={<Plus size={14} />} label="New list" dashed />
         {selectedList && !selectedList.is_global && selectedList.owner_id === profile.id && (
           <>
-            <div className="toolbar__spacer" />
-            <button onClick={() => setShowShare(selectedList)} className="btn btn--sm"><UserPlus size={12} /> Share</button>
-            <button onClick={() => deleteList(selectedList.id)} className="btn btn--sm btn--icon"><Trash2 size={12} /></button>
+            <span style={{ flex: 1 }} />
+            <Button size="sm" variant="secondary" onClick={() => setShowShare(selectedList)}>
+              <UserPlus size={12} /> Share
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => deleteList(selectedList.id)} aria-label="Delete this list">
+              <Trash2 size={12} />
+            </Button>
           </>
         )}
-      </div>
-
-      {/* Pipeline at a glance. One strip, because five separate tiles of
-          the same weight read as noise and told you nothing about shape. */}
-      <div className="kit" style={{ marginBottom: 14 }}>
-        <Card padded={false}>
-          <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-            {[
-              { label: 'Total', value: String(counts.all), sub: 'On this list' },
-              { label: 'Leads', value: String(counts.lead), sub: 'Not yet approached', tone: 'info' as const },
-              { label: 'Contacted', value: String(counts.contacted), sub: 'In conversation', tone: 'warning' as const },
-              { label: 'Quoted', value: String(counts.quoted), sub: 'Awaiting a decision', tone: 'accent' as const },
-              { label: 'Won', value: String(counts.won), sub: `${counts.lost} lost`, tone: 'success' as const },
-            ].map((f, i) => (
-              <div key={f.label} style={{
-                flex: '1 1 150px', minWidth: 0, padding: '13px 17px',
-                borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
-              }}>
-                <Figure {...f} />
-              </div>
-            ))}
-          </div>
-        </Card>
       </div>
 
       {/* Whose accounts. The first thing a rep wants and the last thing a
@@ -597,51 +583,89 @@ export function CrmWorkspace({
         )}
       </div>
 
-      {/* Toolbar */}
-      <div className="toolbar" style={{ marginTop: 12 }}>
+      {/* Toolbar. Add contact is the primary action and sits last, where
+          the eye finishes. The selection bar takes over the middle only
+          when there is a selection to act on. */}
+      <div className="kit" style={{
+        marginTop: 12, display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+      }}>
         {canEdit && (
-          <div className="row">
-            <input type="email" placeholder="email@company.com to enrich"
-              value={enrichEmail} onChange={(e) => setEnrichEmail(e.target.value)} className="input" style={{ width: 280 }} />
-            <button onClick={handleEnrichInput} disabled={enriching || !enrichEmail} className="btn btn--primary">
-              {enriching ? <Loader size={14} className="spin" /> : <Plus size={14} />} Enrich + add
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <TextInput
+              type="email"
+              value={enrichEmail}
+              onChange={setEnrichEmail}
+              placeholder="email@company.com to look up"
+              style={{ width: 260 }}
+            />
+            <Button variant="secondary" onClick={handleEnrichInput} disabled={enriching || !enrichEmail}>
+              {enriching ? <Loader size={14} className="spin" /> : <Plus size={14} />} Enrich and add
+            </Button>
           </div>
         )}
-        <div className="toolbar__spacer" />
+
+        <span style={{ flex: 1 }} />
+
         {selectedCount > 0 && (
-          <div className="row" style={{ background: 'var(--stc-danger-bg)', padding: '4px 10px', borderRadius: 'var(--r-2)', border: '1px solid rgba(207,36,23,0.3)' }}>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--stc-red-300)' }}>{selectedCount} SELECTED</span>
-            <button onClick={bulkEnrich} className="btn btn--sm"><Mail size={12} /> Enrich</button>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap',
+            padding: '4px 5px 4px 11px', borderRadius: 'var(--r)',
+            border: '1px solid var(--border-strong)', background: 'var(--surface-sunken)',
+          }}>
+            <span style={{
+              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+              letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)',
+            }}>{selectedCount} selected</span>
+            <Button size="sm" variant="ghost" onClick={bulkEnrich}><Mail size={12} /> Enrich</Button>
             {canEdit && (
-              <button onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [] })} className="btn btn--sm">
-                <UserPlus size={12} /> Assign…
-              </button>
+              <Button size="sm" variant="ghost"
+                onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [] })}>
+                <UserPlus size={12} /> Assign
+              </Button>
             )}
-            <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'move' })} className="btn btn--sm"><MoreHorizontal size={12} /> Move…</button>
+            <Button size="sm" variant="ghost"
+              onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'move' })}>
+              <MoreHorizontal size={12} /> Move
+            </Button>
             {selectedCount <= 10 && (
-              <button onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'duplicate' })} className="btn btn--sm"><Plus size={12} /> Duplicate…</button>
+              <Button size="sm" variant="ghost"
+                onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: gridRef.current?.api.getSelectedRows().map((r) => r.id) ?? [], mode: 'duplicate' })}>
+                <Plus size={12} /> Duplicate
+              </Button>
             )}
-            <button onClick={bulkDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
+            <Button size="sm" variant="danger" onClick={bulkDelete}><Trash2 size={12} /> Delete</Button>
           </div>
         )}
+
         {canEdit && (
-          <label className="btn">
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            height: 32, padding: '0 13px', borderRadius: 'var(--r)', cursor: 'pointer',
+            border: '1px solid var(--border-strong)', background: 'var(--surface)',
+            color: 'var(--text)', fontFamily: 'var(--inter)', fontSize: 13, fontWeight: 500,
+            letterSpacing: '-0.01em',
+          }}>
             {importing ? <Loader size={14} className="spin" /> : <Upload size={14} />} Import CSV
             <input type="file" accept=".csv" hidden onChange={(e) => {
               const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '';
             }} />
           </label>
         )}
-        <button onClick={handleExport} className="btn"><Download size={14} /> Export{selectedCount > 0 ? ` (${selectedCount})` : ''}</button>
-        {canEdit && <button onClick={() => handleAddRow()} className="btn btn--primary"><Plus size={14} /> Add contact</button>}
+        <Button variant="secondary" onClick={handleExport}>
+          <Download size={14} /> Export{selectedCount > 0 ? ` (${selectedCount})` : ''}
+        </Button>
+        {canEdit && (
+          <Button variant="accent" onClick={() => handleAddRow()}>
+            <Plus size={14} /> Add contact
+          </Button>
+        )}
       </div>
 
-      <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', marginBottom: 6, marginTop: 4 }}>
-        TIP · click any row to open details · right-click any cell for edit, enrich, move, delete
+      <div className="kit" style={{ fontSize: 11.5, color: 'var(--text-subtle)', margin: '8px 0 10px' }}>
+        Click a row to open it. Right click any cell to edit, enrich, move or delete it.
       </div>
 
-      {message && <div className="alert alert--info" style={{ marginBottom: 12 }}>{message}</div>}
+      {message && <div className="kit" style={{ marginBottom: 12 }}><Alert tone="info">{message}</Alert></div>}
 
       {/* An empty grid under a filter looks like a broken list. Say which
           filter did it and offer the way back in one click. */}
@@ -773,9 +797,11 @@ export function CrmWorkspace({
 
             {emptyAreaMenu && (
         <EdgeAwareCtxMenu x={emptyAreaMenu.x} y={emptyAreaMenu.y}>
-          <div className="ctx-menu__head">{selectedList?.name ?? 'CRM'}</div>
-          <button onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} disabled={!canEdit}><Plus size={12} /> Add contact</button>
-          <button onClick={() => { setEmptyAreaMenu(null); document.querySelector<HTMLInputElement>('input[type=file][accept=".csv"]')?.click(); }} disabled={!canEdit}><Upload size={12} /> Import CSV…</button>
+          <MenuHead>{selectedList?.name ?? 'CRM'}</MenuHead>
+          <MenuItem icon={<Plus size={13} />} label="Add contact" disabled={!canEdit}
+            onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} />
+          <MenuItem icon={<Upload size={13} />} label="Import CSV" disabled={!canEdit}
+            onClick={() => { setEmptyAreaMenu(null); document.querySelector<HTMLInputElement>('input[type=file][accept=".csv"]')?.click(); }} />
         </EdgeAwareCtxMenu>
       )}
       {nextActionFor && (
@@ -820,16 +846,6 @@ export function CrmWorkspace({
 
 // ============ subcomponents ============
 
-function Stat({ label, value, accent }: { label: string; value: number | string; accent?: 'red'|'success'|'warning'|'info'|'lusha' }) {
-  return (
-    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
-      <div className="stat__bar" />
-      <div className="stat__label">{label}</div>
-      <div className="stat__value tnum">{value}</div>
-    </div>
-  );
-}
-
 /* =============================================================
    Whose accounts.
 
@@ -838,6 +854,36 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
    quietly belonging to nobody. Looking at a named colleague's portfolio
    is behind the picker: it is a manager's action, not a daily one.
    ============================================================= */
+/** One list. Active carries the accent underline; the rest are quiet. */
+function ListTab({ active, onClick, icon, label, note, dashed }: {
+  active?: boolean; onClick: () => void; icon: React.ReactNode;
+  label: string; note?: string; dashed?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px',
+        borderRadius: 'var(--r)', cursor: 'pointer',
+        border: dashed ? '1px dashed var(--border-strong)' : `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        background: active ? 'var(--accent)' : 'transparent',
+        color: active ? '#fff' : 'var(--text-muted)',
+        fontFamily: 'var(--inter)', fontSize: 13, fontWeight: active ? 600 : 500,
+        letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+      }}
+    >
+      {icon}
+      {label}
+      {note && (
+        <span style={{
+          fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
+          color: active ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)',
+        }}>{note}</span>
+      )}
+    </button>
+  );
+}
+
 function ScopeSwitch({ scope, onChange, profiles, me, unassignedCount }: {
   scope: Scope;
   onChange: (s: Scope) => void;
@@ -908,59 +954,46 @@ function AssignMenu({ x, y, count, owners, me, onPick, onClose }: {
 }) {
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-      <div className="kit" style={{
-        position: 'fixed', left: Math.min(x, window.innerWidth - 250), top: y, zIndex: 61,
-        width: 230, maxHeight: 340, overflowY: 'auto',
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 5,
-      }}>
-        <div style={{
-          padding: '7px 9px 8px', fontSize: 11, letterSpacing: '0.12em',
-          textTransform: 'uppercase', color: 'var(--text-subtle)',
-          fontFamily: 'var(--panton)', fontWeight: 700,
-        }}>
-          Assign {count} {count === 1 ? 'account' : 'accounts'}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 69 }} />
+      <EdgeAwareCtxMenu x={x} y={y} width={236}>
+        <MenuHead>Assign {count} {count === 1 ? 'account' : 'accounts'}</MenuHead>
+        <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+          {me && <MenuItem label={`${me} (me)`} onClick={() => onPick(me)} />}
+          {owners.filter((o) => o !== me).map((o) => (
+            <MenuItem key={o} label={o} onClick={() => onPick(o)} />
+          ))}
         </div>
-        {me && <MenuRow label={`${me} (me)`} onClick={() => onPick(me)} />}
-        {owners.filter((o) => o !== me).map((o) => <MenuRow key={o} label={o} onClick={() => onPick(o)} />)}
-        <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />
-        <MenuRow label="Clear the owner" onClick={() => onPick(null)} muted />
-      </div>
+        <MenuRule />
+        <MenuItem label="Clear the owner" onClick={() => onPick(null)} />
+      </EdgeAwareCtxMenu>
     </>
-  );
-}
-
-function MenuRow({ label, onClick, muted }: { label: string; onClick: () => void; muted?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'block', width: '100%', textAlign: 'left', border: 'none',
-        background: 'transparent', cursor: 'pointer', padding: '7px 9px',
-        borderRadius: 'var(--r-sm)', fontFamily: 'var(--inter)', fontSize: 13,
-        color: muted ? 'var(--text-subtle)' : 'var(--text)',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-sunken)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >{label}</button>
   );
 }
 
 function NewListModal({ onCreate, onClose }: { onCreate: (name: string) => void; onClose: () => void }) {
   const [name, setName] = useState('');
   return (
-    <Modal onClose={onClose} title="New CRM list">
-      <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) onCreate(name.trim()); }}>
-        <div className="field">
-          <div className="field__label">List name</div>
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. M62 corridor, Hyde walk-ins" />
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
-          <button type="button" onClick={onClose} className="btn btn--ghost">Cancel</button>
-          <button type="submit" className="btn btn--primary"><Plus size={14} /> Create</button>
-        </div>
-      </form>
+    <Modal
+      onClose={onClose}
+      title="New CRM list"
+      description="A working list of your own. Share it with colleagues afterwards if it turns out to be useful to them."
+      width={440}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={() => { if (name.trim()) onCreate(name.trim()); }} disabled={!name.trim()}>
+            <Plus size={14} /> Create list
+          </Button>
+        </>
+      }
+    >
+      <Field label="List name">
+        <TextInput
+          value={name}
+          onChange={setName}
+          placeholder="M62 corridor, Hyde walk-ins"
+        />
+      </Field>
     </Modal>
   );
 }
@@ -969,22 +1002,38 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
   list: CrmList; profiles: Profile[]; members: Member[];
   onShare: (l: string, u: string, e: boolean) => void; onUnshare: (l: string, u: string) => void; onClose: () => void;
 }) {
+  const shared = profiles.filter((p) => members.some((m) => m.user_id === p.id));
   return (
-    <Modal onClose={onClose} title={`Share "${list.name}"`}>
-      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-        {profiles.map((p) => {
-          const m = members.find((x) => x.user_id === p.id);
+    <Modal
+      onClose={onClose}
+      title={`Share ${list.name}`}
+      description={shared.length
+        ? `${shared.length} ${shared.length === 1 ? 'colleague has' : 'colleagues have'} access. They can edit the contacts on it.`
+        : 'Nobody else can see this list yet.'}
+      width={470}
+      footer={<Button variant="secondary" onClick={onClose}>Done</Button>}
+    >
+      <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {profiles.map((p, i) => {
+          const isShared = members.some((x) => x.user_id === p.id);
           return (
-            <div key={p.id} className="row-item">
-              <div>
-                <div className="row-item__title">{p.full_name}</div>
-                <div className="row-item__sub mono">{p.email}</div>
+            <div key={p.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, minHeight: 44, padding: '7px 2px',
+              borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: 'var(--text)', letterSpacing: '-0.01em' }}>{p.full_name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.email}</div>
               </div>
-              {m ? <button onClick={() => onUnshare(list.id, p.id)} className="btn btn--sm">Remove</button>
-                 : <button onClick={() => onShare(list.id, p.id, true)} className="btn btn--sm btn--primary"><UserPlus size={12} /> Share</button>}
+              {isShared
+                ? <Button size="sm" variant="ghost" onClick={() => onUnshare(list.id, p.id)}>Remove</Button>
+                : <Button size="sm" variant="secondary" onClick={() => onShare(list.id, p.id, true)}><UserPlus size={12} /> Share</Button>}
             </div>
           );
         })}
+        {profiles.length === 0 && (
+          <span style={{ fontSize: 13, color: 'var(--text-subtle)' }}>There is nobody else on the system yet.</span>
+        )}
       </div>
     </Modal>
   );
@@ -1018,67 +1067,139 @@ function useEdgeAwarePosition(x: number, y: number) {
 }
 
 
-// Inline wrapper for ctx-menus that auto-flips position to stay in viewport.
-function EdgeAwareCtxMenu({ x, y, className, children }: { x: number; y: number; className?: string; children: React.ReactNode }) {
+/* =============================================================
+   Floating menus.
+
+   One shell for all of them, so a right click on a row and a right click
+   on empty space produce the same object rather than two near misses.
+   The kit's own rule applies: a 1px border and a real elevation, because
+   this is a thing that genuinely floats.
+   ============================================================= */
+function EdgeAwareCtxMenu({ x, y, width = 220, children }: {
+  x: number; y: number; width?: number; children: React.ReactNode;
+}) {
   const { ref, pos } = useEdgeAwarePosition(x, y);
   return (
-    <div ref={ref} className={className ?? 'ctx-menu'} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={ref}
+      className="kit"
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', left: pos.left, top: pos.top, zIndex: 70, width,
+        background: 'var(--surface-raised)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 5,
+      }}
+    >
       {children}
     </div>
   );
 }
 
+function MenuHead({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      padding: '7px 9px 8px', fontFamily: 'var(--panton)', fontWeight: 700,
+      fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase',
+      color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    }}>{children}</div>
+  );
+}
+
+function MenuItem({ icon, label, onClick, disabled, danger, title }: {
+  icon?: React.ReactNode; label: React.ReactNode; onClick: () => void;
+  disabled?: boolean; danger?: boolean; title?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
+        border: 'none', background: 'transparent', padding: '7px 9px',
+        borderRadius: 'var(--r-sm)', fontFamily: 'var(--inter)', fontSize: 13,
+        letterSpacing: '-0.01em',
+        color: disabled ? 'var(--text-subtle)' : danger ? 'var(--danger)' : 'var(--text)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--surface-sunken)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      {icon && <span style={{ display: 'flex', flexShrink: 0, color: 'currentColor', opacity: 0.75 }}>{icon}</span>}
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  );
+}
+
+function MenuRule() {
+  return <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />;
+}
+
 function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
-  const { ref, pos } = useEdgeAwarePosition(x, y);
-  // Lusha returns these contact attributes:
-  const ENRICHABLE_FIELDS = ['company_name','contact_name','email','phone','location','fleet_size'];
+  // What Lusha can actually return, so the option is not offered where it cannot work.
+  const ENRICHABLE_FIELDS = ['company_name', 'contact_name', 'email', 'phone', 'location', 'fleet_size'];
   const hasLookupHandle = !!row.email || !!row.company_name;
   const canEnrich = hasLookupHandle && ENRICHABLE_FIELDS.includes(field);
   const enrichTitle = !hasLookupHandle
-    ? 'Add an email or company name to the row first - Lusha needs at least one to look up'
+    ? 'Add an email or a company name to the row first. Lusha needs at least one to look anything up'
     : !ENRICHABLE_FIELDS.includes(field)
       ? 'Lusha does not provide this field'
       : row.email
         ? 'Look this contact up on Lusha by email'
-        : 'Lusha will find a contact at ' + row.company_name + ' (Sales Director, MD, Fleet Manager...)';
+        : `Lusha will find a contact at ${row.company_name}, working down from Sales Director to Fleet Manager`;
+
   return (
-    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">{row.company_name}{row.location && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.location}</span>}</div>
-      <button onClick={onView}><Edit2 size={12} /> Open details</button>
-      <button onClick={onEdit} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
-      <button onClick={onEnrich} disabled={!canEnrich} title={enrichTitle}><Mail size={12} /> Enrich from Lusha…</button>
-      <button onClick={onMove}><MoreHorizontal size={12} /> Move to list…</button>
-      <hr />
-      <button onClick={onDelete} disabled={!canEdit} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
-    </div>
+    <EdgeAwareCtxMenu x={x} y={y} width={232}>
+      <MenuHead>{row.company_name}{row.location ? `, ${row.location}` : ''}</MenuHead>
+      <MenuItem icon={<Edit2 size={13} />} label="Open details" onClick={onView} />
+      <MenuItem icon={<Edit2 size={13} />} label="Edit this cell" onClick={onEdit} disabled={!canEdit} />
+      <MenuItem icon={<Mail size={13} />} label="Enrich from Lusha" onClick={onEnrich} disabled={!canEnrich} title={enrichTitle} />
+      <MenuItem icon={<MoreHorizontal size={13} />} label="Move to list" onClick={onMove} />
+      <MenuRule />
+      <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} disabled={!canEdit} danger />
+    </EdgeAwareCtxMenu>
   );
 }
 
-function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: { x: number; y: number; lists: CrmList[]; onPick: (id: string) => void; onClose: () => void; mode?: 'move' | 'duplicate' }) {
-  const { ref, pos } = useEdgeAwarePosition(x, y);
+function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: {
+  x: number; y: number; lists: CrmList[]; onPick: (id: string) => void; onClose: () => void; mode?: 'move' | 'duplicate';
+}) {
   return (
-    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">{mode === 'duplicate' ? 'Duplicate to list' : 'Move to list'}</div>
+    <EdgeAwareCtxMenu x={x} y={y} width={232}>
+      <MenuHead>{mode === 'duplicate' ? 'Duplicate to list' : 'Move to list'}</MenuHead>
       {lists.map((l) => (
-        <button key={l.id} onClick={() => onPick(l.id)}>
-          {l.is_global ? <Globe size={12} /> : <Users size={12} />} {l.name}
-        </button>
+        <MenuItem
+          key={l.id}
+          icon={l.is_global ? <Globe size={13} /> : <Users size={13} />}
+          label={l.name}
+          onClick={() => onPick(l.id)}
+        />
       ))}
-      {lists.length === 0 && <div className="row-item__sub" style={{ padding: 8 }}>No other lists.</div>}
-      <hr />
-      <button onClick={onClose}>Cancel</button>
-    </div>
+      {lists.length === 0 && (
+        <div style={{ padding: '7px 9px', fontSize: 12.5, color: 'var(--text-subtle)' }}>
+          There are no other lists to move it to.
+        </div>
+      )}
+      <MenuRule />
+      <MenuItem label="Cancel" onClick={onClose} />
+    </EdgeAwareCtxMenu>
   );
 }
 
 function ListPickerModal({ lists, onPick, onClose, title }: { lists: CrmList[]; onPick: (id: string) => void; onClose: () => void; title: string }) {
   return (
-    <Modal onClose={onClose} title={title}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <Modal onClose={onClose} title={title} width={440}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {lists.map((l) => (
-          <button key={l.id} onClick={() => onPick(l.id)} className="btn" style={{ justifyContent: 'flex-start', height: 40 }}>
-            {l.is_global ? <Globe size={14} /> : <Users size={14} />} {l.name}
-          </button>
+          <OptionCard
+            key={l.id}
+            selected={false}
+            onSelect={() => onPick(l.id)}
+            icon={l.is_global ? <Globe size={15} /> : <Users size={15} />}
+            title={l.name}
+            description={l.is_global ? 'Shared with everyone' : 'A personal list'}
+          />
         ))}
       </div>
     </Modal>
@@ -1142,152 +1263,179 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
   const willOverwrite = ENRICHABLE_FIELD_CHOICES.filter((f) => checked.has(f.key) && (row as any)[f.key]);
   const canSpend = checkState === 'found' && checked.size > 0 && !busy;
 
-  return (
-    <Modal onClose={onCancel} title="Enrich from Lusha">
-      <p style={{ color: 'var(--fg-2)', fontSize: 13.5, margin: 0 }}>
-        Looking up via Lusha using <strong style={{ color: 'var(--fg-1)' }}>{lookupHandle}</strong>.
-      </p>
-
-      {/* Pre-flight banner */}
-      {checkState === 'loading' && (
-        <div className="card" style={{ marginTop: 12, padding: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Loader size={14} className="spin" />
-          <span style={{ fontSize: 13, color: 'var(--fg-2)' }}>Checking Lusha&hellip; (free, no credits spent)</span>
+  const stateBanner = () => {
+    if (checkState === 'loading') {
+      return (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px',
+          borderRadius: 'var(--r)', border: '1px solid var(--border)', background: 'var(--surface)',
+        }}>
+          <Loader size={14} className="spin" style={{ color: 'var(--text-subtle)' }} />
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            Checking Lusha. This part is free, no credits are spent.
+          </span>
         </div>
-      )}
-      {checkState === 'found' && (
-        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-success, #2da44e)' }}>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
-            <strong style={{ color: 'var(--stc-success, #2da44e)' }}>✓ Found on Lusha</strong>
-            {checkData?.lushaName && <> &mdash; indexed as <strong>{checkData.lushaName}</strong></>}
+      );
+    }
+    if (checkState === 'found') {
+      return (
+        <Alert tone="success">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span>
+              <strong>Found on Lusha</strong>
+              {checkData?.lushaName ? <>, indexed as <strong>{checkData.lushaName}</strong></> : null}
+            </span>
             {checkData?.matchedRole && (
-              <span style={{ fontSize: 12, color: 'var(--fg-2)', display: 'block', marginTop: 4 }}>
-                Found contact at: <strong style={{ color: 'var(--fg-1)' }}>{checkData.matchedRole}</strong>
+              <span style={{ color: 'var(--text-muted)' }}>
+                Contact found: <strong style={{ color: 'var(--text)' }}>{checkData.matchedRole}</strong>
               </span>
             )}
             {!checkData?.matchedRole && checkData?.contactCount === 0 && (
-              <span style={{ fontSize: 12, color: 'var(--stc-warning, #d4a017)', display: 'block', marginTop: 4 }}>
-                No contact found in our role cascade, so only company-level fields will populate.
+              <span style={{ color: 'var(--text-muted)' }}>
+                No contact found in our role cascade, so only company level fields will populate.
               </span>
             )}
             {checkData?.matchedVariant && checkData.matchedVariant !== row.company_name && (
-              <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', display: 'block', marginTop: 4 }}>
-                matched on &ldquo;{checkData.matchedVariant}&rdquo;
+              <span style={{ color: 'var(--text-subtle)', fontSize: 11.5 }}>
+                Matched on &ldquo;{checkData.matchedVariant}&rdquo;
               </span>
             )}
           </div>
-        </div>
-      )}
-      {checkState === 'requires_website' && (
-        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-red)' }}>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
-            <strong style={{ color: 'var(--stc-red)' }}>Website URL required</strong>
-            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
-            <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>
-              Open this contact&apos;s full view and add a Website link (any URL form works:{' '}
-              <span style={{ color: 'var(--fg-2)' }}>customer.com</span>,{' '}
-              <span style={{ color: 'var(--fg-2)' }}>www.customer.com</span>,{' '}
-              <span style={{ color: 'var(--fg-2)' }}>https://customer.com/</span>).
-            </div>
+        </Alert>
+      );
+    }
+    if (checkState === 'requires_website') {
+      return (
+        <Alert tone="danger">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <strong>A website address is needed</strong>
+            <span>{checkData?.message}</span>
+            <span style={{ color: 'var(--text-subtle)', fontSize: 11.5 }}>
+              Open this contact and add a Website link. Any form works: customer.com,
+              www.customer.com, https://customer.com/
+            </span>
           </div>
+        </Alert>
+      );
+    }
+    if (checkState === 'not_found') {
+      return (
+        <Alert tone="warning">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <strong>Not on Lusha</strong>
+            <span>{checkData?.message}</span>
+            <span style={{ color: 'var(--text-subtle)', fontSize: 11.5 }}>
+              Nothing has been charged. Close this, or correct the company name and try again.
+            </span>
+          </div>
+        </Alert>
+      );
+    }
+    return (
+      <Alert tone="danger">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <strong>The Lusha check failed</strong>
+          <span>{checkData?.message}</span>
         </div>
-      )}
+      </Alert>
+    );
+  };
 
-      {checkState === 'not_found' && (
-        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-warning, #d4a017)' }}>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
-            <strong style={{ color: 'var(--stc-warning, #d4a017)' }}>Not on Lusha</strong>
-            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
-            <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>0 credits will be charged. Close this dialog or edit the company name.</div>
-          </div>
-        </div>
-      )}
-      {checkState === 'error' && (
-        <div className="card" style={{ marginTop: 12, padding: 10, borderColor: 'var(--stc-red)' }}>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
-            <strong style={{ color: 'var(--stc-red)' }}>Lusha pre-check failed</strong>
-            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 4 }}>{checkData?.message}</div>
-          </div>
-        </div>
-      )}
+  return (
+    <Modal
+      onClose={onCancel}
+      title="Enrich from Lusha"
+      description={`Looking up ${lookupHandle}`}
+      width={520}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          {checkState === 'found' && (
+            <Button variant="accent" onClick={() => onConfirm(Array.from(checked))} disabled={!canSpend}>
+              {busy ? <Loader size={14} className="spin" /> : <Send size={14} />}
+              Spend 1 credit, update {checked.size} {checked.size === 1 ? 'field' : 'fields'}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {stateBanner()}
 
-      {/* Field picker - disabled until we confirm Lusha has a match;
-          each row also disabled if Lusha won't populate it. */}
-      <div style={{ marginTop: 12, opacity: checkState === 'found' ? 1 : 0.4, pointerEvents: checkState === 'found' ? 'auto' : 'none' }}>
-        <div className="field__label" style={{ marginBottom: 8 }}>Which fields to update?</div>
-        <div className="col" style={{ gap: 4 }}>
-          {ENRICHABLE_FIELD_CHOICES.map((f) => {
-            const current = (row as any)[f.key];
-            const has = current !== null && current !== undefined && current !== '';
-            const available = checkData?.availableFields ? (checkData.availableFields as any)[f.key] !== false : true;
-            const disabled = !available && checkState === 'found';
-            // Auto-uncheck unavailable fields the moment we know they're unavailable
-            if (disabled && checked.has(f.key)) {
-              setTimeout(() => { const n = new Set(checked); n.delete(f.key); setChecked(n); }, 0);
-            }
-            return (
-              <label key={f.key} className="row" style={{
-                gap: 8, padding: '6px 8px',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                borderRadius: 'var(--r-2)',
-                opacity: disabled ? 0.45 : 1,
-                background: checked.has(f.key) && !disabled ? 'rgba(207,36,23,0.06)' : 'transparent',
-              }}>
-                <input type="checkbox" checked={checked.has(f.key) && !disabled} disabled={disabled} onChange={() => !disabled && toggle(f.key)} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, color: 'var(--fg-1)' }}>
-                    {f.label}
-                    {disabled && <span className="mono" style={{ fontSize: 10, color: 'var(--stc-warning, #d4a017)', marginLeft: 6 }}>not available on Lusha for this row</span>}
-                    {!disabled && has && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 6 }}>(will overwrite: {String(current).slice(0,40)})</span>}
-                  </div>
-                  <div className="row-item__sub">{f.help}</div>
+      {/* The picker stays inert until Lusha confirms a match, because
+          choosing fields for a company it cannot find spends nothing and
+          teaches the wrong thing about what the button does. */}
+      <div style={{
+        opacity: checkState === 'found' ? 1 : 0.4,
+        pointerEvents: checkState === 'found' ? 'auto' : 'none',
+      }}>
+        <Field label="Which fields to update">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {ENRICHABLE_FIELD_CHOICES.map((f) => {
+              const current = (row as any)[f.key];
+              const has = current !== null && current !== undefined && current !== '';
+              const available = checkData?.availableFields ? (checkData.availableFields as any)[f.key] !== false : true;
+              const disabled = !available && checkState === 'found';
+              // Unavailable fields uncheck themselves the moment we know.
+              if (disabled && checked.has(f.key)) {
+                setTimeout(() => { const n = new Set(checked); n.delete(f.key); setChecked(n); }, 0);
+              }
+              const on = checked.has(f.key) && !disabled;
+              return (
+                <div key={f.key} style={{
+                  padding: '4px 8px', borderRadius: 'var(--r)',
+                  opacity: disabled ? 0.45 : 1,
+                  background: on ? 'var(--surface-sunken)' : 'transparent',
+                }}>
+                  <Checkbox
+                    checked={on}
+                    onChange={() => !disabled && toggle(f.key)}
+                    label={
+                      <span>
+                        {f.label}
+                        {disabled && (
+                          <span style={{ color: 'var(--warning)', fontSize: 11.5, marginLeft: 7 }}>
+                            not available for this row
+                          </span>
+                        )}
+                        {!disabled && has && (
+                          <span style={{ color: 'var(--text-subtle)', fontSize: 11.5, marginLeft: 7 }}>
+                            replaces {String(current).slice(0, 40)}
+                          </span>
+                        )}
+                      </span>
+                    }
+                    hint={f.help}
+                  />
                 </div>
-              </label>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </Field>
       </div>
 
       {checkState === 'found' && (
-        <div className="card" style={{ marginTop: 12, padding: 10 }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>COST</span>
-            <span className="tnum" style={{ fontWeight: 600 }}>1 credit</span>
+        <div style={{
+          padding: '11px 13px', borderRadius: 'var(--r)',
+          border: '1px solid var(--border)', background: 'var(--surface)',
+          display: 'flex', flexDirection: 'column', gap: 5,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Cost</span>
+            <span style={{ fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>1 credit</span>
           </div>
-          <div className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>REMAINING AFTER</span>
-            <span className="tnum">{balance == null ? '?' : Math.max(0, balance - 1)} (of {remaining})</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Left afterwards</span>
+            <span style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+              {balance == null ? 'unknown' : `${Math.max(0, balance - 1)} of ${remaining}`}
+            </span>
           </div>
           {willOverwrite.length > 0 && (
-            <div className="mono" style={{ fontSize: 10.5, color: 'var(--stc-warning)', marginTop: 6 }}>
-              {`// `}WILL OVERWRITE {willOverwrite.length} EXISTING VALUE{willOverwrite.length === 1 ? '' : 'S'}
+            <div style={{ fontSize: 11.5, color: 'var(--warning)', borderTop: '1px solid var(--border)', paddingTop: 7 }}>
+              This replaces {willOverwrite.length} existing {willOverwrite.length === 1 ? 'value' : 'values'}.
             </div>
           )}
         </div>
       )}
-
-      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
-        <button type="button" onClick={onCancel} className="btn btn--ghost">Cancel</button>
-        {checkState === 'found' && (
-          <button type="button" onClick={() => onConfirm(Array.from(checked))} className="btn btn--primary" disabled={!canSpend}>
-            {busy ? <Loader size={14} className="spin" /> : <Send size={14} />} Spend 1 credit · update {checked.size} field{checked.size === 1 ? '' : 's'}
-          </button>
-        )}
-      </div>
     </Modal>
-  );
-}
-
-function Modal({ children, onClose, title }: { children: React.ReactNode; onClose: () => void; title: string }) {
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0 }}>{title}</h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16 }}>{children}</div>
-      </div>
-    </div>
   );
 }
