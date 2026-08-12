@@ -17,6 +17,34 @@ export const maxDuration = 60;
 
 const DEMO = 'DEMO';
 const DAY = 86_400_000;
+
+/**
+ * Insert rows that may reference columns the database does not have yet.
+ *
+ * The dashboard migration adds last_activity_at, but nothing forces it to
+ * have been run, and the seeder must work either way. PostgREST reports an
+ * unknown column by name, so strip whichever one it names and try again.
+ */
+async function insertTolerant(
+  supabase: any, table: string, rows: any[], select = 'id',
+): Promise<{ data: any[] | null; error: any; dropped: string[] }> {
+  let payload = rows;
+  const dropped: string[] = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await supabase.from(table).insert(payload).select(select);
+    if (!error) return { data, error: null, dropped };
+
+    // PGRST204: "Could not find the 'x' column of 'y' in the schema cache"
+    // 42703:    "column \"x\" of relation \"y\" does not exist"
+    const m = String(error.message ?? '').match(/'([a-z_]+)' column|column "([a-z_]+)"/i);
+    const col = m?.[1] ?? m?.[2];
+    if (!col || !payload.some((r) => col in r)) return { data: null, error, dropped };
+
+    dropped.push(col);
+    payload = payload.map((r) => { const { [col]: _drop, ...rest } = r; return rest; });
+  }
+  return { data: null, error: { message: 'too many unknown columns' }, dropped };
+}
 const iso = (d: Date) => d.toISOString();
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const ago = (n: number) => new Date(Date.now() - n * DAY);
@@ -165,11 +193,12 @@ export async function POST(req: NextRequest) {
     })),
   ];
 
-  const { data: deals, error: dealErr } = await supabase.from('crm_contacts').insert(dealRows).select('id, company_name');
-  if (dealErr) return NextResponse.json({ error: `deals: ${dealErr.message}` }, { status: 500 });
+  const dealsRes = await insertTolerant(supabase, 'crm_contacts', dealRows, 'id, company_name');
+  if (dealsRes.error) return NextResponse.json({ error: `deals: ${dealsRes.error.message}` }, { status: 500 });
+  const deals = dealsRes.data;
   created.deals = deals?.length ?? 0;
 
-  const { data: stock, error: stockErr } = await supabase.from('stock_trailers').insert([
+  const stockRes = await insertTolerant(supabase, 'stock_trailers', [
     ...SOLD_STOCK.map((s) => ({
       stc_no: s.stc, make: s.make, model: s.model, status: 'sold',
       category: 'Curtainsider', customer: s.customer, sales_rep: initials,
@@ -182,9 +211,9 @@ export async function POST(req: NextRequest) {
       category: s.category, year: 2024, location: 'Hyde', new_or_used: 'New',
       nbv: 28_000, retail_price: 36_500,
     })),
-  ]).select('id');
-  if (stockErr) return NextResponse.json({ error: `stock: ${stockErr.message}` }, { status: 500 });
-  created.stock = stock?.length ?? 0;
+  ]);
+  if (stockRes.error) return NextResponse.json({ error: `stock: ${stockRes.error.message}` }, { status: 500 });
+  created.stock = stockRes.data?.length ?? 0;
 
   // Meetings: two today so the action queue is populated, plus the week.
   const byName = new Map((deals ?? []).map((d: any) => [d.company_name, d.id]));
@@ -194,7 +223,7 @@ export async function POST(req: NextRequest) {
     { title: `${DEMO} Review with TIP Trailers`,    at: ahead(2, 11), company: 'TIP Trailers' },
     { title: `${DEMO} Quote walkthrough, Fowler Welch`, at: ahead(4, 14), company: 'Fowler Welch' },
   ];
-  const { data: events, error: evErr } = await supabase.from('calendar_events').insert(
+  const eventsRes = await insertTolerant(supabase, 'calendar_events',
     meetings.map((m) => ({
       title: m.title,
       start_at: iso(m.at),
@@ -205,9 +234,9 @@ export async function POST(req: NextRequest) {
       attendees: [{ user_id: target.id, name: fullName }],
       visibility: 'private', visible_to: [],
     })),
-  ).select('id');
-  if (evErr) return NextResponse.json({ error: `meetings: ${evErr.message}` }, { status: 500 });
-  created.meetings = events?.length ?? 0;
+  );
+  if (eventsRes.error) return NextResponse.json({ error: `meetings: ${eventsRes.error.message}` }, { status: 500 });
+  created.meetings = eventsRes.data?.length ?? 0;
 
   // Optional tables. Report rather than fail if the migration has not run.
   const optional: Record<string, string> = {};
@@ -231,9 +260,17 @@ export async function POST(req: NextRequest) {
   );
   optional.account_ownership = ownErr ? `skipped: ${ownErr.message}` : 'seeded';
 
+  const skippedColumns = Array.from(new Set([
+    ...dealsRes.dropped, ...stockRes.dropped, ...eventsRes.dropped,
+  ]));
+
   return NextResponse.json({
     ok: true, mode, target: fullName, list: trackerName,
     wiped, created, optional,
+    skippedColumns: skippedColumns.length ? skippedColumns : undefined,
+    migrationNote: skippedColumns.length
+      ? `Seeded without ${skippedColumns.join(', ')}. Run supabase/migrations/001_dashboard.sql to add them.`
+      : undefined,
     note: 'Everything is marked DEMO. POST {"mode":"wipe"} to remove it and nothing else.',
   });
 }

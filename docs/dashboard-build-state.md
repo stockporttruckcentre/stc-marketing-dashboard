@@ -23,6 +23,11 @@ coming from server routes rather than browser queries.
 | `components/dashboard/ExecDashboard.tsx` | Exec view, separate render and separate queries |
 | `components/dashboard/SupportDashboard.tsx` | Marketer view, deliberately a shell |
 | `components/dashboard/VariantSwitch.tsx` | Admin-only preview switch, temporary |
+| `components/dashboard/CommandBar.tsx` | The toolbar: understands a sentence, asks for what is missing, does it |
+| `lib/command/` | The language engine. `normalise` folds words, `entities` pulls values, `intents` scores and fills, `features` maps every screen |
+| `scripts/command-parse-check.ts` | Pins the parser against real phrasings. `npm run check:command` |
+| `app/api/command/*` | `resolve` disambiguates references, `execute` carries the action out |
+| `app/api/admin/seed-demo/route.ts` | Demo data, all marked DEMO, with a wipe |
 | `components/kit/primitives.tsx` | The shared UI kit components, first of their kind in this repo |
 | `app/kit-tokens.css` | Kit design tokens, wired in without disturbing other screens |
 | `supabase/migrations/001_dashboard.sql` | Additive schema. **Not yet run** |
@@ -87,12 +92,41 @@ Exec view: revenue and pipeline by rep are live. Year-on-year, invoice volume an
 the Friday digest all show their blocked state, since Protean and the digest job
 do not exist.
 
+## The toolbar
+
+One input on the dashboard that parses a sentence, resolves what it refers
+to against the database, asks only for what it genuinely could not work
+out, and finishes with a link to whatever it made. No model involved.
+
+`lib/command/features.ts` is the part that matters for keeping it useful:
+it lists every screen, what people call it, and what you can do there.
+**If a screen is added to the sidebar and not to that file, the toolbar
+cannot reach it**, and typing its name will hit a dead end. That was the
+original bug: eight intents against twelve screens, so a bare word like
+"meeting" matched nothing and the bar sat there doing nothing.
+
+Two rules that keep it honest:
+
+- Never do nothing. Anything typed either matches an intent, matches a
+  feature, or gets shown three examples that work.
+- A bare noun is a browse, not a command. Below a confidence of 6 only
+  the suggestions show, so typing "stock" offers to open the stock list
+  rather than presenting as "add a trailer".
+
+Add a phrasing that gets misread to `scripts/command-parse-check.ts`
+before fixing it. Three real bugs came out of writing that file rather
+than assuming: "gold" fuzzy-matching "sold", words inside company names
+voting on intent, and three free-text slots all filling with the same
+name.
+
 ## What to do next, in order
 
 1. **Run `supabase/migrations/001_dashboard.sql`.** Nothing depends on it to
-   render, but it turns three approximations into real data. Read its comments
-   first: the `account_ownership` backfill is commented out on purpose because it
-   matches on free-text names.
+   render, and the seeder now works without it, but it turns three
+   approximations into real data. Read its comments first: the
+   `account_ownership` backfill is commented out on purpose because it matches
+   on free-text names. Until it runs, the seed response lists which columns it
+   had to skip.
 2. **Set `profiles.dashboard_variant`** for whoever should get the exec view, and
    add the control to `components/AdminPanel.tsx`. Until then everyone lands on
    the rep view and only admins can preview the others through `VariantSwitch`.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles } from 'lucide-react';
 import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
+import { suggestFeatures, type Suggestion } from '@/lib/command/features';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -72,8 +73,18 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
     if (el) { el.focus(); requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length)); }
   }, [seed?.nonce, seed?.text]);
 
-  // Live understanding, so the bar shows it is following along.
-  const preview = useMemo(() => (text.trim().length > 3 ? parse(text) : null), [text]);
+  // Live understanding, so the bar shows it is following along. Two
+  // characters is enough: "cr" should already be offering something.
+  const parsed = useMemo(() => (text.trim().length >= 2 ? parse(text) : null), [text]);
+  // A bare noun like "stock" scores 3 on the nearest intent, which is not
+  // enough to present as a command. Below this it is a browse, not an
+  // instruction, and only the suggestions below should show.
+  const preview = parsed && parsed.confidence >= 6 ? parsed : null;
+  // Everything the app can do, ranked against what has been typed. This is
+  // what stops a bare word like "meeting" hitting a dead end.
+  const suggestions = useMemo(() => suggestFeatures(text, 5), [text]);
+  const [cursor, setCursor] = useState(-1);
+  useEffect(() => { setCursor(-1); }, [text]);
 
   const reset = useCallback(() => {
     setStage('idle'); setResult(null); setSlots({}); setChoices(null);
@@ -149,6 +160,16 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
     setSlots(current); setResult(parsed); setStage('ready');
   }, []);
 
+  function takeSuggestion(s: Suggestion) {
+    if (s.path) { router.push(s.path); reset(); return; }
+    if (s.phrase) {
+      setText(s.phrase);
+      setCursor(-1);
+      const el = inputRef.current;
+      if (el) { el.focus(); requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length)); }
+    }
+  }
+
   async function submit() {
     const parsed = parse(text);
     if (!parsed.intent) {
@@ -219,8 +240,15 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
           value={text}
           onChange={(e) => { setText(e.target.value); if (stage === 'done') { setOutcome(null); setStage('idle'); } }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
-            if (e.key === 'Escape') reset();
+            if (e.key === 'ArrowDown' && stage === 'idle') {
+              e.preventDefault(); setCursor((c) => Math.min(c + 1, suggestions.length - 1));
+            } else if (e.key === 'ArrowUp' && stage === 'idle') {
+              e.preventDefault(); setCursor((c) => Math.max(c - 1, -1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (stage === 'idle' && cursor >= 0 && suggestions[cursor]) takeSuggestion(suggestions[cursor]);
+              else submit();
+            } else if (e.key === 'Escape') reset();
           }}
           placeholder={EXAMPLES[exampleIdx]}
           style={{
@@ -242,24 +270,73 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
         }}>Ctrl K</kbd>
       </div>
 
-      {/* what it thinks you meant, while you type */}
-      {stage === 'idle' && preview?.intent && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          padding: '9px 14px', borderTop: '1px solid var(--border)',
-          background: 'var(--surface-sunken)',
-        }}>
-          <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
-          {preview.filled.map((f) => (
-            <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
+      {/* what it thinks you meant, and everything else it could be */}
+      {stage === 'idle' && text.trim().length >= 2 && (
+        <div style={{ borderTop: '1px solid var(--border)' }}>
+          {preview?.intent && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '9px 14px', background: 'var(--surface-sunken)',
+              borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+              outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+              outlineOffset: -2,
+            }}>
+              <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
+              {preview.filled.map((f) => (
+                <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
+              ))}
+              {preview.missing.map((m) => (
+                <Badge key={m.key} tone="warning">{m.label}?</Badge>
+              ))}
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                <CornerDownLeft size={12} /> to run
+              </span>
+            </div>
+          )}
+
+          {suggestions.map((s, i) => (
+            <button
+              key={`${s.kind}-${s.label}`}
+              onMouseDown={(e) => { e.preventDefault(); takeSuggestion(s); }}
+              onMouseEnter={() => setCursor(i)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                textAlign: 'left', minHeight: 38, padding: '7px 14px',
+                border: 'none', borderBottom: i === suggestions.length - 1 ? 'none' : '1px solid var(--border)',
+                background: cursor === i ? 'var(--bg-subtle)' : 'transparent',
+                color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
+              }}
+            >
+              {s.kind === 'feature'
+                ? <ArrowRight size={13} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                : <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+              <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{s.label}</span>
+              <span style={{
+                fontSize: 12, color: 'var(--text-subtle)', overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{s.sub}</span>
+            </button>
           ))}
-          {preview.missing.map((m) => (
-            <Badge key={m.key} tone="warning">{m.label}?</Badge>
-          ))}
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
-            <CornerDownLeft size={12} /> to run
-          </span>
+
+          {!preview?.intent && suggestions.length === 0 && (
+            <div style={{ padding: '11px 14px' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
+                Nothing matches that yet. Things that work:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {EXAMPLES.slice(0, 3).map((ex) => (
+                  <button key={ex} onMouseDown={(e) => { e.preventDefault(); setText(ex); inputRef.current?.focus(); }}
+                    style={{
+                      textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer',
+                      color: 'var(--text-subtle)', fontSize: 12, fontFamily: 'var(--inter)', padding: 0,
+                    }}>
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

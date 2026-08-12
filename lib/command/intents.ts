@@ -129,6 +129,17 @@ export const INTENTS: IntentSpec[] = [
     writes: false,
   },
   {
+    id: 'list_meetings',
+    title: 'Show your meetings',
+    verbs: ['find'], nouns: ['meeting'],
+    phrases: [/\b(my|our)\s+(meetings|diary|calendar|schedule)\b/i, /\bwhat('s| is)\s+(on|in my diary)\b/i],
+    slots: [
+      { key: 'range', type: 'range', label: 'Period', required: false, ask: 'Over what period?' },
+    ],
+    example: 'show my meetings this week',
+    writes: false,
+  },
+  {
     id: 'find_record',
     title: 'Open a record',
     verbs: ['find'], nouns: ['contact', 'trailer', 'stock'],

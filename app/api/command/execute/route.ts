@@ -168,7 +168,9 @@ export async function POST(req: NextRequest) {
         estimated_value: estimated,
         assigned_to: fullName,
         date_of_enquiry: new Date().toISOString().slice(0, 10),
-        last_activity_at: new Date().toISOString(),
+        // Not last_activity_at: that column only exists once the dashboard
+        // migration has been run, and this has to work either way.
+        last_contact: new Date().toISOString().slice(0, 10),
       }).select('id, company_name').single();
       if (error) return NextResponse.json<Result>({ ok: false, message: error.message });
 
@@ -236,6 +238,30 @@ export async function POST(req: NextRequest) {
           ? `Target already met. ${gbp(booked)} booked against ${gbp(target)}.`
           : `${gbp(gap)} still to invoice this month. ${gbp(booked)} booked of ${gbp(target)}.`,
         link: { href: '/dashboard/analytics', label: 'Open analytics' },
+      });
+    }
+
+    // ---------------------------------------------------------------
+    case 'list_meetings': {
+      const from = slots.range?.from ? new Date(slots.range.from) : new Date();
+      const to = slots.range?.to ? new Date(slots.range.to) : new Date(Date.now() + 7 * 86400000);
+      const { data, error } = await supabase.from('calendar_events')
+        .select('id, title, start_at')
+        .gte('start_at', from.toISOString())
+        .lte('start_at', to.toISOString())
+        .order('start_at', { ascending: true }).limit(10);
+      if (error) return NextResponse.json<Result>({ ok: false, message: error.message });
+
+      const rows = (data ?? []) as any[];
+      return NextResponse.json<Result>({
+        ok: true,
+        message: rows.length === 0
+          ? 'Nothing in your diary for that period.'
+          : `${rows.length} meeting${rows.length === 1 ? '' : 's'} coming up.`,
+        detail: rows.slice(0, 5).map((r) =>
+          `${new Date(r.start_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} ${r.title}`,
+        ).join(' · ') || undefined,
+        link: { href: '/dashboard/calendar', label: 'Open the calendar' },
       });
     }
 
