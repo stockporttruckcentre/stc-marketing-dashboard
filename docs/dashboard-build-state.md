@@ -124,6 +124,7 @@ name.
 | Screen | State |
 |---|---|
 | Dashboard | Fully kit-native. Wrapped in `.kit`, built from `components/kit/primitives` |
+| CRM pipeline | Contact drawer rebuilt on the kit and extracted to `components/crm/`. The stat strip is one figure row. The AG Grid table is untouched |
 | News | Controls and type only. `PageHead`, `Button`, `Tabs`, `Chip`, `SearchInput`, `Alert` and `EmptyState` are kit; the card grid is deliberately untouched because that layout is signed off |
 | Everything else | Untouched, on the original theme |
 
@@ -135,6 +136,24 @@ not modified, which is what guarantees the cards still render as approved.
 Primitives now cover: `Button` `Chip` `Tabs` `SearchInput` `Alert`
 `PageHead` `SectionHead` `Label` `Card` `Kpi` `Figure` `Bar` `Badge`
 `Row` `EmptyState` `NotProvisioned` `Skeleton`.
+
+## CRM meeting items
+
+From the CRM meeting transcript. Four are built, four are blocked on work
+already documented in `dashboard-upgrade-plan.md`.
+
+| # | Item | State |
+|---|---|---|
+| 1 | Duplicate accounts, sales and maintenance as separate entities | **Blocked.** Needs either `parent_customer_id` or a `customers` table above `crm_contacts`. The drawer already shows an "Also on" row where the same customer appears on more than one list, which is the affordance without the schema |
+| 2 | Portfolio-per-user filtering | **Blocked** on `account_ownership`, and on it being reconciled with the four existing ownership mechanisms |
+| 3 | "What next?" prompt after adding a prospect | **Built.** `NextActionPrompt`, offering a call, a proposal, a note or a reminder |
+| 4 | Generate proposal on the contact record | **Built.** `GenerateProposalPicker` with the four types. Trailer sales and maintenance route to the tracker; rental and refurb say plainly that their tool is not built and raise the proposal anyway |
+| 5 | Delegate a call to another diary | **Partly built.** The whose-diary picker works and shares the event with the owner. Pushing to Outlook needs Graph, and the owner still cannot edit their own delegated meeting until the calendar policies are rewritten |
+| 6 | Protean sync populating customer records | **Blocked** on Wayne sign-off and the server move |
+| 7 | Restricted stock-only role for Rama | **Blocked** on the granular permissions panel |
+
+Nothing in the list touched the AG Grid table, bulk actions, CSV import or
+the Lusha flow, and none of those were changed.
 
 ## What to do next, in order
 

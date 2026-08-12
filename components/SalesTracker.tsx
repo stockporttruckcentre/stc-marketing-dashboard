@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
 import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container } from 'lucide-react';
-import { ScheduleMeetingModal } from './CrmWorkspace';
+import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
