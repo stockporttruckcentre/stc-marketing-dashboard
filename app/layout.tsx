@@ -1,3 +1,6 @@
+// Kit tokens load first so globals.css still wins at :root for the three
+// colliding names. See the header of kit-tokens.css.
+import './kit-tokens.css';
 import './globals.css';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';

@@ -1,0 +1,161 @@
+/* =============================================================
+   STC UI kit tokens, wired into the app.
+
+   Derived from design-system/tokens.css. Two deliberate changes:
+
+   1. The kit's @font-face block and CSS reset are dropped. Panton is
+      already self-hosted from public/fonts and declared in globals.css,
+      and the reset would fight the app's own.
+   2. The kit ships its dark palette under [data-stc-theme="dark"].
+      This app themes on [data-theme], set from the stc_theme cookie by
+      the inline script in app/layout.tsx. Both selectors are bound below
+      so the existing theme toggle drives kit components unchanged.
+
+   Imported BEFORE globals.css in app/layout.tsx. That order matters:
+   globals.css redefines --bg, --accent and --border for the current dark
+   theme, and those redefinitions must win at :root so the eleven screens
+   that have not been rebranded yet look exactly as they did.
+
+   Kit-native surfaces opt into the kit's own values for those three by
+   sitting inside .kit (see the bottom of this file). Today that is the
+   dashboard only.
+
+   To resync after a kit update, re-derive from design-system/tokens.css
+   and reapply the two changes above.
+   ============================================================= */
+
+/* STC Design System - design tokens
+   Drop this in as globals.css (or import it first). Every component
+   references these semantic variables, never a raw hex. */
+
+:root {
+  /* ---- brand ---- */
+  --stc-navy: #09163A;
+  --stc-red:  #CF2417;
+  --stc-paper:#F7F7F5;
+
+  /* ---- navy scale ---- */
+  --navy-50:#EFF2F8; --navy-100:#D9DEEC; --navy-200:#B4BDD8; --navy-300:#8492C0;
+  --navy-400:#5A6DA8; --navy-500:#3D5290; --navy-600:#2B3F78; --navy-700:#1E2F63;
+  --navy-800:#13224F; --navy-900:#09163A; --navy-950:#050D26;
+
+  /* ---- red scale ---- */
+  --red-50:#FDF2F1; --red-100:#FCE3E1; --red-200:#F9C3BE; --red-300:#F49189;
+  --red-400:#EC6055; --red-500:#E03B2E; --red-600:#CF2417; --red-700:#B31F14;
+  --red-800:#9C1B11; --red-900:#7A150D;
+
+  /* ---- neutral scale (warm, to sit with paper) ---- */
+  --n-0:#FFFFFF; --n-25:#FBFBFA; --n-50:#F7F7F5; --n-100:#EFEFEC; --n-200:#E2E2DE;
+  --n-300:#CBCBC6; --n-400:#A3A39D; --n-500:#7A7A74; --n-600:#5B5B56;
+  --n-700:#43433F; --n-800:#2B2B28; --n-900:#1A1A18;
+
+  /* ---- semantic: surfaces ---- */
+  --bg:#F7F7F5;
+  --bg-subtle:#EFEFEC;
+  --surface:#FFFFFF;
+  --surface-raised:#FFFFFF;
+  --surface-sunken:#F7F7F5;
+  --surface-inverse:#09163A;
+
+  /* ---- semantic: borders ---- */
+  --border:#E2E2DE;
+  --border-strong:#CBCBC6;
+  --border-emphasis:#09163A;
+
+  /* ---- semantic: text ---- */
+  --text:#09163A;
+  --text-muted:#46527A;
+  --text-subtle:#7A7A74;
+  --text-inverse:#FFFFFF;
+
+  /* ---- semantic: action ---- */
+  --primary:#09163A; --primary-hover:#13224F; --primary-fg:#FFFFFF;
+  --accent:#CF2417;  --accent-hover:#B31F14;  --accent-fg:#FFFFFF;
+  --focus:#3D5290;
+
+  /* ---- semantic: status ---- */
+  --success:#1F9E3C; --warning:#C77A06; --danger:#B31F14; --info:#2B3F78;
+
+  /* ---- elevation ---- */
+  --shadow-1:0 1px 2px rgba(9,22,58,.06);
+  --shadow-2:0 2px 6px rgba(9,22,58,.08);
+  --shadow-3:0 8px 20px rgba(9,22,58,.10);
+  --shadow-4:0 20px 44px rgba(9,22,58,.14);
+
+  /* ---- shape ---- */
+  --r-sm:2px; --r:4px; --r-md:6px; --r-lg:8px; --r-full:999px;
+
+  /* ---- type ---- */
+  --panton:'Panton', sans-serif;
+  --inter:'Inter', system-ui, sans-serif;
+  --mono:ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* ---- motion ---- */
+  --ease:cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast:120ms; --dur-mid:160ms; --dur-slow:220ms;
+
+  /* ---- density (compact) ---- */
+  --control-sm:28px; --control:32px; --control-lg:38px;
+  --row:36px; --row-lg:44px;
+  --content-max:1440px;
+}
+
+[data-stc-theme="dark"],
+[data-theme="dark"] {
+  --bg:#050D26;
+  --bg-subtle:#13224F;
+  --surface:#09163A;
+  --surface-raised:#1E2F63;
+  --surface-sunken:#050D26;
+  --surface-inverse:#FFFFFF;
+
+  --border:#1E2F63;
+  --border-strong:#2B3F78;
+  --border-emphasis:#5A6DA8;
+
+  --text:#FFFFFF;
+  --text-muted:#B4BDD8;
+  --text-subtle:#8492C0;
+  --text-inverse:#09163A;
+
+  --primary:#FFFFFF; --primary-hover:#D9DEEC; --primary-fg:#09163A;
+  --accent:#E03B2E;  --accent-hover:#EC6055;  --accent-fg:#FFFFFF;
+  --focus:#8492C0;
+
+  --success:#3ECF6B; --warning:#E8A33D; --danger:#EC6055; --info:#8492C0;
+
+  --shadow-1:0 1px 2px rgba(0,0,0,.35);
+  --shadow-2:0 2px 6px rgba(0,0,0,.40);
+  --shadow-3:0 8px 20px rgba(0,0,0,.45);
+  --shadow-4:0 20px 44px rgba(0,0,0,.50);
+}
+
+/* -------------------------------------------------------------
+   Kit scope.
+
+   globals.css wins at :root for --bg, --accent and --border so that
+   un-rebranded screens are untouched. Anything inside .kit gets the
+   kit's real values back. Remove this block once the whole app is
+   kit-native and globals.css no longer defines them.
+   ------------------------------------------------------------- */
+.kit {
+  --bg: #F7F7F5;
+  --accent: #CF2417;
+  --border: #E2E2DE;
+}
+[data-stc-theme="dark"] .kit,
+[data-theme="dark"] .kit {
+  --bg: #050D26;
+  --accent: #E03B2E;
+  --border: #1E2F63;
+}
+
+.kit {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--inter);
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+}
+.kit :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
