@@ -1,0 +1,239 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+/**
+ * Demo data, so a dashboard can be judged with something on it.
+ *
+ * Everything written here carries source 'DEMO' or a DEMO- prefixed
+ * identifier, and `POST { "mode": "wipe" }` removes exactly those rows
+ * and nothing else. Real records are never touched.
+ *
+ * Seeds against the calling user by default. Pass an email to target
+ * somebody else; admin only.
+ */
+
+const DEMO = 'DEMO';
+const DAY = 86_400_000;
+const iso = (d: Date) => d.toISOString();
+const day = (d: Date) => d.toISOString().slice(0, 10);
+const ago = (n: number) => new Date(Date.now() - n * DAY);
+const ahead = (n: number, hour = 10) => {
+  const d = new Date(Date.now() + n * DAY); d.setHours(hour, 0, 0, 0); return d;
+};
+
+/** Open work. Some deliberately stale so "gone quiet" has something to show. */
+const PIPELINE = [
+  { company: 'TIP Trailers',        contact: 'Marie Vance',    status: 'quoted',    value: 184_000, quietDays: 21, vehicles: '4' },
+  { company: 'Dawson Group',        contact: 'Ian Dawson',     status: 'quoted',    value: 96_500,  quietDays: 12, vehicles: '3' },
+  { company: 'Fowler Welch',        contact: 'Priya Nair',     status: 'contacted', value: 74_200,  quietDays: 16, vehicles: '2' },
+  { company: 'Gregory Distribution',contact: 'Sam Gregory',    status: 'quoted',    value: 61_800,  quietDays: 9,  vehicles: '2' },
+  { company: 'Maritime Transport',  contact: 'Lewis Cardy',    status: 'contacted', value: 48_000,  quietDays: 3,  vehicles: '1' },
+  { company: 'Culina Logistics',    contact: 'Hannah Reed',    status: 'quoted',    value: 132_000, quietDays: 2,  vehicles: '4' },
+  { company: 'Turners of Soham',    contact: 'Rob Turner',     status: 'contacted', value: 27_500,  quietDays: 31, vehicles: '1' },
+  { company: 'Bibby Distribution',  contact: 'Alan Prior',     status: 'lead',      value: 15_000,  quietDays: 1,  vehicles: '1' },
+  { company: 'Knights of Old',      contact: 'Jess Wray',      status: 'quoted',    value: 88_400,  quietDays: 8,  vehicles: '3' },
+  { company: 'Suttons Group',       contact: 'Michael Sutton', status: 'contacted', value: 39_900,  quietDays: 5,  vehicles: '1' },
+  { company: 'A&A Scaffolding',     contact: 'Dean Ackroyd',   status: 'lead',      value: 12_400,  quietDays: 4,  vehicles: '1' },
+];
+
+/** Closed business, for the revenue and portfolio figures. */
+const CLOSED = [
+  { company: 'Wincanton',        contact: 'Ellie Marsh',  sale: 118_000, profit: 21_400, daysAgo: 6 },
+  { company: 'Malcolm Logistics',contact: 'Craig Malcolm',sale: 74_500,  profit: 12_900, daysAgo: 18 },
+  { company: 'TIP Trailers',     contact: 'Marie Vance',  sale: 152_000, profit: 28_800, daysAgo: 34 },
+  { company: 'Pollock Scotrans', contact: 'Iain Pollock', sale: 46_750,  profit: 7_300,  daysAgo: 58 },
+  { company: 'XPO Logistics',    contact: 'Nadia Khan',   sale: 205_000, profit: 34_100, daysAgo: 71 },
+];
+
+/** Sold stock, so "how many trailers have we sold to X" can answer. */
+const SOLD_STOCK = [
+  { stc: 'DEMO-STC90121', make: 'Schmitz',  model: 'S.KO Cool',  customer: 'TIP Trailers',      price: 38_500, daysAgo: 9 },
+  { stc: 'DEMO-STC90122', make: 'Schmitz',  model: 'S.CS Universal', customer: 'TIP Trailers',  price: 36_900, daysAgo: 24 },
+  { stc: 'DEMO-STC90123', make: 'Krone',    model: 'Profi Liner', customer: 'TIP Trailers',     price: 41_200, daysAgo: 47 },
+  { stc: 'DEMO-STC90124', make: 'Don Bur',  model: 'Teardrop',    customer: 'Wincanton',        price: 44_000, daysAgo: 12 },
+  { stc: 'DEMO-STC90125', make: 'SDC',      model: 'Curtainsider',customer: 'Malcolm Logistics',price: 33_750, daysAgo: 30 },
+  { stc: 'DEMO-STC90126', make: 'Krone',    model: 'Box Liner',   customer: 'XPO Logistics',    price: 52_400, daysAgo: 66 },
+];
+
+const IN_STOCK = [
+  { stc: 'DEMO-STC90201', make: 'Schmitz', model: 'S.KO Cool',    category: 'Fridge',       status: 'in_stock' },
+  { stc: 'DEMO-STC90202', make: 'Don Bur', model: 'Teardrop',     category: 'Curtainsider', status: 'in_stock' },
+  { stc: 'DEMO-STC90203', make: 'SDC',     model: 'Flatbed',      category: 'Flat',         status: 'new_build' },
+  { stc: 'DEMO-STC90204', make: 'Krone',   model: 'Profi Liner',  category: 'Curtainsider', status: 'sales_order' },
+];
+
+export async function POST(req: NextRequest) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const body = await req.json().catch(() => ({})) as { mode?: 'seed' | 'wipe'; email?: string };
+  const mode = body.mode ?? 'seed';
+
+  const { data: me } = await supabase.from('profiles').select('id, full_name, role, email').eq('id', user.id).single();
+  let target = me as any;
+
+  if (body.email && body.email !== (me as any)?.email) {
+    if ((me as any)?.role !== 'admin') {
+      return NextResponse.json({ error: 'only an admin can seed another account' }, { status: 403 });
+    }
+    const { data: other } = await supabase.from('profiles').select('id, full_name, role, email').eq('email', body.email).single();
+    if (!other) return NextResponse.json({ error: `no profile for ${body.email}` }, { status: 404 });
+    target = other;
+  }
+
+  const fullName: string = target.full_name || target.email;
+  const initials = fullName.split(/\s+/).map((s: string) => s[0]).join('').toUpperCase();
+
+  // The rep's tracker list, created if missing, exactly as the tracker page does.
+  const trackerName = `${fullName.split(' ')[0]}'s Sales tracker`;
+  let { data: list } = await supabase.from('crm_lists').select('id')
+    .eq('owner_id', target.id).eq('is_global', false)
+    .ilike('name', '%Sales tracker%').limit(1).maybeSingle();
+  if (!list && mode === 'seed') {
+    const { data: created, error } = await supabase.from('crm_lists').insert({
+      name: trackerName, owner_id: target.id, is_global: false, color: '#cf2417',
+      description: 'Personal sales pipeline',
+    }).select('id').single();
+    if (error) return NextResponse.json({ error: `could not create tracker list: ${error.message}` }, { status: 500 });
+    list = created;
+  }
+  const listId = (list as any)?.id;
+
+  // ---------------- wipe ----------------
+  const wiped: Record<string, number> = {};
+  if (listId) {
+    const { data: gone } = await supabase.from('crm_contacts').delete()
+      .eq('list_id', listId).eq('source', DEMO).select('id');
+    wiped.deals = gone?.length ?? 0;
+  }
+  const { data: goneStock } = await supabase.from('stock_trailers').delete()
+    .like('stc_no', 'DEMO-%').select('id');
+  wiped.stock = goneStock?.length ?? 0;
+
+  const { data: goneEvents } = await supabase.from('calendar_events').delete()
+    .eq('created_by', target.id).like('title', `${DEMO}%`).select('id');
+  wiped.meetings = goneEvents?.length ?? 0;
+
+  // Optional tables. Ignore failures: they may not exist yet.
+  await supabase.from('notifications').delete().eq('user_id', target.id).like('title', `${DEMO}%`);
+  await supabase.from('revenue_targets').delete().eq('user_id', target.id);
+
+  if (mode === 'wipe') {
+    return NextResponse.json({ ok: true, mode, target: fullName, wiped });
+  }
+
+  // ---------------- seed ----------------
+  if (!listId) return NextResponse.json({ error: 'no tracker list' }, { status: 500 });
+  const created: Record<string, number> = {};
+
+  const dealRows = [
+    ...PIPELINE.map((p) => ({
+      list_id: listId, source: DEMO, side: 'trailer_sales',
+      company_name: p.company, contact_name: p.contact,
+      email: `${p.contact.split(' ')[0].toLowerCase()}@${p.company.toLowerCase().replace(/[^a-z]/g, '')}.co.uk`,
+      phone: '01614 ' + String(100000 + Math.floor(p.value % 899999)).slice(0, 6),
+      status: p.status,
+      estimated_value: p.value,
+      vehicles: p.vehicles,
+      assigned_to: fullName.split(' ')[0],
+      account_manager: initials,
+      date_of_enquiry: day(ago(p.quietDays + 6)),
+      last_contact: day(ago(p.quietDays)),
+      last_activity_at: iso(ago(p.quietDays)),
+      description: `${p.vehicles} unit requirement, ${p.status === 'quoted' ? 'quote issued' : 'initial discussion'}`,
+      requirement: 'Trailer supply',
+      location: 'North West',
+    })),
+    ...CLOSED.map((c) => ({
+      list_id: listId, source: DEMO, side: 'trailer_sales',
+      company_name: c.company, contact_name: c.contact,
+      email: `${c.contact.split(' ')[0].toLowerCase()}@${c.company.toLowerCase().replace(/[^a-z]/g, '')}.co.uk`,
+      status: 'customer',
+      sale_price: c.sale, profit: c.profit,
+      commission: Number((c.profit * 0.1).toFixed(2)), commission_rate: 0.1,
+      order_date: day(ago(c.daysAgo)),
+      dispatch_date: day(ago(Math.max(0, c.daysAgo - 5))),
+      assigned_to: fullName.split(' ')[0],
+      account_manager: initials,
+      date_of_enquiry: day(ago(c.daysAgo + 30)),
+      last_activity_at: iso(ago(c.daysAgo)),
+      location: 'North West',
+    })),
+  ];
+
+  const { data: deals, error: dealErr } = await supabase.from('crm_contacts').insert(dealRows).select('id, company_name');
+  if (dealErr) return NextResponse.json({ error: `deals: ${dealErr.message}` }, { status: 500 });
+  created.deals = deals?.length ?? 0;
+
+  const { data: stock, error: stockErr } = await supabase.from('stock_trailers').insert([
+    ...SOLD_STOCK.map((s) => ({
+      stc_no: s.stc, make: s.make, model: s.model, status: 'sold',
+      category: 'Curtainsider', customer: s.customer, sales_rep: initials,
+      sales_price: s.price, profit: Math.round(s.price * 0.18),
+      profit_pct: 18, order_date: day(ago(s.daysAgo + 7)), dispatch_date: day(ago(s.daysAgo)),
+      year: 2023, location: 'Bredbury', new_or_used: 'Used',
+    })),
+    ...IN_STOCK.map((s) => ({
+      stc_no: s.stc, make: s.make, model: s.model, status: s.status,
+      category: s.category, year: 2024, location: 'Hyde', new_or_used: 'New',
+      nbv: 28_000, retail_price: 36_500,
+    })),
+  ]).select('id');
+  if (stockErr) return NextResponse.json({ error: `stock: ${stockErr.message}` }, { status: 500 });
+  created.stock = stock?.length ?? 0;
+
+  // Meetings: two today so the action queue is populated, plus the week.
+  const byName = new Map((deals ?? []).map((d: any) => [d.company_name, d.id]));
+  const meetings = [
+    { title: `${DEMO} Call with Dawson Group`,      at: ahead(0, new Date().getHours() + 1), company: 'Dawson Group' },
+    { title: `${DEMO} Site visit, Culina Logistics`,at: ahead(0, new Date().getHours() + 3), company: 'Culina Logistics' },
+    { title: `${DEMO} Review with TIP Trailers`,    at: ahead(2, 11), company: 'TIP Trailers' },
+    { title: `${DEMO} Quote walkthrough, Fowler Welch`, at: ahead(4, 14), company: 'Fowler Welch' },
+  ];
+  const { data: events, error: evErr } = await supabase.from('calendar_events').insert(
+    meetings.map((m) => ({
+      title: m.title,
+      start_at: iso(m.at),
+      end_at: iso(new Date(m.at.getTime() + 45 * 60 * 1000)),
+      all_day: false, color: '#cf2417',
+      created_by: target.id,
+      contact_id: byName.get(m.company) ?? null,
+      attendees: [{ user_id: target.id, name: fullName }],
+      visibility: 'private', visible_to: [],
+    })),
+  ).select('id');
+  if (evErr) return NextResponse.json({ error: `meetings: ${evErr.message}` }, { status: 500 });
+  created.meetings = events?.length ?? 0;
+
+  // Optional tables. Report rather than fail if the migration has not run.
+  const optional: Record<string, string> = {};
+
+  const { error: notifErr } = await supabase.from('notifications').insert([
+    { user_id: target.id, kind: 'lead_assigned', title: `${DEMO} New lead assigned to you`, body: 'A&A Scaffolding enquired about a curtainsider.', link_path: '/dashboard/leads' },
+    { user_id: target.id, kind: 'system_alert',  title: `${DEMO} TIP Trailers has gone quiet`, body: 'No activity for 21 days on a £184,000 quote.', link_path: '/dashboard' },
+    { user_id: target.id, kind: 'message',       title: `${DEMO} Tom left a note on Wincanton`, body: 'Deposit cleared, ready to dispatch.', link_path: '/dashboard/leads' },
+  ]);
+  optional.notifications = notifErr ? `skipped: ${notifErr.message}` : 'seeded';
+
+  const month = new Date(); month.setDate(1);
+  const { error: targetErr } = await supabase.from('revenue_targets').insert([
+    { user_id: target.id, period_month: day(month), target_amount: 250_000 },
+    { user_id: null,      period_month: day(month), target_amount: 1_100_000 },
+  ]);
+  optional.targets = targetErr ? `skipped: ${targetErr.message}` : 'seeded';
+
+  const { error: ownErr } = await supabase.from('account_ownership').insert(
+    (deals ?? []).slice(0, 10).map((d: any) => ({ contact_id: d.id, user_id: target.id, role_on_account: 'owner' })),
+  );
+  optional.account_ownership = ownErr ? `skipped: ${ownErr.message}` : 'seeded';
+
+  return NextResponse.json({
+    ok: true, mode, target: fullName, list: trackerName,
+    wiped, created, optional,
+    note: 'Everything is marked DEMO. POST {"mode":"wipe"} to remove it and nothing else.',
+  });
+}

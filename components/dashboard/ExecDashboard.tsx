@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Card, Kpi, Label, SectionHead, EmptyState, NotProvisioned, Row,
-  compactMoney, money,
+  Card, Kpi, Label, SectionHead, EmptyState, NotProvisioned, Bar,
+  compactMoney,
 } from '@/components/kit/primitives';
 import type { Profile } from '@/lib/types';
 
@@ -85,27 +85,47 @@ export function ExecDashboard({ profile }: { profile: Profile }) {
                 why="Each rep's figures appear here once they have a sales tracker with deals on it."
               />
             ) : (
+              // The middle of this table used to be dead space: a name hard
+              // left, figures hard right, nothing between. The bar earns that
+              // width by showing each rep against the best performer, which is
+              // the comparison the table exists to make.
               <div>
-                <Row style={{ borderBottom: '1px solid var(--border-strong)', minHeight: 28, padding: '0 0 7px' }}>
-                  <span style={{ flex: 1 }}><Label>Rep</Label></span>
-                  <span style={{ width: 70, textAlign: 'right' }}><Label>Open</Label></span>
-                  <span style={{ width: 90, textAlign: 'right' }}><Label>Pipeline</Label></span>
-                  <span style={{ width: 90, textAlign: 'right' }}><Label>Won YTD</Label></span>
-                </Row>
-                {data.perRep.map((r: any) => (
-                  <Row key={r.rep}>
-                    <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{r.rep}</span>
-                    <span style={{ width: 70, textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>
-                      {r.openDeals}
-                    </span>
-                    <span style={{ width: 90, textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>
-                      {compactMoney(r.openValue)}
-                    </span>
-                    <span style={{ width: 90, textAlign: 'right', fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                      {compactMoney(r.revenueYtd)}
-                    </span>
-                  </Row>
-                ))}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '150px minmax(80px, 1fr) 62px 84px 92px',
+                  gap: 14, alignItems: 'center', padding: '0 0 7px',
+                  borderBottom: '1px solid var(--border-strong)',
+                }}>
+                  <Label>Rep</Label>
+                  <Label>Share of revenue</Label>
+                  <span style={{ textAlign: 'right' }}><Label>Open</Label></span>
+                  <span style={{ textAlign: 'right' }}><Label>Pipeline</Label></span>
+                  <span style={{ textAlign: 'right' }}><Label>Won YTD</Label></span>
+                </div>
+                {(() => {
+                  const top = Math.max(...data.perRep.map((r: any) => r.revenueYtd), 1);
+                  return data.perRep.map((r: any) => (
+                    <div key={r.rep} style={{
+                      display: 'grid', gridTemplateColumns: '150px minmax(80px, 1fr) 62px 84px 92px',
+                      gap: 14, alignItems: 'center', minHeight: 36, padding: '7px 0',
+                      borderBottom: '1px solid var(--border)',
+                    }}>
+                      <span style={{
+                        fontSize: 13, fontWeight: 500, color: 'var(--text)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{r.rep}</span>
+                      <Bar value={r.revenueYtd} max={top} tone={r.revenueYtd === top ? 'accent' : 'info'} />
+                      <span style={{ textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>
+                        {r.openDeals}
+                      </span>
+                      <span style={{ textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)' }}>
+                        {compactMoney(r.openValue)}
+                      </span>
+                      <span style={{ textAlign: 'right', fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                        {compactMoney(r.revenueYtd)}
+                      </span>
+                    </div>
+                  ));
+                })()}
               </div>
             )}
             <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 12, lineHeight: 1.5 }}>

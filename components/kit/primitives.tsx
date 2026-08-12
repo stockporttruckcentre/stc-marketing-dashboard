@@ -123,6 +123,44 @@ export function Badge({ tone = 'neutral', dot, children }: { tone?: Tone; dot?: 
 /* ---------- metrics ---------- */
 
 /**
+ * Step the number down as it gets longer so a six figure sum still fits
+ * on one line. Without this a card sized for "12" wraps on "£124,500".
+ */
+function numberSize(value: string, base: number): number {
+  const n = value.length;
+  if (n <= 4) return base;
+  if (n <= 6) return base - 3;
+  if (n <= 9) return base - 6;
+  return base - 9;
+}
+
+/**
+ * A number with its label. Used inline in the summary strip, where a row
+ * of separate cards would just be visual noise.
+ */
+export function Figure({
+  label, value, sub, tone,
+}: { label: string; value: string; sub?: string; tone?: Tone }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+      <Label>{label}</Label>
+      <span style={{
+        fontFamily: 'var(--panton)', fontWeight: 800,
+        fontSize: numberSize(value, 24), lineHeight: 1.05, letterSpacing: '-0.03em',
+        fontVariantNumeric: 'tabular-nums', color: tone ? TONE_FG[tone] : 'var(--text)',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>{value}</span>
+      {sub && (
+        <span style={{
+          fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.35,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{sub}</span>
+      )}
+    </div>
+  );
+}
+
+/**
  * KPI card. Numbers are Panton and tabular so columns of them line up.
  * `emphasis` is the kit's "red points" rule: at most one per screen.
  */
@@ -140,11 +178,33 @@ export function Kpi({
     }}>
       <Label>{label}</Label>
       <span style={{
-        fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 26, lineHeight: 1.05,
+        fontFamily: 'var(--panton)', fontWeight: 800,
+        fontSize: numberSize(value, 26), lineHeight: 1.05,
         letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums',
         color: tone ? TONE_FG[tone] : 'var(--text)',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       }}>{value}</span>
       {sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.4 }}>{sub}</span>}
+    </div>
+  );
+}
+
+/**
+ * Proportional bar. Used where a table would otherwise leave a wide empty
+ * gutter between a name on the left and figures on the right.
+ */
+export function Bar({ value, max, tone = 'neutral' }: { value: number; max: number; tone?: Tone }) {
+  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
+  return (
+    <div style={{
+      position: 'relative', height: 6, borderRadius: 'var(--r-full)',
+      background: 'var(--bg-subtle)', overflow: 'hidden', width: '100%',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0, width: `${pct * 100}%`,
+        background: TONE_FG[tone], borderRadius: 'var(--r-full)',
+        transition: `width 220ms ${EASE}`,
+      }} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Label } from '@/components/kit/primitives';
 import type { DashboardVariant } from '@/lib/dashboard/variant';
@@ -26,7 +27,7 @@ export function VariantSwitch({ current }: { current: DashboardVariant }) {
   const router = useRouter();
   return (
     <div className="kit" style={{
-      display: 'flex', alignItems: 'center', gap: 10,
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
       padding: '8px 12px', marginBottom: 16,
       background: 'var(--surface-sunken)',
       border: '1px solid var(--border)',
@@ -53,9 +54,59 @@ export function VariantSwitch({ current }: { current: DashboardVariant }) {
           );
         })}
       </div>
-      <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginLeft: 'auto' }}>
-        Admin only. Everyone else lands on their assigned view.
+      <DemoData />
+      <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+        Admin only
       </span>
+    </div>
+  );
+}
+
+
+/**
+ * Demo data control. Everything it writes is marked DEMO and the wipe
+ * removes exactly those rows, so it is safe to run against a database
+ * that also holds real records.
+ */
+function DemoData() {
+  const router = useRouter();
+  const [busy, setBusy] = useState<null | 'seed' | 'wipe'>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run(mode: 'seed' | 'wipe') {
+    setBusy(mode); setMsg(null);
+    try {
+      const r = await fetch('/api/admin/seed-demo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const j = await r.json();
+      setMsg(j.error
+        ? j.error
+        : mode === 'seed'
+          ? `Seeded ${j.created?.deals ?? 0} deals, ${j.created?.stock ?? 0} trailers, ${j.created?.meetings ?? 0} meetings`
+          : `Removed ${Object.values(j.wiped ?? {}).reduce((a: any, b: any) => a + b, 0)} demo rows`);
+      router.refresh();
+    } catch (e: any) { setMsg(e.message); }
+    finally { setBusy(null); }
+  }
+
+  const btn = {
+    height: 26, padding: '0 10px', borderRadius: 'var(--r)',
+    border: '1px solid var(--border-strong)', background: 'var(--surface)',
+    color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
+    fontFamily: 'var(--inter)',
+  } as const;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+      {msg && <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{msg}</span>}
+      <button style={btn} disabled={!!busy} onClick={() => run('seed')}>
+        {busy === 'seed' ? 'Seeding' : 'Load demo data'}
+      </button>
+      <button style={btn} disabled={!!busy} onClick={() => run('wipe')}>
+        {busy === 'wipe' ? 'Clearing' : 'Clear'}
+      </button>
     </div>
   );
 }
