@@ -30,7 +30,16 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [profiles, setProfiles] = useState<Profile[]>(allProfiles);
-  const [title, setTitle] = useState(`Meeting with ${contact.company_name}`);
+  // A call and a site visit are booked the same way but are not the same
+  // thing, and the diary reads badly when everything is called a meeting.
+  const [kind, setKind] = useState<'call' | 'meeting'>('call');
+  const [title, setTitle] = useState(`Call with ${contact.company_name}`);
+  const [titleEdited, setTitleEdited] = useState(false);
+
+  function pickKind(k: 'call' | 'meeting') {
+    setKind(k);
+    if (!titleEdited) setTitle(`${k === 'call' ? 'Call' : 'Meeting'} with ${contact.company_name}`);
+  }
   // Default: tomorrow 10:00 for 1 hour
   const tomorrow = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); return d; }, []);
   const oneHourLater = useMemo(() => { const d = new Date(tomorrow); d.setHours(d.getHours() + 1); return d; }, [tomorrow]);
@@ -130,7 +139,7 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal__head">
           <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <CalendarPlus size={16} style={{ color: 'var(--stc-red)' }} /> Schedule a meeting
+            <CalendarPlus size={16} style={{ color: 'var(--stc-red)' }} /> Schedule
           </h3>
           <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
         </div>
@@ -140,8 +149,26 @@ export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }:
             <input className="input" value={contact.company_name} readOnly style={{ background: 'var(--bg-3)', color: 'var(--fg-2)' }} />
           </div>
           <div className="field">
-            <div className="field__label">Meeting title</div>
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+            <div className="field__label">What is it</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {([['call', 'Call'], ['meeting', 'Meeting']] as const).map(([k, label]) => (
+                <button
+                  key={k} type="button" onClick={() => pickKind(k)}
+                  style={{
+                    flex: 1, height: 34, borderRadius: 'var(--r-2)', cursor: 'pointer',
+                    border: `1px solid ${kind === k ? 'var(--stc-red)' : 'var(--border)'}`,
+                    background: kind === k ? 'rgba(207,36,23,0.08)' : 'transparent',
+                    color: kind === k ? 'var(--fg-1)' : 'var(--fg-2)',
+                    fontSize: 13, fontWeight: kind === k ? 600 : 500,
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <div className="field__label">Title</div>
+            <input className="input" value={title}
+              onChange={(e) => { setTitle(e.target.value); setTitleEdited(true); }} required />
           </div>
           <div className="split-2">
             <div className="field">

@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText, Download,
-  MoreHorizontal, ChevronDown, Calendar, Truck, Link2, MapPin, StickyNote,
+  X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
 import {
-  Button, Badge, Label, SectionHead, EmptyState, Alert, money, type Tone,
+  Button, Badge, Label, SectionHead, EmptyState, Alert, type Tone,
 } from '@/components/kit/primitives';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
+import { AddressMap } from './AddressMap';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
 
 /* =============================================================
@@ -55,9 +56,19 @@ export function ContactDrawer({
   const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [alsoOn, setAlsoOn] = useState<{ id: string; name: string }[]>([]);
+  const [addresses, setAddresses] = useState<ContactAddress[]>([]);
+  const [showMap, setShowMap] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => { setEdit(contact); }, [contact]);
+
+  const loadAddresses = useCallback(async () => {
+    const { data } = await supabase.from('contact_addresses').select('*')
+      .eq('contact_id', contact.id)
+      .order('is_primary', { ascending: false }).order('created_at', { ascending: true });
+    setAddresses((data ?? []) as ContactAddress[]);
+  }, [supabase, contact.id]);
+  useEffect(() => { loadAddresses(); }, [loadAddresses]);
 
   useEffect(() => {
     (async () => {
@@ -225,7 +236,7 @@ export function ContactDrawer({
                 <FileText size={14} /> Generate proposal
               </Button>
               <Button variant="secondary" onClick={() => setShowSchedule(true)}>
-                <CalendarPlus size={14} /> Schedule call
+                <CalendarPlus size={14} /> Schedule
               </Button>
               <Button variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
                 <MoreHorizontal size={15} />
@@ -241,7 +252,7 @@ export function ContactDrawer({
                     {[
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
                       { label: 'Copy to another list', on: () => setMovePickerOpen('duplicate') },
-                      { label: 'Export this record', on: () => exportContact(edit, notes, lists) },
+                      { label: 'Export or share', on: () => window.open(`/dashboard/crm/export/${contact.id}`, '_blank', 'noopener') },
                     ].map((a) => (
                       <button key={a.label} onClick={() => { setOverflowOpen(false); a.on(); }}
                         style={menuItem}>{a.label}</button>
@@ -345,11 +356,22 @@ export function ContactDrawer({
           <Collapsible
             icon={<MapPin size={14} />}
             title="Addresses"
-            count={undefined}
+            count={addresses.length || undefined}
             defaultOpen={false}
+            action={addresses.length > 0 ? (
+              <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); setShowMap(true); }}>
+                <MapIcon size={13} /> View on map
+              </Button>
+            ) : undefined}
           >
-            <AddressList contactId={edit.id} canEdit={canEdit} legacyAddress={edit.address}
-              onPrimaryChange={(addr, city) => onChange({ ...edit, address: addr, location: city ?? edit.location })} />
+            <AddressList
+              contactId={edit.id}
+              items={addresses}
+              reload={loadAddresses}
+              canEdit={canEdit}
+              legacyAddress={edit.address}
+              onPrimaryChange={(addr, city) => onChange({ ...edit, address: addr, location: city ?? edit.location })}
+            />
           </Collapsible>
 
           <Collapsible
@@ -448,6 +470,15 @@ export function ContactDrawer({
         )}
         {showProposal && (
           <GenerateProposalPicker contact={edit} onClose={() => setShowProposal(false)} />
+        )}
+        {showMap && (
+          <AddressMap
+            contactId={edit.id}
+            addresses={addresses}
+            canEdit={canEdit}
+            onClose={() => setShowMap(false)}
+            onChanged={loadAddresses}
+          />
         )}
         {movePickerOpen && (
           <ListPicker
@@ -611,21 +642,14 @@ function AddLinkForm({ kind, onSave, onCancel }: { kind: string; onSave: (label:
 }
 
 function AddressList({
-  contactId, canEdit, legacyAddress, onPrimaryChange,
-}: { contactId: string; canEdit: boolean; legacyAddress: string | null; onPrimaryChange: (a: string, c: string | null) => void }) {
+  contactId, items, reload, canEdit, legacyAddress, onPrimaryChange,
+}: {
+  contactId: string; items: ContactAddress[]; reload: () => void;
+  canEdit: boolean; legacyAddress: string | null;
+  onPrimaryChange: (a: string, c: string | null) => void;
+}) {
   const supabase = useMemo(() => createClient(), []);
-  const [items, setItems] = useState<ContactAddress[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  async function load() {
-    setLoading(true);
-    const { data } = await supabase.from('contact_addresses').select('*')
-      .eq('contact_id', contactId)
-      .order('is_primary', { ascending: false }).order('created_at', { ascending: true });
-    setItems((data ?? []) as ContactAddress[]);
-    setLoading(false);
-  }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [contactId]);
+  const load = reload;
 
   async function save(id: string, patch: Partial<ContactAddress>) {
     const next: any = { ...patch };
@@ -648,8 +672,6 @@ function AddressList({
     await supabase.from('contact_addresses').delete().eq('id', id);
     load();
   }
-
-  if (loading) return <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>Loading</div>;
 
   if (items.length === 0) {
     return (
@@ -703,32 +725,4 @@ function AddressList({
       {canEdit && <Button size="sm" variant="secondary" onClick={add}><Plus size={12} /> Add another site</Button>}
     </div>
   );
-}
-
-/** Single-record export. Unchanged behaviour, kept out of the render path. */
-function exportContact(c: CRMContact, notes: ContactNote[], lists: CrmList[]) {
-  const list = lists.find((l) => l.id === c.list_id);
-  const esc = (s: any) => String(s ?? '').replace(/[<>&]/g, (m) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[m]!));
-  const rows: [string, any][] = [
-    ['Contact name', c.contact_name], ['Email', c.email], ['Phone', c.phone],
-    ['Location', c.location], ['Status', c.status], ['Owned by', c.assigned_to],
-    ['Employees', c.employee_count], ['Turnover', c.turnover != null ? money(c.turnover) : null],
-    ['Trucks', c.trucks], ['Trailers', c.trailers], ['Vans', c.vans],
-  ];
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(c.company_name)}</title>
-<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 24px;color:#09163A}
-h1{font-size:26px;margin:0 0 4px}h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#CF2417;margin:26px 0 8px;border-bottom:1px solid #E2E2DE;padding-bottom:6px}
-td{padding:5px 0;vertical-align:top}td:first-child{width:34%;color:#7A7A74;font-size:13px}
-.note{background:#F7F7F5;border-left:2px solid #CF2417;padding:10px 12px;margin:8px 0;border-radius:4px}
-.note b{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#7A7A74}</style></head><body>
-<h1>${esc(c.company_name)}</h1><div style="color:#7A7A74;font-size:13px">${esc(list?.name ?? '')} · exported ${new Date().toLocaleString('en-GB')}</div>
-<h2>Details</h2><table>${rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => `<tr><td>${k}</td><td>${esc(v)}</td></tr>`).join('')}</table>
-${notes.length ? `<h2>Notes</h2>${notes.map((n) => `<div class="note"><b>${esc(n.author_name)} · ${new Date(n.created_at).toLocaleString('en-GB')}</b><div>${esc(n.text).replace(/\n/g, '<br>')}</div></div>`).join('')}` : ''}
-</body></html>`;
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${c.company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.html`;
-  a.click();
-  URL.revokeObjectURL(url);
 }

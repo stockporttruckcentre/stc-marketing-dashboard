@@ -124,7 +124,8 @@ name.
 | Screen | State |
 |---|---|
 | Dashboard | Fully kit-native. Wrapped in `.kit`, built from `components/kit/primitives` |
-| CRM pipeline | Contact drawer rebuilt on the kit and extracted to `components/crm/`. The stat strip is one figure row. The AG Grid table is untouched |
+| CRM pipeline | Contact drawer rebuilt on the kit and extracted to `components/crm/`. The stat strip is one figure row. Export, scheduling and the site map are kit-native. The AG Grid table is untouched |
+| Customer export | New tab at `/dashboard/crm/export/[id]`. PDF, Excel, Word, clipboard and email from one document |
 | News | Controls and type only. `PageHead`, `Button`, `Tabs`, `Chip`, `SearchInput`, `Alert` and `EmptyState` are kit; the card grid is deliberately untouched because that layout is signed off |
 | Everything else | Untouched, on the original theme |
 
@@ -154,6 +155,30 @@ already documented in `dashboard-upgrade-plan.md`.
 
 Nothing in the list touched the AG Grid table, bulk actions, CSV import or
 the Lusha flow, and none of those were changed.
+
+## Customer export
+
+One model in `lib/crm/export-model.ts`, rendered five ways. Built once on
+the server so the formats cannot drift apart, which is how a field ends up
+in the PDF but missing from the Word version.
+
+| Format | How | Notes |
+|---|---|---|
+| PDF | Browser print, with a print stylesheet | No dependency. Sections are kept off page breaks |
+| Excel | `exceljs` | A real workbook: four sheets, numbers stored as numbers with currency formats, dates as dates, frozen headers |
+| Word | `docx` | A real document: styled headings, bordered tables, notes as readable paragraphs |
+| Clipboard | `ClipboardItem` | Rich text and plain text together, so it pastes properly into either |
+| Email | `mailto` | **To finish when Microsoft sign-in is live.** Should attach the PDF and send from the user's own mailbox through Graph. Today it opens a draft with the summary in the body and says so |
+
+Neither file format is a renamed HTML file. That was explicitly asked for
+and is worth keeping: a spreadsheet somebody cannot sort or sum is not a
+spreadsheet.
+
+## Maps
+
+Leaflet with OpenStreetMap tiles and Nominatim geocoding, proxied through
+`/api/geo`. **No API key needed.** The full decision, the limits of the
+free tier and what to move to if it outgrows them is in `docs/maps.md`.
 
 ## What to do next, in order
 
