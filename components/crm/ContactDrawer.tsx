@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
-  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon,
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
@@ -238,6 +238,10 @@ export function ContactDrawer({
               <Button variant="secondary" onClick={() => setShowSchedule(true)}>
                 <CalendarPlus size={14} /> Schedule
               </Button>
+              <Button variant="secondary"
+                onClick={() => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener')}>
+                <Share2 size={14} /> Export
+              </Button>
               <Button variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
                 <MoreHorizontal size={15} />
               </Button>
@@ -252,7 +256,6 @@ export function ContactDrawer({
                     {[
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
                       { label: 'Copy to another list', on: () => setMovePickerOpen('duplicate') },
-                      { label: 'Export or share', on: () => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener') },
                     ].map((a) => (
                       <button key={a.label} onClick={() => { setOverflowOpen(false); a.on(); }}
                         style={menuItem}>{a.label}</button>
