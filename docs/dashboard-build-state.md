@@ -124,7 +124,7 @@ name.
 | Screen | State |
 |---|---|
 | Dashboard | Fully kit-native. Wrapped in `.kit`, built from `components/kit/primitives` |
-| CRM pipeline | Contact drawer rebuilt on the kit and extracted to `components/crm/`. The stat strip is one figure row. Export, scheduling and the site map are kit-native. The AG Grid table is untouched |
+| CRM pipeline | Kit-native apart from the AG Grid table itself. Contact drawer, page head, list tabs, toolbar, selection bar, every floating menu, and all four modals. Export, scheduling and the site map too |
 | Customer export | New tab at `/dashboard/crm/export/[id]`. PDF, Excel, Word, clipboard and email from one document |
 | News | Controls and type only. `PageHead`, `Button`, `Tabs`, `Chip`, `SearchInput`, `Alert` and `EmptyState` are kit; the card grid is deliberately untouched because that layout is signed off |
 | Everything else | Untouched, on the original theme |
@@ -134,9 +134,21 @@ the control clusters rather than the page, so kit tokens reach the buttons
 and type without recolouring the layout underneath. `app/globals.css` was
 not modified, which is what guarantees the cards still render as approved.
 
-Primitives now cover: `Button` `Chip` `Tabs` `SearchInput` `Alert`
-`PageHead` `SectionHead` `Label` `Card` `Kpi` `Figure` `Bar` `Badge`
-`Row` `EmptyState` `NotProvisioned` `Skeleton`.
+`components/kit/primitives.tsx` covers: `Button` `Chip` `Tabs`
+`SearchInput` `Alert` `PageHead` `SectionHead` `Label` `Card` `Kpi`
+`Figure` `Bar` `Badge` `Row` `EmptyState` `NotProvisioned` `Skeleton`.
+
+`components/kit/forms.tsx` covers: `Field` `TextInput` `TextArea`
+`Select` `Segmented` `OptionCard` `Checkbox` `Modal`. Separate file
+because every one of them holds focus or keyboard state, so it is a
+client boundary, and `primitives.tsx` has to stay importable from server
+components.
+
+The form controls put the border on a wrapper and leave the control
+inside transparent and borderless. That is what lets a field carry a
+leading icon, a trailing unit or a clear button on the same 32px baseline
+without any of them fighting the input's own box, and it keeps focus and
+error as one rule in one place instead of one per control type.
 
 ## CRM meeting items
 
@@ -145,16 +157,54 @@ already documented in `dashboard-upgrade-plan.md`.
 
 | # | Item | State |
 |---|---|---|
-| 1 | Duplicate accounts, sales and maintenance as separate entities | **Blocked.** Needs either `parent_customer_id` or a `customers` table above `crm_contacts`. The drawer already shows an "Also on" row where the same customer appears on more than one list, which is the affordance without the schema |
-| 2 | Portfolio-per-user filtering | **Blocked** on `account_ownership`, and on it being reconciled with the four existing ownership mechanisms |
+| 1 | Duplicate accounts, sales and maintenance as separate entities | **Built.** `parent_customer_id` self-reference, migration 003, `/api/crm/link`, and a "Same customer" section in the drawer that shows deliberate twins and probable duplicates together. Needs migration 003 run; until then the section says so rather than failing |
+| 2 | Portfolio-per-user filtering | **Built** without `account_ownership`. Everyone, My accounts and Unassigned in one switch, plus a picker for a named colleague. See below for why the free-text problem did not stop it |
 | 3 | "What next?" prompt after adding a prospect | **Built.** `NextActionPrompt`, offering a call, a proposal, a note or a reminder |
 | 4 | Generate proposal on the contact record | **Built.** `GenerateProposalPicker` with the four types. Trailer sales and maintenance route to the tracker; rental and refurb say plainly that their tool is not built and raise the proposal anyway |
 | 5 | Delegate a call to another diary | **Partly built.** The whose-diary picker works and shares the event with the owner. Pushing to Outlook needs Graph, and the owner still cannot edit their own delegated meeting until the calendar policies are rewritten |
 | 6 | Protean sync populating customer records | **Blocked** on Wayne sign-off and the server move |
 | 7 | Restricted stock-only role for Rama | **Blocked** on the granular permissions panel |
 
-Nothing in the list touched the AG Grid table, bulk actions, CSV import or
-the Lusha flow, and none of those were changed.
+The AG Grid table itself is still untouched. Bulk actions, CSV import and
+the Lusha flow gained an owner picker and a kit restyle but no change in
+behaviour.
+
+### Twinned accounts, and why not a customers table
+
+The textbook answer is a `customers` table above `crm_contacts` owning
+several account records. It is also the wrong move right now.
+`crm_contacts` is already doing three jobs, every query and every RLS
+policy in the app reads from it, and the platform is about to move off
+Supabase. Restructuring the busiest table in the product immediately
+before that migration is not a trade worth making.
+
+So migration 003 adds a self-reference and a trigger that keeps links one
+level deep, which means "the same customer" always has exactly one
+answer. It is additive, no existing query or policy changes, and if the
+customers table is ever built this column is the map for the backfill.
+
+### Portfolio filtering without `account_ownership`
+
+This was parked as blocked because there was nothing dependable to filter
+on. `assigned_to` is free text holding whatever somebody typed into a
+spreadsheet: "Alex", "alex ellis", "A.Ellis", an email address, and a lot
+of blanks. Equality against a profile name would have hidden most of a
+rep's portfolio, which is worse than no filter.
+
+`lib/crm/ownership.ts` fixes it at both ends. Reading is generous: a
+person is identified by their name, their email, its local part and their
+first name, and a contact matches on any of those, which covers the
+history already in the database. Writing is exact: the Assigned column is
+a picker of real people, so everything set from today is canonical and
+the generous matching only ever cleans up the past.
+
+The loose first-name rule has one failure mode, two colleagues sharing a
+first name. The list says so on screen rather than handing one of them
+the other's accounts.
+
+**When `account_ownership` arrives** it becomes the source of truth and
+this becomes the backfill. `ownerKeys` is the function that maps the old
+free text onto a real user id.
 
 ## Customer export
 
@@ -168,11 +218,29 @@ in the PDF but missing from the Word version.
 | Excel | `exceljs` | A real workbook: four sheets, numbers stored as numbers with currency formats, dates as dates, frozen headers |
 | Word | `docx` | A real document: styled headings, bordered tables, notes as readable paragraphs |
 | Clipboard | `ClipboardItem` | Rich text and plain text together, so it pastes properly into either |
-| Email | `mailto` | **To finish when Microsoft sign-in is live.** Should attach the PDF and send from the user's own mailbox through Graph. Today it opens a draft with the summary in the body and says so |
+| Email | Clipboard, then `mailto` | Two visible steps. The formatted HTML is copied inside the click, then a panel says so and offers the compose window. **To finish when Microsoft sign-in is live:** attach the PDF and send from the user's own mailbox through Graph |
 
 Neither file format is a renamed HTML file. That was explicitly asked for
 and is worth keeping: a spreadsheet somebody cannot sort or sum is not a
 spreadsheet.
+
+Two things about this page that are easy to get wrong again:
+
+- **It lives at `/export`, not under `/dashboard`.** It was under the
+  dashboard layout at first, which meant the sidebar and top bar were
+  printed into the PDF. The bare layout in `app/export/layout.tsx` is the
+  fix, and middleware protects `/export` alongside `/dashboard`.
+- **It scrolls itself.** `globals.css` puts `overflow: hidden` on the
+  body and lets `.content` inside the dashboard shell scroll, so a page
+  outside that shell has to bring its own scroll container. The print
+  rules release it again, or printing would only ever capture the first
+  window's worth.
+
+The email step is a paste rather than a prefilled draft because the
+signature is the point. Outlook only inserts one when a person starts a
+message in the client, so a draft built by the server or by `mailto`
+arrives without it. Graph does not change that either. The Office ribbon
+add-in is what removes the paste, and it is a separate piece of work.
 
 ## Maps
 

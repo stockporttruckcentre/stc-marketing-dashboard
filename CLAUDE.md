@@ -65,12 +65,17 @@ it becomes a one-pass change across roughly ten render sites.
 Before finishing any task that touched text in this repo, grep your own output:
 
 ```bash
-grep -rn '—\|–\|―' --include="*.tsx" --include="*.ts" --include="*.css" \
+grep -rn '—\|–\|―\|&mdash;\|&ndash;\|&#8212;\|&#8211;' \
+  --include="*.tsx" --include="*.ts" --include="*.css" \
   --include="*.md" --include="*.sql" app components lib supabase
 ```
 
 Anything that comes back and is not the standalone placeholder glyph is a defect
 and gets fixed before the work is called done.
+
+The HTML entities are in that pattern for a reason. `&mdash;` renders as an em
+dash and reads as one, but a search for the literal character walks straight past
+it. One had been sitting in the Lusha dialog since before the ban existed.
 
 ---
 
