@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import {
   Printer, FileSpreadsheet, FileText, Copy, Mail, Check, Loader, ArrowLeft,
+  X, ClipboardCheck, AlertTriangle,
 } from 'lucide-react';
 import { Button, Label, Badge, Alert } from '@/components/kit/primitives';
 import { exportEmailHtml } from '@/lib/crm/export-email-html';
@@ -26,6 +27,9 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailCopied, setEmailCopied] = useState(false);
+  const [to, setTo] = useState('');
 
   function flash(what: string) {
     setDone(what);
@@ -85,9 +89,14 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
    * Outlook only inserts one when a person starts a new message in the
    * client.
    *
-   * So: formatted HTML onto the clipboard, then open a blank compose.
-   * The signature is already sitting there and the body pastes in above
-   * it, formatted. One click and one paste, and it looks like the page.
+   * So the formatted HTML goes on the clipboard and the compose window
+   * opens blank, with the signature already in it, ready to paste above.
+   *
+   * The first version of this fired the mailto immediately and left a
+   * sentence behind explaining the paste. That reads as a broken button:
+   * you press Email, an empty message appears, and nothing tells you the
+   * clipboard is loaded. So the two steps are now two visible steps, and
+   * the compose window only opens when you ask for it.
    *
    * The tidier version, where the ribbon add-in drops this straight into
    * an open compose with no paste at all, is noted in the build state doc
@@ -95,17 +104,48 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
    */
   async function email() {
     setBusy('email');
+    // Copied inside the click, while the page still holds the user
+    // gesture that the clipboard API insists on.
     const copied = await putOnClipboard();
-    const subject = encodeURIComponent(`${m.company} account summary`);
-    window.location.href = `mailto:?subject=${subject}`;
+    setEmailCopied(copied);
     setBusy(null);
-    if (copied) {
-      setNote('Formatted copy is on your clipboard and a blank message is open. Paste it above your signature: it keeps the layout you see here.');
+    setNote(null);
+    setEmailOpen(true);
+  }
+
+  async function recopy() {
+    setBusy('recopy');
+    const copied = await putOnClipboard();
+    setEmailCopied(copied);
+    if (copied) { setNote(null); flash('recopy'); }
+    setBusy(null);
+  }
+
+  /**
+   * If the clipboard worked, the compose window is left blank so the
+   * paste lands cleanly. If it did not, the summary goes in as plain
+   * text: a readable message beats an empty one, and mailto bodies are
+   * plain text whatever we do. Clients vary on how long a mailto they
+   * accept, so it is trimmed well short of where they start dropping it.
+   */
+  function mailtoHref(): string {
+    const subject = encodeURIComponent(`${m.company} account summary`);
+    const recipient = encodeURIComponent(to.trim());
+    let href = `mailto:${recipient}?subject=${subject}`;
+    if (!emailCopied) {
+      const body = plainText(m).slice(0, 1600);
+      href += `&body=${encodeURIComponent(body)}`;
     }
+    return href;
   }
 
   return (
-    <div className="kit" style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    /* Its own scroll container on purpose. `globals.css` puts
+       `overflow: hidden` on the body and lets `.content` inside the
+       dashboard shell do the scrolling, and this page is deliberately
+       outside that shell, so without this the document is simply cut off
+       at the bottom of the window with no way to reach the rest. */
+    <div className="kit export-scroll" style={{ height: '100vh', overflowY: 'auto', background: 'var(--bg)' }}>
       {/* ---- toolbar ---- */}
       <div className="export-bar" style={{
         position: 'sticky', top: 0, zIndex: 5,
@@ -148,6 +188,20 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
         <div className="export-bar" style={{ padding: '12px 22px 0' }}>
           <Alert tone="info">{note}</Alert>
         </div>
+      )}
+
+      {emailOpen && (
+        <EmailPanel
+          company={m.company}
+          copied={emailCopied}
+          to={to}
+          setTo={setTo}
+          href={mailtoHref()}
+          busy={busy === 'recopy'}
+          recopied={done === 'recopy'}
+          onRecopy={recopy}
+          onClose={() => setEmailOpen(false)}
+        />
       )}
 
       {/* ---- the document ---- */}
@@ -253,7 +307,13 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
           /* Anything that is not the document is hidden, including app
              chrome that might wrap this page in future. */
           .export-bar, .sidebar, .topbar, nav, header.topbar { display: none !important; }
-          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+          html, body {
+            background: #fff !important; margin: 0 !important; padding: 0 !important;
+            height: auto !important; overflow: visible !important;
+          }
+          /* The on-screen scroll container has to release the page, or
+             print only ever gets the first window's worth of it. */
+          .export-scroll { height: auto !important; overflow: visible !important; }
           .kit { background: #fff !important; }
           #export-doc {
             border: none !important; border-radius: 0 !important;
@@ -264,6 +324,150 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
           @page { margin: 16mm; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/* =============================================================
+   Send by email.
+
+   Two steps, both visible, because the alternative is a button that
+   appears to open an empty message for no reason.
+
+   Step one has already happened by the time this opens: the formatted
+   summary is on the clipboard. Step two is the compose window, opened
+   from a real link rather than a scripted navigation, so the export tab
+   stays put behind it and can be pasted from again if the first attempt
+   goes somewhere unhelpful.
+
+   The signature is the whole reason for the paste. Outlook only inserts
+   one when a person starts a message in the client, so a draft built by
+   the server would arrive without it. That changes when Microsoft
+   sign-in is live: Graph can then attach the PDF and send it from the
+   user's own mailbox.
+   ============================================================= */
+function EmailPanel({
+  company, copied, to, setTo, href, busy, recopied, onRecopy, onClose,
+}: {
+  company: string;
+  copied: boolean;
+  to: string;
+  setTo: (v: string) => void;
+  href: string;
+  busy: boolean;
+  recopied: boolean;
+  onRecopy: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="export-bar"
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(9, 22, 58, 0.44)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 520, background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+          boxShadow: 'var(--shadow-3)', overflow: 'hidden',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '14px 18px', borderBottom: '1px solid var(--border)',
+        }}>
+          <Mail size={16} style={{ color: 'var(--accent)' }} />
+          <span style={{
+            fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 15,
+            letterSpacing: '-0.01em', color: 'var(--text)',
+          }}>Send by email</span>
+          <button onClick={onClose} aria-label="Close" style={{
+            marginLeft: 'auto', width: 28, height: 28, display: 'grid', placeItems: 'center',
+            border: '1px solid var(--border)', borderRadius: 'var(--r)',
+            background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer',
+          }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        <div style={{ padding: '16px 18px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {copied ? (
+            <div style={{
+              display: 'flex', gap: 10, alignItems: 'flex-start',
+              padding: '11px 13px', borderRadius: 'var(--r)',
+              background: 'var(--surface-sunken)', borderLeft: '2px solid var(--success)',
+            }}>
+              <ClipboardCheck size={16} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5 }}>
+                The {company} summary is on your clipboard, formatted. Open a new
+                message and press Ctrl and V above your signature.
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex', gap: 10, alignItems: 'flex-start',
+              padding: '11px 13px', borderRadius: 'var(--r)',
+              background: 'var(--surface-sunken)', borderLeft: '2px solid var(--warning)',
+            }}>
+              <AlertTriangle size={16} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5 }}>
+                The browser blocked clipboard access, so the message opens with a
+                plain text version of the summary instead. Try Copy again below to
+                get the formatted one.
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label>Send to (optional)</Label>
+            <input
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="name@company.co.uk"
+              style={{
+                marginTop: 6, width: '100%', height: 32, padding: '0 10px',
+                border: '1px solid var(--border)', borderRadius: 'var(--r)',
+                background: 'var(--surface-sunken)', color: 'var(--text)',
+                fontFamily: 'var(--inter)', fontSize: 13.5,
+              }}
+            />
+            <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 5 }}>
+              Leave it blank to pick the recipient in Outlook.
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+            {/* A real link, not a scripted navigation. The mail client
+                takes the handoff and this tab is left alone. */}
+            <a
+              href={href}
+              onClick={() => setTimeout(onClose, 400)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7, height: 32,
+                padding: '0 13px', borderRadius: 'var(--r)', border: '1px solid transparent',
+                background: 'var(--accent)', color: '#fff', textDecoration: 'none',
+                fontFamily: 'var(--inter)', fontSize: 13, fontWeight: 500,
+              }}
+            >
+              <Mail size={14} /> Open a new message
+            </a>
+            <Button variant="secondary" onClick={onRecopy} disabled={busy}>
+              {busy ? <Loader size={14} className="spin" /> : recopied ? <Check size={14} /> : <Copy size={14} />}
+              {recopied ? 'Copied' : 'Copy again'}
+            </Button>
+          </div>
+
+          <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.55, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            Sending the PDF as an attachment straight from your own mailbox needs
+            Microsoft sign-in. It is on the list for when that goes live.
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

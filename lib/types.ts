@@ -54,6 +54,7 @@ export interface CRMContact {
   assigned_to: string | null;
   last_contact: string | null;
   // Sales tracker fields (used when this contact is in a personal sales tracker list)
+  parent_customer_id: string | null;   // twinned account, see migration 003
   stock_trailer_id: string | null;
   commission_rate: number | null;
   side: 'trailer_sales' | 'maintenance';

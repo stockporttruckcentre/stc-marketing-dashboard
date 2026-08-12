@@ -8,7 +8,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
 import {
-  Button, Badge, Label, SectionHead, EmptyState, Alert, type Tone,
+  Button, Badge, Label, SectionHead, EmptyState, NotProvisioned, Alert, type Tone,
 } from '@/components/kit/primitives';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
@@ -29,6 +29,11 @@ import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactA
    ============================================================= */
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+
+const SIDE_LABEL: Record<string, string> = {
+  trailer_sales: 'Sales and leasing',
+  maintenance: 'Maintenance',
+};
 
 const STATUS_TONE: Record<string, Tone> = {
   lead: 'info', contacted: 'warning', quoted: 'accent',
@@ -55,7 +60,10 @@ export function ContactDrawer({
   const [showAddLink, setShowAddLink] = useState<null | 'website' | 'linkedin' | 'other'>(null);
   const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [alsoOn, setAlsoOn] = useState<{ id: string; name: string }[]>([]);
+  const [alsoOn, setAlsoOn] = useState<{ id: string; name: string; company: string; side: string; status: string }[]>([]);
+  const [linked, setLinked] = useState<any[]>([]);
+  const [linkAvailable, setLinkAvailable] = useState(true);
+  const [linking, setLinking] = useState(false);
   const [addresses, setAddresses] = useState<ContactAddress[]>([]);
   const [showMap, setShowMap] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -90,27 +98,48 @@ export function ContactDrawer({
     return () => { cancelled = true; };
   }, [supabase, contact.id, showSchedule]);
 
-  // The same customer often sits on more than one list. Worth surfacing,
-  // because the meeting flagged customers who legitimately need both a
-  // sales and a maintenance account.
-  useEffect(() => {
-    (async () => {
-      let q = supabase.from('crm_contacts').select('id, list_id').neq('id', contact.id);
-      q = contact.email
-        ? q.eq('email', contact.email)
-        : q.eq('company_name', contact.company_name);
-      const { data } = await q;
-      const seen = new Set<string>();
-      const hits: { id: string; name: string }[] = [];
-      for (const h of (data ?? []) as any[]) {
-        if (!h.list_id || seen.has(h.list_id)) continue;
-        seen.add(h.list_id);
-        const l = lists.find((x) => x.id === h.list_id);
-        if (l) hits.push({ id: l.id, name: l.name });
-      }
-      setAlsoOn(hits);
-    })();
-  }, [supabase, contact, lists]);
+  /**
+   * Two questions with one answer: which records are deliberately twinned
+   * with this one, and which look like the same customer but are not
+   * linked yet. Showing them together is what turns an accidental
+   * duplicate into a decision rather than a mystery.
+   */
+  const loadSameCustomer = useCallback(async () => {
+    const res = await fetch(`/api/crm/link?id=${contact.id}`).then((r) => r.json()).catch(() => null);
+    if (res) {
+      setLinked(res.linked ?? []);
+      setLinkAvailable(res.available !== false);
+    }
+
+    const linkedIds = new Set<string>(((res?.linked ?? []) as any[]).map((r) => r.id));
+    let q = supabase.from('crm_contacts')
+      .select('id, company_name, list_id, side, status')
+      .neq('id', contact.id);
+    q = contact.email
+      ? q.eq('email', contact.email)
+      : q.eq('company_name', contact.company_name);
+    const { data } = await q;
+    setAlsoOn(((data ?? []) as any[])
+      .filter((r) => !linkedIds.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        name: lists.find((l) => l.id === r.list_id)?.name ?? 'Another list',
+        company: r.company_name, side: r.side ?? 'trailer_sales', status: r.status,
+      })));
+  }, [supabase, contact.id, contact.email, contact.company_name, lists]);
+
+  useEffect(() => { loadSameCustomer(); }, [loadSameCustomer]);
+
+  async function linkAction(action: 'create_twin' | 'link' | 'unlink', targetId?: string) {
+    setLinking(true);
+    const res = await fetch('/api/crm/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, contact_id: contact.id, target_id: targetId }),
+    }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+    setLinking(false);
+    setMessage(res.error ?? res.message ?? null);
+    if (!res.error) loadSameCustomer();
+  }
 
   async function saveField(field: keyof CRMContact, value: any) {
     if ((contact as any)[field] === value) return;
@@ -217,10 +246,12 @@ export function ContactDrawer({
               {metaLine && (
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{metaLine}</div>
               )}
-              {alsoOn.length > 0 && (
+              {linked.length > 0 && (
                 <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <Label>Also on</Label>
-                  {alsoOn.map((l) => <Badge key={l.id} tone="neutral">{l.name}</Badge>)}
+                  <Label>Same customer</Label>
+                  {linked.map((l: any) => (
+                    <Badge key={l.id} tone="accent">{SIDE_LABEL[l.side] ?? l.side}</Badge>
+                  ))}
                 </div>
               )}
             </div>
@@ -422,6 +453,89 @@ export function ContactDrawer({
               <AddLinkForm kind={showAddLink} onSave={(label, url) => addLink(showAddLink, label, url)} onCancel={() => setShowAddLink(null)} />
             )}
           </Collapsible>
+
+          {/* ---- the same business, under more than one account ---- */}
+          <section>
+            <SectionHead
+              title="Same customer"
+              hint={linked.length ? `${linked.length + 1} accounts` : undefined}
+            />
+            {!linkAvailable ? (
+              <NotProvisioned
+                what="Sales and maintenance accounts for one business, linked so nobody types the details twice."
+                needs="migration 003"
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {linked.map((l: any) => (
+                  <div key={l.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 11,
+                    padding: '10px 12px', borderRadius: 'var(--r)',
+                    border: '1px solid var(--border)', background: 'var(--surface)',
+                    borderLeft: '2px solid var(--accent)',
+                  }}>
+                    <Building2 size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
+                        {SIDE_LABEL[l.side] ?? l.side}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{l.status}</div>
+                    </div>
+                    <Button size="sm" variant="ghost"
+                      onClick={() => window.location.assign(`/dashboard/crm?contact=${l.id}`)}>Open</Button>
+                  </div>
+                ))}
+
+                {canEdit && !linked.some((l: any) => l.side !== (edit.side ?? 'trailer_sales')) && (
+                  <Button variant="secondary" disabled={linking}
+                    onClick={() => linkAction('create_twin')}>
+                    <Plus size={13} />
+                    Create the {(edit.side ?? 'trailer_sales') === 'maintenance' ? 'sales and leasing' : 'maintenance'} account
+                  </Button>
+                )}
+
+                {alsoOn.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <Label>Looks like the same customer, not linked</Label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                      {alsoOn.map((a) => (
+                        <div key={a.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 11,
+                          padding: '9px 12px', borderRadius: 'var(--r)',
+                          border: '1px dashed var(--border-strong)', background: 'var(--surface-sunken)',
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {a.company}
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                              {SIDE_LABEL[a.side] ?? a.side} · {a.status} · {a.name}
+                            </div>
+                          </div>
+                          {canEdit && (
+                            <Button size="sm" variant="secondary" disabled={linking}
+                              onClick={() => linkAction('link', a.id)}>Link</Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {linked.length === 0 && alsoOn.length === 0 && (
+                  <EmptyState
+                    what="This is the only account for this business."
+                    why="Some customers need a sales and leasing account and a maintenance account, because they are separate entities in Protean. Creating the second one copies the details across."
+                  />
+                )}
+
+                {canEdit && edit.parent_customer_id && (
+                  <Button size="sm" variant="ghost" disabled={linking}
+                    onClick={() => linkAction('unlink')}>Unlink this account</Button>
+                )}
+              </div>
+            )}
+          </section>
 
           {/* ---- notes ---- */}
           <section>
