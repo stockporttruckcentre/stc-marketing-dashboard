@@ -89,6 +89,16 @@ function parseRange(text: string): { from: Date; to: Date; label: string } | nul
       return { from: startOfDay(from), to: now, label: `past ${n} ${rel[2]}${n === 1 ? '' : 's'}` };
     }
   }
+  if (/\bthis week\b/.test(t)) {
+    const from = startOfDay(now);
+    const to = new Date(from); to.setDate(to.getDate() + 7);
+    return { from, to, label: 'this week' };
+  }
+  if (/\bnext week\b/.test(t)) {
+    const from = startOfDay(now); from.setDate(from.getDate() + 7);
+    const to = new Date(from); to.setDate(to.getDate() + 7);
+    return { from, to, label: 'next week' };
+  }
   if (/\bthis year\b|\bytd\b|\byear to date\b/.test(t)) {
     return { from: new Date(now.getFullYear(), 0, 1), to: now, label: 'this year' };
   }

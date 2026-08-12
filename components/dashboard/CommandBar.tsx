@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles } from 'lucide-react';
 import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
 import { suggestFeatures, type Suggestion } from '@/lib/command/features';
+import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -18,7 +19,7 @@ import { Label, Badge, Button } from '@/components/kit/primitives';
    ============================================================= */
 
 type Candidate = { id: string; label: string; sub?: string; status?: string };
-type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done';
+type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered';
 type Outcome = { ok: boolean; message: string; detail?: string; link?: { href: string; label: string } };
 
 const EXAMPLES = [
@@ -83,12 +84,20 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
   // Everything the app can do, ranked against what has been typed. This is
   // what stops a bare word like "meeting" hitting a dead end.
   const suggestions = useMemo(() => suggestFeatures(text, 5), [text]);
+  // A composed question: count / total / average / list of anything in the
+  // dictionary. This is what covers the hundreds of phrasings that no
+  // hand-written intent list ever would.
+  const plan = useMemo(() => (text.trim().length >= 3 ? parseQuery(text) : null), [text]);
+  // An instruction always beats a question: "create trailer STC1" must not
+  // be answered as "count trailers". Otherwise a confident query wins.
+  const useQuery = !!plan && plan.confidence >= 8 && !preview?.intent?.writes;
+  const [answered, setAnswered] = useState<any | null>(null);
   const [cursor, setCursor] = useState(-1);
   useEffect(() => { setCursor(-1); }, [text]);
 
   const reset = useCallback(() => {
     setStage('idle'); setResult(null); setSlots({}); setChoices(null);
-    setAsking(null); setAnswer(''); setOutcome(null); setText('');
+    setAsking(null); setAnswer(''); setOutcome(null); setText(''); setAnswered(null);
   }, []);
 
   /** Walk forward: resolve references, then ask for anything still missing. */
@@ -170,7 +179,23 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
     }
   }
 
+  async function runQuery(p: QueryPlan) {
+    setStage('running');
+    const res = await fetch('/api/command/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(planToPayload(p)),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (!res.ok) {
+      setOutcome({ ok: false, message: res.error ?? 'That query did not run.' });
+      setStage('done');
+      return;
+    }
+    setAnswered(res);
+    setStage('answered');
+  }
+
   async function submit() {
+    if (useQuery && plan) return runQuery(plan);
     const parsed = parse(text);
     if (!parsed.intent) {
       setOutcome({
@@ -273,7 +298,22 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
       {/* what it thinks you meant, and everything else it could be */}
       {stage === 'idle' && text.trim().length >= 2 && (
         <div style={{ borderTop: '1px solid var(--border)' }}>
-          {preview?.intent && (
+          {useQuery && plan && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '9px 14px', background: 'var(--surface-sunken)',
+              borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+              outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+              outlineOffset: -2,
+            }}>
+              <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+              <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                <CornerDownLeft size={12} /> to answer
+              </span>
+            </div>
+          )}
+          {!useQuery && preview?.intent && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
               padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -422,6 +462,77 @@ export function CommandBar({ seed }: { seed?: { text: string; nonce: number } })
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
           <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Working on it</span>
+        </div>
+      )}
+
+      {/* the answer to a question */}
+      {stage === 'answered' && answered && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+          <Label>{answered.summary}</Label>
+
+          {answered.kind === 'number' && (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+              <span style={{
+                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
+                letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+              }}>
+                {answered.money
+                  ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
+                  : Number(answered.value).toLocaleString()}
+              </span>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                {answered.money
+                  ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
+                  : answered.entity}
+              </span>
+            </div>
+          )}
+
+          {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {answered.sample.map((s: any) => (
+                <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+                  <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
+                  <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
+                </div>
+              ))}
+              {answered.value > answered.sample.length && (
+                <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+                  and {answered.value - answered.sample.length} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {answered.kind === 'grouped' && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(() => {
+                const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
+                return answered.groups.map((g: any) => {
+                  const v = answered.measure === 'count' ? g.count : g.total;
+                  return (
+                    <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
+                      <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
+                      <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
+                      </div>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                        {answered.measure === 'count' ? v.toLocaleString()
+                          : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
+              See them <ArrowRight size={12} />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
+          </div>
         </div>
       )}
 
