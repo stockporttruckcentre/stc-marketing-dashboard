@@ -298,19 +298,66 @@ rule: if the same meeting is edited on both sides between syncs, the CRM wins as
 master, but that has to be a decision written down rather than an accident of
 implementation.
 
-**Change notifications need a publicly reachable endpoint, and the CRM is moving
-behind your firewall.** Microsoft Graph pushes changes by calling an HTTPS URL it
-can reach from the internet. A server on the local network cannot receive that.
-The options are a DMZ or reverse-proxied endpoint, or falling back to polling
-delta queries on a timer, which is simpler but makes "perfect" into "within a few
-minutes". This is a network and IT question, not an application one, and it needs
-raising early because it affects how the local hosting is set up.
+**Push notifications need Microsoft to have a route to the server.** Graph is
+free in both directions and push is fully supported, so cost and capability are
+not the question. The question is reachability: a Graph subscription delivers by
+calling a `notificationUrl` that Microsoft's servers must be able to reach, and
+Microsoft validates that URL when the subscription is created. A CRM on the
+internal network alone cannot receive that call.
+
+Three ways to solve it, all of them ordinary:
+
+1. **Deliver to Azure Event Hubs instead of a webhook.** Graph subscriptions can
+   target Event Hubs rather than an HTTPS endpoint, and the CRM then reads from
+   it outbound. Nothing is exposed inbound at all. This is the neatest fit for a
+   server that stays behind the firewall, and it is worth pricing before
+   assuming a DMZ is needed.
+2. **Expose one endpoint.** A reverse proxy or DMZ host that accepts only the
+   Graph notification path. Standard, but it is a hole in the perimeter that
+   somebody has to own.
+3. **Poll delta queries on a timer.** No inbound anything. Free, simple, and for
+   a calendar a one to five minute cycle is usually indistinguishable from push
+   to the people using it. It only stops being "perfect" if the requirement is
+   genuinely sub-minute.
+
+None of these blocks the build. It is a network decision that belongs to whoever
+plans the local hosting, and it is worth taking early rather than at integration
+time.
 
 **Writing into other people's calendars still needs IT.** Delegated meetings, Tom
 booking in Dave's diary, require application-level Graph permissions and tenant
 admin consent. You control CRM permissions, but this specific piece still depends
 on the same IT team that owns Entra. Worth flagging now so it is not discovered
 at integration time.
+
+### The Office ribbon is further out, and it argues for the same decision
+
+A custom ribbon and task pane in Outlook is on the roadmap. It does not need
+planning yet, but two things about it should influence choices being made now.
+
+**An Office add-in is a web app, so it consumes the same API.** Modern add-ins
+are HTML and JavaScript loaded into an embedded browser inside Office, declared
+by a manifest and served over HTTPS. A ribbon button that says "log this email
+against the customer" or "create a prospect from this thread" is a small page
+calling the same server routes the dashboard uses. That is a second, independent
+reason for the API-first recommendation above: the layer built for the dashboard
+is the layer the ribbon will run on. Build it browser-direct and the add-in
+starts by building it again.
+
+**It raises the reachability question a third time.** Office fetches add-in
+content from wherever the manifest points, so the CRM has to be reachable by the
+Office clients using it, which includes Outlook on the web and on phones if those
+are in scope. Combined with Graph notifications and any remote access to the CRM
+itself, that is three separate features all asking the same question about the
+network posture of a server on the internal LAN. Worth answering once,
+deliberately, rather than three times under deadline.
+
+**Batch the Entra requests.** Add-in sign-on, Graph delegated calendar scopes,
+Graph application scopes for delegated diaries, and SSO itself all live on the
+same Entra app registration. Since IT owns that tenant and each consent request
+is a separate conversation with another team, it is worth designing the
+registration once against the full roadmap rather than going back for one scope
+at a time.
 
 ---
 
@@ -558,10 +605,11 @@ guessed.
     the Supabase stack on your own hardware keeps auth, RLS, PostgREST, realtime
     and storage working. The difference between the two paths is months of work,
     so it should be a deliberate choice.
-11. **How does Graph reach a server behind the firewall?** Change notifications
-    need a publicly reachable HTTPS endpoint. Either a DMZ endpoint or polling
-    on a timer. This is a network decision that affects how "perfect sync" is
-    specified.
+11. **How does Microsoft reach a server on the internal network?** Not a cost
+    question, Graph is free both ways. It is reachability: Event Hubs delivery,
+    one exposed endpoint, or delta polling. The same question returns for the
+    Office ribbon and for any remote access to the CRM, so answer it once for
+    the network as a whole rather than per feature.
 
 ---
 
