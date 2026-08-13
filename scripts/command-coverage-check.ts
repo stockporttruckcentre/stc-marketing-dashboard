@@ -344,9 +344,111 @@ for (const q of [
     `-> ${parseEdit(q, CAPS.admin)?.summary}`);
 }
 
-/* Marking sold is not a field edit. It raises a commission line on
-   somebody's tracker, so it keeps its own confirmation. */
-ok('selling is handed to the sold flow', parseEdit('mark STC143980 as sold', CAPS.admin) === null);
+/* Marking sold is understood, and handed on rather than written. It
+   raises a commission line on somebody's tracker and needs a price, so
+   the bar names the units and stops there. */
+const soldPlan = parseEdit('mark STC143580 and 144504 as sold', CAPS.admin);
+ok('selling is understood', !!soldPlan);
+ok('selling is handed to the sold flow', soldPlan?.handoff === 'markSold', String(soldPlan?.handoff));
+ok('selling names both units', soldPlan?.targets.map((t) => t.text).join(',') === 'STC143580,144504',
+  soldPlan?.targets.map((t) => t.text).join(','));
+
+/* ---------- the ten typed out verbatim ----------
+
+   Every one of these was typed at the bar and checked against what came
+   back. Seven were wrong on the first pass and two of those were wrong
+   in the dangerous way: a write aimed at the wrong column, and a
+   question answered confidently with a filter on a rep who does not
+   exist. Pinned here so they cannot go back. */
+
+const VERBATIM_EDITS: { q: string; key: string; op: string; value: unknown; targets: string[] }[] = [
+  { q: `Reduce STC143140's refurb cost by £100`,
+    key: 'refurb_costs', op: 'subtract', value: 100, targets: ['STC143140'] },
+  // The STC number is the value here, not the record. Read the other way
+  // round this renames a different trailer.
+  { q: 'Add stock number STC150001 to C734105',
+    key: 'stc_no', op: 'set', value: 'STC150001', targets: ['C734105'] },
+  // No prefix, and the digits cannot be the value because a depot is not
+  // a number.
+  { q: 'Move 143480 to bredbury ',
+    key: 'location', op: 'set', value: 'Bredbury', targets: ['143480'] },
+  { q: 'mark all outstanding social posts as approved',
+    key: 'status', op: 'set', value: 'approved', targets: ['outstanding'] },
+];
+
+for (const c of VERBATIM_EDITS) {
+  const p = parseEdit(c.q, CAPS.admin);
+  ok(`verbatim: "${c.q.trim()}" is an instruction`, !!p, 'no plan');
+  if (!p) continue;
+  ok(`verbatim: "${c.q.trim()}" -> column`, p.field.key === c.key, `got ${p.field.key}`);
+  ok(`verbatim: "${c.q.trim()}" -> operation`, p.op === c.op, `got ${p.op}`);
+  ok(`verbatim: "${c.q.trim()}" -> value`, p.value === c.value, `got ${String(p.value)}`);
+  ok(`verbatim: "${c.q.trim()}" -> records`,
+    p.targets.map((t) => t.text).join(',') === c.targets.join(','),
+    `got ${p.targets.map((t) => t.text).join(',')}`);
+  ok(`verbatim: "${c.q.trim()}" is complete`, p.missing.length === 0, p.missing.join(','));
+}
+
+/* A bulk instruction describes the rows rather than naming them, and the
+   half after "as" is where they are going. Reading the longest state
+   word won meant "mark all outstanding as approved" set every approved
+   post back to outstanding: the instruction exactly inverted. */
+const bulk = parseEdit('mark all outstanding social posts as approved', CAPS.admin);
+ok('bulk: targets a description', bulk?.target?.kind === 'filter', bulk?.target?.kind);
+ok('bulk: narrows on the state described',
+  bulk?.target?.kind === 'filter' && bulk.target.value === 'pending_review',
+  bulk?.target?.kind === 'filter' ? bulk.target.value : '-');
+ok('bulk: approving needs the approve capability',
+  !parseEdit('mark all outstanding social posts as approved', CAPS.marketer));
+
+/* "All" on its own is not a subset. A bar that acts on a whole table
+   from four words ruins somebody's afternoon, so the instruction is
+   understood and then held, waiting for which ones. */
+const vague = parseEdit('approve everything', CAPS.admin);
+ok('bulk: an unnarrowed everything never runs',
+  !vague || vague.missing.includes('target'), vague?.missing.join(','));
+
+/* A negation is not a typo. The fuzzy matcher used to bridge
+   "approved" and "unapproved" on a two edit budget. */
+ok('fuzzy: does not bridge a negation',
+  parseEdit('mark all outstanding social posts as approved', CAPS.admin)?.value === 'approved');
+ok('fuzzy: still forgives a real typo',
+  parseEdit('aprove all pending social posts', CAPS.admin)?.value === 'approved');
+
+/* ---------- the questions from the same ten ---------- */
+const VERBATIM_QUERIES: { q: string; expect: Record<string, string | boolean> }[] = [
+  // The colour and the bracket both used to be dropped, so this answered
+  // with every curtainsider on the yard at any price.
+  { q: 'Give me a list of blue curtainsiders between 5k and 10k',
+    expect: { category: 'Curtainsider', colour: 'Blue', min: '5000', max: '10000' } },
+  // Counted trailers before there was anywhere else for it to go.
+  { q: 'How many social posts are left to approve',
+    expect: { entity: 'posts', status: 'pending_review', measure: 'count' } },
+  // "just" was read as the name of the rep who sold them, and "today"
+  // was stripped as a politeness, so this answered for all time.
+  { q: 'How much revenue did we make from just trailer sales today? ',
+    expect: { entity: 'trailers', measure: 'sum', range: true, noRep: true } },
+];
+
+for (const c of VERBATIM_QUERIES) {
+  const plan = parseQuery(c.q);
+  ok(`verbatim query: "${c.q.trim()}" parses`, !!plan);
+  if (!plan) continue;
+  for (const [key, want] of Object.entries(c.expect)) {
+    const got = key === 'range' ? Boolean(plan.range)
+      : key === 'measure' ? plan.measure
+      : key === 'entity' ? plan.entity.id
+      : key === 'noRep' ? !plan.filters.some((f) => f.key === 'rep')
+      : plan.filters.find((f) => f.key === key)?.value;
+    ok(`verbatim query: "${c.q.trim()}" -> ${key}`, got === want,
+      `got ${String(got)}, want ${String(want)}`);
+  }
+}
+
+// A period on a present tense state is meaningless, so it is dropped
+// rather than silently narrowing the answer to nothing.
+ok('in stock ignores a period', !parseQuery('how many trailers in stock today')?.range);
+ok('sold keeps its period', !!parseQuery('how many trailers sold today')?.range);
 
 /* Half a sentence gets offered endings rather than an error. */
 ok('a bare stock number offers fields',

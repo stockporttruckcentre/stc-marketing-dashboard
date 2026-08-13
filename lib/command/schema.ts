@@ -109,6 +109,14 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'location', column: 'location', kind: 'text', label: 'location', freeText: true },
       { key: 'customer', column: 'customer', kind: 'text', label: 'customer', freeText: true },
       { key: 'rep', column: 'sales_rep', kind: 'text', label: 'rep', freeText: true },
+      // "Blue curtainsiders" used to narrow on the body and quietly drop
+      // the colour, so the answer was every curtainsider on the yard.
+      { key: 'colour', column: 'colour', kind: 'enum', label: 'colour',
+        vocabulary: {
+          blue: 'Blue', red: 'Red', white: 'White', black: 'Black', green: 'Green',
+          silver: 'Silver', grey: 'Grey', gray: 'Grey', yellow: 'Yellow',
+          orange: 'Orange', 'dark blue': 'Blue', 'light blue': 'Blue',
+        } },
       { key: 'condition', column: 'new_or_used', kind: 'enum', label: 'condition',
         vocabulary: { new: 'New', used: 'Used', secondhand: 'Used', 'second hand': 'Used' } },
     ],
@@ -198,6 +206,40 @@ export const ENTITIES: EntitySpec[] = [
     ],
     hrefFor: (r) => `/dashboard/crm?contact=${r.id}`,
   },
+  /* The marketing side is part of the CRM too.
+     "How many social posts are left to approve" used to fall through to
+     the trailers entity and answer with a count of trailers, which is a
+     confident wrong answer to a question about something else entirely. */
+  {
+    id: 'posts',
+    table: 'social_posts',
+    label: 'social posts', labelOne: 'social post',
+    nouns: ['social post', 'social posts', 'post', 'posts', 'socials', 'content'],
+    titleColumn: 'content',
+    subtitleColumns: ['platform', 'scheduled_date', 'status'],
+    dateColumn: 'scheduled_date',
+    amounts: [],
+    filters: [
+      { key: 'status', column: 'status', kind: 'enum', label: 'status',
+        vocabulary: {
+          draft: 'draft', drafts: 'draft', unwritten: 'draft',
+          'pending review': 'pending_review', 'to approve': 'pending_review',
+          'for approval': 'pending_review', 'awaiting approval': 'pending_review',
+          'left to approve': 'pending_review', 'need approving': 'pending_review',
+          'needs approving': 'pending_review', unapproved: 'pending_review',
+          outstanding: 'pending_review', pending: 'pending_review',
+          approved: 'approved', signed: 'approved', 'signed off': 'approved',
+          scheduled: 'scheduled', queued: 'scheduled', planned: 'scheduled',
+          posted: 'posted', published: 'posted', live: 'posted', gone: 'posted',
+        } },
+      { key: 'author', column: 'created_by', kind: 'text', label: 'author', freeText: true },
+    ],
+    dimensions: [
+      { key: 'status', column: 'status', label: 'status', words: ['status', 'stage', 'state'] },
+      { key: 'author', column: 'created_by', label: 'author', words: ['author', 'who', 'writer'] },
+    ],
+    hrefFor: () => '/dashboard/social',
+  },
   {
     id: 'meetings',
     table: 'calendar_events',
@@ -221,7 +263,8 @@ export const ENTITIES: EntitySpec[] = [
 /** Words that pick which number is being asked for. */
 export const MEASURE_WORDS: { measure: Measure; words: string[] }[] = [
   { measure: 'count', words: ['how many', 'count', 'number of', 'how much stock', 'total number'] },
-  { measure: 'sum',   words: ['how much', 'total', 'worth', 'value of', 'sum', 'revenue', 'turnover'] },
+  { measure: 'sum',   words: ['how much', 'total', 'worth', 'value of', 'sum', 'revenue',
+                             'turnover', 'turn over', 'turned over', 'took', 'taken', 'billed'] },
   { measure: 'avg',   words: ['average', 'avg', 'mean', 'typical'] },
   { measure: 'list',  words: ['list', 'show', 'which', 'what are', 'find', 'give me'] },
 ];

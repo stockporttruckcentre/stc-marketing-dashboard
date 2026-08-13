@@ -45,8 +45,15 @@ export const FILLER = [
   'i just want', 'just want', 'quickly', 'quick', 'please', 'thanks', 'cheers', 'ta',
   'for me', 'if you can', 'if possible', 'and tell me', 'and let me know',
   'right now', 'at the moment', 'currently', 'as it stands', 'as things stand',
-  'at present', 'today', 'so far',
+  'at present', 'so far',
 ];
+
+/* "today" is deliberately not filler.
+   It was, and "how much revenue did we make from just trailer sales
+   today" came back with no period at all, answering for all time. The
+   one case it was there for, "how many trailers in stock today", is
+   handled properly in query.ts instead: in stock is a state you are in
+   now, so a date range on it is meaningless and gets dropped. */
 
 /* -------------------------------------------------------------
    Depots.
@@ -265,6 +272,14 @@ const RESERVED = new Set([
   'trailer', 'trailers', 'unit', 'units', 'vehicle', 'vehicles', 'customer',
   'customers', 'deal', 'deals', 'order', 'orders', 'hire', 'rental', 'storage',
   'site', 'depot', 'yard', 'stockport truck centre', 'stc',
+  /* Narrowing words. "How much revenue did we make from just trailer
+     sales today" read "just" as the rep who sold them, and answered for
+     a person who does not exist. Anything that qualifies a noun rather
+     than naming one belongs here. */
+  'just', 'only', 'solely', 'purely', 'simply', 'merely', 'exactly',
+  'about', 'roughly', 'approximately', 'around', 'mainly', 'mostly',
+  'outstanding', 'pending', 'remaining', 'left', 'still', 'other', 'others',
+  'blue', 'red', 'white', 'black', 'green', 'silver', 'grey', 'gray', 'yellow',
   ...Object.keys(BODY_TYPES),
 ]);
 

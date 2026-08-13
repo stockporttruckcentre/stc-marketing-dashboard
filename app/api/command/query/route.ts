@@ -57,9 +57,21 @@ export async function POST(req: NextRequest) {
     q = q.not('list_id', 'is', null);
   }
 
+  /* A price bracket lands on an amount column rather than a filter
+     column, so the allowlist has to cover both. Still an allowlist: the
+     column has to be one this entity declares, whichever list it is in. */
+  const allowedAmountColumns = new Set(entity.amounts.map((a) => a.column));
+
   for (const f of (body.filters ?? [])) {
-    if (!allowedFilterColumns.has(f.column)) continue;
-    if (f.op === 'eq') q = q.eq(f.column, f.value);
+    const isRange = f.op === 'gte' || f.op === 'lte';
+    const allowed = isRange
+      ? (allowedAmountColumns.has(f.column) || allowedFilterColumns.has(f.column))
+      : allowedFilterColumns.has(f.column);
+    if (!allowed) continue;
+
+    if (f.op === 'gte') { const n = Number(f.value); if (Number.isFinite(n)) q = q.gte(f.column, n); }
+    else if (f.op === 'lte') { const n = Number(f.value); if (Number.isFinite(n)) q = q.lte(f.column, n); }
+    else if (f.op === 'eq') q = q.eq(f.column, f.value);
     else q = q.ilike(f.column, `%${f.value}%`);
   }
 

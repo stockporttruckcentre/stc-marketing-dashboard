@@ -28,12 +28,14 @@ import { BODY_TYPES } from './lexicon';
 
 export type FieldKind = 'money' | 'number' | 'text' | 'longtext' | 'date' | 'enum';
 
+export type WritableEntity = 'trailers' | 'contacts' | 'posts';
+
 export type WritableField = {
   /** The column, exactly as the table spells it. */
   key: string;
   label: string;
   kind: FieldKind;
-  entity: 'trailers' | 'contacts';
+  entity: WritableEntity;
   /** What people call it. Longest match wins, so order does not matter. */
   aliases: string[];
   /** For enums: the words somebody types, mapped to what gets stored. */
@@ -56,6 +58,28 @@ const STOCK_STATUS: Record<string, string> = {
   'sales order': 'sales_order', ordered: 'sales_order', order: 'sales_order', reserved: 'sales_order',
   rental: 'rental', rented: 'rental', hire: 'rental', 'on hire': 'rental',
   scrap: 'scrap', scrapped: 'scrap', 'written off': 'scrap',
+  /* Sold is here so the sentence is understood, not so the column is
+     written. mutate.ts turns it into a handoff to the sales tracker,
+     which is where the price and the commission line belong. Leaving it
+     out meant "mark STC143580 as sold" was not recognised at all. */
+  sold: 'sold', gone: 'sold', 'sold it': 'sold', sell: 'sold', 'sell it': 'sold',
+};
+
+const POST_STATUS: Record<string, string> = {
+  draft: 'draft', drafts: 'draft',
+  'pending review': 'pending_review', 'for approval': 'pending_review',
+  'awaiting approval': 'pending_review', unapproved: 'pending_review',
+  /* The words people actually use for the pile waiting on somebody.
+     "Mark all outstanding social posts as approved" needs "outstanding"
+     to mean something, or the instruction has no subset and is refused. */
+  outstanding: 'pending_review', pending: 'pending_review',
+  'to approve': 'pending_review', 'left to approve': 'pending_review',
+  'needs approving': 'pending_review', 'need approving': 'pending_review',
+  unreviewed: 'pending_review', 'not approved': 'pending_review',
+  approved: 'approved', 'signed off': 'approved', ok: 'approved',
+  approve: 'approved', approving: 'approved', 'sign off': 'approved',
+  scheduled: 'scheduled', queued: 'scheduled',
+  posted: 'posted', published: 'posted', live: 'posted',
 };
 
 const DEAL_STATUS: Record<string, string> = {
@@ -114,6 +138,13 @@ export const TRAILER_FIELDS: WritableField[] = [
     capability: 'stock.edit', aliases: ['colour', 'color', 'paint'] },
   { key: 'chassis_number', label: 'Chassis number', kind: 'text', entity: 'trailers',
     capability: 'stock.edit', aliases: ['chassis number', 'chassis no', 'chassis', 'vin'] },
+  /* A unit arrives on chassis and gets its stock number later, so this
+     is written against a record found by chassis rather than by the
+     number being set. mutate.ts knows to read the STC reference as the
+     value here rather than as the record. */
+  { key: 'stc_no', label: 'Stock number', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit',
+    aliases: ['stock number', 'stock no', 'stc number', 'stc no', 'stocknumber', 'unit number'] },
   { key: 'ministry_no', label: 'Ministry number', kind: 'text', entity: 'trailers',
     capability: 'stock.edit', aliases: ['ministry number', 'ministry no', 'ministry'] },
   { key: 'mot_date', label: 'MOT', kind: 'date', entity: 'trailers',
@@ -176,8 +207,14 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['contact name', 'contact', 'name', 'who to ask for'] },
   { key: 'email', label: 'Email', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['email', 'email address', 'e mail'] },
+  /* "number" is not one of these. It used to be, and "add stock number
+     STC150001 to C734105" was filed as a phone number, on the wrong
+     record, with a chassis number for a value. An alias that vague
+     claims every sentence with a digit in it. */
   { key: 'phone', label: 'Phone', kind: 'text', entity: 'contacts',
-    capability: 'crm.edit', aliases: ['phone', 'phone number', 'telephone', 'number', 'mobile', 'landline'] },
+    capability: 'crm.edit',
+    aliases: ['phone', 'phone number', 'telephone', 'telephone number', 'mobile',
+              'mobile number', 'landline', 'tel', 'contact number'] },
   { key: 'location', label: 'Location', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['location', 'town', 'city', 'area', 'region', 'based in'] },
   { key: 'address', label: 'Address', kind: 'text', entity: 'contacts',
@@ -226,7 +263,26 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['note', 'notes', 'comment', 'comments', 'remark'] },
 ];
 
-export const WRITABLE_FIELDS: WritableField[] = [...TRAILER_FIELDS, ...CONTACT_FIELDS];
+/* -------------------------------------------------------------
+   Social posts.
+
+   Here because approving is an instruction people give in bulk and by
+   voice: "mark all outstanding social posts as approved". Approving is
+   its own capability, so somebody who writes posts cannot wave their
+   own through.
+   ------------------------------------------------------------- */
+export const POST_FIELDS: WritableField[] = [
+  { key: 'status', label: 'Status', kind: 'enum', entity: 'posts', vocabulary: POST_STATUS,
+    capability: 'marketing.approve',
+    aliases: ['post status', 'social status', 'approval', 'status'] },
+  { key: 'scheduled_date', label: 'Scheduled date', kind: 'date', entity: 'posts',
+    capability: 'marketing.edit',
+    aliases: ['scheduled date', 'schedule date', 'post date', 'publish date', 'going out on'] },
+  { key: 'caption', label: 'Caption', kind: 'longtext', entity: 'posts', arithmetic: true,
+    capability: 'marketing.edit', aliases: ['caption', 'post caption'] },
+];
+
+export const WRITABLE_FIELDS: WritableField[] = [...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS];
 
 /** Every field this person is allowed to write, for the checks and the empty state. */
 export function writableFor(caps: Set<CrmCapability>): WritableField[] {

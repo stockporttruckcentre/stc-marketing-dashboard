@@ -21,7 +21,7 @@ import {
 } from './lexicon';
 
 export type PlanFilter = {
-  key: string; column: string; op: 'eq' | 'ilike'; value: string; label: string;
+  key: string; column: string; op: 'eq' | 'ilike' | 'gte' | 'lte'; value: string; label: string;
 };
 
 export type QueryPlan = {
@@ -243,6 +243,25 @@ export function parseQuery(input: string): QueryPlan | null {
     }
   }
 
+  /* --- how much ---
+     "Blue curtainsiders between 5k and 10k" used to answer with every
+     blue curtainsider, because a price bracket is not a word the
+     vocabulary knows. Under, over and between all land on the same
+     column: whichever amount the sentence is about, or the price. */
+  const bracket = readBracket(text);
+  if (bracket && entity.amounts.length) {
+    const amt = entity.amounts.find((a) => a.words.some((w) => lower.includes(w))) ?? entity.amounts[0];
+    if (bracket.min != null) {
+      filters.push({ key: 'min', column: amt.column, op: 'gte', value: String(bracket.min),
+        label: `${amt.label} over ${money(bracket.min)}` });
+    }
+    if (bracket.max != null) {
+      filters.push({ key: 'max', column: amt.column, op: 'lte', value: String(bracket.max),
+        label: `${amt.label} under ${money(bracket.max)}` });
+    }
+    confidence += 4;
+  }
+
   /* --- how long ---
      There is no length column, so a size matches against the description,
      which is where the spec sheet ends up. */
@@ -256,8 +275,14 @@ export function parseQuery(input: string): QueryPlan | null {
   // Free-text filters take proper nouns: "how many Schmitz in Hyde".
   const entities = extract(text, tokenise(text));
   const freeSpecs = entity.filters.filter((f) => f.freeText);
+  /* A word already used by a vocabulary phrase is spent.
+     Matching on the whole phrase was not enough: "how many social posts
+     are left to approve" consumed "left to approve" as the status, and
+     then read the leftover "approve" as the name of the person who
+     wrote them. Any word inside a consumed phrase is gone. */
+  const spentWords = new Set(consumed.flatMap((c) => c.toLowerCase().split(/\s+/)));
   const availableNouns = entities.properNouns.filter(
-    (n) => !consumed.some((c) => c.toLowerCase() === n.toLowerCase()) && !isReservedWord(n),
+    (n) => !spentWords.has(n.toLowerCase()) && !isReservedWord(n),
   );
   if (availableNouns.length && freeSpecs.length) {
     // "to X" / "for X" is the customer; "in X" / "at X" is the location.
@@ -285,8 +310,15 @@ export function parseQuery(input: string): QueryPlan | null {
     if (dim) { groupBy = { column: dim.column, label: dim.label }; confidence += 5; }
   }
 
-  // --- period ---------------------------------------------------------
-  const range = entities.range
+  /* --- period ---
+     In stock is a state you are in now, not something that happened on a
+     date, so "how many trailers in stock today" is asking about right
+     now and a range on the dispatch date would answer nothing. Any other
+     period alongside it is somebody being loose with words, and the
+     state is the part they meant. */
+  const presentTense = filters.some((f) => f.key === 'status' && f.value === 'in_stock');
+  const dropRange = presentTense && /^(today|this week|this month|this year)$/.test(entities.range?.label ?? '');
+  const range = entities.range && !dropRange
     ? { from: entities.range.from.toISOString(), to: entities.range.to.toISOString(), label: entities.range.label }
     : undefined;
   if (range) confidence += 3;
@@ -313,6 +345,52 @@ export function parseQuery(input: string): QueryPlan | null {
     summary: bits.join(' '),
     confidence,
   };
+}
+
+/**
+ * A price bracket, in the shorthand people use for one.
+ *
+ *   between 5k and 10k        5000 to 10000
+ *   from £5,000 to £10,000    the same
+ *   under 10k / below 10k     no floor
+ *   over 5k / more than 5k    no ceiling
+ *   5k-10k                    the same, written the fast way
+ */
+function readBracket(text: string): { min: number | null; max: number | null } | null {
+  const t = text.toLowerCase().replace(/,/g, '');
+  const num = String.raw`(?:£|\$|€)?\s*(\d+(?:\.\d+)?)\s*(k|m|grand)?`;
+  const scale = (n: string, s?: string) => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return null;
+    const suffix = (s ?? '').toLowerCase();
+    if (suffix === 'k' || suffix === 'grand') return v * 1000;
+    if (suffix === 'm') return v * 1_000_000;
+    return v;
+  };
+
+  // The dash alternatives are escapes rather than the characters
+  // themselves, because people paste all three and the repo bans two of
+  // them on sight.
+  const DASH = String.raw`[-\u2013\u2014]`;
+  const span = t.match(new RegExp(String.raw`\b(?:between|from)\s+${num}\s*(?:and|to|${DASH})\s*${num}`))
+    ?? t.match(new RegExp(String.raw`\b${num}\s*(?:${DASH}|to)\s*${num}\b`));
+  if (span) {
+    const min = scale(span[1], span[2]);
+    const max = scale(span[3], span[4]);
+    if (min != null && max != null) return { min: Math.min(min, max), max: Math.max(min, max) };
+  }
+
+  const under = t.match(new RegExp(String.raw`\b(?:under|below|less than|cheaper than|up to|no more than|max)\s+${num}`));
+  if (under) { const v = scale(under[1], under[2]); if (v != null) return { min: null, max: v }; }
+
+  const over = t.match(new RegExp(String.raw`\b(?:over|above|more than|at least|north of|from)\s+${num}`));
+  if (over) { const v = scale(over[1], over[2]); if (v != null) return { min: v, max: null }; }
+
+  return null;
+}
+
+function money(n: number): string {
+  return `£${n.toLocaleString('en-GB', { maximumFractionDigits: 0 })}`;
 }
 
 /** Serialisable form, for posting to the query route. */

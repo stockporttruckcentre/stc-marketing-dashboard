@@ -28,7 +28,8 @@ type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'an
 
 /** What the server says a write is about to do, before it does it. */
 type EditPreview = {
-  recordId: string;
+  recordId?: string;
+  recordIds?: string[];
   recordLabel: string;
   recordSub?: string;
   fieldLabel: string;
@@ -36,6 +37,12 @@ type EditPreview = {
   after: string;
   unchanged?: boolean;
   caution?: string | null;
+  /** Several records at once, or every record matching a description. */
+  bulk?: boolean;
+  count?: number;
+  /** Understood here, finished somewhere else. Nothing to save. */
+  handoff?: 'markSold';
+  link?: { href: string; label: string };
 };
 type Outcome = { ok: boolean; message: string; detail?: string; link?: { href: string; label: string } };
 
@@ -399,7 +406,10 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         entity: p.entity, fieldKey: p.field.key, op: p.op, value: p.value,
-        target: p.target?.text, recordId,
+        targets: p.targets.map((t) => (t.kind === 'filter'
+          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
+          : { kind: t.kind, text: t.text })),
+        recordId, handoff: p.handoff,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
 
@@ -426,7 +436,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         entity: edit.entity, fieldKey: edit.field.key, op: edit.op, value: edit.value,
-        recordId: editPreview.recordId, confirm: true,
+        // A bulk change is defined by its description, not by ids, so the
+        // targets go back up rather than the rows they matched.
+        targets: edit.targets.map((t) => (t.kind === 'filter'
+          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
+          : { kind: t.kind, text: t.text })),
+        recordIds: editPreview.recordIds, recordId: editPreview.recordId,
+        confirm: true,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
     setEditPreview(null);
@@ -830,6 +846,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
             onPick={(id) => { if (edit) previewEdit(edit, id); }}
             onApply={applyEdit}
             onCancel={reset}
+            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -1130,6 +1147,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
             onPick={(id) => { if (edit) previewEdit(edit, id); }}
             onApply={applyEdit}
             onCancel={reset}
+            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -1177,13 +1195,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    that picks the first Dawson and writes to it is a bar that eventually
    writes to the wrong Dawson.
    ============================================================= */
-function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel }: {
+function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, onGo }: {
   preview: EditPreview | null;
   candidates: Candidate[] | null;
   summary: string;
   onPick: (id: string) => void;
   onApply: () => void;
   onCancel: () => void;
+  onGo: (href: string) => void;
 }) {
   if (candidates) {
     return (
@@ -1262,9 +1281,21 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel }
           )}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <Button variant="primary" size="sm" onClick={onApply}>
-              <Check size={12} /> Save it
-            </Button>
+            {/* Selling is understood here and finished on the stock
+                list, where the price and the commission line are. A
+                Save button that quietly changed a status column would
+                leave the tracker out of step with the yard. */}
+            {preview.handoff === 'markSold'
+              ? (
+                <Button variant="primary" size="sm" onClick={() => onGo(preview.link?.href ?? '/dashboard/sales')}>
+                  {preview.link?.label ?? 'Open the trailer'} <ArrowRight size={12} />
+                </Button>
+              )
+              : (
+                <Button variant="primary" size="sm" onClick={onApply}>
+                  <Check size={12} /> {preview.bulk ? `Change all ${preview.count}` : 'Save it'}
+                </Button>
+              )}
             <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
           </div>
         </div>

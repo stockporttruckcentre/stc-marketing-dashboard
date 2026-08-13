@@ -102,6 +102,19 @@ function parseRange(text: string): { from: Date; to: Date; label: string } | nul
     return { from: startOfDay(from), to: now, label: `last ${unit}` };
   }
 
+  /* A single day is a period too. "How much revenue did we make today"
+     used to come back with no range at all and answer for all time,
+     because "today" was being stripped as a politeness word. */
+  if (/\btoday\b/.test(t)) {
+    const from = startOfDay(now);
+    const to = new Date(from); to.setDate(to.getDate() + 1);
+    return { from, to, label: 'today' };
+  }
+  if (/\byesterday\b/.test(t)) {
+    const from = startOfDay(now); from.setDate(from.getDate() - 1);
+    const to = new Date(from); to.setDate(to.getDate() + 1);
+    return { from, to, label: 'yesterday' };
+  }
   if (/\bthis week\b/.test(t)) {
     const from = startOfDay(now);
     const to = new Date(from); to.setDate(to.getDate() + 7);
