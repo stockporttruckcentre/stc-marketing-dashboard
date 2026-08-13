@@ -16,7 +16,8 @@
     "check:gaps": "tsx scripts/command-gaps.ts",
     "check:litmus": "tsx scripts/command-litmus.ts",
     "check:sweep": "tsx scripts/command-sweep.ts",
-    "check:audit": "tsx scripts/command-audit.ts"
+    "check:audit": "tsx scripts/command-audit.ts",
+    "check:score": "tsx scripts/command-score.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
