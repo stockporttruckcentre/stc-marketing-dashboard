@@ -52,7 +52,19 @@ export type CrmCapability =
   | 'crm.enrich'
   /** Bulk data in and out. */
   | 'crm.import'
-  | 'crm.export';
+  | 'crm.export'
+  /* ---- beyond the CRM tab ----
+     The command bar reaches the whole product, so it needs to know what
+     somebody may do outside this one screen. Kept here rather than in a
+     second file, because two permission models is how they drift. */
+  /** Manage the team: add people, change roles, set dashboards. */
+  | 'admin.users'
+  /** Trailer stock: add, edit, mark sold. */
+  | 'stock.edit'
+  /** Social planner and brand kit. */
+  | 'marketing.edit'
+  /** Approve social posts for publishing. */
+  | 'marketing.approve';
 
 export type CrmCapabilities = Set<CrmCapability>;
 
@@ -83,14 +95,16 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
+    'admin.users', 'stock.edit', 'marketing.edit', 'marketing.approve',
   ],
   sales: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.create', 'crm.delete',
     'crm.assign', 'crm.delegate', 'crm.manageLists', 'crm.proposal',
-    'crm.enrich', 'crm.import', 'crm.export',
+    'crm.enrich', 'crm.import', 'crm.export', 'stock.edit',
   ],
   marketer: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.export',
+    'stock.edit', 'marketing.edit',
   ],
   viewer: [
     'crm.view', 'crm.viewGlobal', 'crm.export',

@@ -165,10 +165,25 @@ has, and understand however somebody chooses to type it: their word order,
 their jargon, their typos, the words they leave out.
 
 **Whenever you add a feature, action or screen anywhere in the app, you add
-its words to `lib/command/lexicon.ts` and a case to
-`scripts/command-coverage-check.ts` in the same change.** A feature the bar
-cannot reach is invisible, and the original bug was exactly that: eight
-intents against twelve screens, so typing "meeting" did nothing.
+an entry to `lib/command/actions.ts`, its words to `lib/command/lexicon.ts`,
+and a case to `scripts/command-coverage-check.ts, in the same change.** A
+feature the bar cannot reach is invisible, and the original bug was exactly
+that: eight intents against twelve screens, so typing "meeting" did nothing.
+
+### Nothing you cannot do is ever offered
+
+Every action in `actions.ts` names the capability it needs, and the bar
+filters on it before scoring. A read only viewer typing "elevate dave to
+admin" sees nothing, because an action that appears and then refuses
+teaches people the tool is unreliable.
+
+This is why screens go through `actions.ts` rather than the old feature
+registry: that registry had no notion of permission, so it kept offering
+the Team screen to people who could not open it.
+
+The coverage check sweeps every action against all four roles in both
+directions: reachable by everybody who is allowed it, invisible to
+everybody who is not.
 
 ### Generated, not listed
 

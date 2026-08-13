@@ -40,7 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="app">
       <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
       <div className="main">
-        <TopBar />
+        <TopBar role={p.role} />
         <main className="page">{children}</main>
       </div>
     </div>

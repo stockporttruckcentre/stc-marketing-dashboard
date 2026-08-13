@@ -50,6 +50,7 @@ const contacts: CRMContact[] = COMPANIES.map((c, i) => ({
   date_of_enquiry: null, links: [], created_at: '', updated_at: '',
 } as any));
 
+// roleParam
 export default function Preview() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
@@ -59,7 +60,10 @@ export default function Preview() {
           that does not. */}
       <div className="sidebar" style={{ padding: 16, color: 'var(--fg-2)' }}>Nav</div>
       <div className="main" style={{ minWidth: 0 }}>
-        <TopBar />
+        {/* ?role=viewer to see the bar as somebody with less access. */}
+        <TopBar role={(typeof window !== 'undefined'
+          ? (new URLSearchParams(window.location.search).get('role') as any)
+          : null) ?? 'admin'} />
         <main className="page" style={{ maxWidth: 'none' }}>
           <CrmWorkspace
             profile={profile} lists={lists} members={[]} profiles={others}

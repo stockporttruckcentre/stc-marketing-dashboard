@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { Hash, Bell, HelpCircle } from 'lucide-react';
 import { CommandBar } from '@/components/dashboard/CommandBar';
+import type { UserRole } from '@/lib/types';
 
 const CRUMBS: Record<string, [string, string]> = {
   '/dashboard':           ['Workspace', 'Dashboard'],
@@ -17,7 +18,7 @@ const CRUMBS: Record<string, [string, string]> = {
   '/dashboard/settings':  ['Admin',     'Settings'],
 };
 
-export function TopBar() {
+export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
   const path = usePathname();
 
   let crumbs: [string, string] = ['Workspace', 'Dashboard'];
@@ -39,7 +40,7 @@ export function TopBar() {
           its left and the bell to its right: it is the widest thing in a
           52px bar and without the gaps it reads as one welded strip. */}
       <div style={{ flex: 1, minWidth: 0, maxWidth: 620, margin: '0 18px' }}>
-        <CommandBar variant="bar" />
+        <CommandBar variant="bar" role={role} />
       </div>
 
       <div className="topbar__right">

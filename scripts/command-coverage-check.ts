@@ -19,6 +19,9 @@
 import { parseQuery } from '../lib/command/query';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
 import { STATE_PHRASES, BODY_TYPES, DEPOTS } from '../lib/command/lexicon';
+import { ACTIONS, suggestActions, availableActions } from '../lib/command/actions';
+import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
+import type { UserRole } from '../lib/types';
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -31,20 +34,100 @@ function ok(name: string, condition: boolean, detail = '') {
 
 /* ---------- every screen is reachable ---------- */
 
-for (const f of FEATURES) {
-  for (const term of [f.title, ...(f.aliases ?? [])]) {
-    const hits = suggestFeatures(term, 6);
-    ok(`feature "${term}" reaches ${f.title}`,
-      hits.some((h) => h.path === f.path),
-      `-> ${hits.map((h) => h.label).join(', ') || 'nothing'}`);
+
+
+/* ---------- every action, in every phrasing, for every role ----------
+
+   This is the sweep that matters, and the one that was missing. The bar
+   is not a stock search: it has to reach navigation, creation, record
+   actions, imports, exports, session and admin, and it has to show a
+   person only what they can actually do.
+
+   Verbs times objects, both orders, for each of the four roles. */
+
+const ROLES: UserRole[] = ['admin', 'sales', 'marketer', 'viewer'];
+const CAPS = Object.fromEntries(ROLES.map((r) => [r, capabilitiesFor({ role: r })])) as
+  Record<UserRole, ReturnType<typeof capabilitiesFor>>;
+
+for (const a of ACTIONS) {
+  // Somebody who is allowed this action must reach it, from every object
+  // word it claims and from every verb and object pair, in both orders.
+  const allowed = ROLES.filter((r) => !a.capability || CAPS[r].has(a.capability));
+
+  // Lusha is switched off for everybody at rollout, so its action having
+  // no role is the lock working rather than a gap. Asserted the other way
+  // round so that when the lock lifts, this line is what reminds us the
+  // action comes back.
+  const lockedOff = LUSHA_LOCKED && a.capability === 'crm.enrich';
+  if (lockedOff) {
+    ok(`action ${a.id} is hidden while Lusha is locked`, allowed.length === 0);
+  } else {
+    ok(`action ${a.id} is reachable by somebody`, allowed.length > 0, 'no role can use it');
   }
-  // Every offered action has to survive the parser too, or the suggestion
-  // hands somebody a phrase that then does nothing.
-  for (const a of f.actions ?? []) {
-    const phrase = a.phrase.trim();
-    ok(`action "${a.label}" parses`, phrase.length > 0);
+
+  const role = allowed[0];
+  if (role) {
+    for (const obj of a.objects) {
+      const hits = suggestActions(obj, CAPS[role], 8);
+      ok(`${a.id}: "${obj}"`, hits.some((h) => h.action.id === a.id),
+        `-> ${hits.map((h) => h.action.id).join(', ') || 'nothing'}`);
+    }
+    for (const verb of (a.verbs ?? []).slice(0, 4)) {
+      for (const obj of a.objects.slice(0, 3)) {
+        for (const phrase of [`${verb} ${obj}`, `${obj} ${verb}`, `${verb} the ${obj} please`]) {
+          const hits = suggestActions(phrase, CAPS[role], 8);
+          ok(`${a.id}: "${phrase}"`, hits.some((h) => h.action.id === a.id),
+            `-> ${hits.map((h) => h.action.id).join(', ') || 'nothing'}`);
+        }
+      }
+    }
+    for (const phrase of a.phrases ?? []) {
+      const hits = suggestActions(phrase, CAPS[role], 8);
+      ok(`${a.id}: phrase "${phrase}"`, hits.some((h) => h.action.id === a.id),
+        `-> ${hits.map((h) => h.action.id).join(', ') || 'nothing'}`);
+    }
+  }
+
+  // And a person who is not allowed it must never be offered it, from
+  // any of its words. An action that appears and then refuses teaches
+  // people the tool is unreliable.
+  for (const r of ROLES.filter((x) => !allowed.includes(x))) {
+    for (const obj of a.objects) {
+      const hits = suggestActions(obj, CAPS[r], 8);
+      ok(`${a.id} hidden from ${r}: "${obj}"`, !hits.some((h) => h.action.id === a.id));
+    }
+    for (const phrase of a.phrases ?? []) {
+      ok(`${a.id} hidden from ${r}: "${phrase}"`,
+        !suggestActions(phrase, CAPS[r], 8).some((h) => h.action.id === a.id));
+    }
   }
 }
+
+// The case named in the requirement, spelled out.
+ok('admin can elevate somebody',
+  suggestActions('elevate dave to admin', CAPS.admin, 8).some((h) => h.action.id === 'admin.role'));
+for (const r of ['sales', 'marketer', 'viewer'] as UserRole[]) {
+  ok(`${r} cannot elevate anybody`,
+    !suggestActions('elevate dave to admin', CAPS[r], 8).some((h) => h.action.id === 'admin.role'));
+}
+
+/* Screens are reached through the action registry, because that is the
+   one that knows about permission. This asserts the two lists cannot
+   drift: every screen the app has, and every word anybody might type for
+   it, has to resolve for somebody. */
+for (const f of FEATURES) {
+  ok(`screen ${f.path} has an action`, ACTIONS.some((a) => a.path === f.path));
+  for (const term of [f.title, ...(f.aliases ?? [])]) {
+    const reached = ROLES.some((r) =>
+      suggestActions(term, CAPS[r], 8).some((h) => h.action.path === f.path));
+    ok(`"${term}" reaches ${f.title}`, reached);
+  }
+}
+
+// A viewer sees fewer things than an admin, and both see something.
+ok('a viewer has actions', availableActions(CAPS.viewer).length > 0);
+ok('an admin has more than a viewer',
+  availableActions(CAPS.admin).length > availableActions(CAPS.viewer).length);
 
 /* ---------- the combinations ---------- */
 

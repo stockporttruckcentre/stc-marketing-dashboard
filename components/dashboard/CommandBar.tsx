@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles } from 'lucide-react';
 import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
-import { suggestFeatures, type Suggestion } from '@/lib/command/features';
+import { type Suggestion } from '@/lib/command/features';
+import { suggestActions } from '@/lib/command/actions';
+import { capabilitiesFor } from '@/lib/crm/permissions';
+import type { UserRole } from '@/lib/types';
 import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
@@ -46,8 +49,14 @@ const SHORT_EXAMPLES = [
  * `seed` lets the quick action buttons drive this bar instead of each
  * one growing its own modal. Bump the nonce to re-apply the same text.
  */
-export function CommandBar({ seed, variant = 'panel' }: {
+export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   seed?: { text: string; nonce: number };
+  /**
+   * What this person may do. Actions they cannot reach are never
+   * offered, because a suggestion that then refuses teaches people the
+   * bar is unreliable. "Elevate Dave to admin" exists for one person.
+   */
+  role?: UserRole;
   /**
    * `panel` is the dashboard card. `bar` is the compact form that lives
    * in the top bar on every page: a 30px input whose results float below
@@ -121,7 +130,31 @@ export function CommandBar({ seed, variant = 'panel' }: {
   const preview = parsed && parsed.confidence >= 6 ? parsed : null;
   // Everything the app can do, ranked against what has been typed. This is
   // what stops a bare word like "meeting" hitting a dead end.
-  const features = useMemo(() => suggestFeatures(text, 5), [text]);
+  const caps = useMemo(() => capabilitiesFor({ role }), [role]);
+
+  /**
+   * Everything the product can do, filtered to this person, ahead of the
+   * plain screen list. An action is a better answer than a screen: "add
+   * a contact" should offer adding a contact, not just opening the CRM.
+   */
+  const actions = useMemo(
+    () => suggestActions(text, caps, 5).map((h) => ({
+      kind: 'action' as const,
+      label: h.action.label,
+      sub: h.action.blurb,
+      path: h.action.seed ? undefined : h.action.path,
+      phrase: h.action.seed,
+      score: h.score,
+    })),
+    [text, caps],
+  );
+
+  /* The old feature registry used to supply these. It had no notion of
+     permission, so a read only viewer typing "elevate dave to admin" was
+     still offered the Team screen: the action was hidden and the door to
+     it was left open. Screens come from the action registry now, which
+     knows who may see them. */
+  const features: Suggestion[] = [];
 
   /**
    * Records that match what has been typed.
@@ -156,7 +189,20 @@ export function CommandBar({ seed, variant = 'panel' }: {
     return () => { cancelled = true; clearTimeout(t); };
   }, [text, stage]);
 
-  const suggestions = useMemo(() => [...features, ...records].slice(0, 7), [features, records]);
+  const suggestions = useMemo(() => {
+    // Actions first, then screens the action list did not already cover,
+    // then matching records. Deduped on where they lead, so "stock" does
+    // not offer the stock list twice.
+    const seen = new Set<string>();
+    const out: Suggestion[] = [];
+    for (const s of [...actions, ...features, ...records] as Suggestion[]) {
+      const key = s.path ?? s.phrase ?? s.label;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }
+    return out.slice(0, 7);
+  }, [actions, features, records]);
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
