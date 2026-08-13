@@ -174,6 +174,13 @@ const CLAUSE_END = /[,;.]|\b(?:and|but|with|then|order(?:ed)? by|sorted by)\b/;
 const COMPARATORS = ['versus', 'vs', 'v', 'against', 'compared to', 'compared with',
                      'next to', 'side by side with'];
 
+/* "Compare Don Bur and Krone" is the same request as "Don Bur versus
+   Krone", and it is the way most people say it out loud. The verb has to
+   be there: a bare "and" between two names is a list, not a comparison,
+   and reading every "and" as one would turn half the sentences in this
+   application into side by side charts. */
+const COMPARE_VERBS = ['compare', 'contrast', 'stack up', 'side by side'];
+
 /* -------------------------------------------------------------
    Emptiness.
 
@@ -353,6 +360,13 @@ export function readGrammar(input: string): Grammar {
     new RegExp(String.raw`\b(?:show me|give me|find|list|get me|pull|bring up|bring me)\s+${NUM}\b`),
     new RegExp(String.raw`\b${NUM}\s+(?:\w+\s+){0,3}?${NOUNISH}\b`),
   ];
+  /* A figure inside a comparison is a threshold, not a row count.
+     "More than 30 trailers on their fleet" asked for customers with big
+     fleets and came back with thirty rows, which is a plausible number
+     of results and the answer to nothing. Same for "contacted in the
+     last 14 days", which returned fourteen leads. */
+  const THRESHOLD = new RegExp(String.raw`\b(?:over|above|more than|greater than|at least|under|below|less than|fewer than|up to|no more than|max|between|within|last|past|next|in the last|in the past)\s+(?:£|\$|€)?\s*NUMBER\b`
+    .replace('NUMBER', String.raw`(?:\d{1,4}|${numberWords})`));
   let n: number | null = null;
   let limitAt = -1;
   for (const re of shapes) {
@@ -360,6 +374,11 @@ export function readGrammar(input: string): Grammar {
     if (!m) continue;
     const v = /^\d+$/.test(m[1]) ? Number(m[1]) : WORD_NUMBERS[m[1]];
     if (!Number.isFinite(v) || v <= 0) continue;
+    // Was this figure already spoken for by a comparison or a period?
+    const claimed = [...t.matchAll(new RegExp(THRESHOLD, 'g'))]
+      .some((x) => (m.index ?? -1) >= (x.index ?? 0)
+        && (m.index ?? -1) < (x.index ?? 0) + x[0].length + 2);
+    if (claimed) continue;
     n = v; limitAt = m.index ?? -1;
     break;
   }
@@ -428,7 +447,7 @@ export function readGrammar(input: string): Grammar {
   let hint: string | undefined;
 
   const noneOf = t.match(
-    /\b(?:with no|with none of|without any|without an|without a|without|having no|that have no|that has no|missing a|missing an)\s+([a-z][a-z0-9 ]{2,40})/);
+    /(?:\bwith no|\bwith none of|\bwithout any|\bwithout an|\bwithout a|\bwithout|\bhaving no|\bhaving none of|\bthat have no|\bthat has no|\bwho have no|\bhave no|\bhas no|\bgot no|\bmissing a|\bmissing an|\band no|\bor no|\bbut no|,\s*no)\s+([a-z][a-z0-9 ]{2,40})/);
   if (noneOf) {
     /* Captured to the end of the clause rather than to the first short
        word. The lazy version stopped at "at", "on" or "in", which
@@ -468,18 +487,61 @@ export function readGrammar(input: string): Grammar {
     });
   }
 
-  /* --- comparison --- */
+  /* --- comparison ---
+     Two shapes. "Don Bur versus Krone" puts the comparator between the
+     two things; "compare Don Bur and Krone" puts a verb in front and
+     joins them with "and". Both are how people say it, and only the
+     first was read.
+
+     Up to two words a side, because half the makes and every depot in
+     this business is a single word and the other half are not: Don Bur,
+     Gray & Adams, Lawrence David. Whatever comes out is checked against
+     the data before it becomes a comparison, so a pair of ordinary words
+     resolves to nothing rather than to a chart of two non-existent
+     makes. */
+  let comparison: { left: string; right: string; at: number; said: string } | null = null;
+
+  /* Words adjacent to the comparator, counted rather than matched.
+     A regex with a multi word side and no anchor takes the leftmost
+     match it can, so "how many trailers at Carrington versus Bredbury"
+     read the left side as "trailers at carrington". The comparison
+     still worked and the depot filter did not get removed, so the
+     answer narrowed to Carrington and then compared Carrington with
+     itself. Counting back from the comparator cannot do that. */
+  const beside = (whole: string, at: number, len: number) => {
+    const before = whole.slice(0, at).trim().split(/\s+/).filter(Boolean);
+    const after = whole.slice(at + len).trim().split(/\s+/).filter(Boolean);
+    return {
+      /* Two words then one, so "Don Bur" and "Gray & Adams" survive and
+         a single word name still resolves when the pair does not. */
+      lefts: [before.slice(-2).join(' '), before.slice(-1).join(' ')].filter(Boolean),
+      rights: [after.slice(0, 2).join(' '), after.slice(0, 1).join(' ')].filter(Boolean),
+    };
+  };
+
   for (const c of [...COMPARATORS].sort((a, b) => b.length - a.length)) {
-    const m = t.match(new RegExp(String.raw`\b([a-z0-9']{2,20})\s+${c}\s+([a-z0-9']{2,20})\b`));
-    if (!m) continue;
-    const [left, right] = [m[1], m[2]];
-    if (left === right) continue;
-    operations.push({
-      op: 'compare', against: [left, right],
-      label: `${left} against ${right}`, at: m.index ?? -1,
-    });
-    consumed.push(c);
+    const at = t.indexOf(` ${c} `);
+    if (at === -1) continue;
+    const { lefts, rights } = beside(t, at + 1, c.length);
+    if (!lefts.length || !rights.length) continue;
+    comparison = { left: lefts[0], right: rights[0], at, said: c };
     break;
+  }
+  if (!comparison) {
+    for (const v of [...COMPARE_VERBS].sort((a, b) => b.length - a.length)) {
+      const m = t.match(new RegExp(
+        String.raw`\b${v}\s+(.{2,30}?)\s+(?:and|with|to|against|versus|vs)\s+(.{2,30}?)(?=\s|$)`));
+      if (!m) continue;
+      comparison = { left: m[1].trim(), right: m[2].trim(), at: m.index ?? -1, said: v };
+      break;
+    }
+  }
+  if (comparison && comparison.left !== comparison.right) {
+    operations.push({
+      op: 'compare', against: [comparison.left, comparison.right],
+      label: `${comparison.left} against ${comparison.right}`, at: comparison.at,
+    });
+    consumed.push(comparison.said, comparison.left, comparison.right);
   }
 
   return { operations, consumed, negatedText, negates };
