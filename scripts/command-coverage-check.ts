@@ -17,12 +17,14 @@
    npm run check:coverage
    ============================================================= */
 import { parseQuery } from '../lib/command/query';
+import { ENTITIES as ENTITIES_FOR_SPACE } from '../lib/command/schema';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
 import { STATE_PHRASES, BODY_TYPES, DEPOTS } from '../lib/command/lexicon';
 import { ACTIONS, suggestActions, availableActions } from '../lib/command/actions';
 import { composeSuggestions } from '../lib/command/compose';
 import { parseEdit, composeEdits } from '../lib/command/mutate';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
+import { parseSelection, selectionSpace } from '../lib/command/select';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
 import type { UserRole } from '../lib/types';
 
@@ -495,6 +497,69 @@ function sampleValue(f: { kind: string; vocabulary?: Record<string, string> }): 
     case 'enum': return Object.keys(f.vocabulary ?? {})[0] ?? 'yes';
     default: return 'Carrington';
   }
+}
+
+/* ---------- selectors compose ----------
+
+   A command is verb x rows x field x value, and "which rows" is the
+   combinatorial half. These assert that clauses stack rather than
+   overwriting each other, and that the two clause kinds which look
+   alike stay apart: "with a fleet" is a presence test and "with a fleet
+   over 50" is a comparison, and reading the second as the first throws
+   the number away silently. */
+
+const SELECTIONS: { q: string; entity: string; expect: string[] }[] = [
+  { q: 'customers in Manchester with no owner not contacted in 30 days with a fleet over 50',
+    entity: 'contacts',
+    expect: ['fleet over 50', 'no owner', 'not contacted in 30 days', 'in Manchester'] },
+  { q: 'quoted customers in bredbury with no email',
+    entity: 'contacts', expect: ['no email', 'status quoted', 'in Bredbury'] },
+  { q: 'unassigned leads never contacted',
+    entity: 'deals', expect: ['nobody owns', 'never contacted'] },
+  { q: 'trailers in stock with no mot date',
+    entity: 'trailers', expect: ['no MOT date', 'status in stock'] },
+  { q: 'trailers with a refurb cost over 5k at carrington',
+    entity: 'trailers', expect: ['refurb cost over £5,000', 'in Carrington'] },
+  { q: 'customers with no next action and no phone number',
+    entity: 'contacts', expect: ['no next action', 'no phone number'] },
+];
+
+for (const c of SELECTIONS) {
+  const sel = parseSelection(c.q, 'Alex Ellis');
+  ok(`selector: "${c.q}" parses`, !!sel);
+  if (!sel) continue;
+  ok(`selector: "${c.q}" -> entity`, sel.entity.id === c.entity, sel.entity.id);
+  const labels = sel.conditions.map((x) => x.label);
+  for (const want of c.expect) {
+    ok(`selector: "${c.q}" -> ${want}`, labels.includes(want), labels.join(' + '));
+  }
+  ok(`selector: "${c.q}" keeps every clause`,
+    labels.length === c.expect.length, `got ${labels.length}, want ${c.expect.length}`);
+}
+
+/* The entity noun is not also a value for the entity. "Quoted customers"
+   was coming back as status=customer with the real status discarded. */
+ok('selector: the noun is not a filter',
+  !parseSelection('quoted customers', 'Alex')
+    ?.conditions.some((c) => c.label === 'status customers'));
+
+/* A presence test must not swallow a comparison. */
+const fleet = parseSelection('customers with a fleet over 50', 'Alex');
+ok('selector: a comparison beats a presence test',
+  !!fleet?.conditions.some((c) => c.kind === 'gte' && c.value === 50),
+  fleet?.conditions.map((c) => c.label).join(' + '));
+
+/* And a bare presence test still works when there is no number. */
+ok('selector: a presence test survives on its own',
+  !!parseSelection('customers with a phone number', 'Alex')
+    ?.conditions.some((c) => c.kind === 'present'));
+
+/* Every entity the bar answers questions about has to be able to
+   express more than a handful of sets, or that tab still needs
+   clicking through. Asserted per entity so a thin one is named. */
+for (const e of ENTITIES_FOR_SPACE) {
+  const space = selectionSpace(e);
+  ok(`selector space: ${e.id} is more than a handful`, space >= 3, String(space));
 }
 
 console.log(`\n${pass}/${pass + fail} passing`);

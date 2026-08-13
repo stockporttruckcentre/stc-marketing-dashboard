@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from '@/lib/command/fields';
 import { capabilitiesFor } from '@/lib/crm/permissions';
+import type { Condition } from '@/lib/command/select';
 import type { UserRole } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,13 @@ export const dynamic = 'force-dynamic';
 
 type TargetIn =
   | { kind: 'stock' | 'company'; text: string }
-  | { kind: 'filter'; column: string; value: string; label?: string };
+  | { kind: 'filter'; column: string; value: string; label?: string }
+  /**
+   * A composed set of rows: "every customer in Manchester with no owner
+   * nobody has rung in a month". Every condition narrows the last, and
+   * the preview counts what matched before anything is written.
+   */
+  | { kind: 'selection'; conditions: Condition[]; label?: string };
 
 type Body = {
   entity?: WritableEntity;
@@ -133,6 +140,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: `You do not have access to change ${field.label.toLowerCase()}.` });
   }
 
+  const op = body.op ?? 'set';
   const table = TABLES[entity];
   const titleColumn = TITLE[entity];
   const select = ['id', titleColumn, ...SUBS[entity], field.key].filter(
@@ -142,6 +150,19 @@ export async function POST(req: NextRequest) {
   const targets: TargetIn[] = body.targets?.length
     ? body.targets
     : (body.target ? [{ kind: 'stock', text: body.target }] : []);
+
+  /* ---- a composed set of rows --------------------------------------- */
+  const selection = targets.find((t) => t.kind === 'selection') as
+    Extract<TargetIn, { kind: 'selection' }> | undefined;
+
+  if (selection) {
+    return applySelection(supabase, {
+      entity, field, table, titleColumn, select,
+      conditions: selection.conditions,
+      label: selection.label ?? 'those records',
+      op, value: body.value ?? null, confirm: !!body.confirm,
+    });
+  }
 
   /* ---- a description of rows, rather than named ones ---------------- */
   const bulk = targets.find((t) => t.kind === 'filter') as
@@ -201,7 +222,7 @@ export async function POST(req: NextRequest) {
     if (!targets.length) return NextResponse.json({ ok: false, message: 'Name the record to change.' });
 
     for (const t of targets) {
-      if (t.kind === 'filter') continue;
+      if (t.kind === 'filter' || t.kind === 'selection') continue;
       const term = String(t.text ?? '').trim();
       if (!term) continue;
 
@@ -335,5 +356,102 @@ export async function POST(req: NextRequest) {
           ? 'It was empty before.'
           : `It was ${display(field, first.current)}.`),
     link: { href: hrefFor(entity, first.record.id), label: many ? 'Open the first one' : 'Open the record' },
+  });
+}
+
+
+/**
+ * Apply one field to every row a composed selector picks out.
+ *
+ * The conditions are rebuilt server side against an allowlist of the
+ * columns this entity declares, so a crafted request cannot narrow on a
+ * column the parser would never have produced, and cannot use the
+ * selector as a way to read one.
+ *
+ * Nothing is written on the preview pass. It reports the count and a
+ * sample, because "every customer in Manchester nobody has rung" is a
+ * number somebody should see before it becomes an edit.
+ */
+async function applySelection(
+  supabase: ReturnType<typeof createClient>,
+  o: {
+    entity: WritableEntity; field: WritableField; table: string;
+    titleColumn: string; select: string;
+    conditions: Condition[]; label: string;
+    op: 'set' | 'add' | 'subtract' | 'clear';
+    value: string | number | null; confirm: boolean;
+  },
+) {
+  const allowed = new Set(
+    WRITABLE_FIELDS.filter((f) => f.entity === o.entity).map((f) => f.key),
+  );
+  // Columns a selector may narrow on but nobody writes.
+  for (const extra of ['links', 'fleet_size', 'profit', 'profit_pct', 'total_nbv',
+                       'created_at', 'updated_at', 'last_activity_at']) allowed.add(extra);
+
+  const usable = o.conditions.filter((c) => c.kind === 'owner' || allowed.has(c.column));
+  if (!usable.length) {
+    return NextResponse.json({ ok: false, message: 'I could not narrow that down safely.' });
+  }
+
+  let q: any = supabase.from(o.table).select(o.select);
+  for (const c of usable) {
+    switch (c.kind) {
+      case 'eq': q = q.eq(c.column, c.value); break;
+      case 'ilike': q = q.ilike(c.column, `%${c.value}%`); break;
+      case 'empty': q = q.is(c.column, null); break;
+      case 'present': q = q.not(c.column, 'is', null); break;
+      case 'gte': q = q.gte(c.column, c.value); break;
+      case 'lte': q = q.lte(c.column, c.value); break;
+      case 'before': q = q.lt(c.column, c.value); break;
+      case 'after': q = q.gte(c.column, c.value); break;
+      case 'owner':
+        q = c.value === null
+          ? q.is('assigned_to', null)
+          : q.ilike('assigned_to', `%${c.value}%`);
+        break;
+    }
+  }
+
+  const { data, error } = await q.limit(1000);
+  if (error) return NextResponse.json({ ok: false, message: error.message });
+
+  const rows = (data ?? []) as any[];
+  if (!rows.length) {
+    return NextResponse.json({ ok: false, message: `Nothing matches ${o.label}.` });
+  }
+
+  const next = o.op === 'clear' ? null
+    : (o.field.kind === 'money' || o.field.kind === 'number')
+      ? Number(o.value) : o.value;
+
+  if (!o.confirm) {
+    return NextResponse.json({
+      ok: true, preview: true, bulk: true,
+      count: rows.length,
+      recordIds: rows.map((r) => r.id),
+      recordLabel: `${rows.length} ${rows.length === 1 ? 'record' : 'records'}`,
+      recordSub: `${o.label}. ${rows.slice(0, 3).map((r) => labelOf(o.entity, r)).join(', ')}`
+        + (rows.length > 3 ? ` and ${rows.length - 3} more` : ''),
+      fieldLabel: o.field.label,
+      before: 'as they are',
+      after: display(o.field, next),
+      caution: rows.length > 50
+        ? `That is ${rows.length} records in one go. Worth reading the list first.`
+        : (o.field.caution ?? null),
+      link: { href: hrefFor(o.entity, rows[0].id), label: 'Open the first one' },
+    });
+  }
+
+  const ids = rows.map((r) => r.id);
+  const { error: writeErr } = await supabase
+    .from(o.table).update({ [o.field.key]: next }).in('id', ids);
+  if (writeErr) return NextResponse.json({ ok: false, message: writeErr.message });
+
+  return NextResponse.json({
+    ok: true,
+    message: `${o.field.label} set on ${ids.length} ${ids.length === 1 ? 'record' : 'records'}.`,
+    detail: o.label,
+    link: { href: hrefFor(o.entity, ids[0]), label: 'Open the first one' },
   });
 }
