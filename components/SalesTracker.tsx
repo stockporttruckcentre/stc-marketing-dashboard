@@ -8,6 +8,7 @@ import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calen
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
+import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { SALES_TRACKER } from '@/lib/import/dictionary';
 import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
@@ -437,8 +438,13 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
     onSave({ [field]: value } as any);
   }
 
+  // Same guard as the other drawers: the shade is easy to clip on the
+  // way past, and one click should not lose where you were.
+  const dismiss = useDismissGuard(onClose);
+
   return (
-    <div className="drawer-bg" onClick={onClose}>
+    <div className="drawer-bg" {...dismiss.backdropProps}>
+      {dismiss.hint}
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer__head">
           <div>

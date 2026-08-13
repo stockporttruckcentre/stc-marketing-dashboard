@@ -6,6 +6,7 @@ import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEve
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling, Send, ArrowRight, AlertCircle, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { STOCK_TRAILERS } from '@/lib/import/dictionary';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
@@ -543,12 +544,17 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
     onSave({ [field]: value } as any);
   }
 
+  // A trailer drawer holds unsaved edits, so a stray click on the shade
+  // must not throw them away. First click arms, second closes.
+  const dismiss = useDismissGuard(onClose);
+
   const totalNbv = (Number(edit.nbv) || 0) + (Number(edit.refurb_costs) || 0) + (Number(edit.refurb_costs_at_sale) || 0);
   const computedProfit = (Number(edit.sales_price) || 0) - totalNbv;
   const computedProfitPct = edit.sales_price ? computedProfit / Number(edit.sales_price) : null;
 
   return (
-    <div className="drawer-bg" onClick={onClose}>
+    <div className="drawer-bg" {...dismiss.backdropProps}>
+      {dismiss.hint}
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer__head">
           <div style={{ minWidth: 0, flex: 1 }}>

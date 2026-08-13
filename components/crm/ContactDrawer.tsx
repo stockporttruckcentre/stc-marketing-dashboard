@@ -11,6 +11,7 @@ import {
   Button, Badge, Label, SectionHead, EmptyState, NotProvisioned, Alert, type Tone,
 } from '@/components/kit/primitives';
 import { Segmented } from '@/components/kit/forms';
+import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { AddressMap } from './AddressMap';
@@ -73,6 +74,11 @@ export function ContactDrawer({
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => { setEdit(contact); }, [contact]);
+
+  /* The shaded area beside a drawer is easy to hit on the way to
+     something else, and closing on the first click throws away a half
+     written note. First click arms, second closes, Escape closes now. */
+  const dismiss = useDismissGuard(onClose);
 
   const loadAddresses = useCallback(async () => {
     const { data } = await supabase.from('contact_addresses').select('*')
@@ -219,11 +225,12 @@ export function ContactDrawer({
     .filter(Boolean).join(' · ');
 
   return (
-    <div className="kit" onClick={onClose} style={{
+    <div className="kit" {...dismiss.backdropProps} style={{
       position: 'fixed', inset: 0, zIndex: 900,
       background: 'rgba(5, 13, 38, 0.5)',
       display: 'flex', justifyContent: 'flex-end',
     }}>
+      {dismiss.hint}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{

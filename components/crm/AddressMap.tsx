@@ -7,6 +7,7 @@ import {
   Undo2, Redo2, Star, Trash2, LocateFixed,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { Button, Label, Badge, Alert } from '@/components/kit/primitives';
 import type { ContactAddress } from '@/lib/types';
 import 'leaflet/dist/leaflet.css';
@@ -403,6 +404,10 @@ export function AddressMap({
 
   const positioned = (addresses as Pin[]).filter((a) => coordsOf(a) !== null);
 
+  // The map sits over a shaded CRM, so it gets the same guard as the
+  // drawers: a stray click on the shade should not close it.
+  const dismiss = useDismissGuard(onClose);
+
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   if (!mounted) return null;
@@ -411,7 +416,8 @@ export function AddressMap({
     <div className="kit" style={{
       position: 'fixed', inset: 0, zIndex: 950, display: 'flex',
       background: 'rgba(5, 13, 38, 0.55)',
-    }} onClick={onClose}>
+    }} {...dismiss.backdropProps}>
+      {dismiss.hint}
       {/* The panel sits left of the drawer, over a shaded CRM. */}
       <div
         onClick={(e) => e.stopPropagation()}
