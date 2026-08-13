@@ -117,6 +117,11 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'profit', column: 'profit', label: 'profit', words: ['profit', 'margin', 'gross'] },
       { key: 'nbv', column: 'nbv', label: 'book value', words: ['nbv', 'book value', 'cost'] },
       { key: 'retail', column: 'retail_price', label: 'retail price', words: ['retail'] },
+      /* Refurb is money the business talks about constantly and it was
+         not here, so "trailers with refurb over £2k" put the £2k on the
+         sale price and read the word "refurb" as a customer's name. */
+      { key: 'refurb', column: 'refurb_costs', label: 'refurb cost',
+        words: ['refurb', 'refurb cost', 'refurb costs', 'refurbishment', 'rework'] },
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: STOCK_STATUS },
@@ -227,9 +232,20 @@ export const ENTITIES: EntitySpec[] = [
         words: ['contacted', 'spoke', 'spoken', 'heard from', 'chased'] },
     ],
     amounts: [
-      { key: 'fleet', column: 'fleet_size', label: 'fleet size', words: ['fleet', 'vehicles', 'size'] },
+      { key: 'fleet', column: 'fleet_size', label: 'fleet size', words: ['fleet', 'fleet size', 'vehicles'] },
       { key: 'turnover', column: 'turnover', label: 'turnover', words: ['turnover'] },
       { key: 'employees', column: 'employee_count', label: 'employees', words: ['employees', 'staff', 'headcount'] },
+      /* A customer's own vehicles, counted by type. These are numbers on
+         a CRM record, not vehicles this business stocks: "customers with
+         more than 20 trucks" is a fleet question and there is no truck
+         anywhere in the stock list. */
+      { key: 'their_trucks', column: 'trucks', label: 'their trucks', words: ['trucks', 'tractor units'] },
+      /* On a customer, "trailers" is a count of the ones THEY run. The
+         word also names the stock list, so it only reaches this column
+         once the sentence has already resolved to a customer. */
+      { key: 'their_trailers', column: 'trailers', label: 'their trailers',
+        words: ['their trailers', 'trailers on their fleet', 'trailers on fleet', 'trailers'] },
+      { key: 'their_vans', column: 'vans', label: 'their vans', words: ['vans'] },
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: DEAL_STATUS },
