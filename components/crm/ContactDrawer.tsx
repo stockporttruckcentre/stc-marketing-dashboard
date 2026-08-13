@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
   MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2,
@@ -387,14 +387,21 @@ export function ContactDrawer({
           </section>
 
           {/* ---- the long tail, folded away ---- */}
+          {/* Open as soon as there is an address to show, and the map
+              button carries navy rather than the quiet secondary it had.
+              Seeing where a customer's sites are is most of the point of
+              keeping them, and it was behind a closed section and a
+              button you would scan straight past. Navy and not red
+              because the red on this screen belongs to Generate
+              proposal, and a screen with two red buttons has none. */}
           <Collapsible
             icon={<MapPin size={14} />}
             title="Addresses"
             count={addresses.length || undefined}
-            defaultOpen={false}
+            defaultOpen={addresses.length > 0}
             action={addresses.length > 0 ? (
-              <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); setShowMap(true); }}>
-                <MapIcon size={13} /> View on map
+              <Button variant="primary" onClick={(e) => { e.stopPropagation(); setShowMap(true); }}>
+                <MapIcon size={14} /> View on map
               </Button>
             ) : undefined}
           >
@@ -679,6 +686,17 @@ function Collapsible({
   title, icon, count, children, action, defaultOpen,
 }: { title: string; icon?: ReactNode; count?: number; children: ReactNode; action?: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(!!defaultOpen);
+  /**
+   * Sections whose contents arrive over the network start closed and
+   * should open once there is something in them. `useState` reads its
+   * argument once, at mount, when the addresses have not loaded yet, so
+   * without this the Addresses section stays shut on every record that
+   * has any. Forced open once only: after that it is the user's.
+   */
+  const forced = useRef(false);
+  useEffect(() => {
+    if (defaultOpen && !forced.current) { forced.current = true; setOpen(true); }
+  }, [defaultOpen]);
   return (
     <section>
       <div

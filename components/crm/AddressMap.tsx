@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X, Plus, Crosshair, Loader, MapPin } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Plus, Crosshair, Loader, MapPin, AlertTriangle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button, Label, Badge, Alert } from '@/components/kit/primitives';
 import type { ContactAddress } from '@/lib/types';
@@ -17,6 +18,15 @@ import 'leaflet/dist/leaflet.css';
 
    Leaflet is imported dynamically because it reaches for `window` at
    module scope and would break server rendering.
+
+   The whole panel goes through a portal to document.body, and that is
+   not a stylistic choice. `.main` in globals.css is `position: relative;
+   z-index: 1` and `.sidebar` is `z-index: 2`, so `.main` opens a
+   stacking context that everything inside it is trapped in. A child of
+   it painted at z-index 950 still sits below a sibling of `.main` at 2,
+   and no amount of raising the number fixes that. The drawer gets away
+   with it because it hugs the right edge and never overlaps the nav.
+   This panel starts at the left edge, so it went straight under it.
    ============================================================= */
 
 type Pin = ContactAddress & { lat?: number | null; lng?: number | null };
@@ -42,6 +52,23 @@ export function AddressMap({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+
+  /**
+   * Coordinates worked out for addresses that were saved as text only.
+   *
+   * Held here rather than resolved inside the marker effect. That effect
+   * re-runs whenever the address list changes, and it used to do the
+   * geocoding inline: a lookup takes over a second because the proxy
+   * rate limits itself, so any re-render during that window killed the
+   * run and the pin never appeared. Nothing an address typed into the
+   * drawer was ever going to survive.
+   *
+   * Keyed by address id, so a lookup happens once and then it is a fact
+   * the markers can be drawn from as many times as needed.
+   */
+  const [resolved, setResolved] = useState<Record<string, { lat: number; lng: number }>>({});
+  const [failed, setFailed] = useState<string[]>([]);
+  const [locating, setLocating] = useState(false);
 
   /** Save a pin, then rewrite the address from where it landed. */
   async function persist(id: string, lat: number, lng: number, rewriteAddress: boolean) {
@@ -90,6 +117,67 @@ export function AddressMap({
     };
   }, []);
 
+  /**
+   * Find anything that has no position yet.
+   *
+   * Tried longest first: the whole address, then the last two lines,
+   * then just the town. A geocoder that cannot find "Unit 4, Meadow
+   * Industrial Estate, Bredbury" will usually still find "Bredbury",
+   * and a pin in the right town beats no pin at all.
+   */
+  useEffect(() => {
+    const missing = (addresses as Pin[]).filter(
+      (a) => a.lat == null && !resolved[a.id] && !failed.includes(a.id) && (a.address?.trim() || a.city?.trim()),
+    );
+    if (!missing.length) return;
+
+    let killed = false;
+    (async () => {
+      setLocating(true);
+      for (const a of missing) {
+        const lines = (a.address ?? '').split(/\n|,/).map((s) => s.trim()).filter(Boolean);
+        const attempts = [
+          lines.join(', '),
+          lines.slice(-2).join(', '),
+          a.city?.trim() ?? lines[lines.length - 1] ?? '',
+        ].filter((q, i, all) => q && all.indexOf(q) === i);
+
+        let hit: { lat: number; lng: number } | null = null;
+        for (const q of attempts) {
+          const res = await fetch(`/api/geo/search?q=${encodeURIComponent(q)}`)
+            .then((r) => r.json()).catch(() => null);
+          const first = res?.results?.[0];
+          if (first && Number.isFinite(first.lat) && Number.isFinite(first.lng)) {
+            hit = { lat: Number(first.lat), lng: Number(first.lng) };
+            break;
+          }
+        }
+        if (killed) return;
+
+        if (hit) {
+          setResolved((r) => ({ ...r, [a.id]: hit! }));
+          // Best effort. The columns only exist once migration 002 has
+          // run, and the pin is already on screen either way.
+          supabase.from('contact_addresses')
+            .update({ ...hit, geo_source: 'geocoded', geo_updated_at: new Date().toISOString() })
+            .eq('id', a.id).then(() => {}, () => {});
+        } else {
+          setFailed((f) => (f.includes(a.id) ? f : [...f, a.id]));
+        }
+      }
+      if (!killed) setLocating(false);
+    })();
+
+    return () => { killed = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addresses]);
+
+  /** Where a site actually is: stored, or worked out since. */
+  function coordsOf(a: Pin): { lat: number; lng: number } | null {
+    if (a.lat != null && a.lng != null) return { lat: Number(a.lat), lng: Number(a.lng) };
+    return resolved[a.id] ?? null;
+  }
+
   // ---- put the sites on it ----
   useEffect(() => {
     if (!ready || !map.current) return;
@@ -105,24 +193,10 @@ export function AddressMap({
       const bounds: [number, number][] = [];
 
       for (const a of addresses as Pin[]) {
-        let lat = a.lat != null ? Number(a.lat) : null;
-        let lng = a.lng != null ? Number(a.lng) : null;
+        const at = coordsOf(a);
+        if (!at) continue;
 
-        // No stored position, so look it up once from the written address.
-        if ((lat == null || lng == null) && a.address?.trim()) {
-          const hit = await fetch(`/api/geo/search?q=${encodeURIComponent(a.address.replace(/\n/g, ', '))}`)
-            .then((r) => r.json()).catch(() => null);
-          const first = hit?.results?.[0];
-          if (first) {
-            lat = first.lat; lng = first.lng;
-            await supabase.from('contact_addresses')
-              .update({ lat, lng, geo_source: 'geocoded', geo_updated_at: new Date().toISOString() })
-              .eq('id', a.id).then(() => {}, () => {});
-          }
-        }
-        if (lat == null || lng == null) continue;
-
-        const marker = L.marker([lat, lng], {
+        const marker = L.marker([at.lat, at.lng], {
           draggable: canEdit,
           icon: L.divIcon({
             className: '',
@@ -136,11 +210,14 @@ export function AddressMap({
         marker.on('dragend', async () => {
           const p = marker.getLatLng();
           setSelected(a.id);
+          // A dragged pin is the truth from now on, whatever the
+          // geocoder thought.
+          setResolved((r) => ({ ...r, [a.id]: { lat: p.lat, lng: p.lng } }));
           await persist(a.id, p.lat, p.lng, true);
         });
 
         markers.current.set(a.id, marker);
-        bounds.push([lat, lng]);
+        bounds.push([at.lat, at.lng]);
       }
 
       if (bounds.length === 1) map.current.setView(bounds[0], 15);
@@ -149,7 +226,7 @@ export function AddressMap({
 
     return () => { killed = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, addresses, canEdit]);
+  }, [ready, addresses, resolved, canEdit]);
 
   // ---- click to drop a new site ----
   useEffect(() => {
@@ -188,9 +265,13 @@ export function AddressMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, adding, addresses.length, contactId]);
 
-  const positioned = (addresses as Pin[]).filter((a) => a.lat != null);
+  const positioned = (addresses as Pin[]).filter((a) => coordsOf(a) !== null);
 
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+
+  return createPortal(
     <div className="kit" style={{
       position: 'fixed', inset: 0, zIndex: 950, display: 'flex',
       background: 'rgba(5, 13, 38, 0.55)',
@@ -216,8 +297,10 @@ export function AddressMap({
               letterSpacing: '-0.02em', color: 'var(--text)',
             }}>Sites</div>
             <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-              {positioned.length} of {addresses.length} placed
-              {canEdit ? '. Drag a pin to correct it and the address rewrites itself.' : ''}
+              {locating
+                ? 'Looking up where these addresses are'
+                : `${positioned.length} of ${addresses.length} placed`}
+              {!locating && canEdit ? '. Drag a pin to correct it and the address rewrites itself.' : ''}
             </div>
           </div>
           {canEdit && (
@@ -235,6 +318,28 @@ export function AddressMap({
           <div style={{ padding: '10px 18px 0' }}>
             <Alert tone={status && status !== 'Saved' ? 'warning' : 'info'}>
               {busy ? <><Loader size={13} className="spin" /> Working</> : status}
+            </Alert>
+          </div>
+        )}
+
+        {/* Say so, rather than leaving somebody staring at an empty map
+            wondering whether it is broken or their address is. */}
+        {!locating && failed.length > 0 && (
+          <div style={{ padding: '10px 18px 0' }}>
+            <Alert tone="warning">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>
+                  {failed.length === 1 ? 'One site could not be placed' : `${failed.length} sites could not be placed`}
+                  {' from what is written on the record: '}
+                  <strong>
+                    {failed.map((id) => addresses.find((a) => a.id === id)?.label).filter(Boolean).join(', ')}
+                  </strong>.
+                  {canEdit
+                    ? ' Press Add address and click where it should be, or correct the address on the record.'
+                    : ' The address may need correcting on the record.'}
+                </span>
+              </div>
             </Alert>
           </div>
         )}
@@ -266,19 +371,20 @@ export function AddressMap({
                   height: 28, padding: '0 11px', borderRadius: 'var(--r)',
                   border: `1px solid ${selected === a.id ? 'var(--border-emphasis)' : 'var(--border)'}`,
                   background: selected === a.id ? 'var(--bg-subtle)' : 'transparent',
-                  color: a.lat != null ? 'var(--text)' : 'var(--text-subtle)',
+                  color: coordsOf(a) ? 'var(--text)' : 'var(--text-subtle)',
                   fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--inter)',
                 }}
               >
                 {a.is_primary && <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--accent)' }} />}
                 {a.label}
-                {a.lat == null && <Badge tone="warning">not placed</Badge>}
+                {!coordsOf(a) && <Badge tone="warning">not placed</Badge>}
               </button>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

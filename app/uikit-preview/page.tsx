@@ -17,6 +17,7 @@
 import { notFound } from 'next/navigation';
 import { CrmWorkspace } from '@/components/CrmWorkspace';
 import { TopBar } from '@/components/TopBar';
+import { AddressMap } from '@/components/crm/AddressMap';
 import type { CRMContact, CrmList, Profile } from '@/lib/types';
 
 const profile: Profile = { id: 'u1', email: 'alex@stc.co.uk', full_name: 'Alex Ellis', role: 'sales', theme: 'dark', created_at: '' };
@@ -52,8 +53,12 @@ const contacts: CRMContact[] = COMPANIES.map((c, i) => ({
 export default function Preview() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
-    <div className="app" style={{ display: 'flex' }}>
-      <div className="main" style={{ flex: 1, width: '100%' }}>
+    <div className="app">
+      {/* A stand-in for the real sidebar, at the same z-index, so a panel
+          that escapes the stacking context can be told apart from one
+          that does not. */}
+      <div className="sidebar" style={{ padding: 16, color: 'var(--fg-2)' }}>Nav</div>
+      <div className="main" style={{ minWidth: 0 }}>
         <TopBar />
         <main className="page" style={{ maxWidth: 'none' }}>
           <CrmWorkspace
@@ -61,6 +66,19 @@ export default function Preview() {
             selectedListId="l0" initialContacts={contacts}
           />
         </main>
+        {/* ?map=1 to check the site map. Off by default so the CRM itself
+            can be reviewed without a panel over it. */}
+        {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('map') && <AddressMap
+          contactId="c0"
+          canEdit
+          onClose={() => {}}
+          onChanged={() => {}}
+          addresses={[
+            { id: 'a1', contact_id: 'c0', label: 'Head office', address: 'Bredbury Park Way, Bredbury, Stockport', city: 'Stockport', is_primary: true, created_at: '' } as any,
+            { id: 'a2', contact_id: 'c0', label: 'Depot', address: 'Haydock Industrial Estate, Haydock', city: 'Haydock', is_primary: false, created_at: '' } as any,
+            { id: 'a3', contact_id: 'c0', label: 'Nonsense', address: 'qqqzzz not a real place at all', city: null, is_primary: false, created_at: '' } as any,
+          ]}
+        />}
       </div>
     </div>
   );
