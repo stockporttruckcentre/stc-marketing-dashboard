@@ -1094,7 +1094,7 @@ function readBracket(text: string): {
      characters themselves. People paste all three, the pattern has to
      match all three, and the repo bans two of them on sight, so the
      only way to have both is to spell them. */
-  const DASH = String.raw`[-–—]`;
+  const DASH = String.raw`[-\u2013\u2014]`;
   const span = t.match(new RegExp(String.raw`\b(?:between|from)\s+${num}\s*(?:and|to|${DASH})\s*${num}`))
     ?? t.match(new RegExp(String.raw`\b${num}\s*(?:${DASH}|to)\s*${num}\b`));
   if (span) {
