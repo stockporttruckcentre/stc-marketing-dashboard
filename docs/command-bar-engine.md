@@ -1,25 +1,52 @@
 # How the command bar understands a sentence
 
-A test arrived from outside: ten sentences that had never appeared in any
+A test arrived from outside: sentences that had never appeared in any
 lexicon, test or example in this repo, with one rule attached. Do not add
 them to a lexicon first. If the architecture is right they should mostly
 work, because their parts are independently understood. If they do not,
 another 1,700 lines of aliases will not save it.
 
-The engine scored **0 out of 10**, and three of the ten came back meaning
+The engine scored **zero**, and three of the sentences came back meaning
 the opposite of what was typed:
 
 | Typed | Answered |
 |---|---|
-| `what's the highest mileage vehicle that isn't sold` | sold trailers |
+| `... that isn't sold` | sold trailers |
 | `everything except trailers that's available` | trailers |
-| `give me all stock where price hasn't been entered` | a total of the prices |
+| `all stock where price hasn't been entered` | a total of the prices |
 
 An inverted answer is worse than no answer, because it looks right.
 
-It now scores **10 out of 10**, and 31 out of 31 of the individual facts
-in those sentences. Nothing in any lexicon was changed to get there. Run
-it with `npm run check:litmus`.
+## The benchmark was wrong first
+
+Those original ten sentences were about **trucks**. Rigids, 6x2 axle
+configurations, mileage, DAF and Volvo. STC sells **trailers**. There is
+no rigid, no 6x2 and no mileage column in this application and there
+never should be, and the real make column holds Don Bur, Tiger, SDC,
+Dennison, Cartwright, Krone, Montracon, Gray & Adams and Schmitz.
+
+So the engine was being driven, and scored, against a business that does
+not exist. It scored 10 out of 10 on that corpus, which was worse than
+failing: a benchmark measuring the wrong thing tells you the work is
+done when it is not. Nothing truck-shaped ever reached the schema or the
+production code, but the test fixture had invented DAF and Volvo as
+trailer makes, and the reasoning was being steered by nonsense.
+
+The corpus is now twelve sentences about STC, and every noun in them is
+something this application holds. The values the checks run against are
+read from the hundred and ten real stock rows in
+`app/api/admin/import-sold-2026`, messiness included: `Don Bur` and
+`DonBur` are both in that column, and so are `Dukinfield` and
+`DUKINFIELD`.
+
+It scores **12 out of 12**, 46 of 46 individual facts, with nothing
+added to any lexicon. `npm run check:litmus`.
+
+Finding the right corpus found five real bugs the truck corpus never
+touched: refurb cost was not a queryable amount at all, "compare A and B"
+was not a comparison, "and no email" was not an emptiness test, "by sales
+rep" lost its grouping because only one word after "by" was read, and
+`in between May and July` was read as a depot called Between.
 
 ---
 
@@ -37,15 +64,15 @@ cheapest        order by an attribute, ascending, then take one
 five            take five
 except          invert whatever clause follows
 newest first    order by a date, descending
-DAF vs Volvo    group by an attribute, show two of its values
+Don Bur vs Krone  group by an attribute, show two of its values
 stock age       an attribute computed from another one
 not entered     that attribute is empty
 ```
 
 Seven ideas. They apply to any attribute the data declares, in any
-combination. `the five cheapest available rigids` is four independent
-facts that happen to appear together, and so are the several thousand
-other sentences built from those same four.
+combination. `show the five cheapest curtainsiders currently in stock`
+is four independent facts that happen to appear together, and so are the
+several thousand other sentences built from those same four.
 
 That is the difference between a grammar and a phrasebook. A phrasebook
 grows by one entry per sentence and never finishes. A grammar grows by
@@ -114,21 +141,21 @@ company called Nottingham, a status called "not started" and a depot with
 
 ### `vocab.ts`, the data names itself
 
-`DAFs older than 2022 excluding anything at Warrington` resolved to
-nothing at all, because no word in it names anything this app holds. The
-only reason a person reads it as stock is that they have seen DAF in the
-make column.
+`which Schmitz trailers have been here longest` contains no noun for a
+trailer. The only reason a person reads it as stock is that they have
+seen Schmitz in the make column.
 
 A list of manufacturers in a file fixes that one sentence and goes stale
-on the next delivery. So the values come from the database: whatever
-appears in `stock_trailers.make` IS a make, by definition. The app loads
-them once from `/api/command/vocabulary`; the checks load a sample.
-An empty index changes nothing, so this costs coverage rather than the
-whole feature when it is unavailable.
+the day somebody stocks a Chereau. So the values come from the database:
+whatever appears in `stock_trailers.make` IS a make, by definition. The
+app loads them once from `/api/command/vocabulary`; the checks load STC's
+own stock rows. An empty index changes nothing, so this costs coverage
+rather than the whole feature when it is unavailable.
 
 It also places filters. A word the data says is a make becomes a make
 filter without a preposition having to prove it, which is what stopped
-`average stock age for DAF versus Volvo` reading DAF as the sales rep.
+`compare Don Bur and Krone average profit` reading Don Bur as a sales
+rep called Don.
 
 ### `attributes.ts`, which column a phrase names
 
@@ -151,30 +178,41 @@ keeps its own list.
 
 The operator says what kind of thing it wants; the entity says which of
 its columns are that kind. Neither knows about the other, which is why
-`highest mileage` will work the day a mileage column exists without a
-line being written.
+`highest tread depth` will work the day `tread_depths` is declared as a
+number, without a line being written here.
 
-Entity resolution gained two last resorts before giving up:
+Entity resolution gained three last resorts before giving up:
 
 - **A computed attribute names its entity.** Only stock has a stock age,
-  so `what's been sitting in Stockport longest` is about stock even
-  though it contains no noun for a trailer and a depot three entities
-  share.
+  so `which Schmitz trailers have been here longest` is about stock even
+  when it contains no noun for a trailer.
 - **The data names its entity.** A word that only appears in
   `stock_trailers.make` can only be about trailers.
+- **One of our own yards names it**, since a depot is where stock sits.
 
 ### Saying what it could not do
 
-`what's the highest mileage vehicle that isn't sold` is three requests
-and two of them work. This app sells trailers and holds no mileage
-column, so the ordering has nowhere to go. Returning unsorted rows would
-look like an answer to the question that was asked, so the plan carries
-an `unmet` list and the bar prints it:
+This is the part that matters most, and it is the one the truck corpus
+nearly cost.
 
-> Could not do this part: nothing on a trailer to sort "highest" by
+`how many 6x2s have we got at Carrington` used to come back as a
+confident count of every trailer on that site. A real number, plausibly
+sized, and the answer to a different question. There is no 6x2 in this
+business, and the only honest response is to count what it understood
+and say what it could not place:
 
-The same applies to `high to low` with no attribute named. Guessing a
-column there is how somebody reads the wrong number out in a meeting.
+> Count of trailers where at Carrington
+> nothing in the trailers matches "6x2s"
+
+So any content word the plan cannot account for is named. The same
+applies to an ordering with nothing to order by, and to `high to low`
+with no attribute named. Guessing a column there is how somebody reads
+the wrong number out in a meeting.
+
+A depot on its own now implies stock, since a yard is where stock sits,
+but only weakly and only as a last resort: the sentence said where and
+did not say what, so anything else it contained still has to be
+accounted for or named.
 
 ---
 
@@ -196,7 +234,9 @@ combination, not one at a time:
   the status "in stock"
 
 ```bash
-npm run check:litmus     # the ten sentences, per component
+npm run check:litmus     # twelve STC sentences, scored per fact
+npm run check:sweep      # 47 sentences through the whole bar
+npm run check:audit      # what actually runs, not what parses
 npm run check:coverage   # 8,758 assertions including the operators
 npm run check:command    # the parser against real phrasings
 npm run check:query      # query composition
@@ -204,15 +244,21 @@ npm run check:fuzz       # 103,144 generated sentences
 npm run check:gaps       # sentences the bar still fumbles
 ```
 
-`check:gaps` went from 241 fumbles to 117 as a side effect of the
-consolidation, without any of those sentences being looked at
-individually.
+`check:gaps` went from 241 fumbles to 126 out of a wider corpus, as a
+side effect of the consolidation, without any of those sentences being
+looked at individually.
 
 ---
 
 ## What is still fragmented
 
 This is the honest list, and it is the next work.
+
+**149 actions are declared and none of them carry out their operation
+from the bar. 55 do nothing at all when picked.** That is the largest
+gap in the product and it is written up in
+`docs/command-bar-execution-audit.md`. Every number in this file
+measures understanding, which is a third of the job.
 
 `ontology.ts` and `resolve.ts` are a parallel interpretation of the same
 sentences and are **not wired into the bar**. `resolve.ts` scores
@@ -230,3 +276,13 @@ duplicated.
 49 of the remaining gaps are columns on tables the bar has no entity for
 at all (`calendar_invites`, `contact_addresses`), which is an entity to
 add rather than a phrasing to fix.
+
+## The rule this file exists to enforce
+
+A benchmark written from outside the business will find operators the
+engine is missing, which is genuinely useful. It will also quietly
+redefine what the product is, which is not. Both happened here.
+
+**Any sentence used to drive or score this engine must be about
+something STC holds.** If a test needs a value, it comes from the real
+rows, not from memory.
