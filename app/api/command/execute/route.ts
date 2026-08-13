@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
+import type { CrmCapability } from '@/lib/crm/permissions';
 import { ukDateTimeLong, ukDayTime, ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
@@ -30,17 +31,33 @@ async function globalListId(supabase: any): Promise<string | null> {
   return (data as any)?.id ?? null;
 }
 
-export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+/**
+ * What each intent needs before it may run.
+ *
+ * This route inserts contacts, stock and calendar events, and until now
+ * it checked nothing beyond being signed in, so a read only viewer could
+ * create a trailer through it. Its sibling /api/command/edit has always
+ * checked capabilities per field; this is the same check per intent.
+ *
+ * Reads are absent from the map on purpose: RLS already decides which
+ * rows come back, and a count of your own trailers is not a privilege.
+ */
+const NEEDS: Record<string, CrmCapability> = {
+  create_prospect: 'crm.create',
+  create_stock_trailer: 'stock.edit',
+  schedule_call: 'crm.delegate',
+  create_contract: 'crm.proposal',
+  create_proposal: 'crm.proposal',
+};
 
+export async function POST(req: NextRequest) {
   const { intentId, slots = {} } = await req.json().catch(() => ({})) as {
     intentId?: string; slots?: Record<string, any>;
   };
 
-  const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
-  const fullName = (profile as any)?.full_name ?? user.email;
+  const gate = await requireCapability(NEEDS[String(intentId ?? '')]);
+  if (!gate.ok) return gate.response;
+  const { supabase, user, fullName } = gate;
 
   switch (intentId) {
 

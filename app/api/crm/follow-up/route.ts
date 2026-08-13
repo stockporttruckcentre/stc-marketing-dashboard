@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 import { ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
@@ -13,9 +13,11 @@ export const dynamic = 'force-dynamic';
  * out of the "gone quiet" list for the right length of time.
  */
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* On its fallback path this stamps last_contact on any contact id it is
+     handed, so it is an edit whichever branch it takes. */
+  const gate = await requireCapability('crm.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const { contact_id, due_at } = await req.json().catch(() => ({})) as { contact_id?: string; due_at?: string };
   if (!contact_id) return NextResponse.json({ error: 'contact_id required' }, { status: 400 });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireUser } from '@/lib/api/guard';
 import postgres from 'postgres';
 
 export const dynamic = 'force-dynamic';
@@ -18,9 +18,24 @@ export const dynamic = 'force-dynamic';
  * Commission is a private figure between a rep and their own tracker.
  */
 export async function GET() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* This route crosses row level security on purpose, over a direct
+     postgres connection, to total up every rep's private tracker. That
+     is the right way to build a company view and the wrong thing to hand
+     to anybody who asks: it was returning company-wide revenue to any
+     signed-in account, including a read only one.
+
+     Gated on admin.users because that is the capability the four roles
+     already express for "sees the whole business". When the admin panel
+     grows a manager role this is the one line that changes. */
+  const gate = await requireUser();
+  if (!gate.ok) return gate.response;
+  const { user, caps } = gate;
+  if (!caps.has('admin.users')) {
+    return NextResponse.json({
+      available: false,
+      needs: 'Company-wide figures are for administrators. Your own numbers are on the dashboard.',
+    });
+  }
 
   const url = process.env.POSTGRES_URL || process.env.POSTGRES_URL_NON_POOLING;
   if (!url) {

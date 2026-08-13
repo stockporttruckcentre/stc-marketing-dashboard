@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { ukToday } from '@/lib/format/date';
 import type { ContactStatus } from '@/lib/types';
@@ -36,9 +36,12 @@ const ALLOWED = new Set(
 const SYNTHETIC = new Set(['website']);
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* Bulk inserting five thousand contacts is exactly the thing a read
+     only account should not be able to do. crm.import existed as a
+     capability and was never consulted here. */
+  const gate = await requireCapability('crm.import');
+  if (!gate.ok) return gate.response;
+  const { supabase } = gate;
 
   const body = await req.json().catch(() => ({}));
   const rows: any[] = Array.isArray(body.rows) ? body.rows : [];

@@ -1,5 +1,10 @@
 # Unguarded API routes
 
+**Status: fixed.** Every route below now calls `requireCapability()` from
+`lib/api/guard.ts` before it writes. This file stays as the record of
+what was wrong and why, because the next person to add a route needs to
+know the shape of the mistake, not just that it was made.
+
 Found by reading all 31 route files under `app/api/`. Nothing here is
 theoretical: every line names the route, what it writes, and what it
 fails to check.
@@ -54,17 +59,30 @@ connection above, not that function.
 
 ---
 
-## What fixing it looks like
+## What was done
 
-One helper, called at the top of every write route, in the same shape as
-the check already in `/api/command/edit`:
+`lib/api/guard.ts` holds one helper:
 
 ```ts
-const caps = capabilitiesFor({ role });
-if (!caps.has('stock.edit')) return NextResponse.json(
-  { ok: false, message: '...' }, { status: 403 });
+const gate = await requireCapability('stock.edit');
+if (!gate.ok) return gate.response;
+const { supabase, user, caps } = gate;
 ```
 
-That is a small change per route and about a dozen routes. It has not
-been made yet, and it is deliberately not bundled into the command bar
-work, because a security fix should be reviewable on its own.
+Applied to all eleven write routes, plus:
+
+- `/api/command/execute` gates **per intent**, not per route, because
+  the same endpoint creates prospects, stock, meetings and proposals and
+  those are four different permissions.
+- `/api/dashboard/exec` now returns `{available: false}` with a sentence
+  rather than company-wide revenue, unless the caller is an
+  administrator. One line changes when a manager role exists.
+- `/api/lusha/enrich` checks `crm.enrich` as well as the global lock, so
+  lifting the lock does not hand enrichment to everybody at once.
+- `/api/stock/sold-warning` no longer selects `commission`. Sold-info and
+  check-link cross the same RLS boundary and both withhold it; the exec
+  view says out loud that commission stays between a rep and their own
+  tracker. This route disagreed with all three. The sale price stays,
+  because the warning is about a sale being undone.
+- Refusals name the missing permission rather than saying "no access",
+  so somebody knows what to ask an administrator for.

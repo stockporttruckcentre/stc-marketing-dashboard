@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 
 export const dynamic = 'force-dynamic';
 
 /** Send a stock trailer to the calling user's Sales tracker (creates a new lead, linked to the stock row). */
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* This inserts a lead. A viewer could create one. */
+  const gate = await requireCapability('crm.create');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({})) as { stock_trailer_id?: string };
   if (!body.stock_trailer_id) return NextResponse.json({ error: 'stock_trailer_id required' }, { status: 400 });

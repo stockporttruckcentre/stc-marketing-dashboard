@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 import { ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
@@ -20,9 +20,11 @@ const KIND_SIDE: Record<string, 'trailer_sales' | 'maintenance'> = {
 };
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* Raising a proposal writes a quoted row onto a tracker. crm.proposal
+     existed as a capability and was never consulted. */
+  const gate = await requireCapability('crm.proposal');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const { contact_id, kind } = await req.json().catch(() => ({})) as { contact_id?: string; kind?: string };
   if (!contact_id || !kind || !(kind in KIND_SIDE)) {

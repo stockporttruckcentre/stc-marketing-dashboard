@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability, requireUser } from '@/lib/api/guard';
 import { ukToday } from '@/lib/format/date';
 
 export const dynamic = 'force-dynamic';
@@ -27,9 +27,11 @@ const SHARED_FIELDS = [
 const MISSING_COLUMN = /parent_customer_id/;
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* Linking rewrites parent_customer_id on arbitrary contact ids, which
+     is an edit to two records at once. */
+  const gate = await requireCapability('crm.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({})) as {
     action?: 'create_twin' | 'link' | 'unlink';
@@ -128,9 +130,11 @@ export async function POST(req: NextRequest) {
 
 /** The whole group: the head record and every twin hanging off it. */
 export async function GET(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  // A read. RLS already scopes which contacts come back, so this only
+  // needs to know somebody is signed in.
+  const gate = await requireUser();
+  if (!gate.ok) return gate.response;
+  const { supabase } = gate;
 
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });

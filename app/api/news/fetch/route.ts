@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { XMLParser } from 'fast-xml-parser';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 25;
@@ -35,9 +35,11 @@ function stripHtml(s: string) {
 }
 
 export async function POST() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* This one deletes. Any signed in user could purge every row older than
+     the cutoff and every row from one publication. */
+  const gate = await requireCapability('marketing.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   type Record = { title: string; source: string; url: string; summary: string | null; published_date: string };

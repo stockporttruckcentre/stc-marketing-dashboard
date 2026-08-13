@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -94,8 +94,13 @@ const IN_STOCK = [
 ];
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  /* Admin whoever it targets. The old check only fired when an email
+     named somebody else, so a viewer could seed and wipe against
+     themselves, and the wipe deletes every stc_no LIKE 'DEMO-%' row on
+     the stock list rather than only their own. */
+  const gate = await requireCapability('admin.users');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const body = await req.json().catch(() => ({})) as { mode?: 'seed' | 'wipe'; email?: string };
