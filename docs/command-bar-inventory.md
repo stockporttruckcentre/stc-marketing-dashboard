@@ -2,6 +2,12 @@
 
 This is the sweep that should have come first.
 
+**"The CRM" here means the whole application, not the tab called CRM.**
+Login, the shell, the sidebar, the notification bell, the theme toggle,
+every dashboard variant, every API operation. If a person can cause it to
+happen while signed in, it belongs in this file and it belongs in the
+bar. The tab is one row of the table below.
+
 The registry in `lib/command/actions.ts` was written from the parts of the
 app I happened to be working in, which is why it had thirty three entries
 and nothing at all for social posts. That gap was not an oversight in one
@@ -17,6 +23,41 @@ check asserts it.
 file is the source the registry is written against, and the reason the
 registry can be checked for completeness rather than just for
 correctness.
+
+---
+
+## What has actually been read
+
+The first sweep covered sixteen components and stopped, and nothing
+recorded that it had stopped. That is the same failure as writing the
+registry from memory: the gap was real and invisible. So the sweep now
+carries its own coverage table, and a file that has not been read
+exhaustively says so.
+
+**Read exhaustively, every line, control by control:**
+
+| Area | Files |
+|---|---|
+| CRM tab | `CrmWorkspace`, `crm/ContactDrawer`, `crm/AddressMap`, `crm/ImportDialog`, `crm/ExportView`, `crm/GenerateProposalPicker`, `crm/NextActionPrompt`, `crm/ScheduleMeetingModal`, `CrmListRestore` |
+| Stock and tracker | `StockList`, `SalesTracker` |
+| Calendar and marketing | `TeamCalendar`, `SocialPlanner`, `BrandKit`, `IndustryNews`, `BusinessActivityStrip` |
+| Database | `supabase/schema.sql`, every migration, `lib/types.ts` |
+| Analytics and prospecting | `AnalyticsView`, `CompanyFinder` |
+| Admin, settings, dashboards | `AdminPanel`, `SettingsPanel`, `RepDashboard`, `ExecDashboard`, `SupportDashboard`, `VariantSwitch` |
+| Shell and auth | `Header`, `Nav`, `Sidebar`, `TopBar`, `ThemeToggle`, every `app/**/page.tsx`, login, signup, reset password |
+| API | every route under `app/api/` |
+
+**Deliberately out of scope**, with the reason:
+
+| Not read | Why |
+|---|---|
+| `components/kit/*` | Primitives. They have no behaviour of their own, only the behaviour of whatever renders them. |
+| `components/TruckIcon.tsx` | A drawing. |
+| `design-system/` | A prototype, not the app. |
+| `docs/source/` | Documents somebody else wrote. |
+
+Anything not in either table has not been looked at, and that is a
+defect rather than a decision.
 
 ---
 
