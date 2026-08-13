@@ -34,10 +34,15 @@ const ALL = process.argv.includes('--all');
 const caps = capabilitiesFor({ role: 'admin' });
 
 let checked = 0;
+/* Distinct sentences, separately from assertions about them. The
+   summary line used to print the assertion count and call them
+   sentences, which overstated the sweep by roughly five times. */
+const SENTENCES = new Set<string>();
 let failed = 0;
 const failures: string[] = [];
 
 function assert(sentence: string, what: string, condition: boolean, got = '') {
+  SENTENCES.add(sentence);
   checked++;
   if (condition) return;
   failed++;
@@ -218,7 +223,8 @@ for (const industry of sample(INDUSTRIES, 2)) {
 
 /* ------------------------------------------------------------- */
 
-console.log(`\n${(checked - failed).toLocaleString('en-GB')}/${checked.toLocaleString('en-GB')} generated sentences check out`
+console.log(`\n${SENTENCES.size.toLocaleString('en-GB')} generated sentences, `
+  + `${(checked - failed).toLocaleString('en-GB')}/${checked.toLocaleString('en-GB')} assertions about their PLANS hold`
   + `${ALL ? ' (full sweep)' : ' (sampled, use --all for every combination)'}\n`);
 
 if (failures.length) {
