@@ -74,7 +74,13 @@ function parseDate(text: string): { at: Date; label: string } | null {
 
 /** "in the past 8 weeks", "last 3 months", "this year". */
 function parseRange(text: string): { from: Date; to: Date; label: string } | null {
-  const t = text.toLowerCase();
+  /* "This month's profit" and "this months profit" are the same
+     question. The apostrophe and the stray plural were both losing the
+     period entirely, so the answer covered all time and said so in
+     small print nobody reads. */
+  const t = text.toLowerCase()
+    .replace(/(\w)['’]s\b/g, '$1')
+    .replace(/\b(this|last|next|past)\s+(week|month|quarter|year|day)s\b/g, '$1 $2');
   const now = new Date();
 
   const rel = t.match(/\b(?:past|last|previous)\s+(\d+|[a-z]+)\s*(day|week|month|year)s?\b/);

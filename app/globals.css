@@ -514,6 +514,62 @@ a { color: inherit; text-decoration: none; }
   font-size: 12.5px;
   color: var(--fg-3);
 }
+
+/* =============================================================
+   The command bar in the top bar.
+
+   Three columns rather than a flex row. Flex centred the bar against
+   whatever space was left over, so it slid sideways every time the
+   breadcrumb changed length: Dashboard and Company finder are not the
+   same width, and the thing people aim at was moving between pages.
+   Equal outer columns hold it in the middle of the window.
+
+   The bar is also taller and brighter than it was. It is the way into
+   the whole product and it was sitting at 30px looking like a search
+   box somebody added to a header. Borders before shadows, per the kit,
+   so the prominence comes from a stronger rule and a lifted surface
+   rather than a drop shadow.
+   ============================================================= */
+.topbar--command {
+  display: grid;
+  grid-template-columns: 1fr minmax(360px, 720px) 1fr;
+  gap: 20px;
+}
+.topbar--command .topbar__crumbs { min-width: 0; overflow: hidden; white-space: nowrap; }
+.topbar--command .topbar__right { justify-self: end; }
+
+.topbar__command { min-width: 0; }
+.topbar__command .kit {
+  background: var(--stc-black-700);
+  border-color: var(--stc-line-2);
+  transition: border-color var(--dur-2) var(--ease-out),
+              background var(--dur-2) var(--ease-out);
+}
+/* Focus lands on the input inside, so the ring has to be drawn by the
+   wrapper or it appears round a 28px box inside a 38px one. */
+.topbar__command .kit:focus-within {
+  border-color: var(--stc-red);
+  background: var(--stc-black-800, var(--stc-black-700));
+  box-shadow: 0 0 0 3px rgba(207, 36, 23, 0.16);
+}
+
+/* Below a laptop the middle column cannot hold its minimum and the
+   crumbs at once. Two things give way, in this order.
+
+   The crumbs go first: the page title is already on the page, so the
+   breadcrumb is the least load bearing thing in the row.
+
+   Then the shortcut chip, which is worth about fifty pixels and is a
+   hint rather than a control. Losing it let the placeholder finish its
+   sentence instead of clipping mid word, which teaches more than the
+   chip did. */
+@media (max-width: 1100px) {
+  .topbar--command { grid-template-columns: auto minmax(280px, 1fr) auto; gap: 12px; }
+  .topbar--command .topbar__crumbs { display: none; }
+}
+@media (max-width: 1100px) {
+  .topbar__command kbd { display: none; }
+}
 .topbar__crumbs .sep { color: var(--fg-5); }
 .topbar__crumbs .cur { color: var(--fg-1); font-weight: 500; }
 .topbar__search {

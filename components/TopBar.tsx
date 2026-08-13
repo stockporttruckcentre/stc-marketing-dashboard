@@ -9,7 +9,11 @@ const CRUMBS: Record<string, [string, string]> = {
   '/dashboard':           ['Workspace', 'Dashboard'],
   '/dashboard/calendar':  ['Workspace', 'Team calendar'],
   '/dashboard/news':      ['Workspace', 'Industry news'],
+  // Analytics and the tracker were missing, so both showed the fallback
+  // and told you you were on the Dashboard when you were not.
+  '/dashboard/analytics': ['Workspace', 'Analytics'],
   '/dashboard/crm':       ['Sales',     'CRM pipeline'],
+  '/dashboard/leads':     ['Sales',     'Sales tracker'],
   '/dashboard/finder':    ['Sales',     'Company finder'],
   '/dashboard/sales':     ['Sales',     'Trailer sales'],
   '/dashboard/social':    ['Marketing', 'Social planner'],
@@ -26,8 +30,15 @@ export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
     if (path === key || path.startsWith(key + '/')) crumbs = CRUMBS[key];
   }
 
+  /* Three columns rather than a flex row.
+
+     Flex centred it against whatever was left over, so the bar shifted
+     sideways every time the breadcrumb changed length: Dashboard and
+     Company finder are different widths and the thing people aim at
+     moved between pages. Equal outer columns hold it in the middle of
+     the window whatever is either side of it. */
   return (
-    <header className="topbar">
+    <header className="topbar topbar--command">
       <div className="topbar__crumbs">
         <Hash size={14} style={{ color: 'var(--stc-red)' }} />
         <span>{crumbs[0]}</span>
@@ -35,11 +46,9 @@ export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
         <span className="cur">{crumbs[1]}</span>
       </div>
 
-      {/* The command bar is global, so it lives here rather than on the
-          dashboard. Margin on both sides keeps it off the breadcrumbs to
-          its left and the bell to its right: it is the widest thing in a
-          52px bar and without the gaps it reads as one welded strip. */}
-      <div style={{ flex: 1, minWidth: 0, maxWidth: 620, margin: '0 18px' }}>
+      {/* The command bar is the point of the product, so it gets the
+          middle of the screen and the width to look like it. */}
+      <div className="topbar__command">
         <CommandBar variant="bar" role={role} />
       </div>
 

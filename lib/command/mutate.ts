@@ -797,10 +797,22 @@ const PROMINENT = [
   'mot_date', 'customer', 'notes', 'sales_rep',
 ];
 
+/**
+ * Words that mean this is a question, not the start of an instruction.
+ *
+ * "Show me this month's profit" was offering Set Profit on a customer,
+ * because the sentence names a writable field and nothing said it was a
+ * read. Offering to write a column to somebody who asked to see a number
+ * is the same failure as answering an instruction with a count, in the
+ * other direction.
+ */
+const ASKING = /\b(show me|how much|how many|what is|what are|whats|which|list|export|download|count|total|value of|report|give me)\b/i;
+
 export function composeEdits(input: string, caps: CrmCapabilities, limit = 6): EditSuggestion[] {
   const raw = input.trim();
   if (raw.length < 3) return [];
   if (raw.endsWith('?')) return [];
+  if (ASKING.test(raw)) return [];
 
   const stock = readStockRef(raw);
   const field = findField(raw, caps);

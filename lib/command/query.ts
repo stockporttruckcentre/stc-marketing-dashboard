@@ -179,6 +179,25 @@ export function parseQuery(input: string): QueryPlan | null {
   let measure = rawMeasure;
   let confidence = measureHit ? 8 : 4;
 
+  /* Naming a number is asking for it.
+     "Show me this month's profit" was coming back as a list of trailers,
+     because "show me" is a list word and "profit" was only ever read as
+     which column to use once somebody had already said "total". Nobody
+     says "total" first. They name the figure they want: profit, revenue,
+     commission, turnover. If the sentence names an amount and has not
+     asked for a list of rows in so many words, it wants the amount. */
+  const namesAnAmount = entity.amounts.some((a) =>
+    a.words.some((w) => w !== groupWord && w.length >= 3
+      && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i').test(lower)));
+  const asksForRows = /\b(list|which|show me the|rows|records|each|every one)\b/i.test(lower);
+
+  if (measure === 'list' && namesAnAmount && !asksForRows) {
+    measure = 'sum';
+    confidence += 4;
+  } else if (namesAnAmount) {
+    confidence += 2;
+  }
+
   // --- which number ---------------------------------------------------
   let amountColumn: string | undefined;
   let amountLabel: string | undefined;

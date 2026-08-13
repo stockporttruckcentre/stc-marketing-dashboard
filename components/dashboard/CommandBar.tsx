@@ -93,9 +93,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    */
   role?: UserRole;
   /**
-   * `panel` is the dashboard card. `bar` is the compact form that lives
-   * in the top bar on every page: a 30px input whose results float below
-   * it rather than growing the header.
+   * `panel` is the dashboard card. `bar` is the form that lives in the
+   * top bar on every page: a 38px input, centred, whose results float
+   * below it rather than growing the header.
    */
   variant?: 'panel' | 'bar';
 }) {
@@ -560,11 +560,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       {/* the input */}
       <div style={{
         display: 'flex', alignItems: 'center',
-        gap: bar ? 8 : 10,
-        padding: bar ? '0 10px' : '0 14px',
-        height: bar ? 30 : 52,
+        gap: bar ? 9 : 10,
+        padding: bar ? '0 12px' : '0 14px',
+        /* 38, not 30. This is the way into the whole product and at 30px
+           in a 52px bar it read as a search box somebody bolted on. */
+        height: bar ? 38 : 52,
       }}>
-        <Search size={bar ? 14 : 17} style={{ color: understood ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
+        <Search size={bar ? 15 : 17} style={{ color: understood ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
         <input
           ref={inputRef}
           value={text}
@@ -582,9 +584,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           }}
           placeholder={(bar ? SHORT_EXAMPLES : EXAMPLES)[exampleIdx]}
           style={{
-            flex: 1, minWidth: 0, height: bar ? 28 : 40, border: 'none', outline: 'none',
+            flex: 1, minWidth: 0, height: bar ? 36 : 40, border: 'none', outline: 'none',
             background: 'transparent', color: 'var(--text)',
-            fontFamily: 'var(--inter)', fontSize: bar ? 12.5 : 14.5, letterSpacing: '-0.01em',
+            fontFamily: 'var(--inter)', fontSize: bar ? 13.5 : 14.5, letterSpacing: '-0.01em',
           }}
         />
         {text && (
