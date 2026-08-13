@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent } from 'ag-grid-community';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling, Send, ArrowRight, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling, Send, ArrowRight, AlertCircle, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { ImportDialog } from '@/components/crm/ImportDialog';
+import { STOCK_TRAILERS } from '@/lib/import/dictionary';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
 
 type StatusTab = 'all' | StockStatus;
@@ -23,6 +25,7 @@ const fmtDate = (v: string | null | undefined) => v ? new Date(v).toLocaleDateSt
 export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; role: Profile['role'] }) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<StockTrailer[]>(initialRows);
+  const [showImport, setShowImport] = useState(false);
   const [tab, setTab] = useState<StatusTab>('in_stock');
   const [category, setCategory] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -189,6 +192,26 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     gridRef.current?.api.deselectAll();
   }
 
+  /**
+   * Write the reviewed stock rows.
+   *
+   * Everything intelligent already happened in the dialog: mapping,
+   * coercion, duplicate checking and the review. By the time rows arrive
+   * here they are the right shape for the columns, so this only inserts
+   * and reloads.
+   */
+  async function commitStockImport(records: Record<string, any>[]) {
+    const withDefaults = records.map((r) => ({ status: 'in_stock', ...r }));
+    const { error, count } = await supabase.from('stock_trailers')
+      .insert(withDefaults, { count: 'exact' });
+    if (error) return { inserted: 0, error: error.message };
+    const { data } = await supabase.from('stock_trailers').select('*')
+      .order('updated_at', { ascending: false });
+    setRows((data ?? []) as StockTrailer[]);
+    setMessage(`Imported ${count ?? withDefaults.length} trailers`);
+    return { inserted: count ?? withDefaults.length };
+  }
+
   async function bulkDelete() {
     const sel = gridRef.current?.api.getSelectedRows() ?? [];
     if (!sel.length) return;
@@ -232,7 +255,7 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     setSendConfirm(null);
   }
 
-  // Intercept status change FROM 'sold' — warn the user about the rep / sale being undone.
+  // Intercept status change FROM 'sold'. Warn the user about the rep and the sale being undone.
   async function changeStatusWithGuard(row: StockTrailer, newStatus: StockStatus) {
     if (row.status === 'sold' && newStatus !== 'sold') {
       const r = await fetch('/api/stock/sold-warning', {
@@ -290,10 +313,29 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
             )}
           </div>
         </div>
+        {canEdit && (
+          <button onClick={() => setShowImport(true)} className="btn">
+            <Upload size={14} /> Import
+          </button>
+        )}
         {canEdit && <button onClick={addRow} className="btn btn--primary"><Plus size={14} /> Add trailer</button>}
       </div>
 
       {/* Status tabs */}
+      {showImport && (
+        <ImportDialog
+          dict={STOCK_TRAILERS}
+          listName="the stock list"
+          existing={rows.map((r) => ({
+            id: r.id,
+            stc_no: r.stc_no,
+            chassis_number: (r as any).chassis_number ?? null,
+          }))}
+          onCommit={commitStockImport}
+          onClose={() => setShowImport(false)}
+        />
+      )}
+
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button onClick={() => { setTab('all'); setCategory(null); }} className={`news-chip ${tab === 'all' ? 'is-active' : ''}`}>
           All <span className="news-chip__count">{counts.all}</span>
@@ -526,7 +568,7 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
           <button onClick={onClose} className="btn btn--icon" style={{ flexShrink: 0 }}><X size={16} /></button>
         </div>
         <div ref={bodyRef} className="drawer__body">
-          {/* Tracker linkage banner — yours, or someone else's */}
+          {/* Tracker linkage banner: yours, or someone else's */}
           {myTrackerRow && (
             <div className="card" style={{ padding: 12, background: 'rgba(46,160,67,0.08)', borderColor: 'rgba(46,160,67,0.35)' }}>
               <div className="row" style={{ gap: 10, alignItems: 'center' }}>
@@ -843,7 +885,7 @@ function BulkLocationModal({ currentSelectionCount, onSave, onClose }: { current
 }
 
 
-// ===== Send to tracker — confirms when trailer is already linked to a tracker =====
+// ===== Send to tracker. Confirms when the trailer is already on one =====
 function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
   row: StockTrailer; myEntry: any; others: any[];
   onProceed: () => void; onClose: () => void;
@@ -877,7 +919,7 @@ function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
             </div>
           ))}
           <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
-            You can still add it to your tracker — multiple reps can have the same trailer in their pipeline. Whoever marks it Sold first gets the commission.
+            You can still add it to your tracker. Several reps can have the same trailer in their pipeline, and whoever marks it Sold first gets the commission.
           </div>
         </div>
         <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
@@ -889,7 +931,7 @@ function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
   );
 }
 
-// ===== Sold transition warning — when moving a Sold trailer to another status =====
+// ===== Sold transition warning, for moving a Sold trailer to another status =====
 function SoldTransitionWarning({ row, targetStatus, entries, onProceed, onClose }: {
   row: StockTrailer; targetStatus: StockStatus; entries: any[];
   onProceed: () => void; onClose: () => void;
@@ -918,7 +960,7 @@ function SoldTransitionWarning({ row, targetStatus, entries, onProceed, onClose 
               <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 <li>Affect Sales &amp; Leasing&apos;s revenue figures for the period</li>
                 <li>Reverse any commission allocated to {top.owner_first}</li>
-                <li>The tracker rows linked to this trailer stay as customer (the sale happened — only the trailer status changes)</li>
+                <li>The tracker rows linked to this trailer stay as customer. The sale happened: only the trailer status changes</li>
               </ul>
             </div>
           </div>

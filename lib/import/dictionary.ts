@@ -267,3 +267,223 @@ export const CRM_CONTACTS: Dictionary = {
     },
   ],
 };
+
+/* =============================================================
+   Trailer stock.
+
+   A different sheet with different lies in it. Dave's working order is
+   stock number first, which is also the only field that identifies a
+   unit, so it is both the required field and the duplicate key.
+
+   The mirror image of the contacts dictionary: here a customer email is
+   the column with no home, and a chassis number is real data.
+   ============================================================= */
+export const STOCK_TRAILERS: Dictionary = {
+  entity: 'trailer',
+  required: 'stc_no',
+  duplicateKeys: ['stc_no', 'chassis_number'],
+  fields: [
+    {
+      target: 'stc_no', label: 'Stock number', kind: 'text',
+      aliases: [
+        'stc no', 'stc number', 'stock no', 'stock number', 'stock', 'stc',
+        'unit no', 'unit number', 'fleet no', 'fleet number', 'asset no', 'ref',
+      ],
+    },
+    {
+      target: 'chassis_number', label: 'Chassis number', kind: 'text',
+      aliases: ['chassis', 'chassis no', 'chassis number', 'vin', 'serial', 'serial no'],
+    },
+    {
+      target: 'ministry_no', label: 'Ministry number', kind: 'text',
+      aliases: ['ministry', 'ministry no', 'ministry number', 'mot no', 'dvsa no'],
+    },
+    {
+      target: 'make', label: 'Make', kind: 'text',
+      aliases: ['make', 'manufacturer', 'brand', 'built by'],
+    },
+    {
+      target: 'model', label: 'Model', kind: 'text',
+      aliases: ['model', 'type', 'body type', 'spec', 'variant'],
+    },
+    {
+      target: 'year', label: 'Year', kind: 'number',
+      aliases: ['year', 'yr', 'year of manufacture', 'build year', 'reg year', 'age'],
+    },
+    {
+      target: 'category', label: 'Category', kind: 'text',
+      aliases: ['category', 'trailer type', 'group', 'class', 'fleet type'],
+    },
+    {
+      target: 'axle_type', label: 'Axles', kind: 'text',
+      aliases: ['axle', 'axles', 'axle type', 'axle config', 'no of axles'],
+    },
+    {
+      target: 'door_type', label: 'Doors', kind: 'text',
+      aliases: ['door', 'doors', 'door type', 'rear doors'],
+    },
+    {
+      target: 'colour', label: 'Colour', kind: 'text',
+      aliases: ['colour', 'color', 'paint', 'livery'],
+    },
+    {
+      target: 'mot_date', label: 'MOT expiry', kind: 'date',
+      aliases: ['mot', 'mot date', 'mot expiry', 'mot due', 'test date', 'test expiry', 'plating'],
+      sniff: sniffers.date,
+    },
+    {
+      target: 'location', label: 'Location', kind: 'text',
+      aliases: ['location', 'depot', 'site', 'yard', 'where', 'based'],
+    },
+    {
+      target: 'status_text', label: 'Status note', kind: 'text',
+      aliases: ['status', 'state', 'condition', 'availability', 'stage'],
+    },
+    {
+      target: 'sales_rep', label: 'Sales rep', kind: 'text',
+      aliases: ['rep', 'sales rep', 'salesperson', 'sales person', 'handler', 'owner', 'assigned'],
+    },
+    {
+      target: 'supplier', label: 'Supplier', kind: 'text',
+      aliases: ['supplier', 'vendor', 'bought from', 'source', 'purchased from'],
+    },
+    {
+      target: 'nbv', label: 'Net book value', kind: 'money',
+      aliases: ['nbv', 'net book value', 'book value', 'value', 'current value'],
+      sniff: sniffers.money,
+    },
+    {
+      target: 'refurb_costs', label: 'Refurb cost', kind: 'money',
+      aliases: ['refurb', 'refurb cost', 'refurb costs', 'refurbishment', 'rectification', 'prep cost'],
+    },
+    {
+      target: 'retail_price', label: 'Retail price', kind: 'money',
+      aliases: ['retail', 'retail price', 'asking price', 'list price', 'advertised price'],
+    },
+    {
+      target: 'sales_price', label: 'Sale price', kind: 'money',
+      aliases: ['sale price', 'sales price', 'sold price', 'sold for', 'invoice value'],
+    },
+    {
+      target: 'customer', label: 'Customer', kind: 'text',
+      aliases: ['customer', 'sold to', 'buyer', 'client', 'account'],
+    },
+    {
+      target: 'received_date', label: 'Date received', kind: 'date',
+      aliases: ['received', 'date received', 'arrival', 'date in', 'in stock date', 'purchased'],
+    },
+    {
+      target: 'order_date', label: 'Order date', kind: 'date',
+      aliases: ['order date', 'ordered', 'date ordered', 'po date'],
+    },
+    {
+      target: 'dispatch_date', label: 'Dispatch date', kind: 'date',
+      aliases: ['dispatch', 'dispatch date', 'delivered', 'delivery date', 'date out', 'collected'],
+    },
+    {
+      target: 'new_or_used', label: 'New or used', kind: 'text',
+      aliases: ['new or used', 'new used', 'condition new', 'n u'],
+    },
+    {
+      target: 'description', label: 'Description', kind: 'text',
+      aliases: ['description', 'detail', 'details', 'spec notes', 'summary'],
+    },
+    {
+      target: 'notes', label: 'Notes', kind: 'text',
+      aliases: ['notes', 'note', 'comments', 'comment', 'remarks'],
+    },
+
+    /* ---- recognised, and not for this table ---- */
+    {
+      target: null, label: 'Customer contact details', kind: 'text',
+      aliases: [
+        'email', 'e mail', 'email address', 'phone', 'telephone', 'tel', 'mobile',
+        'contact name', 'contact', 'decision maker',
+      ],
+      ignoredBecause: 'contact details belong on the customer record, not on a trailer',
+    },
+    {
+      target: null, label: 'Company financials', kind: 'money',
+      aliases: ['turnover', 'employees', 'employee count', 'headcount', 'annual revenue'],
+      ignoredBecause: 'a fact about a business, and this import creates trailers',
+    },
+    {
+      target: null, label: 'Spreadsheet bookkeeping', kind: 'text',
+      aliases: ['row', 'row number', 'index', 'sheet', 'tab', 'line'],
+      ignoredBecause: 'a spreadsheet row marker, not stock data',
+    },
+  ],
+};
+
+/* =============================================================
+   Sales tracker.
+
+   Tracker rows are contacts too: they live on crm_contacts with the
+   tracker columns filled in, which is why the deal fields the contacts
+   dictionary knowingly drops are real here. A price on a customer record
+   is a category error; a price on a tracker row is the whole point.
+   ============================================================= */
+export const SALES_TRACKER: Dictionary = {
+  entity: 'deal',
+  required: 'company_name',
+  duplicateKeys: ['company_name'],
+  fields: [
+    ...CRM_CONTACTS.fields.filter((f) => f.target !== null && f.target !== 'website'),
+    {
+      target: 'what', label: 'What they want', kind: 'text',
+      aliases: ['what', 'requirement', 'looking for', 'enquiry', 'interest', 'product'],
+    },
+    {
+      target: 'estimated_value', label: 'Deal value', kind: 'money',
+      aliases: ['deal value', 'value', 'estimated value', 'opportunity', 'potential value', 'quote value'],
+      sniff: sniffers.money,
+    },
+    {
+      target: 'sale_price', label: 'Sale price', kind: 'money',
+      aliases: ['sale price', 'sold for', 'final price', 'invoice value', 'sold price'],
+    },
+    {
+      target: 'profit', label: 'Profit', kind: 'money',
+      aliases: ['profit', 'margin', 'gross profit', 'gp'],
+    },
+    {
+      target: 'commission', label: 'Commission', kind: 'money',
+      aliases: ['commission', 'comm', 'bonus'],
+    },
+    {
+      target: 'next_action', label: 'Next action', kind: 'text',
+      aliases: ['next action', 'next step', 'action', 'to do', 'follow up'],
+    },
+    {
+      target: 'order_date', label: 'Order date', kind: 'date',
+      aliases: ['order date', 'ordered', 'date ordered', 'won date', 'closed date'],
+    },
+    {
+      target: 'dispatch_date', label: 'Dispatch date', kind: 'date',
+      aliases: ['dispatch', 'dispatch date', 'delivered', 'delivery date'],
+    },
+    {
+      target: 'category', label: 'Category', kind: 'text',
+      aliases: ['category', 'grade', 'tier', 'abc', 'class'],
+    },
+    {
+      target: 'vehicles', label: 'Vehicles', kind: 'text',
+      aliases: ['vehicles', 'units', 'quantity', 'qty', 'no of units'],
+    },
+
+    /* ---- recognised, and not for this table ---- */
+    {
+      target: null, label: 'Trailer or stock number', kind: 'text',
+      aliases: [
+        'stock number', 'stock no', 'trailer number', 'trailer no',
+        'chassis', 'chassis number', 'vin', 'ministry no',
+      ],
+      ignoredBecause: 'a specific unit, and a tracker row is about the deal rather than the trailer',
+    },
+    {
+      target: null, label: 'MOT or inspection date', kind: 'date',
+      aliases: ['mot', 'mot expiry', 'mot due', 'inspection', 'pmi'],
+      ignoredBecause: 'a vehicle compliance date with no place on a deal',
+    },
+  ],
+};

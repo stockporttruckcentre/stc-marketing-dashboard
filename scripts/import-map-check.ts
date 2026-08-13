@@ -10,7 +10,7 @@
    ============================================================= */
 import { matchColumns, parseDate, parseMoney, parseStatus, coerce } from '../lib/import/match';
 import { buildPlan, countPlan } from '../lib/import/plan';
-import { CRM_CONTACTS } from '../lib/import/dictionary';
+import { CRM_CONTACTS, STOCK_TRAILERS, SALES_TRACKER } from '../lib/import/dictionary';
 
 let pass = 0, fail = 0;
 
@@ -138,7 +138,9 @@ check('an unreadable cell is reported, not written',
 
 check('a repeat inside the file is caught', plan.rows[2].duplicateInFile, 0);
 check('a row with no company is skipped', plan.rows[3].decision, 'skip');
-check('an existing record is caught', plan.rows[4].duplicateOf?.matchedOn, 'email address');
+// The label comes from the dictionary now, not a hardcoded pair.
+check('an existing record is caught', plan.rows[4].duplicateOf?.matchedOn, 'email');
+check('and it names what it collided with', plan.rows[4].duplicateOf?.label, 'Dawson Group');
 check('duplicates default to skip', plan.rows[4].decision, 'skip');
 
 check('the dropped column is named and explained',
@@ -148,6 +150,71 @@ check('the dropped column is named and explained',
 check('the counts add up',
   countPlan(plan),
   { create: 2, skip: 3, merge: 0, withIssues: 2, duplicates: 2, dropped: 1, unknown: 0 });
+
+/* ---------- stock, where the same header means something else ---------- */
+
+function stockMap(headers: string[], rows: Record<string, any>[] = []) {
+  const out: Record<string, string | null | undefined> = {};
+  for (const c of matchColumns(headers, rows, STOCK_TRAILERS)) out[c.header] = c.target;
+  return out;
+}
+
+check('a stock sheet maps to stock columns',
+  stockMap(['STC No', 'Make', 'Model', 'MOT Expiry', 'NBV']),
+  { 'STC No': 'stc_no', Make: 'make', Model: 'model', 'MOT Expiry': 'mot_date', NBV: 'nbv' });
+
+check("Dave's stock number, however it is spelled",
+  stockMap(['Stock No', 'Chassis Number']),
+  { 'Stock No': 'stc_no', 'Chassis Number': 'chassis_number' });
+
+// The point of per tab dictionaries: an email column is real data on the
+// contacts import and a category error here, and the reverse is true of a
+// chassis number. Both are named and dropped rather than ignored.
+check('a customer email is dropped from a stock import',
+  stockMap(['STC No', 'Email', 'Phone']),
+  { 'STC No': 'stc_no', Email: null, Phone: null });
+
+check('a chassis number is dropped from a contacts import',
+  mapOf(['Company', 'Chassis Number']),
+  { Company: 'company_name', 'Chassis Number': null });
+
+// The dictionary has to be passed to matchColumns as well as buildPlan.
+// Leaving it off made both of these pass for the wrong reason: under the
+// contacts dictionary "STC No" is a dropped column, so the row failed on
+// a missing company name rather than on anything being tested here.
+const noStockNo = [{ 'STC No': '', Make: 'SDC' }];
+check('a stock row with no stock number cannot be imported',
+  buildPlan(matchColumns(['STC No', 'Make'], noStockNo, STOCK_TRAILERS), noStockNo, [], STOCK_TRAILERS)
+    .rows[0].decision,
+  'skip');
+
+const twice = [{ 'STC No': 'STC1421' }, { 'STC No': 'STC1421' }];
+check('two units with the same stock number are caught',
+  buildPlan(matchColumns(['STC No'], twice, STOCK_TRAILERS), twice, [], STOCK_TRAILERS)
+    .rows[1].duplicateInFile,
+  0);
+
+/* ---------- the tracker, where deal money is real ---------- */
+
+function trackerMap(headers: string[], rows: Record<string, any>[] = []) {
+  const out: Record<string, string | null | undefined> = {};
+  for (const c of matchColumns(headers, rows, SALES_TRACKER)) out[c.header] = c.target;
+  return out;
+}
+
+// A price is dropped from a contacts import and kept on the tracker,
+// because a tracker row is a deal rather than a company.
+check('deal money is kept on the tracker',
+  trackerMap(['Company', 'Deal Value', 'Sale Price', 'Profit']),
+  { Company: 'company_name', 'Deal Value': 'estimated_value', 'Sale Price': 'sale_price', Profit: 'profit' });
+
+check('a trailer number is still dropped on the tracker',
+  trackerMap(['Company', 'Trailer Number']),
+  { Company: 'company_name', 'Trailer Number': null });
+
+check('the tracker still understands ordinary contact columns',
+  trackerMap(['Customer Name', 'em addrs', 'Next Action']),
+  { 'Customer Name': 'company_name', 'em addrs': 'email', 'Next Action': 'next_action' });
 
 console.log(`\n${pass}/${pass + fail} passing`);
 if (fail) process.exit(1);

@@ -18,7 +18,7 @@ export type PlannedRow = {
   display: string;
   issues: RowIssue[];
   /** An existing record this looks like. */
-  duplicateOf?: { id: string; company_name: string; email: string | null; matchedOn: string };
+  duplicateOf?: { id: string; label: string; matchedOn: string };
   /** Another row in the same file. */
   duplicateInFile?: number;
   decision: 'import' | 'skip' | 'merge';
@@ -38,20 +38,40 @@ function labelFor(values: Record<string, any>, dict: Dictionary): string {
   return String(values[dict.required] ?? values.email ?? values.contact_name ?? 'Unnamed row');
 }
 
+/** A row already in the target table, as its own columns. */
+export type ExistingRow = { id: string } & Record<string, any>;
+
 export function buildPlan(
   columns: ColumnMatch[],
   rawRows: Record<string, any>[],
-  existing: { id: string; company_name: string; email: string | null }[],
+  existing: ExistingRow[],
   dict: Dictionary,
 ): ImportPlan {
   const mapped = columns.filter((c) => c.target);
 
-  const byEmail = new Map<string, typeof existing[number]>();
-  const byCompany = new Map<string, typeof existing[number]>();
-  for (const e of existing) {
-    if (e.email) byEmail.set(fold(e.email), e);
-    if (e.company_name) byCompany.set(fold(e.company_name), e);
+  /**
+   * One index per duplicate key, built from the dictionary rather than
+   * from a fixed pair of column names.
+   *
+   * This was hardcoded to email and company, which worked for contacts
+   * and meant the stock import had to pass its stock number in the slot
+   * called `company_name`. That is a pun, not a design: it reads as a
+   * bug to anybody who finds it later, and it breaks the moment a
+   * dictionary wants a third key.
+   */
+  const indexes = new Map<string, Map<string, ExistingRow>>();
+  for (const key of dict.duplicateKeys) {
+    const m = new Map<string, ExistingRow>();
+    for (const e of existing) {
+      const v = e[key];
+      if (v != null && String(v).trim() !== '') m.set(fold(String(v)), e);
+    }
+    indexes.set(key, m);
   }
+
+  /** What the dictionary calls a field, for saying how two rows matched. */
+  const labelOf = (key: string) =>
+    dict.fields.find((f) => f.target === key)?.label.toLowerCase() ?? key.replace(/_/g, ' ');
 
   const seenInFile = new Map<string, number>();
   const rows: PlannedRow[] = [];
@@ -108,9 +128,13 @@ export function buildPlan(
     for (const key of dict.duplicateKeys) {
       const v = values[key];
       if (!v) continue;
-      const hit = key === 'email' ? byEmail.get(fold(String(v))) : byCompany.get(fold(String(v)));
+      const hit = indexes.get(key)?.get(fold(String(v)));
       if (hit) {
-        planned.duplicateOf = { ...hit, matchedOn: key === 'email' ? 'email address' : 'company name' };
+        planned.duplicateOf = {
+          id: hit.id,
+          label: labelFor(hit, dict),
+          matchedOn: labelOf(key),
+        };
         planned.decision = 'skip';
         break;
       }

@@ -9,7 +9,7 @@ import {
 import { Button, Alert, Badge } from '@/components/kit/primitives';
 import { Modal, Select } from '@/components/kit/forms';
 import { matchColumns, type ColumnMatch } from '@/lib/import/match';
-import { buildPlan, countPlan, type ImportPlan, type PlannedRow } from '@/lib/import/plan';
+import { buildPlan, countPlan, type ImportPlan, type PlannedRow, type ExistingRow } from '@/lib/import/plan';
 import type { Dictionary } from '@/lib/import/dictionary';
 
 /* =============================================================
@@ -37,7 +37,8 @@ type Step = 'file' | 'columns' | 'rows';
 
 export function ImportDialog({ dict, existing, listName, onCommit, onClose }: {
   dict: Dictionary;
-  existing: { id: string; company_name: string; email: string | null }[];
+  /** Rows already in the target table, as their own columns. */
+  existing: ExistingRow[];
   listName: string;
   onCommit: (rows: Record<string, any>[]) => Promise<{ inserted: number; error?: string }>;
   onClose: () => void;
@@ -393,7 +394,7 @@ function RowRow({ row, onDecide }: { row: PlannedRow; onDecide: (d: PlannedRow['
           {row.display}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 3, lineHeight: 1.5 }}>
-          {dupe && <div>Already on this list as <strong>{dupe.company_name}</strong>, matched on {dupe.matchedOn}.</div>}
+          {dupe && <div>Already here as <strong>{dupe.label}</strong>, matched on {dupe.matchedOn}.</div>}
           {inFile && <div>The same record appears earlier in this file, on row {(row.duplicateInFile ?? 0) + 2}.</div>}
           {row.issues.map((i, n) => (
             <div key={n}>
