@@ -89,6 +89,19 @@ function parseRange(text: string): { from: Date; to: Date; label: string } | nul
       return { from: startOfDay(from), to: now, label: `past ${n} ${rel[2]}${n === 1 ? '' : 's'}` };
     }
   }
+  // "last week" with no number. The numbered branch above needs a digit
+  // or a word, so the bare form fell through and the question came back
+  // with no period at all.
+  const bare = t.match(/\blast\s+(week|month|year)\b/);
+  if (bare) {
+    const unit = bare[1];
+    const from = new Date(now);
+    if (unit === 'week') from.setDate(from.getDate() - 7);
+    if (unit === 'month') from.setMonth(from.getMonth() - 1);
+    if (unit === 'year') from.setFullYear(from.getFullYear() - 1);
+    return { from: startOfDay(from), to: now, label: `last ${unit}` };
+  }
+
   if (/\bthis week\b/.test(t)) {
     const from = startOfDay(now);
     const to = new Date(from); to.setDate(to.getDate() + 7);

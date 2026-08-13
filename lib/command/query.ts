@@ -15,6 +15,10 @@
 import { ENTITIES, MEASURE_WORDS, type EntitySpec, type Measure } from './schema';
 import { extract } from './entities';
 import { tokenise } from './normalise';
+import {
+  deFluff, readDepot, readPlaceAfterPreposition, readRep, readSize,
+  STATE_PHRASES, STATE_LABEL, BODY_TYPES, isReservedWord,
+} from './lexicon';
 
 export type PlanFilter = {
   key: string; column: string; op: 'eq' | 'ilike'; value: string; label: string;
@@ -75,19 +79,44 @@ function pickEntity(text: string): { entity: EntitySpec; at: number; noun: strin
       }
     }
   }
+  // A vocabulary word can name the thing on its own: "how many tautliners
+  // sold this week" has no noun for a trailer in it anywhere.
+  //
+  // Three characters, not five, so "taut", "low" and "tip" are reachable,
+  // but only when exactly one entity claims the word. Anything shared
+  // stays ambiguous and is left alone rather than guessed at.
+  const owners = new Map<string, EntitySpec[]>();
   for (const e of ENTITIES) {
     for (const f of e.filters) {
       for (const w of Object.keys(f.vocabulary ?? {})) {
-        if (w.length > 4 && new RegExp(`\\b${w}s?\\b`).test(t)) return { entity: e, at: t.indexOf(w), noun: '' };
+        if (w.length < 3) continue;
+        owners.set(w, [...(owners.get(w) ?? []), e]);
       }
     }
   }
+  let bestWord: { entity: EntitySpec; at: number } | null = null;
+  for (const [w, es] of owners) {
+    if (new Set(es.map((e) => e.id)).size !== 1) continue;
+    const at = t.search(new RegExp(`\\b${w}s?\\b`));
+    if (at === -1) continue;
+    if (!bestWord || at < bestWord.at) bestWord = { entity: es[0], at };
+  }
+  if (bestWord) return { entity: bestWord.entity, at: bestWord.at, noun: '' };
   return null;
 }
 
 export function parseQuery(input: string): QueryPlan | null {
-  const text = input.trim();
-  if (text.length < 3) return null;
+  const raw = input.trim();
+  if (raw.length < 3) return null;
+
+  /**
+   * Politeness stripped before anything reads the sentence.
+   *
+   * Not cosmetic. "Tell me how many trailers we have" used to answer for
+   * the asker's own accounts, because "me" matched the word that decides
+   * whose records a question is about. A courtesy changed the number.
+   */
+  const text = deFluff(raw) || raw;
 
   const picked = pickEntity(text);
   if (!picked) return null;
@@ -119,7 +148,43 @@ export function parseQuery(input: string): QueryPlan | null {
   const filters: PlanFilter[] = [];
   const consumed: string[] = [];
 
+  /* --- yard talk ---
+     Nobody says "status equals in_stock". They say it is sat there,
+     parked up, on the yard, or that we are storing it.
+
+     Before the schema vocabulary rather than after, and longest phrase
+     first. Both matter: the schema knows the word "sold", the lexicon
+     knows "not sold" and "provisionally sold", and whichever runs first
+     wins. Running the short list first meant "provisionally sold" was
+     answered as sold, which is the opposite of the truth. */
+  if (!filters.some((f) => f.key === 'status') && entity.filters.some((f) => f.key === 'status')) {
+    const spec = entity.filters.find((f) => f.key === 'status')!;
+    const phrases = STATE_PHRASES
+      .flatMap((p) => p.words.map((w) => ({ w, p })))
+      .sort((a, b) => b.w.length - a.w.length);
+    for (const { w, p } of phrases) {
+      if (w === entityNoun || w === groupWord) continue;
+      if (!new RegExp(`\\b${w}\\b`, 'i').test(text)) continue;
+      // Only a value this entity actually has. "on hire" means nothing
+      // to a proposal.
+      const known = Object.values(spec.vocabulary ?? {}).includes(p.value)
+        || spec.vocabulary === undefined;
+      if (!known) continue;
+      filters.push({
+        key: 'status', column: spec.column, op: 'eq', value: p.value,
+        label: STATE_LABEL[p.value] ?? `${spec.label} ${w}`,
+      });
+      consumed.push(w);
+      confidence += 4;
+      break;
+    }
+  }
+
   for (const f of entity.filters) {
+    // Already answered by the yard-talk pass above. Without this,
+    // "sold last week" picked up status twice and the summary read
+    // "where sold and status sold".
+    if (filters.some((x) => x.column === f.column)) continue;
     if (f.vocabulary) {
       // Longest vocabulary phrase first, so "in stock" beats "stock".
       const words = Object.keys(f.vocabulary)
@@ -137,10 +202,54 @@ export function parseQuery(input: string): QueryPlan | null {
   }
 
   // Some nouns both name the thing and narrow it: "leads" is every deal
-  // at status lead, while "customers" is simply all of them.
+  // at status lead, while "customers" is simply all of them. "Box" is the
+  // same shape but narrows the body type rather than the status, so the
+  // key comes from whichever filter owns the column instead of being
+  // assumed to be status.
   const implied = entity.nounImpliesFilter?.[entityNoun];
   if (implied && !filters.some((f) => f.column === implied.column)) {
-    filters.push({ key: 'status', column: implied.column, op: 'eq', value: implied.value, label: implied.label });
+    const owner = entity.filters.find((f) => f.column === implied.column);
+    filters.push({
+      key: owner?.key ?? 'status', column: implied.column,
+      op: 'eq', value: implied.value, label: implied.label,
+    });
+    confidence += 3;
+  }
+
+  /* --- where ---
+     A known depot anywhere in the sentence, including bare at the front
+     as in "carrington, how many parked up". Falls back to whatever
+     follows a preposition for a yard nobody has listed yet. */
+  const locSpec = entity.filters.find((f) => f.key === 'location');
+  if (locSpec && !filters.some((f) => f.column === locSpec.column)) {
+    const place = readDepot(text) ?? readPlaceAfterPreposition(text);
+    if (place) {
+      filters.push({ key: 'location', column: locSpec.column, op: 'ilike', value: place, label: `at ${place}` });
+      consumed.push(place);
+      confidence += 4;
+    }
+  }
+
+  /* --- who sold it ---
+     "by dave" is the rep. "to Dawson" is the buyer. Getting these the
+     wrong way round answers a completely different question. */
+  const repSpec = entity.filters.find((f) => f.key === 'rep' || f.key === 'owner');
+  if (repSpec && !filters.some((f) => f.column === repSpec.column)) {
+    const who = readRep(text);
+    if (who) {
+      filters.push({ key: repSpec.key, column: repSpec.column, op: 'ilike', value: who, label: `by ${who}` });
+      consumed.push(who);
+      confidence += 4;
+    }
+  }
+
+  /* --- how long ---
+     There is no length column, so a size matches against the description,
+     which is where the spec sheet ends up. */
+  const size = readSize(text);
+  if (size && entity.id === 'trailers') {
+    filters.push({ key: 'size', column: 'description', op: 'ilike', value: size, label: `${size}m` });
+    consumed.push(size);
     confidence += 3;
   }
 
@@ -148,7 +257,7 @@ export function parseQuery(input: string): QueryPlan | null {
   const entities = extract(text, tokenise(text));
   const freeSpecs = entity.filters.filter((f) => f.freeText);
   const availableNouns = entities.properNouns.filter(
-    (n) => !consumed.some((c) => c.toLowerCase() === n.toLowerCase()),
+    (n) => !consumed.some((c) => c.toLowerCase() === n.toLowerCase()) && !isReservedWord(n),
   );
   if (availableNouns.length && freeSpecs.length) {
     // "to X" / "for X" is the customer; "in X" / "at X" is the location.

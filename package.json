@@ -9,7 +9,8 @@
     "lint": "next lint",
     "check:command": "tsx scripts/command-parse-check.ts",
     "check:query": "tsx scripts/query-compose-check.ts",
-    "check:import": "tsx scripts/import-map-check.ts"
+    "check:import": "tsx scripts/import-map-check.ts",
+    "check:coverage": "tsx scripts/command-coverage-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

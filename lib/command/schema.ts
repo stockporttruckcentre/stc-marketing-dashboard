@@ -15,6 +15,8 @@
    To add coverage, add vocabulary here. Not another intent.
    ============================================================= */
 
+import { BODY_TYPES } from './lexicon';
+
 export type Measure = 'count' | 'sum' | 'avg' | 'list';
 
 export type FilterSpec = {
@@ -100,15 +102,10 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'model', column: 'model', kind: 'text', label: 'model', freeText: true },
       // Yard words for body type, so "how many fridges in stock" narrows
       // properly instead of counting everything in stock.
-      { key: 'category', column: 'category', kind: 'enum', label: 'category',
-        vocabulary: {
-          fridge: 'Fridge', fridges: 'Fridge', reefer: 'Fridge', reefers: 'Fridge', chilled: 'Fridge', frigo: 'Fridge',
-          curtain: 'Curtainsider', curtains: 'Curtainsider', curtainsider: 'Curtainsider',
-          curtainsiders: 'Curtainsider', tautliner: 'Curtainsider', tautliners: 'Curtainsider',
-          flat: 'Flat', flats: 'Flat', flatbed: 'Flat', flatbeds: 'Flat',
-          skeli: 'Skeletal', skeletal: 'Skeletal', skelly: 'Skeletal',
-          tipper: 'Tipper', tippers: 'Tipper', box: 'Box', boxvan: 'Box',
-        } },
+      // One source of truth for what people call a trailer body. This
+      // used to be a shorter copy living here, which meant half the words
+      // in the lexicon were never reachable from a query.
+      { key: 'category', column: 'category', kind: 'enum', label: 'category', vocabulary: BODY_TYPES },
       { key: 'location', column: 'location', kind: 'text', label: 'location', freeText: true },
       { key: 'customer', column: 'customer', kind: 'text', label: 'customer', freeText: true },
       { key: 'rep', column: 'sales_rep', kind: 'text', label: 'rep', freeText: true },
@@ -123,6 +120,13 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'customer', column: 'customer', label: 'customer', words: ['customer', 'client', 'buyer'] },
       { key: 'rep', column: 'sales_rep', label: 'rep', words: ['rep', 'salesman', 'seller', 'who'] },
     ],
+    // Some words name the thing and narrow it at once. "Box" is a trailer
+    // and a body type, and the rule that stops an entity noun being read
+    // as a filter meant "how many boxes" counted everything.
+    nounImpliesFilter: {
+      box: { column: 'category', value: 'Box', label: 'category box' },
+      boxes: { column: 'category', value: 'Box', label: 'category box' },
+    },
     hrefFor: (r) => `/dashboard/sales?stock=${r.id}`,
   },
   {

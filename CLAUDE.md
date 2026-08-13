@@ -157,6 +157,47 @@ trigger has already fired. Do not guess a value that the kit specifies.
 
 ---
 
+## The command bar is never finished
+
+The global command bar is a first class part of this product, not a search
+box. It has to reach **every** function, screen, shortcut and action the CRM
+has, and understand however somebody chooses to type it: their word order,
+their jargon, their typos, the words they leave out.
+
+**Whenever you add a feature, action or screen anywhere in the app, you add
+its words to `lib/command/lexicon.ts` and a case to
+`scripts/command-coverage-check.ts` in the same change.** A feature the bar
+cannot reach is invisible, and the original bug was exactly that: eight
+intents against twelve screens, so typing "meeting" did nothing.
+
+### Generated, not listed
+
+Do not write variants out longhand. A lookup table of phrasings goes stale
+the day somebody adds a depot, cannot handle a sentence nobody predicted,
+and is unreadable at the size it would have to be.
+
+The coverage comes from combining small structured groups: synonym sets,
+word order independence, filler stripping, fuzzy matching. A few hundred
+groups in `lexicon.ts` already cover millions of sentences.
+
+The volume belongs in the checks instead. `npm run check:coverage` sweeps
+every state word against every body type, depot, period and sentence shape
+and asserts what comes out. A phrasing listed in the lexicon is a guess. A
+phrasing asserted in the check is a promise.
+
+### Three checks, all of which must pass
+
+```bash
+npm run check:command    # the parser, against real phrasings
+npm run check:query      # query composition
+npm run check:coverage   # every screen reachable, and the combinations
+```
+
+Writing these has found real bugs every single time, including a filler
+word that silently changed whose numbers a question answered.
+
+---
+
 ## Rebranding is gradual and user-ordered
 
 The rebrand happens in the order the user sets, one piece at a time.
