@@ -1090,9 +1090,10 @@ function readBracket(text: string): {
     return v;
   };
 
-  // The dash alternatives are escapes rather than the characters
-  // themselves, because people paste all three and the repo bans two of
-  // them on sight.
+  /* The dash alternatives are written as escapes rather than as the
+     characters themselves. People paste all three, the pattern has to
+     match all three, and the repo bans two of them on sight, so the
+     only way to have both is to spell them. */
   const DASH = String.raw`[-–—]`;
   const span = t.match(new RegExp(String.raw`\b(?:between|from)\s+${num}\s*(?:and|to|${DASH})\s*${num}`))
     ?? t.match(new RegExp(String.raw`\b${num}\s*(?:${DASH}|to)\s*${num}\b`));
