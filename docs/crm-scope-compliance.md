@@ -94,10 +94,24 @@ Two things to know about this file:
   from Entra groups, because only IT can see Entra and the CRM needs its own full
   admin control. Sign in answers who you are. This answers what you may do.
 
-**It is not enforcement.** These are interface gates. A determined user with the
-browser console still has whatever RLS allows, and RLS does not currently know
-about any of this. Closing that is a database change and belongs with the admin
-panel, not buried in a UI commit.
+**It is not enforcement, and one hole makes it decorative.**
+
+`profiles_update_self` is `FOR UPDATE USING (id = auth.uid())`. Row level
+security is row level: it decides which rows you may touch, not which columns.
+So a policy meant to let somebody edit their own name lets them edit every field
+in that row, including `role`. One line in the browser console promotes a viewer
+to admin.
+
+Everything here hangs off `profiles.role`. Until that is closed, the capability
+model, the portfolio scoping and the Lusha lock are a tidy interface rather than
+a permission system, and the exec dashboard is readable by anybody who wants it.
+
+`supabase/migrations/005_role_escalation.sql` closes it with a trigger, because
+Supabase runs users and admins as the same Postgres role, so a column level
+revoke would lock admins out too. **Run it before go live.**
+
+Beyond that one fix, RLS still knows nothing about the capability model. Closing
+that properly is a bigger database change and belongs with the admin panel.
 
 ---
 
