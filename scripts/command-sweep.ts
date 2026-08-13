@@ -18,7 +18,7 @@ import { parseEdit } from '../lib/command/mutate';
 import { parseSelection } from '../lib/command/select';
 import { suggestActions } from '../lib/command/actions';
 import { parse } from '../lib/command/intents';
-import { readsOnlyText, INSTRUCTION } from '../components/dashboard/CommandBar';
+import { readsOnlyText, INSTRUCTION } from '../lib/command/arbitrate';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { loadSampleVocabulary, sampleSize } from './sample-vocabulary';
 
