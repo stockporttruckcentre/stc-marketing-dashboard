@@ -102,6 +102,30 @@ const MINE = /\b(my|mine|i|i've|i have|me)\b/i;
 const ALL = /\b(all|company|everyone|team|total|whole|across)\b/i;
 
 /**
+ * Words that hold a sentence together without naming anything.
+ *
+ * Only used to decide what counts as unaccounted for. A sentence that
+ * mentions a body type this app does not stock should say so; a
+ * sentence containing the word "have" should not, and reporting both
+ * the same way buries the one that matters under the one that does not.
+ */
+const GRAMMAR_WORDS = new Set([
+  'and', 'but', 'or', 'nor', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for',
+  'from', 'with', 'without', 'by', 'as', 'is', 'are', 'was', 'were', 'be', 'been',
+  'being', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'can',
+  'could', 'should', 'shall', 'may', 'might', 'must', 'get', 'got', 'give', 'take',
+  'that', 'which', 'who', 'whom', 'whose', 'what', 'when', 'where', 'why', 'how',
+  'this', 'these', 'those', 'there', 'here', 'then', 'than', 'ones', 'one',
+  'some', 'any', 'no', 'not', 'more', 'most', 'less', 'least', 'few', 'many', 'much',
+  'currently', 'right', 'now', 'still', 'yet', 'ever', 'never', 'also', 'too',
+  'please', 'show', 'give', 'find', 'list', 'tell', 'need', 'want', 'like',
+  'compare', 'versus', 'against', 'between', 'over', 'under', 'above', 'below',
+  'each', 'every', 'per', 'split', 'grouped', 'broken', 'down', 'first', 'top',
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'twenty', 'thirty', 'forty', 'fifty', 'hundred', 'dozen', 'couple', 'handful',
+]);
+
+/**
  * Filters whose value is spread across several columns.
  *
  * Keyed by filter then entity, because the same idea lives in different
@@ -153,7 +177,7 @@ function pickMeasure(text: string): { measure: Measure; hit: string } {
 function pickEntity(
   text: string,
   grammar?: Grammar,
-): { entity: EntitySpec; at: number; noun: string } | null {
+): { entity: EntitySpec; at: number; noun: string; weak?: boolean } | null {
   const t = ` ${text.toLowerCase()} `;
   let best: { entity: EntitySpec; at: number; noun: string } | null = null;
   for (const e of ENTITIES) {
@@ -244,17 +268,41 @@ function pickEntity(
     if (ranked.length) return { entity: ranked[0].entity, at: ranked[0].at, noun: '' };
   }
 
+  /* --- one of our own yards names the thing ---
+     A depot is where stock sits. `location` exists on customers and
+     proposals too, but that is the customer's own town, so a sentence
+     naming Carrington and nothing else is about the yard at Carrington.
+
+     Weak, because it is an inference: the sentence said where and did
+     not say what. Anything else it contained that could not be placed
+     gets named in the summary rather than dropped, which is what stops
+     "how many 6x2s at Carrington" coming back as a confident count of
+     every trailer on that site. */
+  const depot = readDepot(text);
+  if (depot) {
+    const stock = ENTITIES.find((e) => e.id === 'trailers');
+    if (stock) return { entity: stock, at: t.indexOf(depot.toLowerCase()), noun: '', weak: true };
+  }
+
   /* --- a breakdown names the thing ---
-     "How many 6x2s have we got by depot" says nothing this app holds
-     except `depot`, and only one entity is broken down by one. Counting
-     something is better than refusing to, and the summary says what was
-     counted so a wrong guess is visible rather than silent. */
+     "Break it down by depot" says nothing this app holds except
+     `depot`, and only one entity is broken down by one. So the grouping
+     names the thing, weakly: `weak` is passed on so the caller knows the
+     entity was inferred from a dimension and nothing else, and can say
+     so if the sentence also contained words it could not place.
+
+     This was written for "how many 6x2s have we got by depot", which
+     was a bad example. There is no 6x2 in this business and no such
+     column, and the risk it created is real: without the flag, that
+     sentence returned a confident count of every trailer in the yard
+     with the part it could not understand quietly discarded. That is
+     the exact failure this engine is meant to stop. */
   const byWord = t.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/);
   if (byWord) {
     const dimOwners = ENTITIES.filter((e) =>
       e.dimensions.some((d) => d.words.includes(byWord[1]) || d.key === byWord[1]));
     if (dimOwners.length === 1) {
-      return { entity: dimOwners[0], at: byWord.index ?? 0, noun: '' };
+      return { entity: dimOwners[0], at: byWord.index ?? 0, noun: '', weak: true };
     }
   }
   return null;
@@ -331,11 +379,28 @@ export function parseQuery(input: string): QueryPlan | null {
   // "how many quoted proposals" loses the actual status.
   const entityNoun = picked.noun;
   // Nor is whatever follows "by": that is the grouping.
-  const groupWord = (lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/) ?? [])[1] ?? '';
+  const groupWord = (lower.match(
+    /\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+(?:\s+[a-z]+){0,2})/) ?? [])[1] ?? '';
+
+  /* Read the comparison first, because it decides what some of the
+     words below mean. "Turnover" is a word for adding money up and also
+     the name of a column, and "customers with turnover above £5 million"
+     is a list of customers rather than a total of their turnovers. The
+     figure is what tells them apart, so it has to be read first. */
+  const bracketPhrase = readBracket(text);
+  const inABracket = (w: string) => !!bracketPhrase
+    && `${(bracketPhrase.about ?? []).join(' ')} ${bracketPhrase.said ?? ''}`.includes(w);
 
   const { measure: rawMeasure, hit: measureHit } = pickMeasure(text);
   let measure = rawMeasure;
   let confidence = measureHit ? 8 : 4;
+
+  /* A measure word swallowed by a comparison was never a measure.
+     A count survives: "how many customers with turnover over £5m" is
+     still a count, and only the summing words are in question. */
+  if (measureHit && (measure === 'sum' || measure === 'avg') && inABracket(measureHit)) {
+    measure = 'list';
+  }
 
   /* Naming a number is asking for it.
      "Show me this month's profit" was coming back as a list of trailers,
@@ -344,9 +409,14 @@ export function parseQuery(input: string): QueryPlan | null {
      says "total" first. They name the figure they want: profit, revenue,
      commission, turnover. If the sentence names an amount and has not
      asked for a list of rows in so many words, it wants the amount. */
+  /* A figure inside a comparison is describing which rows, not which
+     number to add up. "Stock with refurb costs over £2,000" is a list of
+     trailers, and it came back as a total of their book values: the
+     right rows, the wrong question, and a number somebody would have
+     read out. */
   const namesAnAmount = entity.amounts.some((a) =>
-    a.words.some((w) => w !== groupWord && w.length >= 3
-      && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i').test(lower)));
+    a.words.some((w) => w !== groupWord && w.length >= 3 && !inABracket(w)
+      && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower)));
   const asksForRows = /\b(list|which|show me the|rows|records|each|every one)\b/i.test(lower);
 
   if (measure === 'list' && namesAnAmount && !asksForRows) {
@@ -526,15 +596,33 @@ export function parseQuery(input: string): QueryPlan | null {
      column: whichever amount the sentence is about, or the price. */
   const bracket = readBracket(text);
   if (bracket && entity.amounts.length) {
-    const amt = entity.amounts.find((a) => a.words.some((w) => lower.includes(w))) ?? entity.amounts[0];
+    /* Which number the bracket is about. The amounts a person can group
+       by are only some of the columns holding a figure, so this asks
+       the shared resolver first: "refurb over £2k" is about refurb cost,
+       and reading it as the sale price answers a different question with
+       a plausible number. */
+    const named = (bracket.about ?? [])
+      .map((phrase) => columnNamed(entity, phrase))
+      .find((x): x is { column: string; label: string } => !!x) ?? null;
+    const amt = named
+      ?? entity.amounts.find((a) => a.words.some((w) => lower.includes(w)))
+      ?? entity.amounts[0];
+    /* A count of somebody's lorries is not a sum of money, and printing
+       it with a pound sign in front is how a fleet size gets read out as
+       a turnover. */
+    const isMoney = !/^(their trucks|their trailers|their vans|employees|fleet size|year)$/i
+      .test(amt.label);
+    const show = (n: number) => (isMoney ? money(n) : n.toLocaleString('en-GB'));
+
     if (bracket.min != null) {
       filters.push({ key: 'min', column: amt.column, op: 'gte', value: String(bracket.min),
-        label: `${amt.label} over ${money(bracket.min)}` });
+        label: `${amt.label} over ${show(bracket.min)}`, at: lower.indexOf(String(bracket.min)) });
     }
     if (bracket.max != null) {
       filters.push({ key: 'max', column: amt.column, op: 'lte', value: String(bracket.max),
-        label: `${amt.label} under ${money(bracket.max)}` });
+        label: `${amt.label} under ${show(bracket.max)}`, at: lower.indexOf(String(bracket.max)) });
     }
+    consumed.push(...(bracket.about ?? []), bracket.said ?? '');
     confidence += 4;
   }
 
@@ -650,10 +738,23 @@ export function parseQuery(input: string): QueryPlan | null {
 
   // --- grouping -------------------------------------------------------
   let groupBy: QueryPlan['groupBy'];
-  const byMatch = lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/);
+  /* Up to three words after "by", longest first. A dimension is often
+     said in two: "by sales rep" and "by body type" both lost their
+     grouping entirely when only the first word was read, and the answer
+     came back as one number with no breakdown and nothing saying why. */
+  const byMatch = lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+(?:\s+[a-z]+){0,2})/);
   if (byMatch) {
-    const dim = entity.dimensions.find((d) => d.words.includes(byMatch[1]) || d.key === byMatch[1]);
-    if (dim) { groupBy = { column: dim.column, label: dim.label }; confidence += 5; }
+    const said = byMatch[1].split(/\s+/);
+    for (let take = said.length; take >= 1 && !groupBy; take--) {
+      const phrase = said.slice(0, take).join(' ');
+      const dim = entity.dimensions.find((d) => d.words.includes(phrase) || d.key === phrase)
+        // "sales rep" and "rep" are the same dimension said two ways.
+        ?? entity.dimensions.find((d) => d.words.some((w) => phrase.endsWith(` ${w}`)))
+        ?? (take === 1
+          ? entity.dimensions.find((d) => d.words.includes(phrase) || d.key === phrase)
+          : undefined);
+      if (dim) { groupBy = { column: dim.column, label: dim.label }; confidence += 5; }
+    }
   }
 
   /* --- period ---
@@ -700,6 +801,59 @@ export function parseQuery(input: string): QueryPlan | null {
 
   // --- sorting ----------------------------------------------------------
   const unmet: string[] = [];
+
+  /* --- words nothing accounted for ---
+     The failure this engine exists to stop is a confident answer to a
+     question that was not asked. Dropping a word somebody typed is
+     exactly that: "how many 6x2s at Carrington" comes back as every
+     trailer at Carrington, which is a real number, plausibly sized, and
+     the answer to something else.
+
+     So anything left over is named. Only content words count: the
+     filler, the entity noun, the measure words and everything the
+     grammar consumed have all done their job already, and listing them
+     would bury the one word that matters. */
+  {
+    const spent = new Set<string>([
+      ...consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
+      ...grammar.consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
+      ...entityNoun.split(/\s+/),
+      ...groupWord.split(/\s+/),
+      ...(measureHit ? measureHit.split(/\s+/) : []),
+      ...filters.flatMap((f) => `${f.label} ${f.value}`.toLowerCase().split(/\s+/)),
+      ...(range ? range.label.toLowerCase().split(/\s+/) : []),
+      ...(entity.dates ?? []).flatMap((d) =>
+        d.words.filter((w) => lower.includes(w)).flatMap((w) => w.split(/\s+/))),
+      ...entity.amounts.filter((a) => a.words.some((w) => lower.includes(w)))
+        .flatMap((a) => a.words.filter((w) => lower.includes(w))),
+    ].map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean));
+
+    const leftover = lower
+      .replace(/[^a-z0-9£$€ ]+/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3)
+      .filter((w) => !GRAMMAR_WORDS.has(w))
+      .filter((w) => !isReservedWord(w))
+      /* A bare figure is never a leftover: it was either read or it was
+         not, and either way the word beside it carries the meaning. A
+         token that is digits AND letters is a different thing entirely.
+         "6x2" is somebody naming an axle configuration this business
+         does not stock, and it has to be said rather than swallowed. */
+      .filter((w) => !/^[£$€]?[\d.,]+[km]?$/.test(w))
+      .filter((w) => !spent.has(w) && !spent.has(w.replace(/s$/, '')))
+      // A plural or a stem of something already spent is spent too.
+      .filter((w) => ![...spent].some((s) =>
+        s.length >= 4 && (w.startsWith(s) || s.startsWith(w))));
+
+    for (const w of [...new Set(leftover)].slice(0, 3)) {
+      /* Reported, not punished. Docking confidence for a word nobody
+         could place pushed good plans under the threshold where an
+         action outranks them, so "available box trailers under £20k,
+         cheapest first" came back as Add a trailer. Saying what was not
+         understood is the fix; scoring the plan down as well was not. */
+      unmet.push(`nothing in the ${entity.label} matches "${w}"`);
+    }
+  }
   const orderOp = ops.find((o) => o.op === 'order');
   let order: QueryPlan['order'];
   if (orderOp && orderOp.op === 'order') {
@@ -746,14 +900,15 @@ export function parseQuery(input: string): QueryPlan | null {
       /* Comparing IS grouping, on the attribute being compared. */
       if (!groupBy) groupBy = { column: col.column, label: col.label };
       confidence += 5;
-      /* The two things being compared are not also filters. Without
-         this, "DAF versus Volvo" narrowed to DAF and then compared it
-         with itself. */
+      /* The thing being compared is not also a filter.
+         Any filter on the compared column goes, not just one whose
+         value happens to match a side exactly. "Carrington versus
+         Bredbury" narrowed to Carrington and then compared Carrington
+         with itself, which produced two bars, one of them empty, and
+         nothing on screen said the second depot had been filtered out
+         of its own comparison. */
       for (let i = filters.length - 1; i >= 0; i--) {
-        if (filters[i].column === col.column
-            && compareOp.against.some((v) => filters[i].value.toLowerCase() === v.toLowerCase())) {
-          filters.splice(i, 1);
-        }
+        if (filters[i].column === col.column) filters.splice(i, 1);
       }
     }
   }
@@ -892,35 +1047,68 @@ function columnHolding(
  *   over 5k / more than 5k    no ceiling
  *   5k-10k                    the same, written the fast way
  */
-function readBracket(text: string): { min: number | null; max: number | null } | null {
+function readBracket(text: string): {
+  min: number | null; max: number | null;
+  /**
+   * The words around the figure that say WHICH number it is, both
+   * sides, because either can be the subject.
+   *
+   * "Refurb over £2k" puts it in front. "More than 30 trailers on their
+   * fleet" puts it behind, and taking the front unconditionally read
+   * that one as "customers with", resolved to nothing, and fell back to
+   * whichever amount happened to share a word with the sentence. The
+   * caller tries both and keeps the one that names a real column.
+   */
+  about?: string[];
+  /** The whole phrase, so nothing else reads it again. */
+  said?: string;
+} | null {
   const t = text.toLowerCase().replace(/,/g, '');
-  const num = String.raw`(?:£|\$|€)?\s*(\d+(?:\.\d+)?)\s*(k|m|grand)?`;
+
+  /* What the bracket is about, said either side of the comparison.
+     "refurb over £2k" puts it in front; "more than 20 trucks" puts it
+     behind. Both are common and reading only one of them meant half the
+     brackets landed on whichever column happened to be listed first. */
+  const CMP = String.raw`(?:over|above|more than|greater than|at least|north of|under|below|less than|fewer than|cheaper than|up to|no more than|max|between|from)`;
+  const ahead = t.match(new RegExp(String.raw`\b([a-z][a-z ]{2,24}?)\s+${CMP}\s+(?:£|\$|€)?\s*\d`));
+  const JOIN = String.raw`(?:and|but|or|with|at|in|on|by|that|who|which|for|from|to)`;
+  const behind = t.match(new RegExp(
+    String.raw`${CMP}\s+(?:£|\$|€)?\s*\d+(?:\.\d+)?\s*(?:k|m|grand|million|billion)?\s+((?!${JOIN}\b)[a-z][a-z ]{2,24}?)(?=\s+${JOIN}\b|\s*$)`));
+  /* Behind first. The words after a figure are the thing being measured
+     far more often than the words before it, which are usually the
+     noun for the rows. */
+  const about = [behind?.[1], ahead?.[1]]
+    .map((x) => x?.trim()).filter((x): x is string => !!x && x.length > 2);
+  const num = String.raw`(?:£|\$|€)?\s*(\d+(?:\.\d+)?)\s*(k|m|grand|million|billion)?\b`;
   const scale = (n: string, s?: string) => {
     const v = Number(n);
     if (!Number.isFinite(v)) return null;
     const suffix = (s ?? '').toLowerCase();
     if (suffix === 'k' || suffix === 'grand') return v * 1000;
-    if (suffix === 'm') return v * 1_000_000;
+    if (suffix === 'm' || suffix === 'million') return v * 1_000_000;
+    if (suffix === 'billion') return v * 1_000_000_000;
     return v;
   };
 
   // The dash alternatives are escapes rather than the characters
   // themselves, because people paste all three and the repo bans two of
   // them on sight.
-  const DASH = String.raw`[-\u2013\u2014]`;
+  const DASH = String.raw`[-–—]`;
   const span = t.match(new RegExp(String.raw`\b(?:between|from)\s+${num}\s*(?:and|to|${DASH})\s*${num}`))
     ?? t.match(new RegExp(String.raw`\b${num}\s*(?:${DASH}|to)\s*${num}\b`));
   if (span) {
     const min = scale(span[1], span[2]);
     const max = scale(span[3], span[4]);
-    if (min != null && max != null) return { min: Math.min(min, max), max: Math.max(min, max) };
+    if (min != null && max != null) {
+      return { min: Math.min(min, max), max: Math.max(min, max), about, said: span[0] };
+    }
   }
 
   const under = t.match(new RegExp(String.raw`\b(?:under|below|less than|cheaper than|up to|no more than|max)\s+${num}`));
-  if (under) { const v = scale(under[1], under[2]); if (v != null) return { min: null, max: v }; }
+  if (under) { const v = scale(under[1], under[2]); if (v != null) return { min: null, max: v, about, said: under[0] }; }
 
   const over = t.match(new RegExp(String.raw`\b(?:over|above|more than|at least|north of|from)\s+${num}`));
-  if (over) { const v = scale(over[1], over[2]); if (v != null) return { min: v, max: null }; }
+  if (over) { const v = scale(over[1], over[2]); if (v != null) return { min: v, max: null, about, said: over[0] }; }
 
   return null;
 }
