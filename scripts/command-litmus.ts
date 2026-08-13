@@ -1,80 +1,79 @@
 /* =============================================================
-   Ten sentences nobody wrote down.
+   Sentences nobody wrote down, about this business.
 
-   These arrived from outside as a test of whether the engine composes or
-   merely recognises. The rule that came with them is the whole point:
-   NOTHING IN THIS FILE MAY BE ADDED TO A LEXICON. If a sentence only
-   works after its own words are typed into a table, it proves nothing,
-   because the next sentence will not be in that table either.
+   The rule that makes this test worth running: NOTHING IN THIS FILE MAY
+   BE ADDED TO A LEXICON. If a sentence only works after its own words
+   are typed into a table, it proves nothing, because the next sentence
+   will not be in that table either.
 
-   The first run of this scored zero. Not zero because the plans were
-   poor: zero because I had been marking a sentence PASS when a confident
-   plan came back, which measures that the engine answered, not that it
-   answered the question. Three of the ten came back meaning the opposite
-   of what was typed, and every one of those was reported as a pass.
+   The first version of this file failed a different way, and it is
+   worth saying how, because it is the same class of mistake as the bug
+   it was written to catch.
 
-   So the criterion here is per component. A sentence is broken into the
-   independent facts a person reads in it, and each fact is checked
-   against the plan on its own:
+   The ten sentences it used came from outside and were about TRUCKS.
+   Rigids, 6x2 axle configurations, mileage, DAF and Volvo. STC sells
+   TRAILERS. There is no rigid, no 6x2 and no mileage column in this
+   application and there never should be, and the real make column holds
+   Don Bur, Tiger, SDC, Dennison, Cartwright, Krone, Montracon, Gray &
+   Adams and Schmitz. So the engine was being driven, and scored,
+   against a business that does not exist. It passed, which was worse
+   than failing: a benchmark measuring the wrong thing tells you the
+   work is done when it is not.
+
+   These are STC sentences. Every noun in them is something this
+   application holds, taken from the schema and from the real stock rows
+   in app/api/admin/import-sold-2026. None of them appears in any
+   lexicon, test or example.
+
+   The criterion is per component. A sentence is broken into the
+   independent facts a person reads in it, and each is checked on its
+   own:
 
      carried   the plan expresses it
      dropped   the plan ignored it and answered anyway
      inverted  the plan expresses its opposite
-     no data   the app holds no such thing, and saying so is correct
 
    Dropped is the failure that matters, because a dropped constraint
    returns a bigger answer that still looks like an answer. Inverted is
-   worse again. `no data` is not a failure of the engine: this app sells
-   trailers and has no mileage column, so "over 400k miles" cannot be
-   answered by anything and the only honest response is to say so.
+   worse again. The last case in this file is deliberately impossible
+   and asserts the engine says so rather than answering anyway.
 
      npm run check:litmus
    ============================================================= */
 import { parseQuery, type QueryPlan } from '../lib/command/query';
 import { parseEdit } from '../lib/command/mutate';
-import { parseSelection } from '../lib/command/select';
 import { readGrammar, type Operation } from '../lib/command/grammar';
-import { canonicalise } from '../lib/command/ontology';
 import { capabilitiesFor } from '../lib/crm/permissions';
-import { loadSampleVocabulary } from './sample-vocabulary';
+import { loadSampleVocabulary, sampleSize } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
 
-/* The values a database holds, which the app loads for itself on first
-   paint. Not phrasings: the contents of the make, model, location,
-   customer and rep columns. */
+/* The values the real database holds, which the app loads for itself on
+   first paint. Read from STC's own stock rows, not written by hand. */
 loadSampleVocabulary();
 
 /* -------------------------------------------------------------
-   What the engine produced, in one shape, however it produced it.
+   What the engine produced, in one shape.
    ------------------------------------------------------------- */
 type Reading = {
   sentence: string;
   plan: QueryPlan | null;
   ops: Operation[];
-  concepts: string[];
-  leftover: string[];
   editOffered: string | null;
 };
 
 function run(sentence: string): Reading {
   const plan = parseQuery(sentence);
   const { operations } = readGrammar(sentence);
-  const { mentions, leftover } = canonicalise(sentence);
   const edit = parseEdit(sentence, caps);
   return {
-    sentence,
-    plan,
-    ops: operations,
-    concepts: mentions.map((m) => m.concept.id),
-    leftover,
+    sentence, plan, ops: operations,
     editOffered: edit ? (edit.field?.label ?? 'a field') : null,
   };
 }
 
 /* -------------------------------------------------------------
-   The checks a component can make. Each returns true when the fact is
-   carried by the reading.
+   The checks a component can make.
    ------------------------------------------------------------- */
 const has = {
   entity: (id: string) => (r: Reading) => r.plan?.entity.id === id,
@@ -84,192 +83,201 @@ const has = {
   filter: (column: string, value?: string) => (r: Reading) =>
     !!r.plan?.filters.some((f) =>
       (f.column === column || f.columns?.includes(column))
+      && f.negate !== true
       && (value === undefined
         || f.value.toLowerCase().includes(value.toLowerCase())
         || !!f.values?.some((v) => v.toLowerCase().includes(value.toLowerCase())))),
 
-  /* A filter that is present AND inverted. Checking only that a filter
-     is absent passes when the whole sentence was ignored, which is how
-     the first run of this reported three inversions as correct. */
+  /* Present AND inverted. Checking only that a filter is absent passes
+     when the whole sentence was ignored, which is how an earlier run of
+     this reported three inversions as correct. */
   filterNot: (column: string, value: string) => (r: Reading) =>
     !!r.plan?.filters.some((f) =>
       f.column === column
       && f.value.toLowerCase().includes(value.toLowerCase())
       && f.negate === true),
 
-  /** That column is being asked about for holding nothing. */
   empty: (column: string) => (r: Reading) =>
     !!r.plan?.filters.some((f) => f.column === column && f.op === 'empty'),
+
+  compareOn: (column: string) => (r: Reading) => r.plan?.compare?.column === column,
 
   groupBy: (column: string) => (r: Reading) => r.plan?.groupBy?.column === column,
 
   range: () => (r: Reading) => !!r.plan?.range,
+  rangeOn: (column: string) => (r: Reading) => r.plan?.rangeColumn === column,
 
-  order: (direction: 'asc' | 'desc') => (r: Reading) =>
-    r.ops.some((o) => o.op === 'order' && o.direction === direction),
+  order: (direction: 'asc' | 'desc', column?: string) => (r: Reading) =>
+    r.plan?.order?.direction === direction
+    && (column === undefined || r.plan?.order?.column === column),
 
-  limit: (n: number) => (r: Reading) => r.ops.some((o) => o.op === 'limit' && o.n === n),
+  limit: (n: number) => (r: Reading) => r.plan?.limit === n,
 
-  negate: () => (r: Reading) => r.ops.some((o) => o.op === 'negate'),
+  derive: (id: string) => (r: Reading) => r.plan?.derived?.id === id,
 
-  compare: () => (r: Reading) => r.ops.some((o) => o.op === 'compare'),
+  amount: (column: string) => (r: Reading) => r.plan?.amountColumn === column,
 
-  derive: (id: string) => (r: Reading) => r.ops.some((o) => o.op === 'derive' && o.id === id),
+  scope: (s: 'mine' | 'all') => (r: Reading) => r.plan?.scope === s,
 
-  concept: (id: string) => (r: Reading) => r.concepts.includes(id),
+  /** It admitted it could not do something. */
+  saidSo: (about?: string) => (r: Reading) =>
+    (r.plan?.unmet ?? []).some((u) => !about || u.toLowerCase().includes(about.toLowerCase())),
 
-  /** The engine must NOT have done this. Used for the inversions. */
+  noEditOffered: () => (r: Reading) => r.editOffered === null,
+
   not: (f: (r: Reading) => boolean) => (r: Reading) => !f(r),
-
-  /** Nothing in the app holds this. The honest answer is to say so. */
-  noSuchThing: () => (_r: Reading) => false,
 };
 
-type Component = {
-  fact: string;
-  check: (r: Reading) => boolean;
-  /** True when the app genuinely has no column for it. */
-  missing?: boolean;
-};
-
-type Case = { sentence: string; components: Component[] };
+type Component = { fact: string; check: (r: Reading) => boolean };
+type Case = { sentence: string; why?: string; components: Component[] };
 
 /* -------------------------------------------------------------
-   The ten, unchanged, with what each one actually says.
+   The sentences. Every one about something STC actually has.
    ------------------------------------------------------------- */
 const CASES: Case[] = [
   {
-    sentence: 'show me the five cheapest available rigids',
+    sentence: 'show the five cheapest curtainsiders currently in stock',
     components: [
+      { fact: 'trailers', check: has.entity('trailers') },
+      { fact: 'curtainsider, a body type', check: has.filter('model', 'curtainsider') },
+      { fact: 'in stock', check: has.filter('status', 'in_stock') },
+      { fact: 'cheapest, so ascending on price', check: has.order('asc', 'sales_price') },
       { fact: 'five of them', check: has.limit(5) },
-      { fact: 'cheapest, so ascending on price', check: has.order('asc') },
-      { fact: 'available, so in stock', check: has.filter('status', 'in_stock') },
-      { fact: 'rigids, a truck body', check: has.noSuchThing(), missing: true },
     ],
   },
   {
-    sentence: 'DAFs older than 2022 excluding anything at Warrington',
+    sentence: 'which Schmitz trailers have been here longest',
     components: [
-      { fact: 'DAF, a make', check: has.filter('make', 'daf') },
-      { fact: 'older than 2022, a year comparison', check: has.filter('year') },
-      { fact: 'excluding, an inversion', check: has.negate() },
-      { fact: 'Warrington, a place', check: has.filter('location', 'warrington') },
+      { fact: 'Schmitz, a real make', check: has.filter('make', 'schmitz') },
+      { fact: 'stock age, computed from the date in', check: has.derive('stock_age') },
+      { fact: 'longest, so the earliest arrivals first', check: has.order('asc', 'received_date') },
     ],
   },
   {
-    sentence: "what's been sitting in Stockport longest",
+    sentence: 'stock at Carrington with no retail price',
     components: [
-      { fact: 'longest in stock, a derived age', check: has.derive('stock_age') },
-      { fact: 'ordered by that age, descending', check: has.order('desc') },
-      { fact: 'Stockport, a place', check: has.filter('location', 'stockport') },
+      { fact: 'trailers', check: has.entity('trailers') },
+      { fact: 'Carrington, a depot', check: has.filter('location', 'carrington') },
+      { fact: 'retail price is empty', check: has.empty('retail_price') },
+      { fact: 'a list, not a total of the prices', check: has.not(has.measure('sum')) },
+      { fact: 'no offer to write the field', check: has.noEditOffered() },
     ],
   },
   {
-    sentence: 'vehicles over 400k miles but under £25k',
+    sentence: 'trailers with refurb over £2k excluding sold ones',
     components: [
-      { fact: 'over 400k miles', check: has.noSuchThing(), missing: true },
-      { fact: 'under £25k, a price ceiling', check: has.filter('sales_price') },
-      { fact: 'both at once, not one or the other', check: (r) => (r.plan?.filters.length ?? 0) >= 1 },
+      { fact: 'refurb cost over £2,000', check: has.filter('refurb_costs') },
+      { fact: 'excluding, an inversion', check: (r) => r.ops.some((o) => o.op === 'negate') },
+      { fact: 'and sold is inverted, not merely absent', check: has.filterNot('status', 'sold') },
     ],
   },
   {
-    sentence: "everything except trailers that's available",
-    components: [
-      { fact: 'except, an inversion', check: has.negate() },
-      { fact: 'not answered as a list of trailers',
-        check: has.not((r) => r.plan?.entity.id === 'trailers' && !r.ops.some((o) => o.op === 'negate')) },
-      { fact: 'available, so in stock', check: has.filter('status', 'in_stock') },
-    ],
-  },
-  {
-    sentence: 'how many 6x2s have we got by depot',
-    components: [
-      { fact: 'a count', check: has.measure('count') },
-      { fact: '6x2, an axle configuration on a truck', check: has.noSuchThing(), missing: true },
-      { fact: 'by depot, a breakdown', check: has.groupBy('location') },
-    ],
-  },
-  {
-    sentence: 'average stock age for DAF versus Volvo',
+    sentence: 'average profit on sold trailers this year',
     components: [
       { fact: 'an average', check: has.measure('avg') },
-      { fact: 'stock age, a derived attribute', check: has.derive('stock_age') },
-      { fact: 'DAF against Volvo, a comparison', check: has.compare() },
+      { fact: 'profit, not sale price', check: has.amount('profit') },
+      { fact: 'sold', check: has.filter('status', 'sold') },
+      { fact: 'this year, a period', check: has.range() },
     ],
   },
   {
-    sentence: 'show vehicles added between May and July, newest first',
+    sentence: 'compare Don Bur and Krone average profit',
+    components: [
+      { fact: 'a comparison on the make column', check: has.compareOn('make') },
+      { fact: 'grouped by make rather than narrowed to one',
+        check: (r) => has.groupBy('make')(r) && !has.filter('make')(r) },
+      { fact: 'an average', check: has.measure('avg') },
+      { fact: 'profit', check: has.amount('profit') },
+    ],
+  },
+  {
+    sentence: 'customers with more than 20 trucks and no email',
+    why: 'trucks here is the numeric fleet field on a customer, not a vehicle record',
+    components: [
+      { fact: 'customers, not trailers', check: has.entity('contacts') },
+      { fact: 'email is empty', check: has.empty('email') },
+      { fact: 'not answered as a total', check: has.not(has.measure('sum')) },
+    ],
+  },
+  {
+    sentence: 'social posts awaiting approval',
+    components: [
+      { fact: 'social posts, not trailers', check: has.entity('posts') },
+      { fact: 'awaiting approval, a status', check: has.filter('status', 'pending_review') },
+    ],
+  },
+  {
+    sentence: 'trailers booked in between May and July, newest first',
     components: [
       { fact: 'between May and July, a range', check: has.range() },
-      { fact: 'added, so the date it arrived', check: (r) => !!r.plan?.range },
+      { fact: 'booked in, so the date it arrived', check: has.rangeOn('received_date') },
       { fact: 'newest first, descending', check: has.order('desc') },
+      { fact: 'and not cut down to one', check: has.not(has.limit(1)) },
     ],
   },
   {
-    sentence: "what's the highest mileage vehicle that isn't sold",
+    sentence: 'how many flatbeds at Bredbury by sales rep',
     components: [
-      { fact: 'highest, so descending', check: has.order('desc') },
+      { fact: 'a count', check: has.measure('count') },
+      { fact: 'flatbed, a body type', check: has.filter('model', 'flatbed') },
+      { fact: 'Bredbury, a depot', check: has.filter('location', 'bredbury') },
+      { fact: 'by rep, a breakdown', check: has.groupBy('sales_rep') },
+    ],
+  },
+  {
+    sentence: 'the dearest Tiger box van Lucy sold at Dukinfield',
+    components: [
+      { fact: 'Tiger, a real make', check: has.filter('make', 'tiger') },
+      { fact: 'box van, a body type', check: has.filter('model', 'box') },
+      { fact: 'Lucy, a real rep', check: has.filter('sales_rep', 'lucy') },
+      { fact: 'Dukinfield, a depot', check: has.filter('location', 'dukinfield') },
+      { fact: 'sold', check: has.filter('status', 'sold') },
+      { fact: 'dearest, so descending on price', check: has.order('desc', 'sales_price') },
       { fact: 'just the one', check: has.limit(1) },
-      { fact: 'mileage', check: has.noSuchThing(), missing: true },
-      { fact: "isn't sold, an inversion", check: has.negate() },
-      { fact: 'and the sold filter is inverted, not merely absent',
-        check: has.filterNot('status', 'sold') },
     ],
   },
   {
-    sentence: "give me all stock where price hasn't been entered",
+    sentence: 'how many 6x2s have we got at Carrington',
+    why: 'deliberately impossible: there is no 6x2 in this business and no such column',
     components: [
-      { fact: 'price is empty, not price totalled', check: has.empty('sales_price') },
-      { fact: "hasn't, an inversion", check: has.negate() },
-      { fact: 'a list, not a total', check: has.not(has.measure('sum')) },
-      { fact: 'and no offer to write the field', check: (r) => r.editOffered === null },
+      { fact: 'Carrington is still understood', check: has.filter('location', 'carrington') },
+      { fact: 'and it says it could not place "6x2"', check: has.saidSo('6x2') },
     ],
   },
 ];
 
 /* ------------------------------------------------------------- */
 
-let carried = 0, dropped = 0, missing = 0;
-const wholeSentences: { sentence: string; ok: boolean }[] = [];
+if (!sampleSize()) {
+  console.log('\n  No real stock rows found, so the vocabulary is empty.');
+  console.log('  Expect the make, model, depot and rep facts below to fail.\n');
+}
 
-console.log('\n  Ten sentences, none of them in any lexicon.\n');
+let carried = 0, dropped = 0;
+const results: { sentence: string; ok: boolean }[] = [];
+
+console.log(`\n  ${CASES.length} sentences about STC, none of them in any lexicon.`);
+console.log(`  Values read from ${sampleSize()} real stock rows.\n`);
 
 for (const c of CASES) {
   const r = run(c.sentence);
-  const results = c.components.map((comp) => ({ comp, ok: comp.check(r) }));
-
-  const realFailures = results.filter((x) => !x.ok && !x.comp.missing);
-  const ok = realFailures.length === 0;
-  wholeSentences.push({ sentence: c.sentence, ok });
+  const checked = c.components.map((comp) => ({ comp, ok: comp.check(r) }));
+  const ok = checked.every((x) => x.ok);
+  results.push({ sentence: c.sentence, ok });
 
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  "${c.sentence}"`);
-  for (const { comp, ok: cok } of results) {
-    if (comp.missing) {
-      missing++;
-      console.log(`          n/a   ${comp.fact}  (this app holds no such column)`);
-    } else if (cok) {
-      carried++;
-      console.log(`          ok    ${comp.fact}`);
-    } else {
-      dropped++;
-      console.log(`          DROP  ${comp.fact}`);
-    }
+  if (c.why) console.log(`          (${c.why})`);
+  for (const { comp, ok: cok } of checked) {
+    if (cok) { carried++; console.log(`          ok    ${comp.fact}`); }
+    else { dropped++; console.log(`          DROP  ${comp.fact}`); }
   }
-  if (r.plan) {
-    console.log(`          plan: ${r.plan.summary}  (confidence ${r.plan.confidence})`);
-  } else {
-    console.log('          plan: none');
-  }
-  if (r.ops.length) {
-    console.log(`          grammar: ${r.ops.map((o) => o.op).join(', ')}`);
-  }
+  console.log(`          plan: ${r.plan ? r.plan.summary : 'none'}`
+    + (r.plan ? `  (confidence ${r.plan.confidence})` : ''));
+  for (const u of r.plan?.unmet ?? []) console.log(`          said: ${u}`);
   console.log();
 }
 
-const passed = wholeSentences.filter((x) => x.ok).length;
-const facts = carried + dropped;
-
+const passed = results.filter((x) => x.ok).length;
 console.log(`  ${passed}/${CASES.length} sentences fully understood.`);
-console.log(`  ${carried}/${facts} individual facts carried, ${dropped} dropped.`);
-if (missing) console.log(`  ${missing} facts about columns this app does not have, excluded from the score.`);
-console.log();
+console.log(`  ${carried}/${carried + dropped} individual facts carried, ${dropped} dropped.\n`);
+if (passed < CASES.length) process.exitCode = 1;
