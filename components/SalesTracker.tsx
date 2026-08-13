@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container } from 'lucide-react';
-import { ScheduleMeetingModal } from './CrmWorkspace';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload } from 'lucide-react';
+import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
+import { useDismissGuard } from '@/components/kit/useDismissGuard';
+import { ImportDialog } from '@/components/crm/ImportDialog';
+import { SALES_TRACKER } from '@/lib/import/dictionary';
 import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
 
 // Tracker has 3 tabs that group the existing CRM statuses
@@ -26,9 +29,9 @@ const TAB_LABEL: Record<TrackerTab, string> = {
 };
 const TAB_HINT: Record<TrackerTab, string> = {
   all: '',
-  working: 'Active leads — chasing the deal',
-  customer: 'Active customer — ongoing relationship',
-  lost: 'Lost — no longer pursuing',
+  working: 'Active leads, chasing the deal',
+  customer: 'Active customer, ongoing relationship',
+  lost: 'Lost, no longer pursuing',
   commission: 'Your earned commission, summarised',
 };
 
@@ -198,6 +201,34 @@ export function SalesTracker({
   }), []);
 
   const [showNewLead, setShowNewLead] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+
+  /**
+   * Write the reviewed tracker rows.
+   *
+   * They land on whichever side is being looked at, because a tracker
+   * import is somebody bringing in one of the two spreadsheets rather
+   * than a mixture, and asking which side each row belongs to after they
+   * have already reviewed every column would be a fourth step nobody
+   * wants. Wrong guesses are one cell to change.
+   */
+  async function commitTrackerImport(records: Record<string, any>[]) {
+    const withDefaults = records.map((r) => ({
+      list_id: list.id,
+      side,
+      status: 'lead',
+      source: 'Spreadsheet import',
+      ...r,
+    }));
+    const { error, count } = await supabase.from('crm_contacts')
+      .insert(withDefaults, { count: 'exact' });
+    if (error) return { inserted: 0, error: error.message };
+    const { data } = await supabase.from('crm_contacts').select('*')
+      .eq('list_id', list.id).order('updated_at', { ascending: false });
+    setRows((data ?? []) as CRMContact[]);
+    setMessage(`Imported ${count ?? withDefaults.length} onto ${side === 'maintenance' ? 'maintenance' : 'trailer sales'}`);
+    return { inserted: count ?? withDefaults.length };
+  }
 
   async function createBlankLead(company: string, websiteUrl: string, newSide: 'trailer_sales' | 'maintenance', what: string | null) {
     const today = new Date().toISOString().slice(0, 10);
@@ -262,8 +293,21 @@ export function SalesTracker({
             {!isMaintenance && <> · Pipeline est: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalEstValue)}</strong> · Customer revenue: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCustomerRevenue)}</strong> · Commission: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCommission)}</strong></>}
           </div>
         </div>
-        <button onClick={() => setShowNewLead(true)} className="btn btn--primary"><Plus size={14} /> New lead</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowImport(true)} className="btn"><Upload size={14} /> Import</button>
+          <button onClick={() => setShowNewLead(true)} className="btn btn--primary"><Plus size={14} /> New lead</button>
+        </div>
       </div>
+
+      {showImport && (
+        <ImportDialog
+          dict={SALES_TRACKER}
+          listName={`${list.name}, ${isMaintenance ? 'maintenance' : 'trailer sales'}`}
+          existing={rows.map((r) => ({ id: r.id, company_name: r.company_name, email: r.email }))}
+          onCommit={commitTrackerImport}
+          onClose={() => setShowImport(false)}
+        />
+      )}
 
       {/* Top-level side switcher: Trailer Sales | Maintenance */}
       <div className="side-toggle">
@@ -394,8 +438,13 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
     onSave({ [field]: value } as any);
   }
 
+  // Same guard as the other drawers: the shade is easy to clip on the
+  // way past, and one click should not lose where you were.
+  const dismiss = useDismissGuard(onClose);
+
   return (
-    <div className="drawer-bg" onClick={onClose}>
+    <div className="drawer-bg" {...dismiss.backdropProps}>
+      {dismiss.hint}
       <div className="drawer" onClick={(e) => e.stopPropagation()}>
         <div className="drawer__head">
           <div>
@@ -812,7 +861,7 @@ function StockTrailerPicker({ onPick, onClose }: { onPick: (t: StockTrailer | nu
   );
 }
 
-// ===== Mark-as-Sold confirm modal — preview commission before saving =====
+// ===== Mark-as-Sold confirm modal, previewing commission before saving =====
 function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
   trailer: StockTrailer; totalNbv: number; rate: number;
   onConfirm: (salePrice: number, dispatchDate: string | null) => void;
@@ -928,7 +977,7 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
 }
 
 
-// ===== My Commission tab — KPIs, monthly bars, per-sale table =====
+// ===== My Commission tab: KPIs, monthly bars, per-sale table =====
 function CommissionView({ rows }: { rows: CRMContact[] }) {
   // Only consider rows that actually have commission (closed deals)
   const sales = useMemo(() => rows.filter(r => Number(r.commission) > 0)

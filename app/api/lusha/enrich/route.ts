@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
+import { lushaLockResponse } from '@/lib/crm/lusha-gate';
 import { enrichByEmail, enrichByName, prospectingByCompanyAndRoles, prospectingByCompanyId, findLushaCompanyByDomain, extractDomain } from '@/lib/lusha';
 
 export const dynamic = 'force-dynamic';
@@ -39,9 +40,18 @@ function pickCompany(p: any) {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  /* The global lock below stops everybody today. It is temporary, and
+     when it lifts the per-user capability is what decides who may spend
+     a credit. Checking only the lock meant lifting it would grant
+     enrichment to the whole company at once, which is the opposite of
+     what the meeting asked for. */
+  const gate = await requireCapability('crm.enrich');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const locked = lushaLockResponse();
+  if (locked) return locked;
 
   const body = await req.json().catch(() => ({})) as {
     email?: string;

@@ -1,155 +1,56 @@
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { ArrowRight, Calendar, Plus } from 'lucide-react';
-import type { Profile, CRMContact, SocialPost, DEPOTS as _ } from '@/lib/types';
-import { DEPOTS } from '@/lib/types';
+import { getDashboardVariant, canSwitchVariant, type DashboardVariant } from '@/lib/dashboard/variant';
+import { RepDashboard } from '@/components/dashboard/RepDashboard';
+import { ExecDashboard } from '@/components/dashboard/ExecDashboard';
+import { SupportDashboard } from '@/components/dashboard/SupportDashboard';
+import { VariantSwitch } from '@/components/dashboard/VariantSwitch';
+import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS_LABEL: Record<string, string> = {
-  lead: 'Lead', contacted: 'Contacted', quoted: 'Quoted', won: 'Won', lost: 'Lost',
-};
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
-
-export default async function DashboardHome() {
+/**
+ * The dashboard is three separate renders, not one render with widgets
+ * hidden. Which one you get comes from getDashboardVariant(), the single
+ * seam between this screen and however permissions end up working.
+ *
+ * Data comes from /api/dashboard/*, never from browser queries. See
+ * docs/dashboard-upgrade-plan.md for why that matters.
+ */
+export default async function DashboardHome({
+  searchParams,
+}: { searchParams: { view?: string } }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
-  const p = profile as Profile | null;
+  const { data: profileRow } = await supabase
+    .from('profiles').select('*').eq('id', user!.id).single();
 
-  const [{ data: recentContacts }, { data: recentPosts }, { count: pending }] = await Promise.all([
-    supabase.from('crm_contacts').select('*').order('updated_at', { ascending: false }).limit(6),
-    supabase.from('social_posts').select('*').order('updated_at', { ascending: false }).limit(6),
-    supabase.from('social_posts').select('*', { count: 'exact', head: true }).eq('status', 'pending_review'),
-  ]);
+  const profile = (profileRow ?? {
+    id: user!.id,
+    email: user!.email!,
+    full_name: user!.email!.split('@')[0],
+    role: 'viewer',
+    theme: 'dark',
+    created_at: new Date().toISOString(),
+  }) as Profile;
 
-  const { data: allContacts } = await supabase.from('crm_contacts').select('status');
-  const counts: Record<string, number> = { lead: 0, contacted: 0, quoted: 0, won: 0, lost: 0 };
-  (allContacts ?? []).forEach((c: any) => { counts[c.status] = (counts[c.status] ?? 0) + 1; });
-  const totalOpen = counts.lead + counts.contacted + counts.quoted;
+  let variant: DashboardVariant = getDashboardVariant(profile as any);
 
-  const { count: scheduled } = await supabase
-    .from('social_posts').select('*', { count: 'exact', head: true }).eq('status', 'scheduled');
-
-  const firstName = (p?.full_name ?? '').split(' ')[0] || 'there';
-  const dateStr = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // Admins can preview another view. Needed today because role cannot yet
+  // tell a rep from an exec, so without this nobody can see the exec
+  // dashboard at all. Preview only: it never widens what the API returns,
+  // because both routes authorise independently.
+  const requested = searchParams.view;
+  const maySwitch = canSwitchVariant(profile);
+  if (maySwitch && (requested === 'rep' || requested === 'exec' || requested === 'support')) {
+    variant = requested;
+  }
 
   return (
-    <div>
-      <div className="page-head">
-        <div>
-          <div className="page-head__eyebrow">Workspace · Overview</div>
-          <h1 className="page-head__title">{greeting()}, {firstName}<span style={{ color: 'var(--stc-red)' }}>.</span></h1>
-          <div className="page-head__sub">{dateStr} · {DEPOTS.length} depots online</div>
-        </div>
-        <div className="row">
-          <button className="btn"><Calendar size={14} /> This week</button>
-          <Link href="/dashboard/crm" className="btn btn--primary"><Plus size={14} /> New contact</Link>
-        </div>
-      </div>
-
-      <div className="stats-grid">
-        <Stat label="Pipeline · Open"     value={totalOpen.toString()}     accent="red"     sub={`${counts.lead} leads · ${counts.contacted} contacted · ${counts.quoted} quoted`} />
-        <Stat label="Closed · Won"        value={counts.won.toString()}    accent="success" sub={`${counts.lost} lost`} />
-        <Stat label="Posts pending"       value={(pending ?? 0).toString()} accent="warning" sub={`${scheduled ?? 0} scheduled`} />
-        <Stat label="Total contacts"      value={(allContacts?.length ?? 0).toLocaleString()} accent="lusha" sub={`${counts.won} won · ${counts.lost} lost`} />
-      </div>
-
-      <div className="split-2" style={{ marginTop: 18 }}>
-        <div className="card">
-          <div className="card__head">
-            <div className="row" style={{ gap: 10 }}>
-              <span className="card__dot card__dot--red" />
-              <h3 style={{ margin: 0 }}>Sales</h3>
-              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11 }}>RECENT</span>
-            </div>
-            <Link href="/dashboard/crm" className="btn btn--sm btn--ghost">Open CRM <ArrowRight size={12} /></Link>
-          </div>
-          <div className="card__body">
-            {(recentContacts ?? []).map((c: any) => (
-              <div key={c.id} className="row-item">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="row-item__title">{c.company_name}</div>
-                  <div className="row-item__sub">
-                    {c.location || '—'} · {c.fleet_size ? `${c.fleet_size} units` : 'fleet size unknown'}
-                    {c.assigned_to ? ` · ${c.assigned_to}` : ''}
-                  </div>
-                </div>
-                <span className={`pill pill--${c.status}`}>
-                  <span className="pill__dot" />{STATUS_LABEL[c.status] ?? c.status}
-                </span>
-              </div>
-            ))}
-            {(!recentContacts || recentContacts.length === 0) && <Empty msg="No contacts yet — import a Lusha CSV from the CRM tab." />}
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card__head">
-            <div className="row" style={{ gap: 10 }}>
-              <span className="card__dot card__dot--blue" />
-              <h3 style={{ margin: 0 }}>Marketing</h3>
-              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11 }}>APPROVAL QUEUE</span>
-            </div>
-            <Link href="/dashboard/social" className="btn btn--sm btn--ghost">Open planner <ArrowRight size={12} /></Link>
-          </div>
-          <div className="card__body">
-            {(recentPosts ?? []).map((p: any) => (
-              <div key={p.id} className="row-item">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="row-item__title" style={{ whiteSpace: 'normal', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {p.content}
-                  </div>
-                  <div className="row-item__sub">
-                    {(p.platform ?? []).join(' · ')} · {p.scheduled_date}
-                  </div>
-                </div>
-                <span className={`pill pill--${p.status}`}>
-                  <span className="pill__dot" />
-                  {p.status.replace('_', ' ')}
-                </span>
-              </div>
-            ))}
-            {(!recentPosts || recentPosts.length === 0) && <Empty msg="No posts yet — draft one in the Social planner." />}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 18 }}>
-        <div className="eyebrow-row" style={{ marginBottom: 10 }}>Depot network · Live</div>
-        <div className="depot-grid">
-          {DEPOTS.map((d) => (
-            <div key={d.name} className="depot">
-              <div className="depot__head">
-                <span className="depot__dot" />
-                <h4 style={{ margin: 0 }}>{d.name}</h4>
-              </div>
-              <div className="depot__sub">Lat {d.lat.toFixed(3)}, Lng {d.lng.toFixed(3)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+    <>
+      {maySwitch && <VariantSwitch current={variant} />}
+      {variant === 'exec'    && <ExecDashboard profile={profile} />}
+      {variant === 'support' && <SupportDashboard profile={profile} />}
+      {variant === 'rep'     && <RepDashboard profile={profile} />}
+    </>
   );
-}
-
-function Stat({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'red'|'success'|'warning'|'info'|'lusha' }) {
-  return (
-    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
-      <div className="stat__bar" />
-      <div className="stat__label">{label}</div>
-      <div className="stat__value tnum">{value}</div>
-      {sub && <div className="stat__sub">{sub}</div>}
-    </div>
-  );
-}
-
-function Empty({ msg }: { msg: string }) {
-  return <div style={{ padding: '20px 4px', color: 'var(--fg-3)', fontSize: 12.5 }}>{msg}</div>;
 }

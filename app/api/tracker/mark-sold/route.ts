@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,9 +12,14 @@ export const dynamic = 'force-dynamic';
  * and stock_trailers updates are permitted for admin/marketer/sales.
  */
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* The comment below used to say RLS handles ownership, and for the
+     caller's own tracker row it does. It does not cover the two things
+     this route also does: flipping a stock trailer to sold, and reaching
+     across into every other rep's tracker row for the same unit. Neither
+     of those is a statement about a row somebody owns. */
+  const gate = await requireCapability('stock.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({})) as {
     tracker_id?: string;

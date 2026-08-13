@@ -30,7 +30,7 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/auth');
-  const isProtected = pathname.startsWith('/dashboard') || pathname.startsWith('/api');
+  const isProtected = pathname.startsWith('/dashboard') || pathname.startsWith('/export') || pathname.startsWith('/api');
 
   if (!user && isProtected && !pathname.startsWith('/api/health')) {
     const url = request.nextUrl.clone();

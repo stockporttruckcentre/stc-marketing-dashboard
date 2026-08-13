@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { Loader, Search, Plus, CheckCircle, Globe, Users, X, MapPin, Building, Sparkles, Briefcase, Hash } from 'lucide-react';
+import { Alert } from '@/components/kit/primitives';
+import { LUSHA_LOCKED } from '@/lib/crm/permissions';
 import { createClient } from '@/lib/supabase/client';
 import { DEPOTS, type CrmList } from '@/lib/types';
 import { BusinessActivityStrip } from './BusinessActivityStrip';
@@ -128,6 +130,24 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         </div>
       </div>
 
+      {/* The lock the meeting asked for at rollout. Said out loud rather
+          than left as buttons that quietly fail, and the routes refuse it
+          server side too, because hiding a button is not a lock. */}
+      {LUSHA_LOCKED && (
+        <div className="kit" style={{ marginBottom: 14 }}>
+          <Alert tone="warning">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <strong>Lusha searching is switched off</strong>
+              <span>
+                Searches and enrichment come out of a shared monthly credit
+                allowance, so it stays off until it is agreed who can spend
+                them. Nothing here will charge anything in the meantime.
+              </span>
+            </div>
+          </Alert>
+        </div>
+      )}
+
       <div className="cf-tabs" role="tablist">
         <button onClick={() => setTab('finder')}
           className={`cf-tab ${tab === 'finder' ? 'is-active' : ''}`}>
@@ -185,10 +205,11 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
             <span className="cf-summary__sub">· within {radius} mi · {empMin}–{empMax} employees</span>
           </div>
           <button onClick={handleSearch}
-            disabled={searching || (isCustom && !customPostcode.trim())}
+            disabled={LUSHA_LOCKED || searching || (isCustom && !customPostcode.trim())}
+            title={LUSHA_LOCKED ? 'Switched off until a credit policy is agreed' : undefined}
             className="cf-btn-primary">
             {searching ? <Loader size={14} className="spin" /> : <Search size={14} />}
-            {searching ? 'Searching…' : 'Search Lusha'}
+            {LUSHA_LOCKED ? 'Switched off' : searching ? 'Searching…' : 'Search Lusha'}
           </button>
         </div>
       </div>

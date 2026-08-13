@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,9 +12,10 @@ function pick(row: any, names: string[]): any {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  /* An unbounded upsert of client supplied stock rows. */
+  const gate = await requireCapability('stock.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({}));
   const rows: any[] = Array.isArray(body.rows) ? body.rows : [];

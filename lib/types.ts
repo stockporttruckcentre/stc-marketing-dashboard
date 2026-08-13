@@ -40,6 +40,12 @@ export interface CRMContact {
   phone: string | null;
   source: string;
   status: ContactStatus;
+  /**
+   * Whether this company was already trading with STC, as opposed to
+   * where a deal with them has got to. See migration 004. Optional in the
+   * type because the column may not exist yet.
+   */
+  relationship?: 'prospect' | 'existing';
   employee_count: number | null;
   turnover: number | null;
   fleet_size: number | null;  // derived sum of trucks+trailers+vans (set by trigger)
@@ -54,6 +60,7 @@ export interface CRMContact {
   assigned_to: string | null;
   last_contact: string | null;
   // Sales tracker fields (used when this contact is in a personal sales tracker list)
+  parent_customer_id: string | null;   // twinned account, see migration 003
   stock_trailer_id: string | null;
   commission_rate: number | null;
   side: 'trailer_sales' | 'maintenance';
@@ -136,6 +143,47 @@ export interface CalendarEventAttendee {
   email?: string;
 }
 export type CalendarVisibility = 'private' | 'team' | 'specific';
+
+/**
+ * Where somebody stands on a meeting they were asked to.
+ *
+ * `proposed` is the interesting one: they have suggested a different
+ * time and the meeting is now waiting on whoever asked them. Either side
+ * can propose, so this goes back and forth until somebody accepts.
+ * See migration 006.
+ */
+export type InviteStatus = 'pending' | 'accepted' | 'declined' | 'proposed';
+
+export interface CalendarInvite {
+  id: string;
+  event_id: string;
+  user_id: string;
+  invited_by: string | null;
+  status: InviteStatus;
+  /** The time currently on the table, when it differs from the event. */
+  proposed_start_at: string | null;
+  proposed_end_at: string | null;
+  /** Whose answer the meeting is waiting on. Null once it is settled. */
+  awaiting: string | null;
+  /** How many times it has gone back and forth. */
+  rounds: number;
+  note: string | null;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One round of the exchange. Append only, so the entry shows its history. */
+export interface CalendarInviteMessage {
+  id: string;
+  invite_id: string;
+  actor_id: string | null;
+  action: 'invited' | 'accepted' | 'declined' | 'proposed' | 'withdrawn';
+  start_at: string | null;
+  end_at: string | null;
+  note: string | null;
+  created_at: string;
+}
 
 export interface CalendarEvent {
   id: string;
