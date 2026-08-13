@@ -25,10 +25,11 @@
    ============================================================= */
 import type { CrmCapability } from '@/lib/crm/permissions';
 import { BODY_TYPES } from './lexicon';
+import { TABLES, derivedAliases, type ColumnKind } from './columns';
 
 export type FieldKind = 'money' | 'number' | 'text' | 'longtext' | 'date' | 'enum';
 
-export type WritableEntity = 'trailers' | 'contacts' | 'posts';
+export type WritableEntity = 'trailers' | 'contacts' | 'posts' | 'meetings';
 
 export type WritableField = {
   /** The column, exactly as the table spells it. */
@@ -114,7 +115,9 @@ export const TRAILER_FIELDS: WritableField[] = [
     aliases: ['nbv', 'net book value', 'book value', 'book price', 'cost price', 'cost'] },
   { key: 'sales_price', label: 'Sale price', kind: 'money', entity: 'trailers', arithmetic: true,
     capability: 'stock.edit',
-    aliases: ['sale price', 'sales price', 'sold price', 'sold for', 'selling price', 'invoice value'] },
+    /* Not "sold price": new builds carry a separate sold_price column
+       and this one is the sale price on everything else. */
+    aliases: ['sale price', 'sales price', 'sold for', 'selling price', 'invoice value'] },
   { key: 'retail_price', label: 'Retail price', kind: 'money', entity: 'trailers', arithmetic: true,
     capability: 'stock.edit',
     aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price', 'ticket price'] },
@@ -190,8 +193,11 @@ export const TRAILER_FIELDS: WritableField[] = [
     aliases: ['refurb update', 'refurb progress', 'refurb note', 'refurb notes'] },
   { key: 'refurb_done', label: 'Refurb done', kind: 'longtext', entity: 'trailers', arithmetic: true,
     capability: 'stock.edit', aliases: ['refurb done', 'work done', 'refurb completed'] },
+  /* Not "comment" or "comments": stock_trailers has a comments column of
+     its own, and the curated alias was quietly stealing it, so the real
+     column could not be written at all. */
   { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'trailers', arithmetic: true,
-    capability: 'stock.edit', aliases: ['note', 'notes', 'comment', 'comments', 'remark'] },
+    capability: 'stock.edit', aliases: ['note', 'notes', 'remark', 'general notes'] },
 ];
 
 /* -------------------------------------------------------------
@@ -202,7 +208,9 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['status', 'stage', 'state'] },
   { key: 'assigned_to', label: 'Owner', kind: 'text', entity: 'contacts',
     capability: 'crm.assign',
-    aliases: ['owner', 'assigned to', 'assigned', 'account manager', 'rep', 'handler', 'looked after by'] },
+    /* Not "account manager": that is its own column on the maintenance
+       side and this one is the CRM owner. Two different people, often. */
+    aliases: ['owner', 'assigned to', 'assigned', 'rep', 'handler', 'looked after by'] },
   { key: 'contact_name', label: 'Contact name', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['contact name', 'contact', 'name', 'who to ask for'] },
   { key: 'email', label: 'Email', kind: 'text', entity: 'contacts',
@@ -240,7 +248,9 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['commission rate', 'commission percentage', 'comm rate'] },
   { key: 'next_action', label: 'Next action', kind: 'text', entity: 'contacts',
     capability: 'crm.edit',
-    aliases: ['next action', 'next step', 'follow up', 'action', 'to do', 'chase'] },
+    /* Not the bare "action": crm_contacts has an action column beside
+       this one, and taking the word here made that column unreachable. */
+    aliases: ['next action', 'next step', 'follow up', 'to do', 'chase'] },
   { key: 'last_contact', label: 'Last contact', kind: 'date', entity: 'contacts',
     capability: 'crm.edit',
     aliases: ['last contact', 'last contacted', 'last spoke', 'last called', 'contacted on'] },
@@ -260,7 +270,7 @@ export const CONTACT_FIELDS: WritableField[] = [
   { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'contacts', arithmetic: true,
     capability: 'crm.edit', aliases: ['requirement', 'what they want', 'their requirement', 'looking for'] },
   { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', arithmetic: true,
-    capability: 'crm.edit', aliases: ['note', 'notes', 'comment', 'comments', 'remark'] },
+    capability: 'crm.edit', aliases: ['note', 'notes', 'remark', 'latest update'] },
 ];
 
 /* -------------------------------------------------------------
@@ -282,7 +292,131 @@ export const POST_FIELDS: WritableField[] = [
     capability: 'marketing.edit', aliases: ['caption', 'post caption'] },
 ];
 
-export const WRITABLE_FIELDS: WritableField[] = [...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS];
+
+
+/* =============================================================
+   The tail: every remaining column, so nothing is unreachable.
+
+   The lists above are hand written, and hand written is right for the
+   columns people talk about: `refurb_costs_at_sale` is "refurb at sale"
+   in the yard and no amount of string manipulation gets there.
+
+   Hand written is wrong as the ONLY mechanism, because it covers
+   whatever somebody remembered. That is how the bar shipped with no
+   social posts in it at all. So every writable column in columns.ts that
+   nothing above claims gets an entry generated from its own name.
+
+   The derived words are worse. They are not nothing, which is what was
+   there before, and the completeness check can now ask a question it
+   could not ask before: is there a column in this database that cannot
+   be written by typing?
+   ============================================================= */
+
+/** Which table belongs to which of the writable entities. */
+const ENTITY_TABLE: Record<WritableEntity, string> = {
+  trailers: 'stock_trailers',
+  contacts: 'crm_contacts',
+  posts: 'social_posts',
+  meetings: 'calendar_events',
+};
+
+/** What somebody needs before a column on that table is offered. */
+const TABLE_CAPABILITY: Record<string, CrmCapability> = {
+  stock_trailers: 'stock.edit',
+  crm_contacts: 'crm.edit',
+  social_posts: 'marketing.edit',
+  calendar_events: 'crm.delegate',
+};
+
+/** The word that qualifies a column when its plain name is taken. */
+const ENTITY_WORD: Record<WritableEntity, string> = {
+  trailers: 'trailer', contacts: 'customer', posts: 'post', meetings: 'event',
+};
+
+function kindOf(k: ColumnKind): FieldKind {
+  switch (k) {
+    case 'money': return 'money';
+    case 'number': return 'number';
+    case 'date': return 'date';
+    case 'longtext': return 'longtext';
+    case 'enum': return 'enum';
+    case 'bool': return 'enum';
+    default: return 'text';
+  }
+}
+
+function titleCase(s: string): string {
+  const t = s.replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/**
+ * One entry per writable column nothing above already claims.
+ *
+ * Only for the four tables the edit route can actually write. A field
+ * offered for a table with no route behind it would appear and then
+ * refuse, which is the thing this whole file exists to prevent.
+ */
+function generateTail(): WritableField[] {
+  const curated = new Set(
+    [...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS].map((f) => `${f.entity}.${f.key}`),
+  );
+  const out: WritableField[] = [];
+
+  for (const [entity, table] of Object.entries(ENTITY_TABLE) as [WritableEntity, string][]) {
+    const spec = TABLES.find((t) => t.table === table);
+    const capability = TABLE_CAPABILITY[table];
+    if (!spec || !capability) continue;
+
+    for (const col of spec.columns) {
+      if (col.writable === false) continue;
+      if (curated.has(`${entity}.${col.name}`)) continue;
+
+      const kind = kindOf(col.kind);
+      const vocabulary = col.values?.length
+        ? Object.fromEntries(col.values.map((v) => [v.toLowerCase().replace(/_/g, ' '), v]))
+        : col.kind === 'bool'
+          ? { yes: 'true', no: 'false', true: 'true', false: 'false' }
+          : undefined;
+
+      /* A derived alias must never collide with a curated one, or the
+         longest-match rule hands the sentence to whichever was listed
+         first and the generated column becomes unreachable. Where the
+         plain words are taken, the column is qualified by what it is on:
+         "event colour" rather than "colour". */
+      /* Across every entity, not just this one. findField scans the
+         whole dictionary, so "color" on a meeting collided with "colour"
+         on a trailer and the meeting column was unreachable. */
+      const taken = new Set([
+        ...[...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS].flatMap((f) => f.aliases),
+        ...out.flatMap((f) => f.aliases),
+      ]);
+      const derived = derivedAliases(col.name);
+      const free = derived.filter((a) => !taken.has(a));
+      const aliases = free.length
+        ? free
+        : derived.map((a) => `${ENTITY_WORD[entity]} ${a}`);
+
+      out.push({
+        key: col.name,
+        label: titleCase(col.name),
+        kind: vocabulary ? 'enum' : kind,
+        entity,
+        aliases,
+        vocabulary,
+        capability,
+        arithmetic: kind === 'money' || kind === 'number' || kind === 'longtext',
+      });
+    }
+  }
+  return out;
+}
+
+export const GENERATED_FIELDS: WritableField[] = generateTail();
+
+export const WRITABLE_FIELDS: WritableField[] = [
+  ...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS, ...GENERATED_FIELDS,
+];
 
 /** Every field this person is allowed to write, for the checks and the empty state. */
 export function writableFor(caps: Set<CrmCapability>): WritableField[] {

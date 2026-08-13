@@ -144,6 +144,47 @@ export interface CalendarEventAttendee {
 }
 export type CalendarVisibility = 'private' | 'team' | 'specific';
 
+/**
+ * Where somebody stands on a meeting they were asked to.
+ *
+ * `proposed` is the interesting one: they have suggested a different
+ * time and the meeting is now waiting on whoever asked them. Either side
+ * can propose, so this goes back and forth until somebody accepts.
+ * See migration 006.
+ */
+export type InviteStatus = 'pending' | 'accepted' | 'declined' | 'proposed';
+
+export interface CalendarInvite {
+  id: string;
+  event_id: string;
+  user_id: string;
+  invited_by: string | null;
+  status: InviteStatus;
+  /** The time currently on the table, when it differs from the event. */
+  proposed_start_at: string | null;
+  proposed_end_at: string | null;
+  /** Whose answer the meeting is waiting on. Null once it is settled. */
+  awaiting: string | null;
+  /** How many times it has gone back and forth. */
+  rounds: number;
+  note: string | null;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One round of the exchange. Append only, so the entry shows its history. */
+export interface CalendarInviteMessage {
+  id: string;
+  invite_id: string;
+  actor_id: string | null;
+  action: 'invited' | 'accepted' | 'declined' | 'proposed' | 'withdrawn';
+  start_at: string | null;
+  end_at: string | null;
+  note: string | null;
+  created_at: string;
+}
+
 export interface CalendarEvent {
   id: string;
   title: string;

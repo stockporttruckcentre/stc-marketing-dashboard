@@ -56,18 +56,21 @@ const TABLES: Record<WritableEntity, string> = {
   trailers: 'stock_trailers',
   contacts: 'crm_contacts',
   posts: 'social_posts',
+  meetings: 'calendar_events',
 };
 
 const TITLE: Record<WritableEntity, string> = {
   trailers: 'stc_no',
   contacts: 'company_name',
   posts: 'content',
+  meetings: 'title',
 };
 
 const SUBS: Record<WritableEntity, string[]> = {
   trailers: ['make', 'model', 'category', 'location', 'status'],
   contacts: ['contact_name', 'location', 'status'],
   posts: ['scheduled_date', 'status'],
+  meetings: ['start_at', 'visibility'],
 };
 
 /** Where a record lives, so the bar never leaves somebody to go and find it. */
@@ -76,8 +79,13 @@ function hrefFor(entity: WritableEntity, id: string): string {
     case 'trailers': return `/dashboard/sales?stock=${id}`;
     case 'contacts': return `/dashboard/crm?contact=${id}`;
     case 'posts': return '/dashboard/social';
+    case 'meetings': return `/dashboard/calendar?event=${id}`;
   }
 }
+
+const SCREEN_NAME: Record<WritableEntity, string> = {
+  trailers: 'stock list', contacts: 'CRM', posts: 'planner', meetings: 'calendar',
+};
 
 function fieldFor(entity: string, key: string): WritableField | null {
   return WRITABLE_FIELDS.find((f) => f.entity === entity && f.key === key) ?? null;
@@ -108,7 +116,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ ok: false, message: 'Not signed in.' }, { status: 401 });
 
   const body = (await req.json().catch(() => ({}))) as Body;
-  const entity = (['trailers', 'contacts', 'posts'] as const).find((e) => e === body.entity) ?? null;
+  const entity = (['trailers', 'contacts', 'posts', 'meetings'] as const).find((e) => e === body.entity) ?? null;
   if (!entity) return NextResponse.json({ ok: false, message: 'I did not understand what to change.' });
 
   const field = fieldFor(entity, String(body.fieldKey ?? ''));
@@ -220,7 +228,7 @@ export async function POST(req: NextRequest) {
       } else {
         return NextResponse.json({
           ok: false,
-          message: `Nothing on the ${entity === 'trailers' ? 'stock list' : entity === 'posts' ? 'planner' : 'CRM'} matches "${term}".`,
+          message: `Nothing on the ${SCREEN_NAME[entity]} matches "${term}".`,
         });
       }
     }

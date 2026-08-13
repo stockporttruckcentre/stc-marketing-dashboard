@@ -392,6 +392,8 @@ const ENTITY_WORDS: Record<WritableEntity, string[]> = {
   contacts: ['customer', 'customers', 'contact', 'contacts', 'account', 'accounts',
              'company', 'companies', 'lead', 'leads', 'deal', 'deals', 'proposal', 'proposals'],
   posts: ['post', 'posts', 'social', 'socials', 'content'],
+  meetings: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments',
+             'visit', 'visits', 'diary', 'event', 'events'],
 };
 
 function mentionsEntity(softened: string, entity: WritableEntity): boolean {
