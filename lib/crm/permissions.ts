@@ -98,6 +98,23 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
 };
 
 /**
+ * Lusha, switched off at the door.
+ *
+ * The meeting asked for the company finder to be unclickable at rollout
+ * until somebody decides a usage policy, because searches cost credits
+ * out of a monthly allowance and one person exploring can spend the lot.
+ * Tom named Dean; the point is that nobody should find out what a search
+ * costs by accident.
+ *
+ * A single constant rather than a role change, because it is temporary
+ * and it applies to everybody including admins. Set it to false to lift
+ * the lock, and the per role capability sets take over again unchanged.
+ * When the admin panel lands this becomes a stored setting, so somebody
+ * can turn it on for the people who should have it without a deploy.
+ */
+export const LUSHA_LOCKED = true;
+
+/**
  * The one place role becomes capability.
  *
  * When the admin panel lands it will store grants per user. Pass them in
@@ -111,6 +128,7 @@ export function capabilitiesFor(
   overrides?: Partial<Record<CrmCapability, boolean>>,
 ): CrmCapabilities {
   const set = new Set<CrmCapability>(BY_ROLE[profile.role] ?? BY_ROLE.viewer);
+  if (LUSHA_LOCKED) set.delete('crm.enrich');
   if (overrides) {
     for (const [cap, allowed] of Object.entries(overrides) as [CrmCapability, boolean][]) {
       if (allowed) set.add(cap); else set.delete(cap);

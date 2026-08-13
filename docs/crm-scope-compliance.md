@@ -7,7 +7,7 @@ The source document is the record of what was asked for and is never edited.
 This file is where the answer lives. If the two disagree, the source is right
 about the requirement and this file is wrong about the status.
 
-Last audited after the CRM interface rebuild.
+Last audited after the prospect flag, DocuSign shortcut and Lusha lockout.
 
 ---
 
@@ -19,9 +19,9 @@ Last audited after the CRM interface rebuild.
 |---|---|---|---|
 | 1.1 | Generate Proposal on the customer account, prompting trailer sales, maintenance or rental | **Built** | `components/crm/GenerateProposalPicker.tsx`, opened from the drawer. Rental and refurb say plainly their tool is not built and raise the proposal anyway |
 | 1.2 | "What to do next?" prompt after adding a new prospect | **Built** | `components/crm/NextActionPrompt.tsx`, fires on create. The options list is still the open question the meeting flagged |
-| 1.3 | Prospect vs existing customer flag driving split proposal pipelines | **Not built** | Needs a column. `status` has `lead` and `customer` but nothing distinguishes a prospect proposal from an existing customer proposal, which is what Tom asked to split |
-| 1.4 | DocuSign shortcut opening the DocuSign home page | **Not built** | A single link on a converting prospect. Deliberately no envelope pre population, per the meeting |
-| 1.5 | Natural language search bar | **Built** | `lib/command/`, `components/dashboard/CommandBar.tsx`. Currently on the dashboard only. Moving it to the global top bar is task 3 |
+| 1.3 | Prospect vs existing customer flag driving split proposal pipelines | **Built** | Migration 004 adds `relationship`, set on the record next to status in the drawer and carried onto every proposal raised. The dashboard split is now possible; building that view is dashboard work |
+| 1.4 | DocuSign shortcut opening the DocuSign home page | **Built** | A DocuSign button in the drawer, on quoted, won and customer records only. Opens the home page and stops there, per the meeting: the CRM is behind the VPN so anything it generates is a file rather than something signable through a link |
+| 1.5 | Natural language search bar | **Built** | `lib/command/`, `components/dashboard/CommandBar.tsx`. In the global top bar on every page, alongside a contact lookup that replaced the old second search box |
 | 1.6 | Restricted role for Rama | **Partial** | `lib/crm/permissions.ts` expresses it as the `marketer` capability set: reads and edits, no lists, proposals, credits or deletes. The genuinely stock scoped version needs the admin panel, because it is scoped to a table rather than a verb |
 
 ### Changes to existing features
@@ -68,9 +68,12 @@ testing `profile.role` in place.
 | Manage and share lists | yes | yes | no | no |
 | Raise a proposal | yes | yes | no | no |
 | Raise one in somebody else's name | yes | no | no | no |
-| Spend a Lusha credit | yes | yes | no | no |
+| Spend a Lusha credit | yes* | yes* | no | no |
 | Import | yes | yes | no | no |
 | Export | yes | yes | yes | yes |
+
+\* Lusha is locked off for everybody at rollout, admins included, by
+`LUSHA_LOCKED`. The row shows who gets it back when that lifts.
 
 Sales gets assign and delegate because both came straight out of the meeting:
 claiming an unowned lead is everyday work, and Dave taking a call while Dean is
@@ -109,18 +112,31 @@ panel, not buried in a UI commit.
 | Admin panel permissions | `lib/crm/permissions.ts` is the CRM half. The panel itself is not built |
 | Delegated actions across users | Built for calls and meetings. Owner cannot yet edit a meeting booked for them, because the calendar policies let only the creator edit |
 | UI kit refresh | CRM tab done. Other tabs untouched, per the instruction that the rebrand is ordered by the user |
-| Lusha lockout at rollout | **Not built.** Trivial and the meeting wanted it at go live: gate `crm.enrich` off for everyone until a usage policy exists |
+| Lusha lockout at rollout | **Built.** `LUSHA_LOCKED` in `lib/crm/permissions.ts` strips `crm.enrich` from everyone including admins, and the search, enrich and check routes refuse server side, because hiding a button is not a lock. The finder page says why. One constant to lift it |
 
 ---
 
 ## What to do next on this tab, in order
 
-1. **Run migrations 001, 002 and 003.** Three features currently show a "not
-   wired up yet" state that would otherwise work.
-2. **The import flow** (task 1). The current one writes straight to the database
-   with no mapping and no duplicate check, which on a real spreadsheet is how a
-   CRM gets poisoned in one click.
-3. **Prospect vs existing flag** (1.3). Small, and it unblocks the split
-   proposal pipelines Tom asked for on the dashboard.
-4. **DocuSign shortcut** (1.4). One button.
-5. **Lusha lockout.** One capability, and the meeting asked for it at go live.
+Section 1 is now built out as far as it can go without Protean, the ITG
+server or the admin panel. What is left is not CRM page work.
+
+1. **Run the migrations.** 002 and 003 are short, additive and safe. 004 adds
+   the relationship column. 001 is the long one and has two dependencies worth
+   checking first: it calls `current_role_safe()` and references
+   `stock_trailers`, and `schema.sql` is known to have drifted from what is
+   deployed. Its ownership backfill is commented out on purpose because it
+   matches people on free text first names.
+2. **The split proposal view on the dashboard.** The flag exists and every
+   proposal now carries it, so this is a dashboard query rather than a CRM
+   change.
+3. **Import on the stock list and sales tracker.** The dialog, mapping,
+   duplicate check and review are shared; each tab needs its own dictionary,
+   validators and duplicate key.
+4. **Row level security for the capability model.** `lib/crm/permissions.ts`
+   gates the interface and nothing else. The database does not know about any
+   of it. That belongs with the admin panel.
+
+Still blocked, unchanged: Protean for revenue and auto promotion, ITG for
+Outlook and the spreadsheet sync, the admin panel for Rama's stock scoped
+role.

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
-  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2,
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
 import {
   Button, Badge, Label, SectionHead, EmptyState, NotProvisioned, Alert, type Tone,
 } from '@/components/kit/primitives';
+import { Segmented } from '@/components/kit/forms';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { AddressMap } from './AddressMap';
@@ -29,6 +30,9 @@ import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactA
    ============================================================= */
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+
+/** Where a deal has to be before anything is worth signing. */
+const SIGNABLE: string[] = ['quoted', 'won', 'customer'];
 
 const SIDE_LABEL: Record<string, string> = {
   trailer_sales: 'Sales and leasing',
@@ -150,7 +154,15 @@ export function ContactDrawer({
     }
     const { data, error } = await supabase.from('crm_contacts')
       .update(patch).eq('id', contact.id).select('*').single();
-    if (error) { setMessage(error.message); return; }
+    if (error) {
+      // Columns added by a migration that has not been run yet say so in
+      // plain terms, rather than showing a Postgres error to a salesman.
+      const missing = /column .*"?(\w+)"? .*does not exist|Could not find the '(\w+)' column/i.exec(error.message);
+      setMessage(missing
+        ? `Saving ${String(field).replace(/_/g, ' ')} needs a database change that has not been applied yet. Everything else on this record still saves.`
+        : error.message);
+      return;
+    }
     setEdit(data as CRMContact); onChange(data as CRMContact);
   }
 
@@ -242,6 +254,7 @@ export function ContactDrawer({
                   lineHeight: 1.2, letterSpacing: '-0.025em', color: 'var(--text)',
                 }}>{edit.company_name}</h2>
                 <Badge tone={STATUS_TONE[edit.status] ?? 'neutral'} dot>{edit.status}</Badge>
+              {edit.relationship === 'existing' && <Badge tone="success">Customer</Badge>}
               </div>
               {metaLine && (
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{metaLine}</div>
@@ -262,18 +275,37 @@ export function ContactDrawer({
           </div>
 
           {canEdit && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', position: 'relative' }}>
-              <Button variant="accent" onClick={() => setShowProposal(true)}>
-                <FileText size={14} /> Generate proposal
+            <div style={{ display: 'flex', gap: 7, marginTop: 14, flexWrap: 'wrap', position: 'relative' }}>
+              <Button size="sm" variant="accent" onClick={() => setShowProposal(true)}>
+                <FileText size={13} /> Generate proposal
               </Button>
-              <Button variant="secondary" onClick={() => setShowSchedule(true)}>
-                <CalendarPlus size={14} /> Schedule
+              <Button size="sm" variant="secondary" onClick={() => setShowSchedule(true)}>
+                <CalendarPlus size={13} /> Schedule
               </Button>
-              <Button variant="secondary"
+              <Button size="sm" variant="secondary"
                 onClick={() => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener')}>
-                <Share2 size={14} /> Export
+                <Share2 size={13} /> Export
               </Button>
-              <Button variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
+              {/* Only on a converting prospect, which is when it is any
+                  use. On a fresh lead it would be a fourth button in the
+                  row earning nothing.
+
+                  It opens the DocuSign home page and stops there. That
+                  was decided in the meeting and it is not laziness: the
+                  CRM sits behind the VPN, so anything it generates is a
+                  file rather than something signable through a link, and
+                  a half-built envelope would be worse than none. The user
+                  picks their own template, of which Tom keeps two because
+                  sales and leasing and the workshop are separate
+                  entities. */}
+              {SIGNABLE.includes(edit.status) && (
+                <Button size="sm" variant="secondary"
+                  onClick={() => window.open('https://app.docusign.com/', '_blank', 'noopener')}
+                  title="Opens DocuSign so you can build and send the envelope yourself">
+                  <PenLine size={13} /> DocuSign
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
                 <MoreHorizontal size={15} />
               </Button>
               {overflowOpen && (
@@ -329,6 +361,24 @@ export function ContactDrawer({
                 >
                   {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
+              </div>
+              <div>
+                <Label>Relationship</Label>
+                {/* Not the same question as status, and next to it on
+                    purpose so the difference is obvious. Status is where
+                    a deal is. This is whether they were already trading
+                    with us, which is what splits the proposal pipelines
+                    Tom asked to see separately. */}
+                <div style={{ marginTop: 6 }}>
+                  <Segmented
+                    value={edit.relationship ?? 'prospect'}
+                    onChange={(v) => canEdit && saveField('relationship', v)}
+                    options={[
+                      { value: 'prospect', label: 'Prospect' },
+                      { value: 'existing', label: 'Customer' },
+                    ]}
+                  />
+                </div>
               </div>
               <NumberField label="Estimated value" value={edit.estimated_value} prefix="£"
                 onSave={(n) => saveField('estimated_value', n)} canEdit={canEdit} />

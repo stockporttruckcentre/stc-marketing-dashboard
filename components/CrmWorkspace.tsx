@@ -902,6 +902,7 @@ export function CrmWorkspace({
         <ContextMenu
           x={contextMenu.x} y={contextMenu.y} row={contextMenu.row} field={contextMenu.field}
           canEdit={canEdit}
+          enrichAllowed={caps.has('crm.enrich')}
           onEdit={() => {
             const node = gridRef.current?.api.getRowNode(contextMenu.row.id);
             if (node) gridRef.current?.api.startEditingCell({ rowIndex: node.rowIndex!, colKey: contextMenu.field ?? 'company_name' });
@@ -1508,12 +1509,14 @@ function MenuRule() {
   return <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />;
 }
 
-function ContextMenu({ x, y, row, field, canEdit, onView, onEdit, onEnrich, onDelete, onMove }: any) {
+function ContextMenu({ x, y, row, field, canEdit, enrichAllowed, onView, onEdit, onEnrich, onDelete, onMove }: any) {
   // What Lusha can actually return, so the option is not offered where it cannot work.
   const ENRICHABLE_FIELDS = ['company_name', 'contact_name', 'email', 'phone', 'location', 'fleet_size'];
   const hasLookupHandle = !!row.email || !!row.company_name;
-  const canEnrich = hasLookupHandle && ENRICHABLE_FIELDS.includes(field);
-  const enrichTitle = !hasLookupHandle
+  const canEnrich = enrichAllowed && hasLookupHandle && ENRICHABLE_FIELDS.includes(field);
+  const enrichTitle = !enrichAllowed
+    ? 'Lusha is switched off until a policy is agreed for who can spend credits'
+    : !hasLookupHandle
     ? 'Add an email or a company name to the row first. Lusha needs at least one to look anything up'
     : !ENRICHABLE_FIELDS.includes(field)
       ? 'Lusha does not provide this field'

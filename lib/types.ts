@@ -40,6 +40,12 @@ export interface CRMContact {
   phone: string | null;
   source: string;
   status: ContactStatus;
+  /**
+   * Whether this company was already trading with STC, as opposed to
+   * where a deal with them has got to. See migration 004. Optional in the
+   * type because the column may not exist yet.
+   */
+  relationship?: 'prospect' | 'existing';
   employee_count: number | null;
   turnover: number | null;
   fleet_size: number | null;  // derived sum of trucks+trailers+vans (set by trigger)

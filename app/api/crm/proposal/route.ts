@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
 
   const c: any = contact;
-  const { data: row, error } = await supabase.from('crm_contacts').insert({
+  const payload: Record<string, any> = {
     list_id: (list as any).id,
     side: KIND_SIDE[kind],
     status: 'quoted',
@@ -58,10 +58,26 @@ export async function POST(req: NextRequest) {
     phone: c.phone,
     location: c.location,
     assigned_to: fullName,
+    // Carried across so the dashboard can split proposals to prospects
+    // from proposals to existing customers, which was the whole point of
+    // recording it. Falls back to prospect when migration 004 has not run.
+    relationship: c.relationship ?? 'prospect',
     requirement: kind.replace('_', ' '),
     date_of_enquiry: ukToday(),
     last_contact: ukToday(),
-  }).select('id').single();
+  };
+
+  let { data: row, error } = await supabase.from('crm_contacts')
+    .insert(payload).select('id').single();
+
+  // `relationship` arrives with migration 004. Without it the proposal
+  // still has to be raised: losing the split is a reporting gap, losing
+  // the proposal is somebody's afternoon.
+  if (error && /relationship/.test(error.message)) {
+    const { relationship: _dropped, ...withoutRelationship } = payload;
+    ({ data: row, error } = await supabase.from('crm_contacts')
+      .insert(withoutRelationship).select('id').single());
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({
