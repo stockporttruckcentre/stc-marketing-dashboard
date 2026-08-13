@@ -380,7 +380,11 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['deal', 'row', 'this one', 'the line'] },
 
   { id: 'tracker.commission', label: 'My commission', blurb: 'What you have earned and when', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/leads?view=commission', verbs: [...GO, 'how much'],
+    /* Not ?view=commission. The sweep found nothing reads a view param
+       on this page, so the link landed on the default tab and looked
+       broken. A link that goes to the right screen and the wrong tab is
+       worse than one that admits it. */
+    capability: 'crm.view', path: '/dashboard/leads', verbs: [...GO, 'how much'],
     objects: ['commission', 'my commission', 'earnings', 'what i have earned', 'my bonus'],
     phrases: ['how much commission have i made'] },
 
@@ -617,6 +621,176 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['i want a new password'] },
 
   /* ---------- export pages ---------- */
+
+
+  /* ---------- analytics, read properly this time ----------
+
+     The first sweep skipped this screen and I wrote four entries for it
+     from a grep. It has six periods, a rep filter, eight KPIs, four
+     charts and a leaderboard you can click to filter by. */
+
+  { id: 'analytics.period30', label: 'Last 30 days', blurb: 'Analytics for the past month', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=30d', verbs: [...GO, 'set'],
+    objects: ['last 30 days', 'past 30 days', 'last month of figures', '30 day view'] },
+
+  { id: 'analytics.period90', label: 'Last 90 days', blurb: 'Analytics for the past quarter', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=90d', verbs: [...GO, 'set'],
+    objects: ['last 90 days', 'past 90 days', 'last three months', '90 day view'] },
+
+  { id: 'analytics.periodMtd', label: 'This month so far', blurb: 'Month to date', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=mtd', verbs: [...GO, 'set'],
+    objects: ['month to date', 'mtd', 'this month so far', 'so far this month'] },
+
+  { id: 'analytics.periodQtd', label: 'This quarter', blurb: 'Quarter to date', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=qtd', verbs: [...GO, 'set'],
+    objects: ['this quarter', 'quarter to date', 'qtd', 'the quarter'] },
+
+  { id: 'analytics.periodYtd', label: 'Year to date', blurb: 'Since the first of January', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=ytd', verbs: [...GO, 'set'],
+    objects: ['year to date', 'ytd', 'this year so far', 'since january'] },
+
+  { id: 'analytics.periodAll', label: 'All time', blurb: 'Every dated record', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?period=all', verbs: [...GO, 'set'],
+    objects: ['all time', 'ever', 'the lot', 'everything we have done', 'since the start'] },
+
+  { id: 'analytics.repFilter', label: 'Focus analytics on one rep', blurb: 'Or back to the whole team', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'filter', 'focus on'],
+    objects: ['one rep', 'just dave', 'a single rep', 'whole team', 'everybody’s figures'],
+    phrases: ['show me just dave’s numbers', 'back to the whole team'] },
+
+  { id: 'analytics.commission', label: 'Commission paid', blurb: 'Ten per cent of profit, to the team', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
+    objects: ['commission paid', 'commission bill', 'what the team earned', 'total commission'] },
+
+  { id: 'analytics.avgDeal', label: 'Average deal size', blurb: 'Revenue over deals closed', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
+    objects: ['average deal', 'average sale', 'typical deal', 'deal size', 'average order value'] },
+
+  { id: 'analytics.pipelineValue', label: 'Pipeline value', blurb: 'Estimated value of everything open', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
+    objects: ['pipeline value', 'whats in the pipeline', 'open value', 'value of the pipeline'] },
+
+  { id: 'analytics.conversion', label: 'Conversion rate', blurb: 'Open leads that become customers', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'whats'],
+    objects: ['conversion', 'conversion rate', 'close rate', 'win rate', 'strike rate'] },
+
+  { id: 'analytics.stockValue', label: 'Stock available and its book value', blurb: 'What is sat on the yard', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
+    objects: ['stock available', 'stock value', 'nbv on the yard', 'what stock is worth'] },
+
+  { id: 'analytics.funnel', label: 'Pipeline funnel', blurb: 'Lead, contacted, quoted, won, customer, lost', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
+    objects: ['funnel', 'pipeline funnel', 'the stages', 'stage breakdown', 'where deals are'] },
+
+  { id: 'analytics.topCustomers', label: 'Top customers', blurb: 'By revenue in the period', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who are'],
+    objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
+
+  { id: 'analytics.byMake', label: 'Stock by manufacturer', blurb: 'How many of each make on the yard', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'split'],
+    objects: ['by manufacturer', 'by make', 'stock by make', 'which makes', 'manufacturer split'] },
+
+  { id: 'analytics.trend', label: 'Revenue and profit trend', blurb: 'Twelve months, either line toggleable', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
+    objects: ['trend', 'monthly trend', 'the trend line', 'last 12 months', 'month by month'] },
+
+  /* ---------- company finder ---------- */
+
+  { id: 'finder.radius', label: 'Change the search radius', blurb: 'Miles around the chosen place', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/finder', verbs: [...CHANGE, 'widen', 'narrow'],
+    objects: ['radius', 'search radius', 'the miles', 'how far out', 'distance'] },
+
+  { id: 'finder.industry', label: 'Filter the search by industry', blurb: 'Haulage, construction, waste and the rest', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/finder', verbs: [...CHANGE, 'filter'],
+    objects: ['industry', 'sector', 'trade', 'hauliers only', 'construction firms', 'waste collection'] },
+
+  { id: 'finder.size', label: 'Filter the search by company size', blurb: 'Employee count, low and high', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/finder', verbs: [...CHANGE, 'filter'],
+    objects: ['employee count', 'company size', 'headcount range', 'how many staff', 'size of firm'] },
+
+  { id: 'finder.depot', label: 'Search around a depot', blurb: 'Or a postcode you type', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/finder', verbs: [...GO, 'search', 'look'],
+    objects: ['around a depot', 'near hyde', 'around a postcode', 'from a depot', 'near a site'],
+    phrases: ['who is near hyde', 'companies around a postcode'] },
+
+
+  /* ---------- admin, settings and the three dashboards ----------
+
+     Another screen the first sweep skipped. The demo seeder in
+     particular writes real rows and had no way to be typed at. */
+
+  { id: 'admin.roleAdmin', label: 'Make somebody an admin', blurb: 'Full access to everything', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', seed: 'make ',
+    verbs: [...CHANGE, 'promote', 'elevate', 'upgrade'],
+    objects: ['an admin', 'to admin', 'administrator', 'full access'] },
+
+  { id: 'admin.roleSales', label: 'Make somebody sales', blurb: 'Their own portfolio and the pipeline', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', seed: 'make ',
+    verbs: [...CHANGE, 'promote', 'move'],
+    objects: ['to sales', 'a sales user', 'sales role', 'a rep'] },
+
+  { id: 'admin.roleMarketer', label: 'Make somebody restricted', blurb: 'Updates records and nothing else', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', seed: 'make ',
+    verbs: [...CHANGE, 'restrict', 'limit'],
+    objects: ['to marketer', 'restricted', 'a marketer', 'restricted updater'] },
+
+  { id: 'admin.roleViewer', label: 'Make somebody read only', blurb: 'Looks, touches nothing', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', seed: 'make ',
+    verbs: [...CHANGE, 'demote', 'downgrade', 'restrict'],
+    objects: ['read only', 'to viewer', 'a viewer', 'view only', 'take their access away'] },
+
+  { id: 'admin.seedDemo', label: 'Load demo data', blurb: 'Marked rows you can clear again', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard', verbs: [...MAKE, 'seed', 'load'],
+    objects: ['demo data', 'test data', 'sample data', 'dummy records', 'demo rows'],
+    phrases: ['fill it with demo data'] },
+
+  { id: 'admin.wipeDemo', label: 'Clear the demo data', blurb: 'Removes exactly the demo rows', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard', verbs: [...REMOVE, 'wipe', 'clear'],
+    objects: ['demo data', 'test data', 'sample data', 'the demo rows'],
+    phrases: ['get rid of the demo data'] },
+
+  { id: 'admin.previewRep', label: 'Preview the rep dashboard', blurb: 'What a sales user sees', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard?view=rep', verbs: [...GO, 'preview'],
+    objects: ['rep dashboard', 'rep view', 'sales rep view', 'as a rep'] },
+
+  { id: 'admin.previewExec', label: 'Preview the exec dashboard', blurb: 'Company revenue and pipeline by rep', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard?view=exec', verbs: [...GO, 'preview'],
+    objects: ['exec dashboard', 'exec view', 'the board view', 'as an exec'] },
+
+  { id: 'admin.previewSupport', label: 'Preview the support dashboard', blurb: 'Planner, brand kit and news', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard?view=support', verbs: [...GO, 'preview'],
+    objects: ['support dashboard', 'support view', 'marketer view', 'as support'] },
+
+  { id: 'me.chaseWindow', label: 'Change what counts as gone quiet', blurb: 'Seven, ten or fourteen days', kind: 'session',
+    path: '/dashboard', verbs: [...CHANGE, 'set'],
+    objects: ['quiet window', 'stale days', 'chase window', 'how long before chasing', 'gone quiet after'] },
+
+  { id: 'me.needsChasing', label: 'What needs chasing', blurb: 'Open work that has gone quiet', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'what', 'which'],
+    objects: ['needs chasing', 'gone quiet', 'stalled', 'sitting still', 'not heard back', 'needs a nudge'],
+    phrases: ['what have i not chased', 'what has gone quiet'] },
+
+  { id: 'me.needsMeToday', label: 'What needs me today', blurb: 'Diary and stalled work in one list', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'what'],
+    objects: ['needs me today', 'my to do', 'todays list', 'what is waiting on me', 'my actions'],
+    phrases: ['what do i need to do today'] },
+
+  { id: 'me.portfolio', label: 'My portfolio', blurb: 'Accounts allocated to you, and what they are worth', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'how many'],
+    objects: ['my portfolio', 'my accounts', 'accounts allocated to me', 'my book'] },
+
+  { id: 'me.target', label: 'How I am doing against target', blurb: 'Booked this month against your number', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'how much', 'am i'],
+    objects: ['target', 'my target', 'against target', 'booked this month', 'am i on track'],
+    phrases: ['how far off target am i', 'how much left to hit target'] },
+
+  { id: 'me.notifications', label: 'My notifications', blurb: 'Anything unread and waiting', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'check', 'any'],
+    objects: ['notifications', 'unread', 'alerts', 'my bell', 'anything for me', 'messages'] },
+
+  { id: 'me.inFlight', label: 'What is in flight', blurb: 'Open work split new against existing', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'what'],
+    objects: ['in flight', 'open work', 'open proposals', 'live proposals', 'what is open'] },
 
   { id: 'export.copy', label: 'Copy a customer export', blurb: 'Formatted, onto the clipboard', kind: 'data',
     capability: 'crm.export', verbs: ['copy', 'clipboard', 'grab'],
