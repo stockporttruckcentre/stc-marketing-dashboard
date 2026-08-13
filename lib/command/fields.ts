@@ -1,0 +1,234 @@
+/* =============================================================
+   Fields the command bar is allowed to write.
+
+   Until now the bar could go somewhere, count something and export
+   something. It could not change anything, which meant a perfectly
+   ordinary instruction like "add £1k refurb value to STC143980" did
+   nothing at all. Typing an instruction and getting a count back is the
+   worst kind of failure: it looks like it worked.
+
+   So this is the writable half of the dictionary. Every entry names a
+   column, what kind of value it holds, the words people use for it, and
+   the capability somebody needs before it is even offered. The parser in
+   mutate.ts reads nothing but this, so a field added here is typeable
+   the same day, in every phrasing the alias list covers.
+
+   Two things are deliberately absent.
+
+   No id columns, no created_at, no derived numbers. A total that is the
+   sum of two other columns is not a thing to type at, and letting
+   somebody set it by hand only makes the two disagree.
+
+   No status on a trailer that has been sold. Undoing a sale unpicks a
+   commission line on somebody's tracker, so it keeps its existing
+   warning path on the stock list rather than gaining a quiet one here.
+   ============================================================= */
+import type { CrmCapability } from '@/lib/crm/permissions';
+import { BODY_TYPES } from './lexicon';
+
+export type FieldKind = 'money' | 'number' | 'text' | 'longtext' | 'date' | 'enum';
+
+export type WritableField = {
+  /** The column, exactly as the table spells it. */
+  key: string;
+  label: string;
+  kind: FieldKind;
+  entity: 'trailers' | 'contacts';
+  /** What people call it. Longest match wins, so order does not matter. */
+  aliases: string[];
+  /** For enums: the words somebody types, mapped to what gets stored. */
+  vocabulary?: Record<string, string>;
+  capability: CrmCapability;
+  /**
+   * Can you add to it rather than replace it? True for money and
+   * numbers, and for long text where "add a note" means append rather
+   * than overwrite what is already there.
+   */
+  arithmetic?: boolean;
+  /** Shown under the confirmation when the change deserves a word. */
+  caution?: string;
+};
+
+/** Stock statuses, as words rather than as the stored value. */
+const STOCK_STATUS: Record<string, string> = {
+  'in stock': 'in_stock', instock: 'in_stock', available: 'in_stock', stock: 'in_stock',
+  'new build': 'new_build', newbuild: 'new_build', build: 'new_build',
+  'sales order': 'sales_order', ordered: 'sales_order', order: 'sales_order', reserved: 'sales_order',
+  rental: 'rental', rented: 'rental', hire: 'rental', 'on hire': 'rental',
+  scrap: 'scrap', scrapped: 'scrap', 'written off': 'scrap',
+};
+
+const DEAL_STATUS: Record<string, string> = {
+  lead: 'lead', enquiry: 'lead', new: 'lead',
+  contacted: 'contacted', approached: 'contacted',
+  quoted: 'quoted', quote: 'quoted', proposal: 'quoted',
+  won: 'won', win: 'won', closed: 'won',
+  customer: 'customer', converted: 'customer',
+  lost: 'lost', dead: 'lost', lapsed: 'lost',
+};
+
+const YES_NO: Record<string, string> = {
+  yes: 'Yes', y: 'Yes', done: 'Yes', received: 'Yes', paid: 'Yes', in: 'Yes', true: 'Yes',
+  no: 'No', n: 'No', not: 'No', outstanding: 'No', pending: 'No', false: 'No',
+};
+
+/* -------------------------------------------------------------
+   Trailers.
+   ------------------------------------------------------------- */
+export const TRAILER_FIELDS: WritableField[] = [
+  { key: 'refurb_costs', label: 'Refurb cost', kind: 'money', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['refurb cost', 'refurb costs', 'refurb value', 'refurb spend', 'refurbishment cost',
+              'refurbishment', 'rectification cost', 'rectification', 'prep cost', 'prep costs',
+              'prep', 'refurb'] },
+  { key: 'refurb_costs_at_sale', label: 'Refurb at sale', kind: 'money', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['refurb at sale', 'refurb cost at sale', 'refurb costs at sale', 'sale refurb',
+              'refurb on sale', 'post sale refurb'] },
+  { key: 'nbv', label: 'Book value', kind: 'money', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['nbv', 'net book value', 'book value', 'book price', 'cost price', 'cost'] },
+  { key: 'sales_price', label: 'Sale price', kind: 'money', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['sale price', 'sales price', 'sold price', 'sold for', 'selling price', 'invoice value'] },
+  { key: 'retail_price', label: 'Retail price', kind: 'money', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price', 'ticket price'] },
+  { key: 'location', label: 'Location', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit',
+    aliases: ['location', 'depot', 'site', 'yard', 'where it is', 'parked at', 'stored at', 'based at'] },
+  { key: 'status', label: 'Status', kind: 'enum', entity: 'trailers', vocabulary: STOCK_STATUS,
+    capability: 'stock.edit',
+    aliases: ['status', 'state', 'stage'],
+    caution: 'Marking a trailer sold goes through the sales tracker, so the commission line is raised with it.' },
+  { key: 'category', label: 'Category', kind: 'enum', entity: 'trailers', vocabulary: BODY_TYPES,
+    capability: 'stock.edit',
+    aliases: ['category', 'body type', 'body', 'trailer type', 'type'] },
+  { key: 'make', label: 'Make', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['make', 'manufacturer', 'brand', 'built by'] },
+  { key: 'model', label: 'Model', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['model', 'spec'] },
+  { key: 'year', label: 'Year', kind: 'number', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['year', 'year of manufacture', 'build year', 'age'] },
+  { key: 'colour', label: 'Colour', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['colour', 'color', 'paint'] },
+  { key: 'chassis_number', label: 'Chassis number', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['chassis number', 'chassis no', 'chassis', 'vin'] },
+  { key: 'ministry_no', label: 'Ministry number', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['ministry number', 'ministry no', 'ministry'] },
+  { key: 'mot_date', label: 'MOT', kind: 'date', entity: 'trailers',
+    capability: 'stock.edit',
+    aliases: ['mot', 'mot date', 'mot expiry', 'mot due', 'test date', 'plating'] },
+  { key: 'customer', label: 'Customer', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['customer', 'buyer', 'client', 'sold to', 'going to'] },
+  { key: 'sales_rep', label: 'Sales rep', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['rep', 'sales rep', 'salesman', 'seller', 'handled by'] },
+  { key: 'supplier', label: 'Supplier', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['supplier', 'bought from', 'came from', 'source'] },
+  { key: 'door_type', label: 'Door type', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['door type', 'doors', 'door'] },
+  { key: 'axle_type', label: 'Axle type', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['axle type', 'axles', 'axle', 'running gear'] },
+  { key: 'side_aperture', label: 'Side aperture', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['side aperture', 'aperture', 'internal height', 'side height'] },
+  { key: 'tread_depths', label: 'Tread depths', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['tread depths', 'tread depth', 'tread', 'tyres', 'tyre depths'] },
+  { key: 'new_or_used', label: 'New or used', kind: 'enum', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['new or used', 'condition'],
+    vocabulary: { new: 'New', used: 'Used', secondhand: 'Used', 'second hand': 'Used' } },
+  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['order date', 'ordered on', 'date ordered'] },
+  { key: 'dispatch_date', label: 'Dispatch date', kind: 'date', entity: 'trailers',
+    capability: 'stock.edit',
+    aliases: ['dispatch date', 'despatch date', 'dispatched on', 'delivery date', 'delivered on'] },
+  { key: 'expected_delivery', label: 'Expected delivery', kind: 'date', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['expected delivery', 'due date', 'eta', 'expected'] },
+  { key: 'deposit_received', label: 'Deposit received', kind: 'enum', entity: 'trailers',
+    capability: 'stock.edit', vocabulary: YES_NO, aliases: ['deposit received', 'deposit'] },
+  { key: 'paid_in_full', label: 'Paid in full', kind: 'enum', entity: 'trailers',
+    capability: 'stock.edit', vocabulary: YES_NO,
+    aliases: ['paid in full', 'paid in', 'fully paid', 'payment'] },
+  { key: 'signed_order', label: 'Signed order', kind: 'enum', entity: 'trailers',
+    capability: 'stock.edit', vocabulary: YES_NO, aliases: ['signed order', 'signed'] },
+  { key: 'quote_no', label: 'Quote number', kind: 'text', entity: 'trailers',
+    capability: 'stock.edit', aliases: ['quote number', 'quote no', 'quote ref', 'quote'] },
+  { key: 'description', label: 'Description', kind: 'longtext', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit', aliases: ['description', 'spec description', 'details', 'write up'] },
+  { key: 'refurb_update', label: 'Refurb update', kind: 'longtext', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit',
+    aliases: ['refurb update', 'refurb progress', 'refurb note', 'refurb notes'] },
+  { key: 'refurb_done', label: 'Refurb done', kind: 'longtext', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit', aliases: ['refurb done', 'work done', 'refurb completed'] },
+  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'trailers', arithmetic: true,
+    capability: 'stock.edit', aliases: ['note', 'notes', 'comment', 'comments', 'remark'] },
+];
+
+/* -------------------------------------------------------------
+   Customers and the deals against them. One table, so one list.
+   ------------------------------------------------------------- */
+export const CONTACT_FIELDS: WritableField[] = [
+  { key: 'status', label: 'Status', kind: 'enum', entity: 'contacts', vocabulary: DEAL_STATUS,
+    capability: 'crm.edit', aliases: ['status', 'stage', 'state'] },
+  { key: 'assigned_to', label: 'Owner', kind: 'text', entity: 'contacts',
+    capability: 'crm.assign',
+    aliases: ['owner', 'assigned to', 'assigned', 'account manager', 'rep', 'handler', 'looked after by'] },
+  { key: 'contact_name', label: 'Contact name', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['contact name', 'contact', 'name', 'who to ask for'] },
+  { key: 'email', label: 'Email', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['email', 'email address', 'e mail'] },
+  { key: 'phone', label: 'Phone', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['phone', 'phone number', 'telephone', 'number', 'mobile', 'landline'] },
+  { key: 'location', label: 'Location', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['location', 'town', 'city', 'area', 'region', 'based in'] },
+  { key: 'address', label: 'Address', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['address', 'postal address', 'street'] },
+  { key: 'fleet_size', label: 'Fleet size', kind: 'number', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['fleet size', 'fleet'] },
+  { key: 'trucks', label: 'Trucks', kind: 'number', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['trucks', 'tractor units', 'units'] },
+  { key: 'trailers', label: 'Trailers', kind: 'number', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['trailers on fleet', 'their trailers', 'trailer count'] },
+  { key: 'vans', label: 'Vans', kind: 'number', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['vans'] },
+  { key: 'employee_count', label: 'Employees', kind: 'number', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['employees', 'headcount', 'staff', 'employee count'] },
+  { key: 'turnover', label: 'Turnover', kind: 'money', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['turnover', 'annual turnover', 'revenue'] },
+  { key: 'estimated_value', label: 'Estimated value', kind: 'money', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit',
+    aliases: ['estimated value', 'deal value', 'opportunity value', 'pipeline value', 'estimate', 'worth'] },
+  { key: 'sale_price', label: 'Sale price', kind: 'money', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['sale price', 'sold for', 'invoiced', 'invoice value'] },
+  { key: 'commission_rate', label: 'Commission rate', kind: 'number', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['commission rate', 'commission percentage', 'comm rate'] },
+  { key: 'next_action', label: 'Next action', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit',
+    aliases: ['next action', 'next step', 'follow up', 'action', 'to do', 'chase'] },
+  { key: 'last_contact', label: 'Last contact', kind: 'date', entity: 'contacts',
+    capability: 'crm.edit',
+    aliases: ['last contact', 'last contacted', 'last spoke', 'last called', 'contacted on'] },
+  { key: 'date_of_enquiry', label: 'Enquiry date', kind: 'date', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['enquiry date', 'date of enquiry', 'enquired on', 'came in on'] },
+  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['order date', 'ordered on'] },
+  { key: 'source', label: 'Source', kind: 'text', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['source', 'came from', 'lead source', 'found via'] },
+  { key: 'side', label: 'Side', kind: 'enum', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['side', 'division', 'part of the business'],
+    vocabulary: { sales: 'trailer_sales', 'trailer sales': 'trailer_sales',
+                  maintenance: 'maintenance', service: 'maintenance', workshop: 'maintenance' } },
+  { key: 'relationship', label: 'Relationship', kind: 'enum', entity: 'contacts',
+    capability: 'crm.edit', aliases: ['relationship', 'prospect or customer', 'existing customer'],
+    vocabulary: { prospect: 'prospect', new: 'prospect', existing: 'existing', current: 'existing' } },
+  { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['requirement', 'what they want', 'their requirement', 'looking for'] },
+  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', arithmetic: true,
+    capability: 'crm.edit', aliases: ['note', 'notes', 'comment', 'comments', 'remark'] },
+];
+
+export const WRITABLE_FIELDS: WritableField[] = [...TRAILER_FIELDS, ...CONTACT_FIELDS];
+
+/** Every field this person is allowed to write, for the checks and the empty state. */
+export function writableFor(caps: Set<CrmCapability>): WritableField[] {
+  return WRITABLE_FIELDS.filter((f) => caps.has(f.capability));
+}

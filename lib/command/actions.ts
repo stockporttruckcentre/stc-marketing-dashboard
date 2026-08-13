@@ -166,6 +166,24 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['sold', 'as sold', 'to sold', 'sold status'],
     phrases: ['mark as sold', 'this one is sold'] },
 
+  /* Editing a field by typing it, rather than finding the row, opening
+     the drawer and finding the box. lib/command/fields.ts holds the
+     column list and lib/command/mutate.ts reads the sentence; this entry
+     is how somebody discovers that the bar can do it at all. */
+  { id: 'rec.editTrailerField', label: 'Change a trailer detail', blurb: 'Refurb cost, location, MOT, price', kind: 'record',
+    capability: 'stock.edit', verbs: [...CHANGE, 'add', 'knock', 'clear'],
+    objects: ['refurb cost', 'refurb', 'nbv', 'book value', 'retail price', 'mot', 'mot date',
+              'trailer location', 'trailer detail', 'trailer field', 'stock detail'],
+    phrases: ['add refurb', 'change the refurb', 'update the mot', 'move it to'],
+    seed: 'set refurb cost on STC' },
+
+  { id: 'rec.editContactField', label: 'Change a customer detail', blurb: 'Owner, status, phone, next action', kind: 'record',
+    capability: 'crm.edit', verbs: [...CHANGE, 'add', 'clear'],
+    objects: ['customer detail', 'contact detail', 'phone number', 'email address',
+              'next action', 'fleet size', 'estimated value', 'customer field'],
+    phrases: ['update the customer', 'change their number', 'set the next action'],
+    seed: 'set next action on ' },
+
   { id: 'rec.delete', label: 'Delete a record', blurb: 'Gone, with a confirmation first', kind: 'record',
     capability: 'crm.delete', verbs: REMOVE,
     objects: ['contact', 'customer', 'trailer', 'record', 'row', 'list', 'note'] },
@@ -275,6 +293,10 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
     // open it" are the same instruction.
     if (objectHit && verbHit) take(80, `${verbHit} ${objectHit}`);
     else if (objectHit) take(55, objectHit);
+    // A verb on its own is a real thing to type. "Export" used to score
+    // nothing at all, because only objects were counted, so the bar told
+    // somebody their perfectly ordinary word was not a word.
+    else if (verbHit) take(45, verbHit);
 
     if (!best) {
       // Half typed: "analyt" should already be offering Analytics.

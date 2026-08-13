@@ -170,6 +170,23 @@ and a case to `scripts/command-coverage-check.ts, in the same change.** A
 feature the bar cannot reach is invisible, and the original bug was exactly
 that: eight intents against twelve screens, so typing "meeting" did nothing.
 
+Adding a column somebody should be able to edit by typing means an entry in
+`lib/command/fields.ts` as well, with its aliases and the capability it needs.
+That file is the only thing `lib/command/mutate.ts` reads and the only thing
+`/api/command/edit` will write, so a column missing from it cannot be reached
+and cannot be written, whatever the request says.
+
+### It answers questions and it carries out instructions
+
+"How many curtainsiders at Carrington" is a question. "Add £1k refurb value
+to STC143980" is an instruction, and an instruction answered with a count
+looks like it worked, which is worse than doing nothing. An instruction wins
+over the question its words could also be read as.
+
+Every write is shown before it happens: the record it matched, the field, and
+the value before and after. Where more than one record matched it asks. The
+bar never edits a row on the first press of Enter.
+
 ### Nothing you cannot do is ever offered
 
 Every action in `actions.ts` names the capability it needs, and the bar

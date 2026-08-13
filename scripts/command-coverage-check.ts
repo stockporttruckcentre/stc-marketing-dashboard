@@ -20,6 +20,9 @@ import { parseQuery } from '../lib/command/query';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
 import { STATE_PHRASES, BODY_TYPES, DEPOTS } from '../lib/command/lexicon';
 import { ACTIONS, suggestActions, availableActions } from '../lib/command/actions';
+import { composeSuggestions } from '../lib/command/compose';
+import { parseEdit, composeEdits } from '../lib/command/mutate';
+import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
 import type { UserRole } from '../lib/types';
 
@@ -240,6 +243,155 @@ for (const c of ASKED_FOR) {
       : key === 'measure' ? plan?.measure
       : plan?.filters.find((f) => f.key === key)?.value;
     ok(`asked for: "${c.q}" -> ${key}`, got === want, `got ${String(got)}, want ${String(want)}`);
+  }
+}
+
+/* ---------- a bare verb is never a dead end ----------
+
+   The report was "I typed export and nothing came back". The action
+   registry only scored when an object word matched, so a verb on its own
+   fell through to the empty state, and even fixed it would have offered
+   two entries. What somebody means by "export" is "what can I export",
+   and the answer is hundreds of runnable sentences built from the
+   dictionary. These assert the shape of that, not a list of them. */
+
+for (const verb of ['export', 'download', 'how many', 'list', 'value of', 'count']) {
+  const got = composeSuggestions(verb, CAPS.admin, 8);
+  ok(`bare verb "${verb}" offers options`, got.length >= 5, `got ${got.length}`);
+  ok(`bare verb "${verb}" offers runnable sentences`,
+    got.every((g) => g.phrase.trim().split(/\s+/).length >= 2),
+    got.map((g) => g.phrase).join(' / '));
+}
+
+// Half a word already narrows. "expo" is somebody mid-type, not a typo.
+ok('half typed "expo" still offers exports',
+  composeSuggestions('expo', CAPS.admin, 8).length >= 5);
+
+// Naming the thing narrows to that thing.
+for (const [q, want] of [['export customers', 'customers'], ['export trailers', 'trailers'],
+                         ['how many proposals', 'proposals']] as const) {
+  const got = composeSuggestions(q, CAPS.admin, 8);
+  ok(`"${q}" narrows to ${want}`, got.length > 0 && got.every((g) => g.phrase.includes(want)),
+    got.map((g) => g.phrase).join(' / '));
+}
+
+// Named by the user: customers in a place, and a period.
+ok('export offers a depot',
+  composeSuggestions('export customers', CAPS.admin, 12).some((g) => /carrington|bredbury|hyde/.test(g.phrase)),
+  composeSuggestions('export customers', CAPS.admin, 12).map((g) => g.phrase).join(' / '));
+ok('naming the depot puts it first',
+  composeSuggestions('export customers in carrington', CAPS.admin, 4)[0]?.phrase.includes('carrington') === true);
+ok('export offers a period',
+  composeSuggestions('export trailers', CAPS.admin, 12).some((g) => /this week|this month|past 7 days|this year/.test(g.phrase)));
+
+/* ---------- and nothing you cannot do ---------- */
+for (const role of ROLES) {
+  const allowed = CAPS[role].has('crm.export');
+  const got = composeSuggestions('export', CAPS[role], 8);
+  ok(`compose: ${role} ${allowed ? 'gets' : 'never gets'} exports`,
+    allowed ? got.length > 0 : got.length === 0);
+}
+
+/* ---------- instructions, not just questions ----------
+
+   "Add £1k refurb value to STC143980" was read as a question about
+   trailers and answered with a list, which is worse than doing nothing
+   because it looks like it worked. Every one of these has to come back
+   as a plan naming the column, the operation and the value. */
+
+const EDITS: { q: string; key: string; op: string; value: unknown; target?: string }[] = [
+  { q: 'add £1k refurb value to STC143980', key: 'refurb_costs', op: 'add', value: 1000, target: 'STC143980' },
+  { q: 'add 1000 refurb to STC143980', key: 'refurb_costs', op: 'add', value: 1000, target: 'STC143980' },
+  { q: 'stick another 2.5k on the refurb for stc143980', key: 'refurb_costs', op: 'add', value: 2500, target: 'STC143980' },
+  { q: 'set refurb cost 1200 on STC143980', key: 'refurb_costs', op: 'set', value: 1200, target: 'STC143980' },
+  { q: 'stc143980 refurb 1200', key: 'refurb_costs', op: 'set', value: 1200, target: 'STC143980' },
+  { q: 'set the nbv on STC1439 to 8,500', key: 'nbv', op: 'set', value: 8500, target: 'STC1439' },
+  { q: 'knock 250 off the retail on STC143980', key: 'retail_price', op: 'subtract', value: 250, target: 'STC143980' },
+  { q: 'move STC143980 to Carrington', key: 'location', op: 'set', value: 'Carrington', target: 'STC143980' },
+  { q: 'stc 143980 is parked at bredbury', key: 'location', op: 'set', value: 'Bredbury', target: 'STC143980' },
+  { q: 'mot on stc143980 is 14/03/2027', key: 'mot_date', op: 'set', value: '2027-03-14', target: 'STC143980' },
+  { q: 'set the mot on STC143980 to 3 March 2027', key: 'mot_date', op: 'set', value: '2027-03-03', target: 'STC143980' },
+  { q: 'clear the customer on STC143980', key: 'customer', op: 'clear', value: null, target: 'STC143980' },
+  { q: 'set status on stc143980 to rental', key: 'status', op: 'set', value: 'rental', target: 'STC143980' },
+  { q: 'change the sale price on STC143980 to 24k', key: 'sales_price', op: 'set', value: 24000, target: 'STC143980' },
+  { q: 'add a note to Dawson: chasing tyre quote', key: 'notes', op: 'add', value: 'chasing tyre quote', target: 'Dawson' },
+  { q: 'change the owner on Dawson Group to Dave', key: 'assigned_to', op: 'set', value: 'Dave', target: 'Dawson Group' },
+  { q: 'set the fleet size on Dawson to 45', key: 'fleet_size', op: 'set', value: 45, target: 'Dawson' },
+];
+
+for (const c of EDITS) {
+  const p = parseEdit(c.q, CAPS.admin);
+  ok(`edit: "${c.q}" is an instruction`, !!p, 'no plan');
+  if (!p) continue;
+  ok(`edit: "${c.q}" -> column`, p.field.key === c.key, `got ${p.field.key}, want ${c.key}`);
+  ok(`edit: "${c.q}" -> operation`, p.op === c.op, `got ${p.op}, want ${c.op}`);
+  ok(`edit: "${c.q}" -> value`, p.value === c.value, `got ${String(p.value)}, want ${String(c.value)}`);
+  if (c.target) ok(`edit: "${c.q}" -> record`, p.target?.text === c.target, `got ${p.target?.text}`);
+  ok(`edit: "${c.q}" is complete`, p.missing.length === 0, p.missing.join(','));
+  ok(`edit: "${c.q}" is confident enough to act on`, p.confidence >= 10, String(p.confidence));
+}
+
+/* A question that names a field is still a question. Reading it as an
+   instruction would edit a record somebody was only asking about. */
+for (const q of [
+  'how much refurb on STC143980?',
+  'what is the mot on stc143980',
+  'which trailers are at carrington',
+  'how many trailers have a refurb cost',
+  'what is the nbv on STC143980',
+]) {
+  ok(`question stays a question: "${q}"`, parseEdit(q, CAPS.admin) === null,
+    `-> ${parseEdit(q, CAPS.admin)?.summary}`);
+}
+
+/* Marking sold is not a field edit. It raises a commission line on
+   somebody's tracker, so it keeps its own confirmation. */
+ok('selling is handed to the sold flow', parseEdit('mark STC143980 as sold', CAPS.admin) === null);
+
+/* Half a sentence gets offered endings rather than an error. */
+ok('a bare stock number offers fields',
+  composeEdits('STC143980', CAPS.admin, 6).length >= 5,
+  String(composeEdits('STC143980', CAPS.admin, 6).length));
+ok('a bare stock number offers refurb first',
+  composeEdits('STC143980', CAPS.admin, 6)[0]?.phrase.includes('refurb') === true);
+ok('a bare field name offers the sentence shape',
+  composeEdits('refurb cost', CAPS.admin, 6).length > 0);
+
+/* And nothing you cannot write. A read only viewer typing the exact
+   sentence gets no plan at all, because an instruction that appears and
+   then refuses is worse than one that was never offered. */
+for (const role of ROLES) {
+  const canStock = CAPS[role].has('stock.edit');
+  ok(`edit: ${role} ${canStock ? 'can' : 'cannot'} set a refurb cost`,
+    !!parseEdit('add £1k refurb value to STC143980', CAPS[role]) === canStock);
+  ok(`edit: ${role} sees ${canStock ? 'some' : 'no'} trailer fields`,
+    (composeEdits('STC143980', CAPS[role], 6).length > 0) === canStock);
+
+  const canAssign = CAPS[role].has('crm.assign');
+  ok(`edit: ${role} ${canAssign ? 'can' : 'cannot'} reassign an account`,
+    !!parseEdit('change the owner on Dawson Group to Dave', CAPS[role]) === canAssign);
+}
+
+/* Every writable field has to be reachable by at least one of its own
+   words, or it is a column nobody can type at. */
+for (const f of WRITABLE_FIELDS) {
+  const sentence = f.entity === 'trailers'
+    ? `set ${f.aliases[0]} on STC143980 to ${sampleValue(f)}`
+    : `set ${f.aliases[0]} on Dawson to ${sampleValue(f)}`;
+  const p = parseEdit(sentence, CAPS.admin);
+  // Selling is deliberately not a field edit, so it is the one exception.
+  if (f.key === 'status' && f.entity === 'trailers') continue;
+  ok(`field reachable: ${f.entity}.${f.key}`, p?.field.key === f.key,
+    `"${sentence}" -> ${p?.field.key ?? 'NO PLAN'}`);
+}
+
+function sampleValue(f: { kind: string; vocabulary?: Record<string, string> }): string {
+  switch (f.kind) {
+    case 'money': return '1200';
+    case 'number': return '12';
+    case 'date': return '14/03/2027';
+    case 'enum': return Object.keys(f.vocabulary ?? {})[0] ?? 'yes';
+    default: return 'Carrington';
   }
 }
 

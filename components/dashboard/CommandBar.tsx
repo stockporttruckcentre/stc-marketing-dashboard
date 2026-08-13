@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles } from 'lucide-react';
+import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles, Pencil } from 'lucide-react';
 import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
 import { type Suggestion } from '@/lib/command/features';
 import { suggestActions } from '@/lib/command/actions';
+import { composeSuggestions } from '@/lib/command/compose';
+import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
@@ -22,7 +24,19 @@ import { Label, Badge, Button } from '@/components/kit/primitives';
    ============================================================= */
 
 type Candidate = { id: string; label: string; sub?: string; status?: string };
-type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered';
+type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered' | 'confirming';
+
+/** What the server says a write is about to do, before it does it. */
+type EditPreview = {
+  recordId: string;
+  recordLabel: string;
+  recordSub?: string;
+  fieldLabel: string;
+  before: string;
+  after: string;
+  unchanged?: boolean;
+  caution?: string | null;
+};
 type Outcome = { ok: boolean; message: string; detail?: string; link?: { href: string; label: string } };
 
 const EXAMPLES = [
@@ -157,6 +171,56 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const features: Suggestion[] = [];
 
   /**
+   * Concrete questions built from the data dictionary.
+   *
+   * This is what a bare verb should produce. Typing "export" is not a
+   * failed search for an action called Export, it is somebody asking
+   * what they can export, and the answer is hundreds of real sentences.
+   */
+  /**
+   * An instruction, as opposed to a question.
+   *
+   * "Add £1k refurb value to STC143980" used to be read as a question
+   * about trailers and answered with a list, which looks like it worked
+   * and is not. An instruction that names its record, its field and its
+   * value beats every question the same words could be read as.
+   */
+  const edit = useMemo(
+    () => (text.trim().length >= 4 ? parseEdit(text, caps) : null),
+    [text, caps],
+  );
+  const editReady = !!edit && edit.missing.length === 0 && edit.confidence >= 10;
+
+  /**
+   * Half a sentence is not a failure.
+   *
+   * Somebody who types a stock number and stops is part way through an
+   * instruction, and the bar knows every field that instruction could
+   * end in. These are the endings, offered rather than waited for.
+   */
+  const editHints = useMemo(
+    () => composeEdits(text, caps, 5).map((e) => ({
+      kind: 'action' as const,
+      label: e.label,
+      sub: e.sub,
+      phrase: e.phrase,
+      score: e.score,
+    })),
+    [text, caps],
+  );
+
+  const composed = useMemo(
+    () => composeSuggestions(text, caps, 6).map((c) => ({
+      kind: 'action' as const,
+      label: c.label,
+      sub: c.sub,
+      phrase: c.phrase,
+      score: c.score,
+    })),
+    [text, caps],
+  );
+
+  /**
    * Records that match what has been typed.
    *
    * The top bar used to carry a second input that did nothing but this:
@@ -195,28 +259,36 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     // not offer the stock list twice.
     const seen = new Set<string>();
     const out: Suggestion[] = [];
-    for (const s of [...actions, ...features, ...records] as Suggestion[]) {
+    // Composed questions outrank bare actions, because "Export customers
+    // at Carrington" is a better answer to "export" than an entry called
+    // Export a list that then asks which list.
+    for (const s of [...editHints, ...composed, ...actions, ...features, ...records] as Suggestion[]) {
       const key = s.path ?? s.phrase ?? s.label;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(s);
     }
     return out.slice(0, 7);
-  }, [actions, features, records]);
+  }, [editHints, composed, actions, features, records]);
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
   const plan = useMemo(() => (text.trim().length >= 3 ? parseQuery(text) : null), [text]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
-  const useQuery = !!plan && plan.confidence >= 8 && !preview?.intent?.writes;
+  // An instruction outranks the question its words could also be, and a
+  // question outranks a browse.
+  const useQuery = !editReady && !!plan && plan.confidence >= 8 && !preview?.intent?.writes;
   const [answered, setAnswered] = useState<any | null>(null);
+  const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
+  const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
   const [cursor, setCursor] = useState(-1);
   useEffect(() => { setCursor(-1); }, [text]);
 
   const reset = useCallback(() => {
     setStage('idle'); setResult(null); setSlots({}); setChoices(null);
     setAsking(null); setAnswer(''); setOutcome(null); setText(''); setAnswered(null);
+    setEditPreview(null); setEditChoices(null);
   }, []);
 
   /** Walk forward: resolve references, then ask for anything still missing. */
@@ -313,7 +385,59 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     setStage('answered');
   }
 
+  /**
+   * Ask the server what the instruction would do, without doing it.
+   *
+   * Nothing is written on this pass. The record is matched, the current
+   * value comes back beside the proposed one, and only a deliberate
+   * confirm sends the change. A bar that edits a record the moment you
+   * press Enter is a bar people stop trusting with real data.
+   */
+  async function previewEdit(p: EditPlan, recordId?: string) {
+    setStage('running');
+    const res = await fetch('/api/command/edit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entity: p.entity, fieldKey: p.field.key, op: p.op, value: p.value,
+        target: p.target?.text, recordId,
+      }),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+
+    if (res.needsChoice) {
+      setEditChoices(res.candidates ?? []);
+      setStage('confirming');
+      return;
+    }
+    if (!res.ok) {
+      setOutcome({ ok: false, message: res.message ?? 'That change did not go through.' });
+      setStage('done');
+      return;
+    }
+    setEditChoices(null);
+    setEditPreview(res as EditPreview);
+    setStage('confirming');
+  }
+
+  /** The second pass, which is the one that writes. */
+  async function applyEdit() {
+    if (!edit || !editPreview) return;
+    setStage('running');
+    const res = await fetch('/api/command/edit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entity: edit.entity, fieldKey: edit.field.key, op: edit.op, value: edit.value,
+        recordId: editPreview.recordId, confirm: true,
+      }),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+    setEditPreview(null);
+    setOutcome(res);
+    setStage('done');
+  }
+
   async function submit() {
+    // An instruction first. "Add £1k refurb to STC143980" is not a
+    // question about trailers, however much it reads like one.
+    if (editReady && edit) return previewEdit(edit);
     if (useQuery && plan) return runQuery(plan);
     const parsed = parse(text);
     if (!parsed.intent) {
@@ -374,7 +498,8 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const hasPanel =
     (stage === 'idle' && text.trim().length >= 2) ||
     stage === 'choosing' || stage === 'asking' || stage === 'ready' ||
-    stage === 'running' || stage === 'done' || stage === 'answered';
+    stage === 'running' || stage === 'done' || stage === 'answered' ||
+    stage === 'confirming';
 
   return (
     <div className="kit" style={{
@@ -443,6 +568,21 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
+            {editReady && edit && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Pencil size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to check it
+                </span>
+              </div>
+            )}
             {useQuery && plan && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -679,6 +819,18 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
               <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
             </div>
           </div>
+        )}
+
+        {/* what it is about to change, before it changes it */}
+        {stage === 'confirming' && (
+          <EditConfirm
+            preview={editPreview}
+            candidates={editChoices}
+            summary={edit?.summary ?? 'This change'}
+            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            onApply={applyEdit}
+            onCancel={reset}
+          />
         )}
 
         {/* what happened, and where it went */}
@@ -716,6 +868,21 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
+            {editReady && edit && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Pencil size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to check it
+                </span>
+              </div>
+            )}
             {useQuery && plan && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -954,6 +1121,18 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           </div>
         )}
 
+        {/* what it is about to change, before it changes it */}
+        {stage === 'confirming' && (
+          <EditConfirm
+            preview={editPreview}
+            candidates={editChoices}
+            summary={edit?.summary ?? 'This change'}
+            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            onApply={applyEdit}
+            onCancel={reset}
+          />
+        )}
+
         {/* what happened, and where it went */}
         {stage === 'done' && outcome && (
           <div style={{
@@ -982,6 +1161,114 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           </div>
         )}
           </>}
+    </div>
+  );
+}
+
+/* =============================================================
+   The confirmation before a write.
+
+   Shown for every field edit, without exception. It names the record it
+   matched, the field, and the value before and after, because the record
+   was found from a partial name and the person typing has no other way
+   to know which row it landed on.
+
+   Where more than one record matched, it asks instead of guessing. A bar
+   that picks the first Dawson and writes to it is a bar that eventually
+   writes to the wrong Dawson.
+   ============================================================= */
+function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel }: {
+  preview: EditPreview | null;
+  candidates: Candidate[] | null;
+  summary: string;
+  onPick: (id: string) => void;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  if (candidates) {
+    return (
+      <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>
+          Which one?
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+          {summary} needs one record, and more than one matched.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {candidates.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onPick(c.id)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1,
+                textAlign: 'left', width: '100%', padding: '8px 10px',
+                border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
+                fontFamily: 'var(--inter)',
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</span>
+              {c.sub && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.sub}</span>}
+            </button>
+          ))}
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!preview) return null;
+
+  return (
+    <div style={{
+      borderTop: '1px solid var(--border)', padding: 14,
+      borderLeft: '2px solid var(--accent)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+        <Pencil size={15} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
+            {preview.recordLabel}
+          </div>
+          {preview.recordSub && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{preview.recordSub}</div>
+          )}
+
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            marginTop: 10, padding: '8px 10px',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-sm)',
+          }}>
+            <Label>{preview.fieldLabel}</Label>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+              {preview.before}
+            </span>
+            <ArrowRight size={13} style={{ color: 'var(--text-subtle)' }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{preview.after}</span>
+          </div>
+
+          {preview.unchanged && (
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
+              That is what it already says, so nothing would change.
+            </div>
+          )}
+          {preview.caution && (
+            <div style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 8, lineHeight: 1.5 }}>
+              {preview.caution}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Button variant="primary" size="sm" onClick={onApply}>
+              <Check size={12} /> Save it
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
