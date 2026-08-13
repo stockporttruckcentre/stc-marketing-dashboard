@@ -61,6 +61,10 @@ export async function POST(req: NextRequest) {
      column, so the allowlist has to cover both. Still an allowlist: the
      column has to be one this entity declares, whichever list it is in. */
   const allowedAmountColumns = new Set(entity.amounts.map((a) => a.column));
+  /* Free text columns a spread filter may reach into. Named here rather
+     than taken from the request, so the widening is ours and not the
+     caller's. */
+  const ENTITY_TEXT_COLUMNS = new Set(['model', 'description', 'category', 'status_text']);
 
   for (const f of (body.filters ?? [])) {
     const isRange = f.op === 'gte' || f.op === 'lte';
@@ -69,7 +73,20 @@ export async function POST(req: NextRequest) {
       : allowedFilterColumns.has(f.column);
     if (!allowed) continue;
 
-    if (f.op === 'gte') { const n = Number(f.value); if (Number.isFinite(n)) q = q.gte(f.column, n); }
+    /* anyOf spreads one idea across several columns: a curtainsider is
+       recorded in category on some rows and in model on others. Built
+       from the entity's own declared columns, never from the request. */
+    if (f.op === 'anyOf') {
+      const cols = (f.columns ?? [f.column]).filter((c: string) =>
+        allowedFilterColumns.has(c) || ENTITY_TEXT_COLUMNS.has(c));
+      const vals: string[] = (f.values ?? [f.value]).filter(Boolean);
+      if (cols.length && vals.length) {
+        const clauses = cols.flatMap((c: string) =>
+          vals.map((v: string) => `${c}.ilike.%${String(v).replace(/[,()]/g, '')}%`));
+        q = q.or(clauses.join(','));
+      }
+    }
+    else if (f.op === 'gte') { const n = Number(f.value); if (Number.isFinite(n)) q = q.gte(f.column, n); }
     else if (f.op === 'lte') { const n = Number(f.value); if (Number.isFinite(n)) q = q.lte(f.column, n); }
     else if (f.op === 'eq') q = q.eq(f.column, f.value);
     else q = q.ilike(f.column, `%${f.value}%`);

@@ -23,6 +23,20 @@ import { Label, Badge, Button } from '@/components/kit/primitives';
    genuinely could not work out.
    ============================================================= */
 
+/**
+ * Words that can only be a read.
+ *
+ * "Export a list of all trailers in stock" was being offered as Add a
+ * trailer to stock, with slot chips and Enter to run, because the create
+ * intent matched on "trailer" and "stock" and any write intent outranked
+ * the query. A sentence that opens by asking for a list, a count or a
+ * file is not an instruction to create a record, whatever nouns follow.
+ */
+export function readsOnlyText(text: string): boolean {
+  return /\b(export|download|list|show me|how many|how much|count|total|value of|give me|what are|which|report on)\b/i
+    .test(text);
+}
+
 type Candidate = { id: string; label: string; sub?: string; status?: string };
 type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered' | 'confirming';
 
@@ -159,7 +173,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * a contact" should offer adding a contact, not just opening the CRM.
    */
   const actions = useMemo(
-    () => suggestActions(text, caps, 5).map((h) => ({
+    () => suggestActions(text, caps, 8)
+      /* A sentence that opens by asking for a list is not offering to
+         create one. "Export a list of all trailers in stock" was putting
+         Add a trailer at the top, above four correct export
+         suggestions. */
+      .filter((h) => !(readsOnlyText(text) && h.action.kind === 'create'))
+      .slice(0, 5)
+      .map((h) => ({
       kind: 'action' as const,
       label: h.action.label,
       sub: h.action.blurb,
@@ -283,9 +304,19 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const plan = useMemo(() => (text.trim().length >= 3 ? parseQuery(text) : null), [text]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
+  /* Words that can only be a read.
+     "Export a list of all trailers in stock" was being offered as Add a
+     trailer to stock, with slot chips and Enter to run, because the
+     create intent matched on "trailer" and "stock" and any write intent
+     outranked the query. A sentence that opens by asking for a list, a
+     count or a file is not an instruction to create a record, whatever
+     nouns come after it. */
+  const readsOnly = readsOnlyText(text);
+
   // An instruction outranks the question its words could also be, and a
-  // question outranks a browse.
-  const useQuery = !editReady && !!plan && plan.confidence >= 8 && !preview?.intent?.writes;
+  // question outranks a browse. A read verb outranks a write intent.
+  const useQuery = !editReady && !!plan && plan.confidence >= 8
+    && (readsOnly || !preview?.intent?.writes);
   const [answered, setAnswered] = useState<any | null>(null);
   const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
   const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
@@ -614,7 +645,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {!useQuery && preview?.intent && (
+            {!useQuery && preview?.intent && !(readsOnly && preview.intent.writes) && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -915,7 +946,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {!useQuery && preview?.intent && (
+            {!useQuery && preview?.intent && !(readsOnly && preview.intent.writes) && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',

@@ -21,7 +21,19 @@ import {
 } from './lexicon';
 
 export type PlanFilter = {
-  key: string; column: string; op: 'eq' | 'ilike' | 'gte' | 'lte'; value: string; label: string;
+  key: string; column: string; op: 'eq' | 'ilike' | 'gte' | 'lte' | 'anyOf'; value: string; label: string;
+  /**
+   * For `anyOf`: match any of these words in any of these columns.
+   *
+   * Body type is the reason this exists. A trailer's type is recorded in
+   * `category` on some rows and in `model` on others, and `model` is the
+   * one the team actually fills in. Filtering on `category` alone
+   * answered "how many curtainsiders in stock" with 1 when the real
+   * figure is in the thousands, which is the worst kind of wrong: a
+   * confident number nobody would think to check.
+   */
+  columns?: string[];
+  values?: string[];
 };
 
 export type QueryPlan = {
@@ -41,16 +53,49 @@ export type QueryPlan = {
 const MINE = /\b(my|mine|i|i've|i have|me)\b/i;
 const ALL = /\b(all|company|everyone|team|total|whole|across)\b/i;
 
+/**
+ * Filters whose value is spread across several columns.
+ *
+ * Keyed by filter then entity, because the same idea lives in different
+ * places on different tables. Only body type today, and it is enough on
+ * its own to justify the mechanism: `category` is a tidy enum somebody
+ * set up and `model` is where the team writes what the trailer actually
+ * is, so the tidy one is nearly empty and the useful one was unread.
+ */
+const SPREAD_COLUMNS: Record<string, Record<string, string[]>> = {
+  category: { trailers: ['category', 'model', 'description'] },
+};
+
 function pickMeasure(text: string): { measure: Measure; hit: string } {
   const t = text.toLowerCase();
-  // Longest phrase wins, so "how many" beats "how much" on "how many...".
-  let best: { measure: Measure; hit: string } = { measure: 'list', hit: '' };
+
+  /* Where the word sits matters more than how long it is.
+     Longest-match alone read "average profit on curtain trailers
+     invoiced" as a sum, because "invoiced" is one letter longer than
+     "average" and happened to also be a revenue word. What somebody
+     asked for is at the front of the sentence: measures lead, and
+     everything after the first few words is describing the rows.
+
+     Within the same position band the longest phrase still wins, so
+     "how many" beats "how much" on a sentence starting with either. */
+  let best: { measure: Measure; hit: string; at: number } | null = null;
   for (const m of MEASURE_WORDS) {
     for (const w of m.words) {
-      if (t.includes(w) && w.length > best.hit.length) best = { measure: m.measure, hit: w };
+      const at = t.indexOf(w);
+      if (at === -1) continue;
+      // Word boundaries, or "sum" matches inside "consumed".
+      if (at > 0 && /[a-z0-9]/.test(t[at - 1])) continue;
+      const after = t[at + w.length];
+      if (after && /[a-z0-9]/.test(after)) continue;
+
+      if (!best) { best = { measure: m.measure, hit: w, at }; continue; }
+      // Earlier wins outright; a tie goes to the longer phrase.
+      if (at < best.at || (at === best.at && w.length > best.hit.length)) {
+        best = { measure: m.measure, hit: w, at };
+      }
     }
   }
-  return best;
+  return best ? { measure: best.measure, hit: best.hit } : { measure: 'list', hit: '' };
 }
 
 /**
@@ -191,12 +236,32 @@ export function parseQuery(input: string): QueryPlan | null {
         .filter((w) => w !== entityNoun && w !== groupWord)
         .sort((a, b) => b.length - a.length);
       for (const w of words) {
-        if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower)) {
+        if (!new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower)) continue;
+
+        /* Body type is written in more than one place. Everything that
+           maps to the same value goes into the match, so a row saying
+           "Tautliner" in `model` is found by somebody typing
+           "curtainsider", which is how the yard actually talks. */
+        const spread = SPREAD_COLUMNS[f.key]?.[entity.id];
+        if (spread) {
+          const value = f.vocabulary[w];
+          const synonyms = [...new Set(
+            Object.entries(f.vocabulary)
+              .filter(([, v]) => v === value)
+              .map(([word]) => word)
+              .concat(value),
+          )].filter((x) => x.length >= 2);
+          filters.push({
+            key: f.key, column: f.column, op: 'anyOf', value,
+            columns: spread, values: synonyms,
+            label: `${f.label} ${w}`,
+          });
+        } else {
           filters.push({ key: f.key, column: f.column, op: 'eq', value: f.vocabulary[w], label: `${f.label} ${w}` });
-          consumed.push(w);
-          confidence += 4;
-          break;
         }
+        consumed.push(w);
+        confidence += 4;
+        break;
       }
     }
   }
@@ -209,10 +274,29 @@ export function parseQuery(input: string): QueryPlan | null {
   const implied = entity.nounImpliesFilter?.[entityNoun];
   if (implied && !filters.some((f) => f.column === implied.column)) {
     const owner = entity.filters.find((f) => f.column === implied.column);
-    filters.push({
-      key: owner?.key ?? 'status', column: implied.column,
-      op: 'eq', value: implied.value, label: implied.label,
-    });
+    /* The same spread applies here. "How many boxes in stock" reaches
+       this branch rather than the vocabulary one above, and pushing a
+       plain eq meant box trailers were counted off the tidy category
+       column while curtainsiders were counted off all three. One noun
+       behaving differently from the rest is worse than either. */
+    const spread = owner ? SPREAD_COLUMNS[owner.key]?.[entity.id] : undefined;
+    if (spread && owner?.vocabulary) {
+      const synonyms = [...new Set(
+        Object.entries(owner.vocabulary)
+          .filter(([, v]) => v === implied.value)
+          .map(([word]) => word)
+          .concat(implied.value),
+      )].filter((x) => x.length >= 2);
+      filters.push({
+        key: owner.key, column: implied.column, op: 'anyOf', value: implied.value,
+        columns: spread, values: synonyms, label: implied.label,
+      });
+    } else {
+      filters.push({
+        key: owner?.key ?? 'status', column: implied.column,
+        op: 'eq', value: implied.value, label: implied.label,
+      });
+    }
     confidence += 3;
   }
 

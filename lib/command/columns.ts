@@ -423,7 +423,14 @@ export function allColumns(): { table: string; column: ColumnSpec }[] {
  */
 export function derivedAliases(column: string): string[] {
   const spaced = column.replace(/_/g, ' ').trim();
-  const out = new Set<string>([spaced, column]);
+  /* The raw column name is deliberately not an alias when it has an
+     underscore in it. Matching softens the sentence first, so
+     "dispatch_date" becomes "dispatch date" before anything compares it
+     and the underscored form can never match. It was worse than dead
+     weight: it counted as the field's first alias, so the generated
+     sweep built sentences around a word nobody can type. */
+  const out = new Set<string>([spaced]);
+  if (!column.includes('_')) out.add(column);
 
   // Trailing nouns people drop: "order date" is also "order".
   const dropped = spaced.replace(/\b(date|at|no|url|count|id)\b\s*$/, '').trim();

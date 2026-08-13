@@ -263,8 +263,14 @@ export const ENTITIES: EntitySpec[] = [
 /** Words that pick which number is being asked for. */
 export const MEASURE_WORDS: { measure: Measure; words: string[] }[] = [
   { measure: 'count', words: ['how many', 'count', 'number of', 'how much stock', 'total number'] },
+  /* "took" and "taken" are not here. They were, and "deposit taken" is a
+     status phrase on a trailer, so every sentence containing it came
+     back as a sum instead of a list. The generated sweep found 654 of
+     them. "Took in" and "taken in" carry the money sense without
+     colliding. */
   { measure: 'sum',   words: ['how much', 'total', 'worth', 'value of', 'sum', 'revenue',
-                             'turnover', 'turn over', 'turned over', 'took', 'taken', 'billed'] },
+                             'turnover', 'turn over', 'turned over', 'took in', 'taken in',
+                             'billed'] },
   { measure: 'avg',   words: ['average', 'avg', 'mean', 'typical'] },
   { measure: 'list',  words: ['list', 'show', 'which', 'what are', 'find', 'give me'] },
 ];
