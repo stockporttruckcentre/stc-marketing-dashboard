@@ -145,9 +145,11 @@ More columns can be written than can be read.
 `revenue_targets`. None is expressible. Every cross-entity question in
 the brief is therefore unrepresentable, not merely unimplemented.
 
-**UI capability:** 421 handler bindings in `components/` and
+**UI surface area:** 421 handler bindings in `components/` and
 `app/dashboard/`; 170 catalogued in `docs/command-bar-inventory.md`.
-Against 0 executable actions.
+That is evidence of surface area, not a count of capabilities: many
+bindings are the same operation wired in several places and many are
+presentational. The comparable figure is 0 executable actions.
 
 **Analytics that exist only as questions:** trend, acceleration,
 period-over-period, share of total, conversion rate, contribution
@@ -201,6 +203,16 @@ not.
 ---
 
 ## D. Proposed canonical IR
+
+> **SUPERSEDED by `docs/command-ir.md`.** Four defects were found in the
+> draft below after review: `steps` carried no dataflow between steps,
+> `requires` was described as if it were a security boundary,
+> relationships were modelled as foreign keys when four of the seven
+> real relationships in this application are value matches, and the
+> first migration step rewrote parsing instead of adapting losslessly.
+> The revised types are in `command-ir.md`. The draft is kept below
+> because the reasoning about why one IR is needed still stands.
+
 
 One representation for reads, analytics, writes and workflows. No field
 is named after any example. Nothing below encodes a domain noun.
@@ -495,6 +507,7 @@ a missing primitive rather than a missing phrase: relationships (2, 5,
 | entities addressable | tables with a query entity | 4/20 = **20%** |
 | relationships addressable | FK paths expressible | 0/7 = **0%** |
 | UI capability executable | actions that perform their operation | 0/149 = **0%** |
+| relationships declared | registry entries, not FKs | 0/7 = **0%** |
 | dead capabilities | actions with no route | 47 |
 | permission model represented | capabilities gating a plan | 0/17 = **0%** |
 | semantic primitives | composable IR node kinds | 6 of ~19 |
