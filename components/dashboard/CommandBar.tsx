@@ -11,6 +11,7 @@ import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
+import { setVocabulary } from '@/lib/command/vocab';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -126,6 +127,33 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  /**
+   * What the data calls things, loaded once.
+   *
+   * "DAFs older than 2022" resolved to nothing, because no word in it
+   * named a thing the app holds and there was no way to know DAF is a
+   * make. A list of manufacturers in a file would have fixed that one
+   * sentence and gone stale on the next delivery. The make column
+   * already knows, so it is asked.
+   *
+   * Failure is silent on purpose. Without it the bar behaves exactly as
+   * it did before, so a slow or unavailable load costs coverage rather
+   * than the whole feature.
+   */
+  useEffect(() => {
+    let live = true;
+    fetch('/api/command/vocabulary')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!live || !j?.vocabulary) return;
+        for (const [entityId, columns] of Object.entries(j.vocabulary)) {
+          setVocabulary(entityId, columns as any);
+        }
+      })
+      .catch(() => {});
+    return () => { live = false; };
   }, []);
 
   // A quick action button was pressed. Drop its phrasing in and hand the
@@ -801,73 +829,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
         {/* the answer to a question */}
         {stage === 'answered' && answered && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{answered.summary}</Label>
-
-            {answered.kind === 'number' && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-                }}>
-                  {answered.money
-                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
-                    : Number(answered.value).toLocaleString()}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {answered.money
-                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
-                    : answered.entity}
-                </span>
-              </div>
-            )}
-
-            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {answered.sample.map((s: any) => (
-                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
-                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
-                  </div>
-                ))}
-                {answered.value > answered.sample.length && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-                    and {answered.value - answered.sample.length} more
-                  </div>
-                )}
-              </div>
-            )}
-
-            {answered.kind === 'grouped' && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(() => {
-                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
-                  return answered.groups.map((g: any) => {
-                    const v = answered.measure === 'count' ? g.count : g.total;
-                    return (
-                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
-                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
-                        </div>
-                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {answered.measure === 'count' ? v.toLocaleString()
-                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
-                        </span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
-                See them <ArrowRight size={12} />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
-            </div>
-          </div>
+          <Answer
+            answered={answered}
+            onGo={(href) => router.push(href)}
+            onReset={reset}
+          />
         )}
 
         {/* what it is about to change, before it changes it */}
@@ -1102,73 +1068,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
         {/* the answer to a question */}
         {stage === 'answered' && answered && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{answered.summary}</Label>
-
-            {answered.kind === 'number' && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-                }}>
-                  {answered.money
-                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
-                    : Number(answered.value).toLocaleString()}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {answered.money
-                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
-                    : answered.entity}
-                </span>
-              </div>
-            )}
-
-            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {answered.sample.map((s: any) => (
-                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
-                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
-                  </div>
-                ))}
-                {answered.value > answered.sample.length && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-                    and {answered.value - answered.sample.length} more
-                  </div>
-                )}
-              </div>
-            )}
-
-            {answered.kind === 'grouped' && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(() => {
-                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
-                  return answered.groups.map((g: any) => {
-                    const v = answered.measure === 'count' ? g.count : g.total;
-                    return (
-                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
-                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
-                        </div>
-                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {answered.measure === 'count' ? v.toLocaleString()
-                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
-                        </span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
-                See them <ArrowRight size={12} />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
-            </div>
-          </div>
+          <Answer
+            answered={answered}
+            onGo={(href) => router.push(href)}
+            onReset={reset}
+          />
         )}
 
         {/* what it is about to change, before it changes it */}
@@ -1212,6 +1116,137 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           </div>
         )}
           </>}
+    </div>
+  );
+}
+
+/* =============================================================
+   The answer.
+
+   One copy. There were two, byte for byte, because the bar renders in
+   two places and the block was pasted rather than lifted. Adding a
+   result shape meant remembering to add it twice, and the one nobody
+   remembered would look like the feature had not been built.
+   ============================================================= */
+function Answer({ answered, onGo, onReset }: {
+  answered: any;
+  onGo: (href: string) => void;
+  onReset: () => void;
+}) {
+  const gbp = (v: number) => new Intl.NumberFormat('en-GB', {
+    style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
+  }).format(v);
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+      <Label>{answered.summary}</Label>
+
+      {/* What was asked for and could not be answered here. Said out
+          loud rather than quietly left out of the result. */}
+      {(answered.unmet ?? []).length > 0 && (
+        <div style={{
+          marginTop: 8, fontSize: 12, color: 'var(--text-muted)',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          {answered.unmet.map((u: string) => (
+            <span key={u}>Could not do this part: {u}</span>
+          ))}
+        </div>
+      )}
+
+      {answered.kind === 'number' && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+          <span style={{
+            fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
+            letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+          }}>
+            {answered.money ? gbp(answered.value)
+              : `${Number(answered.value).toLocaleString()}${answered.unit ? ` ${answered.unit}` : ''}`}
+          </span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {answered.money || answered.unit
+              ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
+              : answered.entity}
+          </span>
+        </div>
+      )}
+
+      {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {answered.sample.map((s: any) => (
+            <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+              <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
+              <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
+            </div>
+          ))}
+          {answered.value > answered.sample.length && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+              and {answered.value - answered.sample.length} more
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* A few rows in a stated order. "The five cheapest" is a list of
+          five, and answering it with the number five is a different
+          question. */}
+      {answered.kind === 'rows' && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {(answered.rows ?? []).map((r: any) => (
+            <div key={r.id} style={{
+              display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10,
+              alignItems: 'baseline', fontSize: 12.5,
+            }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--text)', fontWeight: 500 }}>{r.title}</span>
+                <span style={{ color: 'var(--text-subtle)', marginLeft: 8 }}>{r.sub}</span>
+              </span>
+              <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                {r.figure == null ? <span style={{ color: 'var(--text-subtle)' }}>—</span>
+                  : r.money ? gbp(Number(r.figure))
+                  : Number(r.figure).toLocaleString()}
+              </span>
+            </div>
+          ))}
+          {answered.total > (answered.rows ?? []).length && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+              {answered.orderLabel ? `${answered.orderLabel}, ` : ''}
+              out of {answered.total.toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {answered.kind === 'grouped' && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {(() => {
+            const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
+            return answered.groups.map((g: any) => {
+              const v = answered.measure === 'count' ? g.count : g.total;
+              return (
+                <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
+                  <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
+                  </div>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                    {answered.measure === 'count' ? v.toLocaleString()
+                      : answered.money === false ? Math.round(v).toLocaleString()
+                      : gbp(v)}
+                  </span>
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <Button variant="primary" size="sm" onClick={() => onGo(answered.listHref ?? answered.href ?? '/dashboard')}>
+          See them <ArrowRight size={12} />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onReset}>Ask something else</Button>
+      </div>
     </div>
   );
 }

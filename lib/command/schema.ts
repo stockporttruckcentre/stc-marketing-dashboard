@@ -57,6 +57,17 @@ export type EntitySpec = {
   hrefFor?: (row: any) => string;
   dateColumn?: string;
   /**
+   * Every date a person can order by or ask about, not only the one
+   * periods are measured against.
+   *
+   * "Show vehicles added between May and July, newest first" needs the
+   * date it ARRIVED, and the period column is the date it left. One
+   * dateColumn could not tell them apart, so "newest first" sorted the
+   * stock list by the day each trailer was dispatched, which for
+   * anything still in the yard is empty.
+   */
+  dates?: { key: string; column: string; label: string; words: string[] }[];
+  /**
    * Nouns that name the thing AND narrow it. "how many leads" means
    * status=lead, whereas "how many customers" just means all of them.
    */
@@ -90,6 +101,17 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'stc_no',
     subtitleColumns: ['make', 'model', 'category', 'location'],
     dateColumn: 'dispatch_date',
+    dates: [
+      { key: 'received', column: 'received_date', label: 'date in',
+        words: ['added', 'arrived', 'came in', 'received', 'booked in', 'landed', 'in stock since', 'taken in'] },
+      { key: 'dispatched', column: 'dispatch_date', label: 'date out',
+        words: ['dispatched', 'delivered', 'went out', 'left', 'collected', 'shipped'] },
+      { key: 'ordered', column: 'order_date', label: 'order date',
+        words: ['ordered', 'order date', 'placed'] },
+      { key: 'mot', column: 'mot_date', label: 'MOT date', words: ['mot', 'test', 'tested'] },
+      { key: 'expected', column: 'expected_delivery', label: 'expected delivery',
+        words: ['expected', 'due in', 'due to arrive', 'eta'] },
+    ],
     amounts: [
       { key: 'price', column: 'sales_price', label: 'sale price', words: ['worth', 'value', 'revenue', 'price', 'sales', 'turnover', 'income'] },
       { key: 'profit', column: 'profit', label: 'profit', words: ['profit', 'margin', 'gross'] },
@@ -146,6 +168,15 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'company_name',
     subtitleColumns: ['contact_name', 'status', 'location'],
     dateColumn: 'date_of_enquiry',
+    dates: [
+      { key: 'enquiry', column: 'date_of_enquiry', label: 'enquiry date',
+        words: ['enquired', 'enquiry', 'came in', 'raised', 'opened'] },
+      { key: 'contact', column: 'last_contact', label: 'last contact',
+        words: ['contacted', 'spoke', 'spoken', 'touched', 'heard from', 'chased'] },
+      { key: 'ordered', column: 'order_date', label: 'order date', words: ['ordered', 'placed'] },
+      { key: 'dispatched', column: 'dispatch_date', label: 'date out',
+        words: ['dispatched', 'delivered', 'went out'] },
+    ],
     scope: 'mine',
     amounts: [
       { key: 'estimated', column: 'estimated_value', label: 'estimated value', words: ['worth', 'value', 'pipeline', 'estimated'] },
@@ -189,6 +220,12 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'company_name',
     subtitleColumns: ['contact_name', 'email', 'phone'],
     dateColumn: 'created_at',
+    dates: [
+      { key: 'added', column: 'created_at', label: 'date added',
+        words: ['added', 'created', 'joined', 'onboarded'] },
+      { key: 'contact', column: 'last_contact', label: 'last contact',
+        words: ['contacted', 'spoke', 'spoken', 'heard from', 'chased'] },
+    ],
     amounts: [
       { key: 'fleet', column: 'fleet_size', label: 'fleet size', words: ['fleet', 'vehicles', 'size'] },
       { key: 'turnover', column: 'turnover', label: 'turnover', words: ['turnover'] },

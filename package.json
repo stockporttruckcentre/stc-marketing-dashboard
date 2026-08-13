@@ -13,7 +13,8 @@
     "check:coverage": "tsx scripts/command-coverage-check.ts",
     "check:census": "tsx scripts/command-census.ts",
     "check:fuzz": "tsx scripts/command-fuzz.ts",
-    "check:gaps": "tsx scripts/command-gaps.ts"
+    "check:gaps": "tsx scripts/command-gaps.ts",
+    "check:litmus": "tsx scripts/command-litmus.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

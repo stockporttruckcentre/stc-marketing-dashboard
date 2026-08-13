@@ -27,8 +27,13 @@ import { ENTITIES } from '../lib/command/schema';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { TABLES } from '../lib/command/columns';
 import { capabilitiesFor } from '../lib/crm/permissions';
+import { loadSampleVocabulary } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
+
+/* The bar learns makes, depots and customers from the database. A check
+   has none, so it gets a sample of what those columns hold. */
+loadSampleVocabulary();
 
 type Gap = { sentence: string; why: string; group: string };
 const gaps: Gap[] = [];

@@ -25,8 +25,14 @@ import { composeSuggestions } from '../lib/command/compose';
 import { parseEdit, composeEdits } from '../lib/command/mutate';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { parseSelection, selectionSpace } from '../lib/command/select';
+import { attributeNames } from '../lib/command/attributes';
+import { loadSampleVocabulary } from './sample-vocabulary';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
 import type { UserRole } from '../lib/types';
+
+/* The bar learns makes, depots and customers from the database. A check
+   has none, so it gets a sample of what those columns hold. */
+loadSampleVocabulary();
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -560,6 +566,141 @@ ok('selector: a presence test survives on its own',
 for (const e of ENTITIES_FOR_SPACE) {
   const space = selectionSpace(e);
   ok(`selector space: ${e.id} is more than a handful`, space >= 3, String(space));
+}
+
+/* ---------- the grammar composes ----------
+
+   The operators are the reason a sentence nobody wrote down can work:
+   an ordering, a limit, a negation, a comparison, a computed attribute
+   and an emptiness test, applied to whatever attribute the sentence
+   names. Six ideas, not six hundred sentences.
+
+   So this asserts them by combination rather than one at a time. Every
+   superlative against every body type, depot and state; every negator
+   against every status; every "with no" against every column the app
+   holds. A phrasing listed in a lexicon is a guess. A phrasing the
+   sweep asserts is a promise. */
+
+const SUPER_WORDS: { word: string; direction: 'asc' | 'desc' }[] = [
+  { word: 'cheapest', direction: 'asc' },
+  { word: 'most expensive', direction: 'desc' },
+  { word: 'dearest', direction: 'desc' },
+  { word: 'newest', direction: 'desc' },
+  { word: 'oldest', direction: 'asc' },
+];
+const COUNTS = [3, 5, 10, 25];
+const BODY_WORDS = [...new Set(Object.keys(BODY_TYPES))].slice(0, 6);
+const YARDS = [...new Set(Object.values(DEPOTS))].slice(0, 5);
+
+/* A superlative orders and takes one, and a number in front of it takes
+   that many instead. Both survive a body type and a depot being added
+   to the same sentence, which is the whole claim. */
+for (const s of SUPER_WORDS) {
+  for (const body of BODY_WORDS) {
+    const p = parseQuery(`the ${s.word} ${body} in stock`);
+    ok(`grammar: "${s.word} ${body} in stock" orders ${s.direction}`,
+      p?.order?.direction === s.direction, p?.summary ?? 'no plan');
+    ok(`grammar: "${s.word} ${body} in stock" takes one`,
+      p?.limit === 1, String(p?.limit));
+    ok(`grammar: "${s.word} ${body} in stock" keeps the body type`,
+      !!p?.filters.some((f) => f.key === 'category'), p?.summary ?? 'no plan');
+
+    for (const n of COUNTS) {
+      const q = parseQuery(`the ${n} ${s.word} ${body} at ${YARDS[n % YARDS.length]}`);
+      ok(`grammar: "${n} ${s.word} ${body}" takes ${n}`, q?.limit === n, String(q?.limit));
+      ok(`grammar: "${n} ${s.word} ${body}" keeps the depot`,
+        !!q?.filters.some((f) => f.key === 'location'), q?.summary ?? 'no plan');
+    }
+  }
+}
+
+/* Negation inverts the clause it is in front of and nothing else. An
+   inverted answer looks exactly like a correct one, so this is asserted
+   against every status the stock list has, in both spellings. */
+const NEGATORS_TESTED = ['except', 'excluding', 'apart from', 'other than', 'not including'];
+const STATUSES = [...new Set(STATE_PHRASES.map((s) => s.words[0]))].slice(0, 8);
+for (const neg of NEGATORS_TESTED) {
+  for (const status of STATUSES) {
+    const p = parseQuery(`trailers ${neg} the ${status} ones`);
+    if (!p) continue;
+    const hit = p.filters.find((f) => f.key === 'status');
+    if (!hit) continue;
+    ok(`grammar: "${neg} the ${status} ones" inverts it`, hit.negate === true, p.summary);
+  }
+}
+for (const status of STATUSES) {
+  const p = parseQuery(`trailers that aren't ${status}`);
+  const hit = p?.filters.find((f) => f.key === 'status');
+  if (!hit) continue;
+  ok(`grammar: "aren't ${status}" inverts it`, hit.negate === true, p!.summary);
+  const yes = parseQuery(`trailers that are ${status}`);
+  ok(`grammar: "are ${status}" does NOT invert it`,
+    yes?.filters.find((f) => f.key === 'status')?.negate !== true, yes?.summary ?? 'no plan');
+}
+
+/* Emptiness, against every column the app can name on each entity. The
+   claim is that any column somebody can ask about is a column they can
+   ask to be blank, so it is swept rather than sampled. */
+for (const e of ENTITIES_FOR_SPACE) {
+  const cols = new Map<string, string>();
+  for (const n of attributeNames(e)) if (!cols.has(n.column)) cols.set(n.column, n.alias);
+  let asked = 0;
+  for (const [column, alias] of cols) {
+    if (alias.length < 4 || asked >= 12) continue;
+    asked++;
+    const p = parseQuery(`${e.label} with no ${alias}`);
+    ok(`grammar: "${e.label} with no ${alias}" is an emptiness test`,
+      !!p?.filters.some((f) => f.op === 'empty' && f.column === column),
+      p?.summary ?? 'no plan');
+    ok(`grammar: "${e.label} with no ${alias}" is not a total`,
+      p?.measure !== 'sum', p?.summary ?? 'no plan');
+  }
+}
+
+/* A comparison groups by whatever holds both sides, and does not also
+   narrow to one of them. */
+for (const a of YARDS) {
+  for (const b of YARDS) {
+    if (a === b) continue;
+    const p = parseQuery(`how many trailers at ${a} versus ${b}`);
+    if (!p?.compare) continue;
+    ok(`grammar: "${a} versus ${b}" groups rather than narrows`,
+      !p.filters.some((f) => f.column === p.compare!.column), p.summary);
+  }
+}
+
+/* Stock age is computed, not stored, and asking for it must not be read
+   as the status "in stock". */
+for (const shape of ['stock age', 'days in stock', 'time on the yard']) {
+  const p = parseQuery(`average ${shape} by depot`);
+  ok(`grammar: "${shape}" is a computed attribute`, p?.derived?.id === 'stock_age',
+    p?.summary ?? 'no plan');
+}
+for (const yard of YARDS) {
+  const p = parseQuery(`what's been sitting at ${yard} longest`);
+  ok(`grammar: "sitting at ${yard} longest" is an age, oldest first`,
+    p?.derived?.id === 'stock_age' && p?.order?.direction === 'asc', p?.summary ?? 'no plan');
+}
+
+/* An ordering is not a limit. "Newest first" is a sorted list, and
+   reading it as a superlative returns exactly one row. */
+for (const shape of ['newest first', 'oldest first', 'cheapest first', 'dearest first']) {
+  const p = parseQuery(`list trailers in stock ${shape}`);
+  ok(`grammar: "${shape}" sorts without limiting`, !!p?.order && p?.limit === undefined,
+    `${p?.order?.direction ?? 'none'} limit ${p?.limit}`);
+}
+
+/* And an ordering with nothing to order by says so rather than
+   returning an unsorted list that looks sorted. "High to low" on its
+   own does not name an attribute, and guessing one is how somebody ends
+   up reading the wrong column out in a meeting. */
+for (const shape of ['high to low', 'low to high', 'descending']) {
+  const p = parseQuery(`list trailers in stock ${shape}`);
+  ok(`grammar: "${shape}" alone admits it cannot sort`,
+    !p?.order && (p?.unmet ?? []).length > 0, p?.summary ?? 'no plan');
+  const named = parseQuery(`list trailers in stock by profit ${shape}`);
+  ok(`grammar: "profit ${shape}" sorts on the named attribute`,
+    named?.order?.column === 'profit', named?.summary ?? 'no plan');
 }
 
 console.log(`\n${pass}/${pass + fail} passing`);
