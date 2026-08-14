@@ -699,17 +699,37 @@ into it, and for the next minute everybody else's sentences resolved
 against them. A company only one person could see became a company
 everybody's bar understood.
 
-So vocabulary sources are classified:
+A shorter TTL was not the fix: it shortens the window on a thing that
+must never happen at all.
 
-| Scope | Tables | Cache |
-|---|---|---|
-| company | `stock_trailers`, `social_posts`, `calendar_events` | one, process wide |
-| actor | everything else, including `crm_contacts` | keyed by user id |
+The first attempt classified tables as company wide or actor scoped and
+cached the company wide half once for everybody. That classification was
+read off `supabase/schema.sql`, where `calendar_events` is
+`auth.role() = 'authenticated'`, and it was already wrong:
+`migrations/006_meeting_invites.sql` replaces that policy with creator,
+team, named users and invitees. Nothing leaked, because
+`calendar_events` declares no free text column and so contributes no
+vocabulary, but the classification was wrong within days of being
+written and no test could have demanded it be updated.
 
-Anything not explicitly listed as company wide is actor scoped, so a
-table added later is private until somebody has read its policy and said
-otherwise. A shorter TTL was not the fix: it shortens the window on a
-thing that must never happen at all.
+The list is gone. The invariant is now unconditional:
+
+```
+authoritative vocabulary = the values visible through THIS actor's own
+                           RLS session
+```
+
+Everything is read through the caller's client and cached against their
+user id, with a TTL and a bounded LRU. There is no shared index and no
+second opinion about what is public, so an RLS migration needs no
+matching change here and the two cannot disagree. A hand maintained list
+of "tables we believe everybody can see" is a second copy of the
+security model kept in a different language in a different file, updated
+by somebody remembering.
+
+The cost is one query per entity per person per minute. If that ever
+shows up in a profile the answer is a measurement and then a narrower
+cache, not an assumption.
 
 ### Vocabulary is an input, not ambient state
 

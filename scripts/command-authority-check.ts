@@ -28,6 +28,24 @@
    the global index between every snapshot, so it measured a world with
    one user in it.
 
+   THE INVARIANT IS NOW UNCONDITIONAL.
+
+     authoritative vocabulary = the values visible through THIS actor's
+     own RLS session
+
+   There is no table by table judgement about what is public, because
+   the version of this file that had one was wrong about
+   `calendar_events` within days: `schema.sql` says every authenticated
+   user sees every row, and `migrations/006_meeting_invites.sql`
+   replaces that with creator, team, named users and invitees. Nothing
+   leaked, since calendar declares no free text column, but a hand
+   maintained list of "tables we believe everybody can see" is a second
+   copy of the security model that no test can demand be updated.
+
+   So the cases below assert the invariant rather than a classification,
+   and one of them uses `stock_trailers`, which the old code treated as
+   public, to show that no table is exempt from the actor's own view.
+
    Proved here, against the real production modules and injected
    vocabularies rather than a database:
 
@@ -45,9 +63,7 @@
    ============================================================= */
 import { readFileSync } from 'fs';
 import { planAuthoritatively, planForExecution, planHash } from '../lib/command/server/planner';
-import {
-  vocabularyFor, resetVocabularyCaches, visibilityOfEntity, visibilityOfTable,
-} from '../lib/command/server/vocabulary';
+import { vocabularyFor, resetVocabularyCaches, cachedActors } from '../lib/command/server/vocabulary';
 import { buildIndex, clearVocabulary, type VocabularySnapshot } from '../lib/command/vocab';
 import { planCommand } from '../lib/command/plan';
 import { capabilitiesFor } from '../lib/crm/permissions';
@@ -353,15 +369,21 @@ const BETA = 'Betacorp';
 const ALPHA_Q = `how many ${ALPHA} deals`;
 const BETA_Q = `how many ${BETA} deals`;
 
-/* Both see the same stock. Only A can see Alpha's account, only B can
-   see Beta's, which is what their list membership decides. */
+/* Their clients differ on EVERY table, including the two the old code
+   believed were public. Whether a real policy narrows stock or the
+   calendar tomorrow is not this module's business: what a person's own
+   client returns is what their sentences mean. */
+const A_MAKE = 'Kroneseven';
+const B_MAKE = 'Schmitzeight';
 const clientA = clientSeeing({
-  stock_trailers: [{ make: 'Krone', model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
+  stock_trailers: [{ make: A_MAKE, model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
   crm_contacts: [{ company_name: ALPHA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+  calendar_events: [{ title: 'A only' }],
 });
 const clientB = clientSeeing({
-  stock_trailers: [{ make: 'Krone', model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
+  stock_trailers: [{ make: B_MAKE, model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
   crm_contacts: [{ company_name: BETA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+  calendar_events: [{ title: 'B only' }],
 });
 
 resetVocabularyCaches();
@@ -369,13 +391,16 @@ resetVocabularyCaches();
 const forA = vocabularyFor(clientA, 'user-a');
 const forB = vocabularyFor(clientB, 'user-b');
 
-/* --- the classification itself --- */
-ok('crm backed entities are actor scoped, because their RLS is per user',
-  visibilityOfEntity('contacts') === 'actor' && visibilityOfEntity('deals') === 'actor');
-ok('stock is company wide, because every authenticated user sees every row',
-  visibilityOfEntity('trailers') === 'company');
-ok('a table nobody has classified is treated as private',
-  visibilityOfTable('some_table_added_next_year') === 'actor');
+/* --- 2. there is no process wide vocabulary to contaminate --- */
+const vocabSourceEarly = source('lib/command/server/vocabulary.ts');
+ok('no table is classified as safe to share',
+  !/COMPANY_WIDE/.test(vocabSourceEarly) && !/visibilityOf/.test(vocabSourceEarly));
+ok('there is no shared index, only one keyed by actor',
+  !/companyCache|companyIndex|mergeIndexes/.test(vocabSourceEarly)
+  && /actorCache = new Map<string, Cached>/.test(vocabSourceEarly));
+ok('every read goes through the caller\'s own client, with nothing to select on',
+  /buildVocabulary\(supabase: Queryable\): Promise<VocabularySnapshot>/.test(vocabSourceEarly)
+  && !/Visibility/.test(vocabSourceEarly));
 
 /* --- 1. A can see Private Alpha and B cannot --- */
 const indexA = await forA();
@@ -385,11 +410,20 @@ ok('B cannot resolve A\'s account name', !indexB.has('alphacorp'));
 ok('B can resolve their own', indexB.has('betacorp'));
 ok('A cannot resolve B\'s', !indexA.has('betacorp'));
 
-/* Company wide values are shared, and that is the intended boundary.
-   B\'s index carries the stock vocabulary even though A\'s request is
-   what filled the shared cache, because every authenticated user sees
-   those rows. */
-ok('company wide vocabulary is shared between them', indexA.has('krone') && indexB.has('krone'));
+/* --- 3. no table is exempt, so an RLS change needs no second change ---
+
+   `stock_trailers` is the table the old code treated as public and
+   cached once for everybody. Each actor now gets exactly what their own
+   client returned, so if that policy is ever narrowed, the command
+   vocabulary follows it with nothing here to update. */
+ok('A sees the stock their own client returned', indexA.has(A_MAKE.toLowerCase()));
+ok('and not the stock only B\'s client returned', !indexA.has(B_MAKE.toLowerCase()));
+ok('B sees theirs', indexB.has(B_MAKE.toLowerCase()));
+ok('and not A\'s, even though A read first', !indexB.has(A_MAKE.toLowerCase()));
+
+/* Only the two of them are cached, each under their own id. */
+ok('the cache holds one entry per actor and nothing shared',
+  cachedActors().sort().join(',') === 'user-a,user-b', cachedActors().join(','));
 
 /* --- 2 and 3. Planning as A, then immediately as B, in one process --- */
 const planA1 = await planAuthoritatively({
@@ -512,14 +546,17 @@ ok('B cannot execute the reading A previewed', !crossed.agreed);
 
 /* --- the architecture, asserted at the source --- */
 const vocabSource = source('lib/command/server/vocabulary.ts');
-ok('crm_contacts is not in the company wide list',
-  /COMPANY_WIDE_TABLES = new Set\(\[[^\]]*\]\)/.test(vocabSource)
-  && !/COMPANY_WIDE_TABLES = new Set\(\[[^\]]*crm_contacts/.test(vocabSource));
 ok('the actor cache is keyed by user id',
   /actorCache = new Map<string, Cached>/.test(vocabSource)
   && /actorIndex\(\s*\n?\s*supabase: Queryable, actorId: string/.test(vocabSource));
 ok('the server vocabulary module installs nothing itself',
   !/installVocabulary/.test(vocabSource));
+ok('the per actor cache is still bounded and still expires',
+  /ACTOR_CACHE_MAX/.test(vocabSource) && /TTL_MS/.test(vocabSource));
+/* The reason the classification is gone, kept where somebody changing
+   this file will read it. */
+ok('the file records why there is no shared cache',
+  /006_meeting_invites/.test(vocabSource));
 
 const planSource = source('lib/command/plan.ts');
 const planBody = planSource.slice(planSource.indexOf('export function planCommand'));

@@ -1,81 +1,66 @@
 /* =============================================================
-   The live vocabulary, on the server, scoped to who is asking.
+   The live vocabulary, on the server, as one actor's own session sees
+   it.
 
    A word is a make because it appears in `stock_trailers.make`. That is
    what lets "how many Chereaus at Carrington" work with nothing written
    down, and it is why the server has to read the same values the
    browser did before it plans the same sentence.
 
-   NOT ALL OF THOSE VALUES ARE EVERYBODY'S.
+   THE INVARIANT
 
-   `stock_trailers`, `social_posts` and `calendar_events` all restrict
-   SELECT to `auth.role() = 'authenticated'`. Every signed in person
-   sees the same rows, so the values in them are company wide and one
-   cached index serves everybody.
+     authoritative vocabulary = the values visible through THIS actor's
+     own RLS session
 
-   `crm_contacts` does not:
+   and nothing else. Everything is read through the caller's client and
+   cached against their user id. There is no shared index, no second
+   opinion about what is public, and nothing to keep in step with the
+   database.
 
-     CREATE POLICY "crm_select" ON crm_contacts FOR SELECT USING (
-       auth.role() = 'authenticated' AND (
-         list_id IS NULL
-         OR EXISTS (SELECT 1 FROM crm_lists l WHERE l.id = crm_contacts.list_id
-           AND (l.is_global OR l.owner_id = auth.uid()
-                OR EXISTS (SELECT 1 FROM crm_list_members m
-                           WHERE m.list_id = l.id AND m.user_id = auth.uid())))
-       ));
+   WHY THERE IS NO SHARED CACHE, THOUGH THERE COULD BE ONE.
 
-   Company names, account owners, locations and sources therefore differ
-   per person. A single process wide cache built through whoever
-   happened to refresh it meant one person's private accounts became
-   everybody's vocabulary for the next minute: their sentences would
-   resolve a company name they cannot see, which both changes what their
-   command means and tells them the value exists.
+   An earlier version of this file classified tables as company wide or
+   actor scoped, and cached the company wide half once for everybody.
+   The classification was read off `supabase/schema.sql`, where
+   `calendar_events` is `auth.role() = 'authenticated'` and every signed
+   in person genuinely does see every row.
 
-   A shorter timer does not fix that. It shortens the window on a thing
-   that must never happen at all. So the classification is the fix:
+   `migrations/006_meeting_invites.sql` replaces that policy:
 
-     company   every authenticated user genuinely sees the same values,
-               so one process cache is correct
-     actor     visibility depends on RLS, so the cache is keyed by user
-               and one person's snapshot is never another's
+     CREATE POLICY "calendar_events_select" ON calendar_events
+       FOR SELECT USING (
+         created_by = auth.uid()
+         OR visibility = 'team'
+         OR (visibility = 'specific' AND auth.uid() = ANY (visible_to))
+         OR EXISTS (SELECT 1 FROM calendar_invites i
+                    WHERE i.event_id = calendar_events.id
+                      AND i.user_id = auth.uid()));
 
-   Anything not explicitly listed as company wide is treated as actor
-   scoped. A table added later is private until somebody has read its
-   policy and said otherwise.
+   So the classification was wrong within days of being written, and it
+   was wrong in the direction that leaks. Nothing escaped, because
+   `calendar_events` declares no free text column and so contributes no
+   vocabulary today. That is luck, not design.
 
-   Nothing here installs anything. It returns an index, and the caller
-   installs it immediately before planning, in the same synchronous run.
+   The lesson is the shape of the mistake rather than the mistake. A
+   hand maintained list of "tables we believe everybody can see" is a
+   second copy of the security model, kept in a different language, in a
+   different file, updated by somebody remembering. Every RLS migration
+   from now on would have to be accompanied by a change here that no
+   test could demand and no reviewer would think to ask for.
+
+   Reading everything through the actor's own client costs one query per
+   entity per person per minute and follows every future migration
+   automatically. If that cost ever shows up in a profile, the answer is
+   a measurement and then a narrower cache, not an assumption.
    ============================================================= */
 import { ENTITIES } from '../schema';
-import { buildIndex, mergeIndexes, type VocabularyIndex, type VocabularySnapshot } from '../vocab';
+import { buildIndex, type VocabularyIndex, type VocabularySnapshot } from '../vocab';
 
-/** How long a loaded index is trusted before it is read again. */
+/** How long one person's index is trusted before it is read again. */
 const TTL_MS = 60_000;
 
-/** How many people's indexes to keep. Oldest read is evicted first. */
+/** How many people's indexes to keep. Least recently read is evicted. */
 const ACTOR_CACHE_MAX = 200;
-
-export type Visibility = 'company' | 'actor';
-
-/**
- * Tables whose SELECT policy is `auth.role() = 'authenticated'` and
- * nothing else, checked against supabase/schema.sql. Every signed in
- * person sees every row, so the distinct values are the same for
- * everybody and may be cached once.
- *
- * `crm_contacts` is deliberately absent and must stay absent.
- */
-const COMPANY_WIDE_TABLES = new Set(['stock_trailers', 'social_posts', 'calendar_events']);
-
-export function visibilityOfTable(table: string): Visibility {
-  return COMPANY_WIDE_TABLES.has(table) ? 'company' : 'actor';
-}
-
-export function visibilityOfEntity(entityId: string): Visibility {
-  const entity = ENTITIES.find((e) => e.id === entityId);
-  /* An entity nobody recognises is not assumed harmless. */
-  return entity ? visibilityOfTable(entity.table) : 'actor';
-}
 
 /**
  * Whatever can produce an index for the actor being planned for.
@@ -96,22 +81,18 @@ type Queryable = {
 };
 
 /**
- * Distinct values for every free text column, for entities in scope.
+ * Distinct values for every free text column an entity declares.
  *
  * Only declared free text columns are read, so this can never widen
  * what is filterable. Values only, never row contents. Whatever the
- * caller's client can see is what comes back, which is exactly the
- * point: the RLS that hides a row hides its vocabulary too.
+ * caller's client can see is what comes back, which is the whole
+ * point: the row RLS hides, its vocabulary is hidden with it, with no
+ * separate rule to maintain and no way for the two to disagree.
  */
-export async function buildVocabulary(
-  supabase: Queryable,
-  scope: Visibility | 'all' = 'all',
-): Promise<VocabularySnapshot> {
+export async function buildVocabulary(supabase: Queryable): Promise<VocabularySnapshot> {
   const out: VocabularySnapshot = {};
 
   for (const entity of ENTITIES) {
-    if (scope !== 'all' && visibilityOfTable(entity.table) !== scope) continue;
-
     const columns = entity.filters.filter((f) => f.freeText).map((f) => f.column);
     if (!columns.length) continue;
 
@@ -150,56 +131,31 @@ export async function buildVocabulary(
 }
 
 /* -------------------------------------------------------------
-   Caches. One shared, one per person, and never the two confused.
+   One cache, keyed by who asked
    ------------------------------------------------------------- */
 
 type Cached = { index: VocabularyIndex; at: number };
-
-let companyCache: Cached | null = null;
-let companyInFlight: Promise<VocabularyIndex> | null = null;
 
 /** Keyed by authenticated user id. Insertion order is read order. */
 const actorCache = new Map<string, Cached>();
 const actorInFlight = new Map<string, Promise<VocabularyIndex>>();
 
-const fresh = (c: Cached | undefined | null, now: number) => !!c && now - c.at < TTL_MS;
-
-async function companyIndex(supabase: Queryable, now: number): Promise<VocabularyIndex> {
-  if (fresh(companyCache, now)) return companyCache!.index;
-  if (companyInFlight) return companyInFlight;
-  companyInFlight = (async () => {
-    try {
-      const index = buildIndex(await buildVocabulary(supabase, 'company'));
-      companyCache = { index, at: Date.now() };
-      return index;
-    } catch {
-      /* A failed read leaves whatever was loaded standing. A stale
-         company vocabulary understands more sentences than an empty
-         one, and the plan is checked either way. */
-      return companyCache?.index ?? buildIndex({});
-    } finally {
-      companyInFlight = null;
-    }
-  })();
-  return companyInFlight;
-}
-
 async function actorIndex(
   supabase: Queryable, actorId: string, now: number,
 ): Promise<VocabularyIndex> {
   const held = actorCache.get(actorId);
-  if (fresh(held, now)) {
+  if (held && now - held.at < TTL_MS) {
     /* Touch, so the least recently used entry is the one evicted. */
     actorCache.delete(actorId);
-    actorCache.set(actorId, held!);
-    return held!.index;
+    actorCache.set(actorId, held);
+    return held.index;
   }
   const running = actorInFlight.get(actorId);
   if (running) return running;
 
   const load = (async () => {
     try {
-      const index = buildIndex(await buildVocabulary(supabase, 'actor'));
+      const index = buildIndex(await buildVocabulary(supabase));
       actorCache.set(actorId, { index, at: Date.now() });
       while (actorCache.size > ACTOR_CACHE_MAX) {
         const oldest = actorCache.keys().next().value as string | undefined;
@@ -208,6 +164,8 @@ async function actorIndex(
       }
       return index;
     } catch {
+      /* A failed read leaves this person's own last index standing, or
+         an empty one. Never somebody else's. */
       return actorCache.get(actorId)?.index ?? buildIndex({});
     } finally {
       actorInFlight.delete(actorId);
@@ -220,32 +178,21 @@ async function actorIndex(
 /**
  * The vocabulary valid for one person, right now.
  *
- * Company wide values from the shared cache, RLS sensitive values from
- * theirs, merged into one index that belongs to nobody else. Returned
- * rather than installed: the caller installs it in the same synchronous
- * run as the planning, because an await between the two is exactly
- * where somebody else's request gets to install theirs.
+ * Returned rather than installed: the caller installs it in the same
+ * synchronous run as the planning, because an await between the two is
+ * exactly where somebody else's request gets to install theirs.
  */
 export function vocabularyFor(supabase: Queryable, actorId: string): VocabularySource {
-  return async () => {
-    const now = Date.now();
-    const [company, actor] = await Promise.all([
-      companyIndex(supabase, now),
-      actorIndex(supabase, actorId, now),
-    ]);
-    return mergeIndexes(company, actor);
-  };
+  return () => actorIndex(supabase, actorId, Date.now());
 }
 
 /** Forget everything cached, for a check that means to load its own. */
 export function resetVocabularyCaches(): void {
-  companyCache = null;
-  companyInFlight = null;
   actorCache.clear();
   actorInFlight.clear();
 }
 
-/** What is currently held, so a check can assert the scoping. */
-export function cacheState(): { company: boolean; actors: string[] } {
-  return { company: !!companyCache, actors: [...actorCache.keys()] };
+/** Who is currently held, so a check can assert the scoping. */
+export function cachedActors(): string[] {
+  return [...actorCache.keys()];
 }
