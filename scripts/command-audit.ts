@@ -49,7 +49,12 @@ const read = (p: string) => {
 };
 
 const EXECUTE = read('app/api/command/execute/route.ts');
-const EDIT = read('app/api/command/edit/route.ts');
+/* The canonical mutation runtime: what plans and previews a change, and
+   what writes it. Both, because a preview with nothing behind it is not
+   a wired path. */
+const MUTATION = !!read('app/api/command/plan/route.ts')
+  && !!read('app/api/command/apply/route.ts')
+  && !!read('lib/command/server/mutation.ts');
 const BAR = read('components/dashboard/CommandBar.tsx');
 
 /* -------------------------------------------------------------
@@ -183,16 +188,18 @@ type Outcome = {
 };
 
 function audit(s: string): Outcome {
-  /* A field write on a named record. This is the one path that already
-     previews before it writes, and the only one that reaches
-     /api/command/edit. */
+  /* A field write. This is the one path that previews before it writes,
+     and it now reaches a record somebody named or a set they described,
+     through the canonical planner. */
   const edit = parseEdit(s, caps);
   if (edit && edit.missing.length === 0 && edit.confidence >= 10) {
     return {
       parse: `write: ${edit.summary}`,
       parseOk: true,
-      wiring: EDIT ? 'handler' : 'none',
-      detail: EDIT ? '/api/command/edit, previewed then confirmed' : 'no edit route',
+      wiring: MUTATION ? 'handler' : 'none',
+      detail: MUTATION
+        ? '/api/command/plan then /api/command/apply, previewed then confirmed'
+        : 'no mutation runtime',
     };
   }
   if (edit) {

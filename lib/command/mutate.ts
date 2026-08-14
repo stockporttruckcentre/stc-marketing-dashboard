@@ -340,6 +340,36 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
      match than "note". */
   const beforeColon = text.split(':')[0];
   const t = soften(beforeColon);
+
+  /* WHAT THEY BECOME NAMES THE FIELD.
+
+     "Mark all the in stock curtainsiders as sold" was filed as a change
+     to the CATEGORY, set to Curtainsider, on every trailer in stock. The
+     alias loop below matched "curtainsiders" against the category field
+     and returned before anything looked at the word after "as", and
+     "curtainsiders" is the longer match, so it won on length as well.
+
+     The half after "as" is where the rows are going, so a state word in
+     it names the column being written. The half before it describes the
+     rows and must not. */
+  const destination = soften(splitOnAs(beforeColon).destination);
+  const destinationState = (): { field: WritableField; alias: string } | null => {
+    if (!destination.trim() || !MARK_WORDS.some((w) => fuzzyContains(t, w))) return null;
+    let hit: { field: WritableField; alias: string } | null = null;
+    for (const f of WRITABLE_FIELDS) {
+      if (f.kind !== 'enum' || !f.vocabulary) continue;
+      if (caps && !caps.has(f.capability)) continue;
+      /* The entity comes from the whole sentence, since that is where
+         the noun is. Only the VALUE has to be in the destination. */
+      if (!mentionsEntity(t, f.entity)) continue;
+      for (const word of Object.keys(f.vocabulary)) {
+        if (!fuzzyContains(destination, word)) continue;
+        if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
+      }
+    }
+    return hit;
+  };
+
   let best: { field: WritableField; alias: string } | null = null;
   for (const f of WRITABLE_FIELDS) {
     if (caps && !caps.has(f.capability)) continue;
@@ -348,7 +378,28 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
       if (!best || a.length > best.alias.length) best = { field: f, alias: a };
     }
   }
-  if (best) return best;
+  /* An alias that is also one of its own field's VALUES is describing
+     the rows, not naming the column.
+
+     "Curtainsiders" is an alias of the category field and also a
+     category, so "mark all the in stock curtainsiders as sold" matched
+     it, and matched it more strongly than anything else because it is a
+     long word. The instruction became: set the category to Curtainsider
+     on every trailer in stock.
+
+     "Paid in full" is an alias of its field and not a value of it, so
+     "set paid in full on STC143980 to yes" is a sentence that genuinely
+     names its column and keeps it. */
+  if (best) {
+    const alias = best.alias;
+    const namesAValue = !!best.field.vocabulary
+      && Object.keys(best.field.vocabulary).some((w) => w === alias || w.startsWith(alias));
+    if (namesAValue) {
+      const destinationField = destinationState();
+      if (destinationField && destinationField.field.key !== best.field.key) return destinationField;
+    }
+    return best;
+  }
 
   /* Some sentences name the field by naming the value. "Move STC143980
      to Carrington" never says the word location, and asking somebody to
@@ -369,6 +420,10 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
      Which entity, from which vocabulary owns the word. Longest match
      wins so "pending review" is not read as "review". */
   if (MARK_WORDS.some((w) => fuzzyContains(t, w))) {
+    /* The destination half first, for the same reason as above. */
+    const destinationField = destinationState();
+    if (destinationField) return destinationField;
+
     let hit: { field: WritableField; alias: string } | null = null;
     for (const f of WRITABLE_FIELDS) {
       if (f.kind !== 'enum' || !f.vocabulary) continue;
@@ -450,30 +505,58 @@ function findOp(text: string): { op: EditOp; word: string } {
  * stock number. Taken from after the preposition, with the field words
  * and anything reserved stripped, because "add a note to Dawson" means
  * the company and "add a note to the record" means nothing at all.
+ *
+ * `value` is what the sentence is going to write, and it is here to
+ * settle the one word English uses for both jobs. "On", "for" and
+ * "against" name the record. "To" usually introduces the new value, so
+ * it is only read as the record when nothing else was, and when what it
+ * captured turns out to BE the value it is not the record either:
+ *
+ *   assign Dawson Group to Dave
+ *
+ * came back as a change to a customer called Dave, with the owner set
+ * to Dave, at a confidence high enough to act on. The company is in the
+ * other half of the sentence, which is where this looks next.
  */
-function findCompany(original: string, fieldAlias: string): string | null {
+function findCompany(
+  original: string, fieldAlias: string, value: string | number | null, opWord: string,
+): string | null {
   const cleaned = original
     .split(':')[0]
     .replace(new RegExp(fieldAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  /* The capture has to stop before the value, or "change the owner on
-     Dawson Group to Dave" files the change against a company called
-     Dawson Group Dave. "on", "for" and "against" name the record; "to"
-     usually introduces the new value, so it is only read as the record
-     when nothing else did. */
   const STOP = String.raw`(?=\s+(?:to|and|with|as|is|are|=|from)\b|[:,;]|$)`;
-  const m =
-    cleaned.match(new RegExp(String.raw`\b(?:on|for|against)\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))
-    ?? cleaned.match(new RegExp(String.raw`\bto\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'));
-  const raw = (m?.[1] ?? '').trim().replace(/[.,:;]+$/, '');
-  if (!raw) return null;
-  const words = raw.split(/\s+/).filter((w) => !NOT_A_VALUE.has(lower(w)));
-  if (!words.length) return null;
-  if (words.every((w) => isReservedWord(w))) return null;
-  const name = words.join(' ');
-  return name.length >= 2 ? name : null;
+  const tidy = (raw: string): string | null => {
+    const trimmed = raw.trim().replace(/[.,:;]+$/, '');
+    if (!trimmed) return null;
+    const words = trimmed.split(/\s+/)
+      .filter((w) => !NOT_A_VALUE.has(lower(w)))
+      .filter((w) => !opWord || lower(w) !== lower(opWord));
+    if (!words.length) return null;
+    if (words.every((w) => isReservedWord(w))) return null;
+    const name = words.join(' ');
+    return name.length >= 2 ? name : null;
+  };
+
+  const named = tidy(
+    cleaned.match(new RegExp(String.raw`\b(?:on|for|against)\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))?.[1] ?? '',
+  );
+  if (named) return named;
+
+  const afterTo = tidy(
+    cleaned.match(new RegExp(String.raw`\bto\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))?.[1] ?? '',
+  );
+  const isTheValue = afterTo != null && value != null
+    && lower(afterTo) === lower(String(value));
+  if (afterTo && !isTheValue) return afterTo;
+
+  /* The half before the word that introduced the value. "Assign Dawson
+     Group to Dave" says who it is about first and what it becomes
+     second, which is the ordinary way round for a verb that takes both. */
+  if (isTheValue) return tidy(cleaned.split(/\s+\b(?:to|as|into)\b\s+/i)[0] ?? '');
+  return null;
 }
 
 /**
@@ -632,7 +715,7 @@ export function parseEdit(
       if (!numeric) for (const c of refs.coded) named.push(c);
     }
     if (!named.length && spec.entity === 'contacts') {
-      const name = findCompany(raw, field.alias);
+      const name = findCompany(raw, field.alias, value, opWord);
       if (name) named = [name];
     }
   }
@@ -699,7 +782,11 @@ export function parseEdit(
     summary: handoff
       ? `Mark ${matchLabel} sold`
       : describe(spec, op, valueLabel, matchLabel),
-    confidence: confidenceOf(spec, op, value, { named: named.length, stock: refs.stc.length > 0 }, opWord),
+    confidence: confidenceOf(
+      spec, op, value,
+      { named: named.length, stock: refs.stc.length > 0, described: !named.length && !!match },
+      opWord,
+    ),
   };
 }
 
@@ -724,12 +811,26 @@ function readDescribedSet(
   const t = soften(raw);
   /* A word that genuinely means every match. Without one, a sentence
      with no named record is incomplete rather than a bulk write. */
-  if (!/\b(all|every|any|the lot|everything|each)\b/.test(t)) return null;
+  if (!COLLECTIVE.test(t)) return null;
 
-  /* The half of the sentence before "as" describes the rows; the half
-     after it says what they become. Reading the whole string would let
-     the destination narrow the selection. */
-  const subject = splitOnAs(raw).subject;
+  /* WHICHEVER HALF THE COLLECTIVE WORD IS IN.
+     One half of the sentence describes the rows and the other says what
+     they become, and English puts them in either order:
+
+       move every available curtainsider at Hyde to Bredbury
+       add 250 refurb costs to every available curtainsider at Hyde
+
+     Always taking the half before the split word read the second of
+     those as "add 250 refurb costs", which names no rows at all, so the
+     instruction came back incomplete. The word that means every match is
+     in the half that describes the rows, by definition, which is a
+     better question to ask than which side of the sentence it is on. */
+  const halves = splitOnAs(raw);
+  const inSubject = COLLECTIVE.test(soften(halves.subject));
+  const inDestination = COLLECTIVE.test(soften(halves.destination));
+  const subject = inSubject === inDestination ? halves.subject
+    : inSubject ? halves.subject : halves.destination;
+
   const read = parseQuery(subject, vocabulary);
   if (!read || read.entity.id !== spec.entity) return null;
 
@@ -763,6 +864,9 @@ function readDescribedSet(
  * longest state word won, and the longest one was the description of the
  * records rather than their destination.
  */
+/** A word that means every match, rather than some of them. */
+const COLLECTIVE = /\b(all|every|any|the lot|everything|each)\b/;
+
 function splitOnAs(text: string): { subject: string; destination: string } {
   const m = text.match(/^(.*?)\s+(?:as|to|into)\s+(.+)$/i);
   if (!m) return { subject: text, destination: '' };
@@ -775,12 +879,24 @@ function readFreeText(stripped: string, spec: WritableField, opWord: string): st
   const colon = stripped.match(/:\s*(.+)$/);
   if (colon) return colon[1].trim();
 
-  // A depot name is a location however it is phrased.
+  /* A depot name is a location however it is phrased, and a sentence
+     that moves rows between depots names two of them:
+
+       move all the trailers at Carrington to Hyde
+
+     Taking the first left every Carrington trailer set to Carrington,
+     which is a change that looks like it worked and does nothing. The
+     half after "to" is where they are going. */
   if (spec.key === 'location') {
-    const t = ` ${stripped.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')} `;
-    for (const [word, depot] of Object.entries(DEPOTS)) {
-      if (t.includes(` ${word} `)) return depot;
-    }
+    const depot = (text: string): string | null => {
+      const t = ` ${text.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')} `;
+      for (const [word, name] of Object.entries(DEPOTS)) {
+        if (t.includes(` ${word} `)) return name;
+      }
+      return null;
+    };
+    const halves = splitOnAs(stripped);
+    return depot(halves.destination) ?? depot(stripped);
   }
 
   // Otherwise the words after "to" or after the verb, minus the filler.
@@ -822,14 +938,25 @@ function describe(
  * match and a stock number are the same shape, and they are not: a stock
  * number is one unit and nothing else, whereas a company name is a guess
  * that happens to be expressible as the same comparison.
+ *
+ * A DESCRIBED SET COUNTS AS SAYING WHICH ROWS.
+ *
+ * It scored nothing at all until the reader could express one properly.
+ * "Move every available curtainsider at Hyde to Bredbury" names three
+ * things about the rows and came out one point below the threshold that
+ * decides whether a sentence is an instruction, so it was read as a
+ * question, and the question it was read as had the destination in its
+ * filters: "list trailers in stock, curtainsiders, at Bredbury". A
+ * confident wrong answer, from a scorer that had never seen a sentence
+ * like it because the reader could not produce one.
  */
 function confidenceOf(
   spec: WritableField, op: EditOp, value: string | number | null,
-  selection: { named: number; stock: boolean }, opWord: string,
+  selection: { named: number; stock: boolean; described: boolean }, opWord: string,
 ): number {
   let score = 4;
   if (selection.stock) score += 4;                 // a stock number is unambiguous
-  else if (selection.named) score += 2;
+  else if (selection.named || selection.described) score += 2;
   if (value != null) score += 3;
   if (opWord) score += 2;
   if (op === 'clear') score += 1;

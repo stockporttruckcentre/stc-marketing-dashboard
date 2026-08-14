@@ -25,16 +25,25 @@
      UNVERIFIED  this harness cannot observe it
      N/A         the sentence does not request this component
 
-   WHAT THIS DOES NOT TEST
-     No database is contacted. No row is read or written. No file is
-     produced. Component 8 is therefore UNVERIFIED for every sentence,
-     and component 5 is UNVERIFIED wherever a real record lookup would
-     be needed. Under the contract above those count against the score
-     rather than being excused, because a command that cannot be
-     observed to have happened has not been shown to happen.
+   WHAT THIS TESTS AGAINST A DATABASE, AND WHAT IT STILL DOES NOT
+     Instructions are now carried out. A mutation sentence is planned
+     through the production entry point, previewed against a fixture
+     yard, confirmed, and the rows are read back afterwards. That is
+     what moves components 5 and 8 for those sentences, and either can
+     still FAIL: an instruction that resolves nothing, or one whose
+     confirmation changes no row, is reported as failing rather than as
+     unobservable.
 
-     That is the point. A number that excluded them is the number that
-     produced "10/10" and "103,144 sentences" earlier in this work.
+     The fixture is a small yard, not a set of answers. It holds
+     trailers across three depots in two body types and two states, two
+     social posts and two customers, and no row in it was chosen to make
+     a particular sentence pass.
+
+     Questions, exports, files and screen navigation are still
+     UNVERIFIED on component 8. Nothing here runs the query executor or
+     produces a file. Under the contract above that counts against the
+     score rather than being excused, because a command that cannot be
+     observed to have happened has not been shown to happen.
 
      npm run check:score
    ============================================================= */
@@ -47,6 +56,9 @@ import { parse } from '../lib/command/intents';
 import { readsOnlyText, INSTRUCTION } from '../lib/command/arbitrate';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { loadSampleVocabulary, sampleSize } from './sample-vocabulary';
+import { fakeDb, type Row as DbRow } from './support/fake-postgrest';
+import { postgrestStore } from '../lib/command/store/postgrest';
+import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 
 const caps = capabilitiesFor({ role: 'admin' });
 /* The fixture, as a value. `parseQuery` takes the index it should read
@@ -58,8 +70,12 @@ const read = (p: string) => {
   try { return readFileSync(join(process.cwd(), p), 'utf8'); } catch { return ''; }
 };
 const EXECUTE = read('app/api/command/execute/route.ts');
-const EDIT_ROUTE = read('app/api/command/edit/route.ts');
 const QUERY_ROUTE = read('app/api/command/query/route.ts');
+/* The canonical mutation runtime: what plans and previews, and what
+   writes. Both, because a preview with nothing behind it is not a path. */
+const MUTATION_PATH = !!read('app/api/command/plan/route.ts')
+  && !!read('app/api/command/apply/route.ts')
+  && !!read('lib/command/server/mutation.ts');
 
 /** Intent ids the execute route branches on. */
 const HANDLED = new Set<string>();
@@ -170,6 +186,71 @@ const OPERATION_ACTIONS: Record<string, RegExp> = {
   bulk: /^(stock\.bulk|crm\.moveToList)/,
 };
 
+/* -------------------------------------------------------------
+   A yard to act on.
+
+   Small, ordinary, and not built around the corpus: three depots, two
+   body types, two states, a pair of posts and a pair of customers. Every
+   instruction below runs against a fresh copy of it, so one sentence
+   cannot leave the next one looking at rows it changed.
+   ------------------------------------------------------------- */
+const YARD = (): Record<string, DbRow[]> => ({
+  stock_trailers: [
+    { id: 'y1', stc_no: 'STC143580', status: 'in_stock', location: 'Hyde', category: 'Curtainsider', retail_price: 20000, sales_price: 22000, nbv: 15000, refurb_costs: 500, mot_date: '2027-03-14', notes: null, customer: null, sales_rep: null },
+    { id: 'y2', stc_no: 'STC143581', status: 'in_stock', location: 'Carrington', category: 'Curtainsider', retail_price: 24000, sales_price: 26000, nbv: 18000, refurb_costs: 250, mot_date: '2027-06-01', notes: null, customer: null, sales_rep: null },
+    { id: 'y3', stc_no: 'STC144504', status: 'sold', location: 'Carrington', category: 'Flatbed', retail_price: 30000, sales_price: 31000, nbv: 22000, refurb_costs: 0, mot_date: '2026-12-01', notes: null, customer: 'Wincanton', sales_rep: 'AE' },
+    { id: 'y4', stc_no: 'STC199999', status: 'in_stock', location: 'Bredbury', category: 'Flatbed', retail_price: 21000, sales_price: 23000, nbv: 16000, refurb_costs: 100, mot_date: '2028-01-01', notes: null, customer: null, sales_rep: null },
+  ],
+  social_posts: [
+    { id: 'z1', content: 'One', platform: ['linkedin'], scheduled_date: '2026-09-01', status: 'pending_review', created_by: 'tester', hashtags: [] },
+    { id: 'z2', content: 'Two', platform: ['linkedin'], scheduled_date: '2026-09-02', status: 'draft', created_by: 'tester', hashtags: [] },
+  ],
+  crm_contacts: [
+    { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null, next_action: null },
+    { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co', next_action: null },
+  ],
+});
+
+type Executed = {
+  /** The instruction was planned, and resolved to at least one row. */
+  resolved: boolean;
+  /** Confirming it changed rows in the database. */
+  changed: number;
+  why: string;
+};
+
+/**
+ * Type the sentence, look at the preview, confirm it, read the rows.
+ *
+ * The same two calls the routes make, in the same order, with nothing
+ * constructed by hand in between.
+ */
+async function carryOut(sentence: string): Promise<Executed> {
+  const db = fakeDb(YARD());
+  const store = postgrestStore(db.supabase);
+  const actor = { capabilities: [...caps], vocabulary: async () => VOCABULARY };
+
+  const planned = await planAndPreview({ text: sentence, ...actor, store, preview: true });
+  if (!planned) return { resolved: false, changed: 0, why: 'not understood' };
+  if (planned.planned.planning.kind !== 'mutate') {
+    return { resolved: false, changed: 0, why: `read as a ${planned.planned.planning.kind}` };
+  }
+  const preview = planned.preview;
+  if (!preview || !preview.ok) {
+    return { resolved: false, changed: 0, why: preview ? preview.why : 'no preview' };
+  }
+  /* NOTHING MAY HAVE BEEN WRITTEN YET. */
+  if (db.writes.length) return { resolved: true, changed: 0, why: 'the preview wrote' };
+
+  const done = await applyMutation({
+    text: sentence, ...actor, store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  if (!done.ok) return { resolved: true, changed: 0, why: done.why };
+  return { resolved: true, changed: done.changed, why: '' };
+}
+
 function score(c: Case): Row {
   const e = c.expect;
   const plan = parseQuery(c.sentence);
@@ -204,10 +285,15 @@ function score(c: Case): Row {
     }
   }
 
-  /* --- 2 entity --- */
+  /* --- 2 entity ---
+     For an instruction, the entity is the one the mutation targets. It
+     used to be read off the QUERY parser even for sentences that are
+     not questions, so "set the MOT on STC143580 to 30 September 2026"
+     was scored against whatever the question reader made of it. */
   if (e.entity) {
-    row.entity = plan?.entity.id === e.entity ? 'PASS' : 'FAIL';
-    if (!plan) row.entity = 'FAIL';
+    const fromInstruction = (e.operation === 'update' || e.operation === 'bulk')
+      && edit && edit.missing.length === 0 ? edit.entity : null;
+    row.entity = (fromInstruction ?? plan?.entity.id) === e.entity ? 'PASS' : 'FAIL';
   }
 
   /* --- 3 filters --- */
@@ -240,8 +326,9 @@ function score(c: Case): Row {
   }
 
   /* --- 5 resolution ---
-     A named record has to be found in the database. Nothing here reads
-     a database, so this cannot be observed. */
+     Filled in by the execution pass below for instructions, which do
+     read a database. A named record inside a sentence this harness
+     cannot carry out is still unobservable. */
   if (e.namesRecord) row.resolution = 'UNVERIFIED';
 
   /* --- 6 permission ---
@@ -257,8 +344,12 @@ function score(c: Case): Row {
      A wired route that performs the operation. */
   if (e.operation === 'query') {
     row.path = QUERY_ROUTE ? 'PASS' : 'FAIL';
-  } else if (e.operation === 'update') {
-    row.path = EDIT_ROUTE && edit && edit.missing.length === 0 ? 'PASS' : 'FAIL';
+  } else if (e.operation === 'update' || e.operation === 'bulk') {
+    /* One canonical path for every instruction, named or described.
+       Bulk used to be scored against the action registry, looking for a
+       `stock.bulk` entry to perform it, because the mutation runtime
+       could only reach a record somebody had named. */
+    row.path = MUTATION_PATH && edit && edit.missing.length === 0 ? 'PASS' : 'FAIL';
   } else if (e.operation === 'navigate') {
     row.path = hits.some((h) => h.action.path) ? 'PASS' : 'FAIL';
   } else {
@@ -277,43 +368,71 @@ function score(c: Case): Row {
   return row;
 }
 
+/* -------------------------------------------------------------
+   Components 5 and 8, observed rather than assumed
+   ------------------------------------------------------------- */
+
+async function scoreWithEffect(c: Case): Promise<Row> {
+  const row = score(c);
+  const e = c.expect;
+
+  /* Only the operations this harness can carry out. A query is not run,
+     a file is not produced, and saying otherwise would be the exact
+     thing this file exists to stop. */
+  const carriedOut = e.operation === 'update' || e.operation === 'bulk';
+  if (!carriedOut) return row;
+
+  const done = await carryOut(c.sentence);
+
+  if (e.namesRecord) row.resolution = done.resolved ? 'PASS' : 'FAIL';
+  row.effect = done.changed > 0 ? 'PASS' : 'FAIL';
+  if (done.why) row.note += `${row.note ? '; ' : ''}${done.why}`;
+  return row;
+}
+
 /* ------------------------------------------------------------- */
 
-const rows = CASES.map(score);
-const AXES = ['operation', 'entity', 'filters', 'shaping',
-              'resolution', 'permission', 'path', 'effect'] as const;
+async function main() {
+  const rows = await Promise.all(CASES.map(scoreWithEffect));
+  const AXES = ['operation', 'entity', 'filters', 'shaping',
+                'resolution', 'permission', 'path', 'effect'] as const;
 
-const passed = (r: Row) => AXES.every((a) => r[a] === 'PASS' || r[a] === 'N/A');
+  const passed = (r: Row) => AXES.every((a) => r[a] === 'PASS' || r[a] === 'N/A');
 
-console.log(`\n  ${CASES.length} sentences. Values read from ${sampleSize()} real stock rows.`);
-console.log('  PASS requires every requested component to PASS.\n');
+  console.log(`\n  ${CASES.length} sentences. Values read from ${sampleSize()} real stock rows.`);
+  console.log('  PASS requires every requested component to PASS.\n');
 
-const w = 46;
-console.log(`  ${'sentence'.padEnd(w)} op  ent flt shp res prm pth eff`);
-console.log(`  ${'-'.repeat(w)} --- --- --- --- --- --- --- ---`);
-const abbr = (s: State) => s === 'PASS' ? ' ok' : s === 'FAIL' ? 'ERR' : s === 'N/A' ? '  .' : ' ??';
-for (const r of rows) {
-  const label = r.sentence.length > w ? `${r.sentence.slice(0, w - 1)}…` : r.sentence;
-  console.log(`  ${label.padEnd(w)} ${AXES.map((a) => abbr(r[a])).join(' ')}`);
-  if (r.note) console.log(`    ${' '.repeat(w)}${r.note}`);
+  const w = 46;
+  console.log(`  ${'sentence'.padEnd(w)} op  ent flt shp res prm pth eff`);
+  console.log(`  ${'-'.repeat(w)} --- --- --- --- --- --- --- ---`);
+  const abbr = (s: State) => s === 'PASS' ? ' ok' : s === 'FAIL' ? 'ERR' : s === 'N/A' ? '  .' : ' ??';
+  for (const r of rows) {
+    const label = r.sentence.length > w ? `${r.sentence.slice(0, w - 1)}…` : r.sentence;
+    console.log(`  ${label.padEnd(w)} ${AXES.map((a) => abbr(r[a])).join(' ')}`);
+    if (r.note) console.log(`    ${' '.repeat(w)}${r.note}`);
+  }
+
+  console.log(`\n  KEY   ok = PASS   ERR = FAIL   ?? = UNVERIFIED   . = not requested\n`);
+
+  /* Per axis, so the shape of the gap is visible rather than one number. */
+  console.log('  BY COMPONENT');
+  for (const a of AXES) {
+    const p = rows.filter((r) => r[a] === 'PASS').length;
+    const f = rows.filter((r) => r[a] === 'FAIL').length;
+    const u = rows.filter((r) => r[a] === 'UNVERIFIED').length;
+    const n = rows.filter((r) => r[a] === 'N/A').length;
+    console.log(`    ${a.padEnd(11)} PASS ${String(p).padStart(2)}   FAIL ${String(f).padStart(2)}`
+      + `   UNVERIFIED ${String(u).padStart(2)}   not requested ${String(n).padStart(2)}`);
+  }
+
+  const total = rows.filter(passed).length;
+  console.log(`\n  SENTENCES PASSING ALL REQUESTED COMPONENTS: ${total}/${CASES.length}\n`);
+  console.log('  Component 8 (effect) is observed for instructions: they are carried');
+  console.log('  out against a fixture yard and the rows are read back. It stays');
+  console.log('  UNVERIFIED for questions, exports and navigation, because nothing');
+  console.log('  here runs the query executor or produces a file. Under the contract');
+  console.log('  that counts against the score rather than being excused.\n');
+
 }
 
-console.log(`\n  KEY   ok = PASS   ERR = FAIL   ?? = UNVERIFIED   . = not requested\n`);
-
-/* Per axis, so the shape of the gap is visible rather than one number. */
-console.log('  BY COMPONENT');
-for (const a of AXES) {
-  const p = rows.filter((r) => r[a] === 'PASS').length;
-  const f = rows.filter((r) => r[a] === 'FAIL').length;
-  const u = rows.filter((r) => r[a] === 'UNVERIFIED').length;
-  const n = rows.filter((r) => r[a] === 'N/A').length;
-  console.log(`    ${a.padEnd(11)} PASS ${String(p).padStart(2)}   FAIL ${String(f).padStart(2)}`
-    + `   UNVERIFIED ${String(u).padStart(2)}   not requested ${String(n).padStart(2)}`);
-}
-
-const total = rows.filter(passed).length;
-console.log(`\n  SENTENCES PASSING ALL REQUESTED COMPONENTS: ${total}/${CASES.length}\n`);
-console.log('  Component 8 (effect) is UNVERIFIED for every sentence because');
-console.log('  this harness contacts no database and produces no file. Under');
-console.log('  the contract that counts against the score rather than being');
-console.log('  excluded. Fixture-based execution tests are what would move it.\n');
+main();

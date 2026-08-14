@@ -168,9 +168,38 @@ ok('the query route plans through the authoritative planner',
   /planForExecution\(/.test(routeSource)
   && /vocabularyFor\(supabase, user\.id\)/.test(routeSource));
 const planRouteSource = source('app/api/command/plan/route.ts');
+const mutationSource = source('lib/command/server/mutation.ts');
 ok('the preview endpoint plans through the same planner with the same vocabulary',
-  /planAuthoritatively\(/.test(planRouteSource)
-  && /vocabularyFor\(supabase, user\.id\)/.test(planRouteSource));
+  /planAndPreview\(/.test(planRouteSource)
+  && /vocabularyFor\(supabase, user\.id\)/.test(planRouteSource)
+  && /planAuthoritatively\(req\)/.test(mutationSource));
+
+/* The route that WRITES.
+
+   Same environment, and one more requirement: it may not accept
+   anything from the client that decides what happens to a record. A
+   plan, a list of ids or a set of values arriving in that body would
+   make the browser the authority, whatever the server then did with
+   it. */
+const applyRouteSource = source('app/api/command/apply/route.ts');
+ok('the apply route authenticates and derives capabilities itself',
+  /requireCapability\(\)/.test(applyRouteSource)
+  && /capabilities: caps/.test(applyRouteSource));
+ok('and loads this actor\'s vocabulary',
+  /vocabularyFor\(supabase, user\.id\)/.test(applyRouteSource));
+ok('and replans the raw text rather than trusting a plan',
+  /planForExecution\(/.test(mutationSource) && !/body\.plan\b/.test(applyRouteSource));
+ok('the only things it reads from the request are the text and two hashes',
+  ['text', 'planHash', 'programmeHash', 'confirm'].every((k) => applyRouteSource.includes(k))
+  && !/\brecordIds?\b/.test(applyRouteSource)
+  && !/\bvalue\b/.test(applyRouteSource));
+ok('it refuses a request that did not confirm',
+  /raw\.confirm !== true/.test(applyRouteSource));
+ok('the whole plan\'s permissions are checked, not one field\'s',
+  /availability\.permitted !== true/.test(mutationSource)
+  && !/authoriseFieldWrite/.test(mutationSource));
+ok('and an incomplete plan is refused before anything is written',
+  /completion\.kind !== 'complete'/.test(mutationSource));
 ok('the vocabulary route and the server planner share one builder',
   /buildVocabulary/.test(source('app/api/command/vocabulary/route.ts')));
 
@@ -224,7 +253,16 @@ ok('the command bar does not offer what the actor is not permitted',
 ok('the command bar shows the meaning the server planned, not one it worked out',
   /\{meaning\.summary\}/.test(bar) && !/planning\.presentation\.summary/.test(bar));
 ok('the command bar offers a command only when the server calls it runnable',
-  /useQuery = !editReady && !!meaning\?\.runnable/.test(bar));
+  /const useQuery = !instructionReady && meaning\?\.kind !== 'mutate' && !!meaning\?\.runnable/.test(bar));
+/* And an instruction is offered on the same terms. The bar used to read
+   the sentence itself with `parseEdit` and act on what it decided, which
+   made the browser the semantic authority for every write. */
+ok('the bar does not decide for itself that a sentence is an instruction',
+  !/parseEdit\(/.test(bar) && /meaning\?\.kind === 'mutate' && meaning\.runnable/.test(bar));
+ok('and it sends the sentence and the two hashes, never a plan or a row id',
+  /planHash: meaning\.hash/.test(bar)
+  && /programmeHash: editPreview\.programmeHash/.test(bar)
+  && !/recordIds:/.test(bar));
 
 const localNobody = planCommand(CRM_QUESTION, { actorCapabilities: [] });
 const localAdmin = planCommand(CRM_QUESTION, { actorCapabilities: EVERYTHING });

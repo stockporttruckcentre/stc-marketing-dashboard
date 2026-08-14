@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
-import { planAuthoritatively } from '@/lib/command/server/planner';
+import { planAndPreview } from '@/lib/command/server/mutation';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
+import { postgrestStore } from '@/lib/command/store/postgrest';
+import { changedFields } from '@/lib/command/server/mutation';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,19 @@ export const dynamic = 'force-dynamic';
  * The response carries a hash of the meaning. Execution sends it back
  * and the server replans from the text and compares, so a reading that
  * has changed since it was shown is previewed again rather than run.
+ *
+ * INSTRUCTIONS COME BACK THROUGH HERE TOO.
+ *
+ * A sentence is a question or an instruction, and which it is was
+ * decided in the bar until now, by calling the instruction reader in the
+ * browser. Two semantic authorities for one sentence is one too many, so
+ * `planCommand` decides it, and this route reports it.
+ *
+ * `preview: true` asks for the exact change as well: which records,
+ * their labels, and what each holds now beside what it would hold. That
+ * reads rows, so it is not done on every keystroke. The bar asks for the
+ * meaning while somebody types and for the preview when they press
+ * Enter, and the preview writes nothing either way.
  */
 export async function POST(req: NextRequest) {
   const gate = await requireCapability();
@@ -32,20 +47,36 @@ export async function POST(req: NextRequest) {
 
   /* Only the sentence is read. There is no shape a client could send
      that this would treat as a plan. */
-  const raw = await req.json().catch(() => ({})) as { text?: unknown };
+  const raw = await req.json().catch(() => ({})) as { text?: unknown; preview?: unknown };
   const text = typeof raw.text === 'string' ? raw.text : '';
   if (!text.trim()) return NextResponse.json({ ok: false, error: 'no question' }, { status: 400 });
 
-  const planned = await planAuthoritatively({
+  const result = await planAndPreview({
     text,
     capabilities: caps,
     /* Their vocabulary, not the last person's. */
     vocabulary: vocabularyFor(supabase, user.id),
+    /* Their rows, through their own RLS session. */
+    store: postgrestStore(supabase),
+    preview: raw.preview === true,
   });
 
-  if (!planned) {
+  if (!result) {
     return NextResponse.json({ ok: false, understood: false }, { status: 200 });
   }
 
-  return NextResponse.json({ ok: true, understood: true, ...planned.meaning });
+  const { planned, preview } = result;
+
+  return NextResponse.json({
+    ok: true,
+    understood: true,
+    ...planned.meaning,
+    kind: planned.planning.kind,
+    /* What it would change, when it is an instruction. Present without
+       the row level detail until a preview is asked for. */
+    mutation: planned.planning.kind === 'mutate'
+      ? { fields: changedFields(planned.planning.plan) }
+      : null,
+    preview: preview ?? null,
+  });
 }

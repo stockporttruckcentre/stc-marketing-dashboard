@@ -25,6 +25,8 @@
     "check:authority": "tsx scripts/command-authority-check.ts",
     "check:fields": "tsx scripts/fields-nullability-check.ts",
     "check:mutation": "tsx scripts/mutation-apply-check.ts",
+    "check:acceptance": "tsx scripts/command-acceptance-check.ts",
+    "check:postgres": "tsx scripts/command-postgres-check.ts",
     "gen:writable-columns": "tsx scripts/generate-writable-columns.ts",
     "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check"
   },

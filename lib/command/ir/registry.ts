@@ -465,7 +465,7 @@ export const CAPABILITIES: CapabilityDef[] = [
     /* Setting a field to a value twice leaves the same value. The unmet
        gate stops it anyway, because every mutation is stopped. */
     idempotent: true,
-    handler: 'app/api/command/edit/route.ts',
+    handler: 'lib/command/server/mutation.ts',
   },
   {
     id: 'contact.enrich',

@@ -7,11 +7,12 @@ import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
 import { type Suggestion } from '@/lib/command/features';
 import { suggestActions } from '@/lib/command/actions';
 import { composeSuggestions } from '@/lib/command/compose';
-import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
+import { composeEdits } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
+import type { MutationPreview } from '@/lib/command/server/mutation';
 import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
@@ -42,23 +43,18 @@ export function readsOnlyText(text: string): boolean {
 type Candidate = { id: string; label: string; sub?: string; status?: string };
 type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered' | 'confirming';
 
-/** What the server says a write is about to do, before it does it. */
-type EditPreview = {
-  recordId?: string;
-  recordIds?: string[];
-  recordLabel: string;
-  recordSub?: string;
-  fieldLabel: string;
-  before: string;
-  after: string;
-  unchanged?: boolean;
-  caution?: string | null;
-  /** Several records at once, or every record matching a description. */
-  bulk?: boolean;
-  count?: number;
-  /** Understood here, finished somewhere else. Nothing to save. */
-  handoff?: 'markSold';
-  link?: { href: string; label: string };
+/**
+ * What the server says a write is about to do, before it does it.
+ *
+ * The server's own type, imported rather than restated. The bar used to
+ * describe the preview itself from a plan it had parsed in the browser,
+ * which meant the shape somebody was shown and the shape that would be
+ * written were two independent descriptions of one change.
+ */
+type ServerMeaning = PlannedMeaning & {
+  kind?: 'read' | 'mutate';
+  mutation?: { fields: { label: string; requires: string }[] } | null;
+  preview?: MutationPreview | null;
 };
 type Outcome = { ok: boolean; message: string; detail?: string; link?: { href: string; label: string } };
 
@@ -237,19 +233,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * failed search for an action called Export, it is somebody asking
    * what they can export, and the answer is hundreds of real sentences.
    */
-  /**
-   * An instruction, as opposed to a question.
-   *
-   * "Add £1k refurb value to STC143980" used to be read as a question
-   * about trailers and answered with a list, which looks like it worked
-   * and is not. An instruction that names its record, its field and its
-   * value beats every question the same words could be read as.
-   */
-  const edit = useMemo(
-    () => (text.trim().length >= 4 ? parseEdit(text, caps) : null),
-    [text, caps],
-  );
-  const editReady = !!edit && edit.missing.length === 0 && edit.confidence >= 10;
+  /* An instruction, as opposed to a question, is decided by the server.
+
+     This used to call the instruction reader in the browser and act on
+     what it said, which made the browser the semantic authority for
+     writes while the server was the semantic authority for reads. The
+     same sentence could be an instruction here and a question there,
+     because the two sides load the vocabulary at different moments.
+     `planCommand` decides it now, and `kind` is what comes back. */
 
   /**
    * Half a sentence is not a failure.
@@ -350,7 +341,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      server load it at different moments, so the same sentence can
      honestly mean two things. The one that counts is the one the server
      will act on, and it arrives with a hash of its meaning. */
-  const [meaning, setMeaning] = useState<PlannedMeaning | null>(null);
+  const [meaning, setMeaning] = useState<ServerMeaning | null>(null);
 
   const worthAsking = !!local
     && local.presentation.confidence >= 8
@@ -391,21 +382,23 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      every gate at once, decided in one place rather than in each
      caller's own idea of what "can I run this" means: well formed,
      permitted for this person, something performs it, and not refused. */
-  const useQuery = !editReady && !!meaning?.runnable
+  /** The server read it as an instruction and will carry it out. */
+  const instructionReady = meaning?.kind === 'mutate' && meaning.runnable;
+
+  const useQuery = !instructionReady && meaning?.kind !== 'mutate' && !!meaning?.runnable
     && (readsOnly || !preview?.intent?.writes);
 
   /* Said out loud rather than left for the answer to imply. */
   const partial = meaning?.unresolved ?? [];
   const [answered, setAnswered] = useState<any | null>(null);
-  const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
-  const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
+  const [editPreview, setEditPreview] = useState<MutationPreview | null>(null);
   const [cursor, setCursor] = useState(-1);
   useEffect(() => { setCursor(-1); }, [text]);
 
   const reset = useCallback(() => {
     setStage('idle'); setResult(null); setSlots({}); setChoices(null);
     setAsking(null); setAnswer(''); setOutcome(null); setText(''); setAnswered(null);
-    setEditPreview(null); setEditChoices(null);
+    setEditPreview(null);
   }, []);
 
   /** Walk forward: resolve references, then ask for anything still missing. */
@@ -496,7 +489,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * is the one somebody agreed to. A client cannot send a plan, so
    * there is nothing here to hand craft.
    */
-  async function runQuery(m: PlannedMeaning) {
+  async function runQuery(m: ServerMeaning) {
     setStage('running');
     const res = await fetch('/api/command/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -524,61 +517,96 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   /**
    * Ask the server what the instruction would do, without doing it.
    *
-   * Nothing is written on this pass. The record is matched, the current
-   * value comes back beside the proposed one, and only a deliberate
-   * confirm sends the change. A bar that edits a record the moment you
-   * press Enter is a bar people stop trusting with real data.
+   * The same planning endpoint that produced the reading, asked one
+   * level deeper: `preview` makes it resolve the rows and report exactly
+   * what each one holds now beside what it would hold. Nothing is
+   * written on this pass, and the sentence is all that goes up.
+   *
+   * Deliberately not asked for on every keystroke. Resolving reads rows,
+   * and a bar that queries the database for every letter typed is a bar
+   * somebody turns off.
    */
-  async function previewEdit(p: EditPlan, recordId?: string) {
+  async function previewInstruction() {
     setStage('running');
-    const res = await fetch('/api/command/edit', {
+    const res = await fetch('/api/command/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        entity: p.entity, fieldKey: p.field.key, op: p.op, value: p.value,
-        named: p.named, match: p.match, expect: p.expect,
-        recordId, handoff: p.handoff,
-      }),
-    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+      body: JSON.stringify({ text, preview: true }),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
 
-    if (res.needsChoice) {
-      setEditChoices(res.candidates ?? []);
-      setStage('confirming');
-      return;
-    }
-    if (!res.ok) {
-      setOutcome({ ok: false, message: res.message ?? 'That change did not go through.' });
+    if (!res?.ok || !res.understood) {
+      setOutcome({ ok: false, message: 'I could not make anything of that.' });
       setStage('done');
       return;
     }
-    setEditChoices(null);
-    setEditPreview(res as EditPreview);
+
+    setMeaning(res as ServerMeaning);
+    const p = res.preview as MutationPreview | null;
+
+    if (!p) {
+      setOutcome({ ok: false, message: 'That is not an instruction I can carry out.' });
+      setStage('done');
+      return;
+    }
+    if (!p.ok) {
+      /* An ambiguity is a question with several answers, and the bar
+         does not answer it on somebody's behalf. The candidates are
+         shown so the next sentence can name one of them. */
+      setEditPreview(p);
+      setStage('confirming');
+      return;
+    }
+
+    setEditPreview(p);
     setStage('confirming');
   }
 
-  /** The second pass, which is the one that writes. */
+  /**
+   * The second pass, which is the one that writes.
+   *
+   * The sentence and two fingerprints. No record ids, no values, no
+   * plan: the server plans and resolves again from the text, and the
+   * fingerprints only decide whether what it arrives at is what was
+   * shown here.
+   */
   async function applyEdit() {
-    if (!edit || !editPreview) return;
+    if (!meaning || !editPreview?.ok) return;
     setStage('running');
-    const res = await fetch('/api/command/edit', {
+    const res = await fetch('/api/command/apply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        entity: edit.entity, fieldKey: edit.field.key, op: edit.op, value: edit.value,
-        // The description goes back up as well as the ids it matched, so
-        // the server can tell a bulk change from a named one.
-        named: edit.named, match: edit.match, expect: edit.expect,
-        recordIds: editPreview.recordIds, recordId: editPreview.recordId,
+        text,
+        planHash: meaning.hash,
+        programmeHash: editPreview.programmeHash,
         confirm: true,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+
+    /* The world moved between looking and agreeing. Show what it says
+       now rather than an error about what it used to say. */
+    if (!res.ok && res.preview) {
+      setEditPreview(res.preview as MutationPreview);
+      setOutcome({ ok: false, message: res.message ?? 'Those records have changed. Check it and confirm again.' });
+      setStage('confirming');
+      return;
+    }
+    if (!res.ok && res.restated) {
+      setMeaning(res.restated as ServerMeaning);
+      setEditPreview(null);
+      setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
+      setStage('idle');
+      return;
+    }
+
     setEditPreview(null);
     setOutcome(res);
     setStage('done');
   }
 
   async function submit() {
-    // An instruction first. "Add £1k refurb to STC143980" is not a
-    // question about trailers, however much it reads like one.
-    if (editReady && edit) return previewEdit(edit);
+    /* An instruction first. "Add £1k refurb to STC143980" is not a
+       question about trailers, however much it reads like one. Which it
+       is was decided by the server, not here. */
+    if (instructionReady) return previewInstruction();
     if (useQuery && meaning) return runQuery(meaning);
     const parsed = parse(text);
     if (!parsed.intent) {
@@ -711,7 +739,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
-            {editReady && edit && (
+            {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -720,7 +748,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Pencil size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to check it
                 </span>
@@ -913,12 +941,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {stage === 'confirming' && (
           <EditConfirm
             preview={editPreview}
-            candidates={editChoices}
-            summary={edit?.summary ?? 'This change'}
-            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            summary={meaning?.summary ?? 'This change'}
             onApply={applyEdit}
             onCancel={reset}
-            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -957,7 +982,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
-            {editReady && edit && (
+            {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -966,7 +991,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Pencil size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to check it
                 </span>
@@ -1159,12 +1184,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {stage === 'confirming' && (
           <EditConfirm
             preview={editPreview}
-            candidates={editChoices}
-            summary={edit?.summary ?? 'This change'}
-            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            summary={meaning?.summary ?? 'This change'}
             onApply={applyEdit}
             onCancel={reset}
-            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -1336,51 +1358,67 @@ function Answer({ answered, onGo, onReset }: {
 /* =============================================================
    The confirmation before a write.
 
-   Shown for every field edit, without exception. It names the record it
-   matched, the field, and the value before and after, because the record
-   was found from a partial name and the person typing has no other way
-   to know which row it landed on.
+   Shown for every change, without exception, from the server's own
+   description of what it is about to do. It names each record it
+   matched and what that record holds now beside what it would hold,
+   because the rows were found from a partial name or a description and
+   the person typing has no other way to know which ones it landed on.
 
-   Where more than one record matched, it asks instead of guessing. A bar
-   that picks the first Dawson and writes to it is a bar that eventually
-   writes to the wrong Dawson.
+   PER ROW, NOT ONE SHARED LINE.
+
+   A bulk change usually starts from different values. "They were
+   outstanding" was true when the only thing a bulk instruction could
+   narrow on was the column it was writing, and became a lie the moment
+   it could narrow on anything else. Eleven rows holding eleven numbers
+   get eleven lines, and one line only when they genuinely agree.
+
+   WHERE SEVERAL RECORDS MATCHED A SENTENCE ABOUT ONE, IT ASKS.
+
+   It does not offer to pick one. The only thing that reaches the server
+   is the sentence, so resolving an ambiguity here would mean the browser
+   deciding which record a command is about, which is the decision this
+   whole path exists to keep on the server. What it does instead is show
+   what matched, so the next sentence can name one of them.
    ============================================================= */
-function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, onGo }: {
-  preview: EditPreview | null;
-  candidates: Candidate[] | null;
+function EditConfirm({ preview, summary, onApply, onCancel }: {
+  preview: MutationPreview | null;
   summary: string;
-  onPick: (id: string) => void;
   onApply: () => void;
   onCancel: () => void;
-  onGo: (href: string) => void;
 }) {
-  if (candidates) {
+  if (!preview) return null;
+
+  if (!preview.ok) {
+    const candidates = preview.candidates ?? preview.referenceCandidates ?? [];
     return (
-      <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+      <div style={{
+        borderTop: '1px solid var(--border)', padding: 14,
+        borderLeft: '2px solid var(--warning)',
+      }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>
-          Which one?
+          {candidates.length ? 'Which one?' : 'Nothing was changed'}
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-          {summary} needs one record, and more than one matched.
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: candidates.length ? 10 : 0 }}>
+          {preview.why}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {candidates.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onPick(c.id)}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1,
-                textAlign: 'left', width: '100%', padding: '8px 10px',
-                border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
-                background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
-                fontFamily: 'var(--inter)',
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</span>
-              {c.sub && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.sub}</span>}
-            </button>
-          ))}
-        </div>
+        {candidates.length > 0 && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {candidates.slice(0, 8).map((c) => (
+                <div key={c.id} style={{
+                  padding: '7px 10px', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', background: 'var(--surface)',
+                  fontSize: 13, color: 'var(--text)',
+                }}>
+                  {c.label}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 8, lineHeight: 1.5 }}>
+              Say which one and press Enter again.
+            </div>
+          </>
+        )}
         <div style={{ marginTop: 10 }}>
           <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
         </div>
@@ -1388,7 +1426,9 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, 
     );
   }
 
-  if (!preview) return null;
+  const fields = preview.fields.map((f) => f.label).join(' and ');
+  const shown = preview.uniform ? preview.rows.slice(0, 1) : preview.rows;
+  const more = preview.count - preview.rows.length;
 
   return (
     <div style={{
@@ -1399,53 +1439,54 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, 
         <Pencil size={15} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
-            {preview.recordLabel}
+            {summary}
           </div>
-          {preview.recordSub && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{preview.recordSub}</div>
-          )}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            {fields} on {preview.count} {preview.count === 1 ? 'record' : 'records'}
+            {preview.uniform && preview.count > 1 ? ', all the same' : ''}
+          </div>
 
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            display: 'flex', flexDirection: 'column', gap: 1,
             marginTop: 10, padding: '8px 10px',
             background: 'var(--surface-sunken)', border: '1px solid var(--border)',
             borderRadius: 'var(--r-sm)',
           }}>
-            <Label>{preview.fieldLabel}</Label>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
-              {preview.before}
-            </span>
-            <ArrowRight size={13} style={{ color: 'var(--text-subtle)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{preview.after}</span>
+            {shown.map((r, i) => (
+              <div key={`${r.label}-${i}`} style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                padding: '2px 0',
+              }}>
+                {!preview.uniform && <Label>{r.label}</Label>}
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                  {r.before}
+                </span>
+                <ArrowRight size={13} style={{ color: 'var(--text-subtle)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{r.after}</span>
+              </div>
+            ))}
+            {more > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', paddingTop: 4 }}>
+                and {more} more
+              </div>
+            )}
           </div>
 
-          {preview.unchanged && (
+          {preview.rows.every((r) => r.before === r.after) && (
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
               That is what it already says, so nothing would change.
             </div>
           )}
-          {preview.caution && (
-            <div style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 8, lineHeight: 1.5 }}>
-              {preview.caution}
+          {preview.cautions.map((c) => (
+            <div key={c} style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 8, lineHeight: 1.5 }}>
+              {c}
             </div>
-          )}
+          ))}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            {/* Selling is understood here and finished on the stock
-                list, where the price and the commission line are. A
-                Save button that quietly changed a status column would
-                leave the tracker out of step with the yard. */}
-            {preview.handoff === 'markSold'
-              ? (
-                <Button variant="primary" size="sm" onClick={() => onGo(preview.link?.href ?? '/dashboard/sales')}>
-                  {preview.link?.label ?? 'Open the trailer'} <ArrowRight size={12} />
-                </Button>
-              )
-              : (
-                <Button variant="primary" size="sm" onClick={onApply}>
-                  <Check size={12} /> {preview.bulk ? `Change all ${preview.count}` : 'Save it'}
-                </Button>
-              )}
+            <Button variant="primary" size="sm" onClick={onApply}>
+              <Check size={12} /> {preview.count > 1 ? `Change all ${preview.count}` : 'Save it'}
+            </Button>
             <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
           </div>
         </div>
@@ -1453,3 +1494,4 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, 
     </div>
   );
 }
+

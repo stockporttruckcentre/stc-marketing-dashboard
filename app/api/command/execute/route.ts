@@ -36,8 +36,9 @@ async function globalListId(supabase: any): Promise<string | null> {
  *
  * This route inserts contacts, stock and calendar events, and until now
  * it checked nothing beyond being signed in, so a read only viewer could
- * create a trailer through it. Its sibling /api/command/edit has always
- * checked capabilities per field; this is the same check per intent.
+ * create a trailer through it. The canonical mutation path checks
+ * capabilities per field, derived from the plan; this is the same check
+ * per intent.
  *
  * Reads are absent from the map on purpose: RLS already decides which
  * rows come back, and a count of your own trailers is not a privilege.

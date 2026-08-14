@@ -39,8 +39,26 @@
    is read. The third is a fact about the rows and can only be found once
    both steps have resolved, which is why it is checked separately and
    after.
+
+   ONE TRAVERSAL, TWO COLLECTORS, NO PLACE TO HIDE.
+
+   The first version of this file had four walkers: references in an
+   expression, references in a condition, fields in an expression, fields
+   in a condition. Each was a switch listing the members it happened to
+   know about, and each quietly returned for the ones it did not. A
+   dependence inside `agg.where`, inside `window.partitionBy`, inside a
+   `case` arm's condition or inside a `related` subcondition was invisible
+   to all four, which meant a plan could be declared independent because
+   nobody had looked.
+
+   There is now one traversal over the IR, exhaustive on every member of
+   `Expr`, `Cond` and `Source`, ending in a `never` assignment. Adding a
+   member to the IR without teaching this file about it is a compile
+   error rather than a silently missed dependence. The two things this
+   file wants, result references and field reads, are visitors over that
+   one traversal.
    ============================================================= */
-import type { Cond, Expr, Mutate, Source, Step } from './types';
+import type { Cond, Expr, Mutate, Select, Source, Step } from './types';
 import { isResultRef } from './types';
 
 export type Dependence = {
@@ -51,82 +69,195 @@ export type Dependence = {
   why: string;
 };
 
-/* -------------------------------------------------------------
-   Reading a step
-   ------------------------------------------------------------- */
+/* =============================================================
+   The traversal
+   ============================================================= */
 
-/** Every `ResultRef` anywhere in an expression. */
-function refsInExpr(e: Expr, out: Set<string>): void {
+/**
+ * Called for every node, on the way in.
+ *
+ * A visitor never controls recursion. Letting it stop early is how the
+ * first version came to miss whole branches, so the walk is total and
+ * the visitor only decides what to write down.
+ */
+export type Visitor = {
+  expr?(e: Expr): void;
+  cond?(c: Cond): void;
+  source?(s: Source): void;
+};
+
+export function walkExpr(e: Expr, v: Visitor): void {
+  v.expr?.(e);
   switch (e.kind) {
-    case 'result': out.add(e.of.step); return;
-    case 'binary': refsInExpr(e.left, out); refsInExpr(e.right, out); return;
-    case 'shift': refsInExpr(e.of, out); return;
-    case 'duration': refsInExpr(e.from, out); refsInExpr(e.to, out); return;
-    case 'agg': if (e.of) refsInExpr(e.of, out); return;
-    case 'window': refsInExpr(e.of, out); return;
+    case 'field':
+    case 'literal':
+    case 'context':
+    case 'result':
+      return;
+    case 'reference':
+      walkCond(e.where, v);
+      return;
+    case 'shift':
+      walkExpr(e.of, v);
+      return;
+    case 'agg':
+      if (e.of) walkExpr(e.of, v);
+      /* An aggregate carries its own condition and its own partition,
+         and both can name a field. `sum(retail_price) where status is
+         sold, per depot` reads three fields, and a walker that only
+         looked at `of` saw one. */
+      if (e.where) walkCond(e.where, v);
+      (e.partitionBy ?? []).forEach((x) => walkExpr(x, v));
+      return;
+    case 'binary':
+      walkExpr(e.left, v);
+      walkExpr(e.right, v);
+      return;
+    case 'duration':
+      walkExpr(e.from, v);
+      walkExpr(e.to, v);
+      return;
+    case 'window':
+      walkExpr(e.of, v);
+      (e.partitionBy ?? []).forEach((x) => walkExpr(x, v));
+      if (e.orderBy) walkExpr(e.orderBy, v);
+      return;
     case 'case':
-      e.when.forEach((w) => { condRefs(w.if, out); refsInExpr(w.then, out); });
-      if (e.else) refsInExpr(e.else, out);
+      for (const w of e.when) {
+        walkCond(w.if, v);
+        walkExpr(w.then, v);
+      }
+      if (e.else) walkExpr(e.else, v);
       return;
-    case 'reference': condRefs(e.where, out); return;
-    default: return;
+    default: {
+      /* A new expression member reaches here and does not compile. That
+         is the point: the alternative is a dependence nobody looks for. */
+      const unreached: never = e;
+      return unreached;
+    }
   }
 }
 
-function condRefs(c: Cond, out: Set<string>): void {
+export function walkCond(c: Cond, v: Visitor): void {
+  v.cond?.(c);
   switch (c.kind) {
-    case 'and':
-    case 'or': c.of.forEach((x) => condRefs(x, out)); return;
-    case 'not': condRefs(c.of, out); return;
-    case 'cmp': refsInExpr(c.left, out); refsInExpr(c.right, out); return;
-    case 'empty': refsInExpr(c.of, out); return;
-    case 'within': refsInExpr(c.of, out); return;
-    case 'in':
-      refsInExpr(c.of, out);
-      if (Array.isArray(c.values)) c.values.forEach((v) => refsInExpr(v, out));
-      else if (isResultRef(c.values)) out.add(c.values.step);
-      else sourceRefs(c.values, out);
+    case 'cmp':
+      walkExpr(c.left, v);
+      walkExpr(c.right, v);
       return;
-    default: return;
+    case 'between':
+      walkExpr(c.of, v);
+      walkExpr(c.from, v);
+      walkExpr(c.to, v);
+      return;
+    case 'in':
+      walkExpr(c.of, v);
+      if (Array.isArray(c.values)) c.values.forEach((x) => walkExpr(x, v));
+      else walkSource(c.values, v);
+      return;
+    case 'empty':
+      walkExpr(c.of, v);
+      return;
+    case 'within':
+      /* A period holds no expression today. If one ever does, `Period`
+         gains a member and this comment stops being true, which is why
+         the period is not walked silently. */
+      walkExpr(c.of, v);
+      return;
+    case 'near':
+      walkExpr(c.of, v);
+      walkExpr(c.origin, v);
+      return;
+    case 'related':
+      /* The nested condition is about the far side of a relationship and
+         can name any field over there. */
+      if (c.where) walkCond(c.where, v);
+      return;
+    case 'and':
+    case 'or':
+      c.of.forEach((x) => walkCond(x, v));
+      return;
+    case 'not':
+      walkCond(c.of, v);
+      return;
+    default: {
+      const unreached: never = c;
+      return unreached;
+    }
   }
 }
 
-function sourceRefs(s: Source | undefined, out: Set<string>): void {
-  if (!s) return;
-  if (isResultRef(s)) { out.add(s.step); return; }
-  if ('op' in s) {
-    if (s.where) condRefs(s.where, out);
-    if (s.from) sourceRefs(s.from, out);
-    (s.select ?? []).forEach((c) => refsInExpr(c.expr, out));
+export function walkSource(s: Source, v: Visitor): void {
+  v.source?.(s);
+  if (isResultRef(s)) return;
+  if (!('op' in s)) return;                       // an EntityRef names no expression
+
+  const sel = s as Select;
+  walkSource(sel.from, v);
+  if (sel.where) walkCond(sel.where, v);
+  (sel.select ?? []).forEach((c) => walkExpr(c.expr, v));
+
+  if (sel.scope && (sel.scope.kind === 'user' || sel.scope.kind === 'team')) {
+    walkExpr(sel.scope.ref, v);
+  }
+
+  const shape = sel.shape;
+  if (shape) {
+    (shape.groupBy ?? []).forEach((x) => walkExpr(x, v));
+    if (shape.having) walkCond(shape.having, v);
+    (shape.orderBy ?? []).forEach((o) => walkExpr(o.by, v));
+    if (shape.compare && 'by' in shape.compare) {
+      walkExpr(shape.compare.by, v);
+      (shape.compare.values ?? []).forEach((x) => walkExpr(x, v));
+    }
   }
 }
 
-/** Every step whose result this one consumes. */
-export function consumes(s: Step): string[] {
-  const out = new Set<string>();
+/** Every expression, condition and source a step contains. */
+export function walkStep(s: Step, v: Visitor): void {
   switch (s.op) {
     case 'select':
-      sourceRefs(s.from, out);
-      if (s.where) condRefs(s.where, out);
-      (s.select ?? []).forEach((c) => refsInExpr(c.expr, out));
-      break;
+      walkSource(s, v);
+      return;
     case 'create':
     case 'update':
-    case 'delete':
-      sourceRefs(s.match, out);
-      (s.set ?? []).forEach((a) => refsInExpr(a.to, out));
-      break;
+    case 'delete': {
+      const m = s as Mutate;
+      if (m.match) walkSource(m.match, v);
+      (m.set ?? []).forEach((a) => walkExpr(a.to, v));
+      return;
+    }
     case 'invoke':
-      sourceRefs(s.subject, out);
+      if (s.subject) walkSource(s.subject, v);
       for (const a of Object.values(s.args ?? {})) {
-        if (isResultRef(a)) out.add(a.step);
-        else refsInExpr(a, out);
+        if (isResultRef(a)) v.source?.(a);
+        else walkExpr(a, v);
       }
-      break;
+      return;
     case 'emit':
-      sourceRefs(s.from, out);
-      break;
+      walkSource(s.from, v);
+      if (s.to.kind === 'share') s.to.with.forEach((x) => walkExpr(x, v));
+      if (s.to.kind === 'email') s.to.to.forEach((x) => walkExpr(x, v));
+      if (s.to.kind === 'attach') walkSource(s.to.to, v);
+      return;
+    default: {
+      const unreached: never = s;
+      return unreached;
+    }
   }
+}
+
+/* =============================================================
+   What the traversal is asked for
+   ============================================================= */
+
+/** Every step whose result this one consumes, anywhere inside it. */
+export function consumes(s: Step): string[] {
+  const out = new Set<string>();
+  walkStep(s, {
+    expr: (e) => { if (e.kind === 'result') out.add(e.of.step); },
+    source: (x) => { if (isResultRef(x)) out.add(x.step); },
+  });
   return [...out];
 }
 
@@ -137,71 +268,51 @@ export function writesFields(s: Step): string[] {
   return (m.set ?? []).map((a) => `${a.field.entity}.${a.field.field}`);
 }
 
-function fieldsInExpr(e: Expr, out: Set<string>): void {
-  switch (e.kind) {
-    case 'field': if (!('via' in e.of)) out.add(`${e.of.entity}.${e.of.field}`); return;
-    case 'binary': fieldsInExpr(e.left, out); fieldsInExpr(e.right, out); return;
-    case 'shift': fieldsInExpr(e.of, out); return;
-    case 'duration': fieldsInExpr(e.from, out); fieldsInExpr(e.to, out); return;
-    case 'agg': if (e.of) fieldsInExpr(e.of, out); return;
-    case 'window': fieldsInExpr(e.of, out); return;
-    case 'case':
-      e.when.forEach((w) => { condFields(w.if, out); fieldsInExpr(w.then, out); });
-      if (e.else) fieldsInExpr(e.else, out);
-      return;
-    case 'reference': condFields(e.where, out); return;
-    default: return;
-  }
-}
-
-function condFields(c: Cond, out: Set<string>): void {
-  switch (c.kind) {
-    case 'and':
-    case 'or': c.of.forEach((x) => condFields(x, out)); return;
-    case 'not': condFields(c.of, out); return;
-    case 'cmp': fieldsInExpr(c.left, out); fieldsInExpr(c.right, out); return;
-    case 'empty': fieldsInExpr(c.of, out); return;
-    case 'within': fieldsInExpr(c.of, out); return;
-    case 'in':
-      fieldsInExpr(c.of, out);
-      if (Array.isArray(c.values)) c.values.forEach((v) => fieldsInExpr(v, out));
-      return;
-    default: return;
-  }
-}
-
 /**
- * Every `entity.field` this step reads, to choose rows or to compute a
- * value.
+ * Every field this step reads, to choose rows or to compute a value.
  *
- * Both, because both go wrong in the same way. A step selecting on a
- * status another step is writing picks rows by a status that is about to
+ * Both, because both go wrong the same way. A step selecting on a status
+ * another step is writing picks rows by a status that is about to
  * change, and a step computing from a price another step is writing
- * computes from a price that is about to change. Neither is a thing the
+ * computes from a price that is about to change. Neither is what the
  * person typing meant.
+ *
+ * A field reached through a relationship is recorded as `*.name`,
+ * because which entity it lands on depends on resolving the path and
+ * this runs before anything is resolved. `reads` treats that as matching
+ * any write of a field with that name, which can refuse a plan that
+ * would have been safe. That is the direction to be wrong in: the cost
+ * of a false refusal is being asked to type two sentences, and the cost
+ * of a missed dependence is a number that was never true.
  */
 export function readsFields(s: Step): string[] {
   const out = new Set<string>();
-  if (s.op === 'update' || s.op === 'delete' || s.op === 'create') {
-    const m = s as Mutate;
-    const match = m.match;
-    if (match && !isResultRef(match) && 'op' in match && match.where) condFields(match.where, out);
-    for (const a of m.set ?? []) {
-      fieldsInExpr(a.to, out);
-      /* Appending reads what is there before it adds a line. */
+  walkStep(s, {
+    expr: (e) => {
+      if (e.kind !== 'field') return;
+      out.add('via' in e.of ? `*.${e.of.field}` : `${e.of.entity}.${e.of.field}`);
+    },
+  });
+  /* Appending reads what is there before it adds a line. Nothing in the
+     expression says so: `to` is the new line on its own. */
+  if (s.op === 'update' || s.op === 'create') {
+    for (const a of (s as Mutate).set ?? []) {
       if (a.mode === 'append') out.add(`${a.field.entity}.${a.field.field}`);
     }
-  }
-  if (s.op === 'select') {
-    if (s.where) condFields(s.where, out);
-    (s.select ?? []).forEach((c) => fieldsInExpr(c.expr, out));
   }
   return [...out];
 }
 
-/* -------------------------------------------------------------
+/** Does a read of `read` see what a write of `written` changes? */
+function readSees(read: string, written: string): boolean {
+  if (read === written) return true;
+  /* A path read landed on some entity this cannot name yet. */
+  return read.startsWith('*.') && read.slice(2) === written.split('.').slice(1).join('.');
+}
+
+/* =============================================================
    The check
-   ------------------------------------------------------------- */
+   ============================================================= */
 
 /**
  * Every dependence between the effect steps of one plan.
@@ -236,12 +347,13 @@ export function dependencesAmong(effects: Step[]): Dependence[] {
 
   /* 2. One step reading a field another writes. */
   for (const a of effects) {
-    const written = new Set(writesFields(a));
-    if (!written.size) continue;
+    const written = writesFields(a);
+    if (!written.length) continue;
     for (const b of effects) {
       if (a === b) continue;
       for (const read of readsFields(b)) {
-        if (!written.has(read)) continue;
+        const hit = written.find((w) => readSees(read, w));
+        if (!hit) continue;
         found.push({
           stepId: b.id ?? '?', needs: a.id ?? '?',
           why: `it reads ${read}, which "${a.id ?? '?'}" changes, and both would be carried out at once`,

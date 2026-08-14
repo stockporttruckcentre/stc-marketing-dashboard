@@ -30,8 +30,11 @@
    from the plan.
    ============================================================= */
 import { parseQuery, type QueryPlan } from './query';
+import { parseEdit, type EditPlan } from './mutate';
 import type { VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
+import { adaptEditPlan } from './ir/adapt-edit';
+import type { CrmCapabilities, CrmCapability } from '@/lib/crm/permissions';
 import {
   validate, completion, derivedRequirements, needsConfirmation,
   type Problem, type Requirement, type Completion,
@@ -74,6 +77,16 @@ export type Availability = {
 export type CommandPlanning = {
   /** Exactly what was typed. */
   text: string;
+  /**
+   * A question or an instruction.
+   *
+   * Decided here, once, and never again by anybody downstream. The bar
+   * used to decide it for itself by calling the instruction reader
+   * directly, which meant the semantic authority for a write lived in
+   * the browser while the semantic authority for a read lived on the
+   * server. Two authorities for one sentence is one too many.
+   */
+  kind: 'read' | 'mutate';
   /** The canonical plan. The single semantic authority. */
   plan: Plan;
   /**
@@ -156,6 +169,16 @@ export function planCommand(
   text: string,
   opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
 ): CommandPlanning | null {
+  /* AN INSTRUCTION WINS OVER THE QUESTION ITS WORDS COULD ALSO BE.
+
+     "Add £1k refurb to STC143980" is a sentence about trailers, and
+     answering it with a count looks like it worked. So the instruction
+     reader goes first, exactly as it did in the bar, and what changes is
+     only that the decision now happens here where the server can make
+     it too. */
+  const write = readInstruction(text, opts);
+  if (write) return write;
+
   const read: QueryPlan | null = parseQuery(text, opts?.vocabulary);
   if (!read) return null;
 
@@ -163,6 +186,7 @@ export function planCommand(
 
   return {
     text,
+    kind: 'read',
     plan,
     select,
     problems: validate(plan),
@@ -183,6 +207,69 @@ export function planCommand(
     },
   };
 }
+
+/**
+ * The instruction reader, if this sentence is one.
+ *
+ * The threshold is the one the bar has always used: nothing missing, and
+ * confident enough to act on. A half instruction is somebody part way
+ * through a sentence, and treating it as a refused mutation would take
+ * the words away from the question engine for anybody who was about to
+ * ask about the same column.
+ *
+ * `parseEdit` needs the actor because a field nobody may write is not a
+ * field this sentence can be about. Passing no actor means no
+ * instruction is read at all, which is the safe direction: the bar
+ * always knows who it is, and a caller that does not should not be
+ * planning writes.
+ */
+function readInstruction(
+  text: string,
+  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+  if (text.trim().length < 4) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const edit: EditPlan | null = parseEdit(text, caps, opts.vocabulary);
+  if (!edit) return null;
+  if (edit.missing.length > 0 || edit.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const { plan } = adaptEditPlan(edit);
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: edit.summary,
+      confidence: edit.confidence,
+      amountLabel: null,
+      groupLabel: null,
+      orderLabel: null,
+      derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * How sure the instruction reader has to be before a sentence is an
+ * instruction rather than a question.
+ *
+ * Named rather than typed inline in two places, because the bar and the
+ * server disagreeing about this number is the same class of bug as them
+ * disagreeing about the vocabulary.
+ */
+const INSTRUCTION_THRESHOLD = 10;
 
 /**
  * The wire body for the existing read executor.
