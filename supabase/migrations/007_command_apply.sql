@@ -58,9 +58,12 @@ CREATE POLICY "command_writable_read" ON command_writable_columns
 --      "id": "0000-...",
 --      "set": { "retail_price": 24995 } }, ...]
 --
--- Returns how many rows were actually changed, which the caller
--- compares with how many it previewed. Fewer means RLS silently
--- withheld some, and that is a failure rather than a partial success.
+-- Returns how many rows were changed, which will always equal how many
+-- were requested: every change must affect exactly one row, and one
+-- that does not raises and rolls the whole call back. A row RLS
+-- withholds and a row somebody has deleted both look like an UPDATE
+-- affecting nothing, which Postgres does not consider an error, so this
+-- is the only place that difference can still be acted on.
 CREATE OR REPLACE FUNCTION command_apply(p_changes JSONB)
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -122,7 +125,21 @@ BEGIN
     )
     USING assignments, row_id;
 
+    -- EXACTLY ONE ROW, OR NOTHING HAPPENS AT ALL.
+    --
+    -- An UPDATE that matches nothing is not an error in Postgres, so
+    -- without this the function would sail past a row RLS withheld or a
+    -- row somebody deleted, and every other change would commit. The
+    -- caller comparing counts afterwards is too late: the transaction
+    -- has already ended. Raising here is what makes the preview's
+    -- promise true, because it is the only point at which the whole
+    -- thing can still be undone.
     GET DIAGNOSTICS affected = ROW_COUNT;
+    IF affected <> 1 THEN
+      RAISE EXCEPTION
+        'expected to change exactly one row of % but changed %; nothing has been changed',
+        target, affected;
+    END IF;
     touched := touched + affected;
   END LOOP;
 
@@ -167,6 +184,7 @@ DECLARE
   v_order_date DATE;
   v_stock_updated BOOLEAN := FALSE;
   v_cascaded  INTEGER := 0;
+  v_affected  INTEGER := 0;
 BEGIN
   SELECT * INTO deal FROM crm_contacts WHERE id = p_tracker_id;
   IF NOT FOUND THEN
@@ -189,6 +207,14 @@ BEGIN
     dispatch_date = COALESCE(p_dispatch_date, deal.dispatch_date)
   WHERE id = p_tracker_id;
 
+  -- The deal was found a moment ago, so an update affecting nothing
+  -- means RLS allows reading it and not writing it. Carrying on would
+  -- flip the stock unit to sold with no sale recorded against anybody.
+  GET DIAGNOSTICS v_affected = ROW_COUNT;
+  IF v_affected <> 1 THEN
+    RAISE EXCEPTION 'the deal could not be updated; nothing has been changed';
+  END IF;
+
   IF deal.stock_trailer_id IS NOT NULL THEN
     UPDATE stock_trailers SET
       status        = 'sold',
@@ -200,11 +226,22 @@ BEGIN
       dispatch_date = COALESCE(p_dispatch_date, dispatch_date)
     WHERE id = deal.stock_trailer_id;
 
-    GET DIAGNOSTICS v_cascaded = ROW_COUNT;
-    v_stock_updated := v_cascaded > 0;
+    -- The unit is part of the sale, not an optional extra. A deal
+    -- linked to a trailer that did not change leaves the deal won and
+    -- the trailer still showing as available, which is the state this
+    -- whole operation exists to remove.
+    GET DIAGNOSTICS v_affected = ROW_COUNT;
+    IF v_affected <> 1 THEN
+      RAISE EXCEPTION
+        'the stock unit could not be updated; nothing has been changed';
+    END IF;
+    v_stock_updated := TRUE;
 
     -- First to sell wins. Everybody else chasing the unit sees it as
     -- gone, and keeps an empty commission, because they did not sell it.
+    -- Zero here is fine and often right: there may be nobody else
+    -- chasing this unit. This is the one count that is not required to
+    -- be one.
     UPDATE crm_contacts SET status = 'customer'
     WHERE stock_trailer_id = deal.stock_trailer_id
       AND id <> p_tracker_id

@@ -7,13 +7,12 @@
    against which ids, with which values, and what the rows hold
    afterwards.
 
-   WHAT THIS DOES NOT PROVE, said plainly. There is no Postgres here, so
-   it does not prove RLS accepts the write, that a NOT NULL constraint
-   holds, or that a trigger leaves the value alone. The fake is written
-   so the same case bodies can be pointed at a real database when one is
-   available; until then those three remain unproven, and the
-   `clearable` metadata plus `check:fields` is what stands in for the
-   constraint half.
+   WHAT THIS DOES NOT PROVE. The fake behaves the way PostgREST is
+   expected to behave, so this proves the executor sends the right call
+   and nothing about whether the SQL works. That half is
+   `scripts/sql/validate-007.sql`, which runs against a real PostgreSQL
+   16 and covers the types, the constraints, row level security and the
+   transaction boundaries. See `scripts/sql/README.md`.
 
      npm run check:mutation
    ============================================================= */
