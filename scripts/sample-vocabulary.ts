@@ -26,7 +26,7 @@
    ============================================================= */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyVocabulary } from '../lib/command/vocab';
+import { buildIndex, type VocabularyIndex } from '../lib/command/vocab';
 
 const SOURCE = join(process.cwd(), 'app/api/admin/import-sold-2026/rows.json');
 
@@ -65,7 +65,7 @@ function distinct(rows: Row[], column: string): { value: string; rows: number }[
  */
 import { DEPOTS } from '../lib/command/lexicon';
 
-export function loadSampleVocabulary(): void {
+export function loadSampleVocabulary(): VocabularyIndex {
   const rows = realRows();
 
   const depots = [
@@ -73,7 +73,7 @@ export function loadSampleVocabulary(): void {
     ...[...new Set(Object.values(DEPOTS))].map((value) => ({ value, rows: 1 })),
   ];
 
-  applyVocabulary({
+  return buildIndex({
     trailers: {
       make: distinct(rows, 'make'),
       model: distinct(rows, 'model'),

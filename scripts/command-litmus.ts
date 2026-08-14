@@ -40,7 +40,7 @@
 
      npm run check:litmus
    ============================================================= */
-import { parseQuery, type QueryPlan } from '../lib/command/query';
+import { parseQuery as readQuery, type QueryPlan } from '../lib/command/query';
 import { parseEdit } from '../lib/command/mutate';
 import { readGrammar, type Operation } from '../lib/command/grammar';
 import { capabilitiesFor } from '../lib/crm/permissions';
@@ -50,7 +50,10 @@ const caps = capabilitiesFor({ role: 'admin' });
 
 /* The values the real database holds, which the app loads for itself on
    first paint. Read from STC's own stock rows, not written by hand. */
-loadSampleVocabulary();
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 /* -------------------------------------------------------------
    What the engine produced, in one shape.

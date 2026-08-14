@@ -43,7 +43,7 @@
 
      npm run check:ir
    ============================================================= */
-import { parseQuery, type QueryPlan } from '../lib/command/query';
+import { parseQuery as readQuery, type QueryPlan } from '../lib/command/query';
 import { adaptQueryPlan } from '../lib/command/ir/adapt';
 import { validate, derivedRequirements } from '../lib/command/ir/validate';
 import type { Cond, Expr, Select, EntityRef } from '../lib/command/ir/types';
@@ -52,7 +52,10 @@ import { BODY_TYPES, DEPOTS, STATE_PHRASES } from '../lib/command/lexicon';
 import { ENTITIES } from '../lib/command/schema';
 import { loadSampleVocabulary } from './sample-vocabulary';
 
-loadSampleVocabulary();
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 /* =============================================================
    The canonical description of a sentence's meaning.

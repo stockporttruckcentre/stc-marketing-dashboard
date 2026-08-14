@@ -13,7 +13,7 @@
 
      npm run check:sweep
    ============================================================= */
-import { parseQuery } from '../lib/command/query';
+import { parseQuery as readQuery } from '../lib/command/query';
 import { parseEdit } from '../lib/command/mutate';
 import { parseSelection } from '../lib/command/select';
 import { suggestActions } from '../lib/command/actions';
@@ -23,7 +23,10 @@ import { capabilitiesFor } from '../lib/crm/permissions';
 import { loadSampleVocabulary, sampleSize } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
-loadSampleVocabulary();
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 const SENTENCES = [
   'Carrington, how many curtainsiders have we got sat there?',

@@ -33,13 +33,16 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIONS, suggestActions } from '../lib/command/actions';
 import { parseEdit } from '../lib/command/mutate';
-import { parseQuery } from '../lib/command/query';
+import { parseQuery as readQuery } from '../lib/command/query';
 import { parse } from '../lib/command/intents';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { loadSampleVocabulary } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
-loadSampleVocabulary();
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 const read = (p: string) => {
   try { return readFileSync(join(process.cwd(), p), 'utf8'); } catch { return ''; }

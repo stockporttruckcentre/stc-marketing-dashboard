@@ -20,7 +20,7 @@ import {
   STATE_PHRASES, STATE_LABEL, BODY_TYPES, isReservedWord,
 } from './lexicon';
 import { readGrammar, DERIVED, type Grammar, type How } from './grammar';
-import { findValues } from './vocab';
+import { findValues, EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
 import { columnNamed } from './attributes';
 
 export type PlanFilter = {
@@ -176,6 +176,7 @@ function pickMeasure(text: string): { measure: Measure; hit: string } {
  */
 function pickEntity(
   text: string,
+  vocabulary: VocabularyIndex,
   grammar?: Grammar,
 ): { entity: EntitySpec; at: number; noun: string; weak?: boolean } | null {
   const t = ` ${text.toLowerCase()} `;
@@ -247,7 +248,7 @@ function pickEntity(
      make, and a make only exists on trailers, which names the thing
      without anybody listing a single manufacturer. Empty index, no
      behaviour change: this is the last resort before giving up. */
-  const fromData = findValues(text);
+  const fromData = findValues(vocabulary, text);
   if (fromData.length) {
     const votes = new Map<string, { entity: EntitySpec; at: number; weight: number }>();
     for (const v of fromData) {
@@ -347,7 +348,22 @@ function readYear(text: string): { op: 'gte' | 'lte' | 'eq'; year: number; label
   return null;
 }
 
-export function parseQuery(input: string): QueryPlan | null {
+export function parseQuery(
+  input: string,
+  /**
+   * The values the database holds, for whoever is asking.
+   *
+   * An argument rather than something this module looks up, because
+   * what a sentence means depends on it and different people can see
+   * different values. Two sentences read with two indexes are two
+   * independent reads with nothing shared between them, which is what
+   * lets one server plan for two people at once.
+   *
+   * Defaulting to the empty index makes "no vocabulary" a value
+   * somebody chose rather than a load they forgot.
+   */
+  vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
+): QueryPlan | null {
   const raw = input.trim();
   if (raw.length < 3) return null;
 
@@ -369,7 +385,7 @@ export function parseQuery(input: string): QueryPlan | null {
   const grammar = readGrammar(raw);
   const ops = grammar.operations;
 
-  const picked = pickEntity(text, grammar);
+  const picked = pickEntity(text, vocabulary, grammar);
   if (!picked) return null;
   const entity = picked.entity;
   const lower = text.toLowerCase();
@@ -580,7 +596,7 @@ export function parseQuery(input: string): QueryPlan | null {
     /* A name after "for" is usually the rep. "Average stock age for DAF
        versus Volvo" is not: DAF is in the make column, and the data
        saying so beats a preposition every time. */
-    const isSomethingElse = who && findValues(who).some((v) =>
+    const isSomethingElse = who && findValues(vocabulary, who).some((v) =>
       v.hits.some((h) => h.entity === entity.id && h.column !== repSpec.column));
     if (who && !isSomethingElse) {
       filters.push({ key: repSpec.key, column: repSpec.column, op: 'ilike', value: who, label: `by ${who}` });
@@ -648,7 +664,7 @@ export function parseQuery(input: string): QueryPlan | null {
      This is also what stops a customer being read as a depot. The old
      rule was that "in X" means a place, which is right until somebody
      writes "trailers in Dawsongroup's colours". */
-  for (const found of findValues(text)) {
+  for (const found of findValues(vocabulary, text)) {
     const hit = found.hits.find((h) => h.entity === entity.id);
     if (!hit) continue;
     if (filters.some((x) => x.column === hit.column)) continue;
@@ -894,7 +910,7 @@ export function parseQuery(input: string): QueryPlan | null {
        holds both of them, so "DAF versus Volvo" compares makes and
        "Carrington against Hyde" compares depots, with nothing written
        down about either. */
-    const col = columnHolding(entity, compareOp.against);
+    const col = columnHolding(entity, vocabulary, compareOp.against);
     if (col) {
       compare = { column: col.column, label: col.label, values: col.values ?? compareOp.against };
       /* Comparing IS grouping, on the attribute being compared. */
@@ -1003,10 +1019,11 @@ function DERIVED_FOR(entity: EntitySpec, id: string, from: string): QueryPlan['d
 /** Which column holds both of these values. */
 function columnHolding(
   entity: EntitySpec,
+  vocabulary: VocabularyIndex,
   values: string[],
 ): { column: string; label: string; values?: string[] } | null {
   // The data knows first: two makes are two rows in the make column.
-  const hits = values.map((v) => findValues(v));
+  const hits = values.map((v) => findValues(vocabulary, v));
   if (hits.every((h) => h.length)) {
     const shared = hits[0].flatMap((h) => h.hits)
       .filter((a) => hits.slice(1).every((rest) =>

@@ -735,23 +735,26 @@ cache, not an assumption.
 
 ```ts
 planCommand(text, { actorCapabilities, vocabulary })
+  -> parseQuery(text, vocabulary)
 ```
 
-`vocabularyFor(supabase, userId)` returns an index; it installs nothing.
-`planAuthoritatively` awaits it and hands it to `planCommand`, which
-installs it and reads in one synchronous run:
+`vocabularyFor(supabase, userId)` returns an index; nothing installs
+one, because there is nowhere to install one. `lib/command/vocab.ts`
+holds no index: it builds them, merges them, and searches whichever one
+it is handed. `EMPTY_VOCABULARY` is a frozen empty index, so "no
+vocabulary" is a value somebody chose rather than a load they forgot.
 
-```ts
-if (opts?.vocabulary) installVocabulary(opts.vocabulary);
-const read = parseQuery(text);
-```
+The first version of this threaded the index as far as `planCommand` and
+then installed it into a module global for one synchronous statement
+before reading. That was safe, because nothing could interleave between
+two synchronous statements, but it was safe by argument rather than by
+construction. Now two reads with two indexes are two independent reads
+and the order they happen in cannot matter, which is a property rather
+than a rule somebody has to keep.
 
-Those two statements are one unit. Nothing may be awaited between them,
-because an await is where another request gets to install its own, and
-`planCommand` is synchronous so nothing can interleave inside it. The
-reader underneath still reads a module global; rewriting it to take the
-index directly removes even that, and is a reader migration rather than
-this job.
+The browser holds its index in component state for the same reason. It
+serves one person, but an index that lives in a module is an index two
+callers can disagree about.
 
 `check:authority` proves the isolation with two actors in ONE process,
 interleaved and concurrent, with no reset between them. The previous

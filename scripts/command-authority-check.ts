@@ -64,7 +64,7 @@
 import { readFileSync } from 'fs';
 import { planAuthoritatively, planForExecution, planHash } from '../lib/command/server/planner';
 import { vocabularyFor, resetVocabularyCaches, cachedActors } from '../lib/command/server/vocabulary';
-import { buildIndex, clearVocabulary, type VocabularySnapshot } from '../lib/command/vocab';
+import { buildIndex, EMPTY_VOCABULARY, type VocabularySnapshot } from '../lib/command/vocab';
 import { planCommand } from '../lib/command/plan';
 import { capabilitiesFor } from '../lib/crm/permissions';
 
@@ -81,12 +81,13 @@ const source = (path: string) => readFileSync(path, 'utf8');
 /**
  * A vocabulary source over a known snapshot.
  *
- * NOTHING IS RESET HERE, deliberately. The previous version cleared the
+ * NOTHING IS RESET HERE, deliberately. An early version cleared a
  * process wide index before every case, which is what made it blind to
  * the defect it should have caught: a check that starts each case from
  * an empty world cannot notice that the world is shared. Every case
  * below runs in whatever state the previous one left behind, which is
- * what a server does.
+ * what a server does. There is no longer any state for it to leave, and
+ * that is the property, not the setup.
  */
 function withVocabulary(snapshot: VocabularySnapshot) {
   const index = buildIndex(snapshot);
@@ -209,8 +210,11 @@ ok('a viewer is offered the question exactly when permissions.ts allows it',
    the server will refuse. This is the defect: the bar computed the
    capabilities and then planned without them. */
 const bar = source('components/dashboard/CommandBar.tsx');
-ok('the command bar plans locally with the actor capabilities',
-  /planCommand\(text, \{ actorCapabilities: caps \}\)/.test(bar));
+ok('the command bar plans locally with the actor capabilities and its own index',
+  /planCommand\(text, \{ actorCapabilities: caps, vocabulary \}\)/.test(bar));
+ok('the command bar holds its index in state rather than in a module',
+  /useState<VocabularyIndex>\(EMPTY_VOCABULARY\)/.test(bar)
+  && /setVocabularyIndex\(buildIndex\(j\.vocabulary\)\)/.test(bar));
 ok('the command bar does not offer what the actor is not permitted',
   /availability\.permitted !== false/.test(bar));
 ok('the command bar shows the meaning the server planned, not one it worked out',
@@ -559,16 +563,100 @@ ok('the file records why there is no shared cache',
   /006_meeting_invites/.test(vocabSource));
 
 const planSource = source('lib/command/plan.ts');
-const planBody = planSource.slice(planSource.indexOf('export function planCommand'));
-const install = planBody.indexOf('installVocabulary');
-const parse = planBody.indexOf('parseQuery(text)');
-ok('planCommand installs the vocabulary and then reads, with nothing between',
-  install > 0 && parse > install
-  && !/await/.test(planBody.slice(install, parse)),
-  planBody.slice(install, parse + 20).replace(/\s+/g, ' '));
+ok('planCommand hands the index to the reader rather than installing it',
+  /parseQuery\(text, opts\?\.vocabulary\)/.test(planSource)
+  && !/installVocabulary/.test(planSource));
 ok('planCommand is synchronous, so nothing can interleave inside it',
   /export function planCommand/.test(planSource)
   && !/export async function planCommand/.test(planSource));
+
+/* =============================================================
+   7. There is no global index left to install into
+
+   The last piece of ambient semantic state. `parseQuery` now takes the
+   index it should read with, so two reads with two indexes are two
+   independent reads and the order they happen in cannot matter.
+   ============================================================= */
+
+const vocabModule = source('lib/command/vocab.ts');
+ok('the vocabulary module holds no index of its own',
+  !/installVocabulary|clearVocabulary|applyVocabulary/.test(vocabModule)
+  && !/^let INDEX/m.test(vocabModule));
+ok('lookup and search read the index they are given',
+  /export function lookupValue\(index: VocabularyIndex, word: string\)/.test(vocabModule)
+  && /index: VocabularyIndex, text: string,/.test(vocabModule));
+ok('an empty vocabulary is an explicit value, not a load somebody forgot',
+  /export const EMPTY_VOCABULARY: VocabularyIndex/.test(vocabModule));
+
+const querySource = source('lib/command/query.ts');
+ok('the reader takes the index and never looks one up',
+  /vocabulary: VocabularyIndex = EMPTY_VOCABULARY/.test(querySource)
+  && !/installVocabulary/.test(querySource));
+const lookups = querySource.split('findValues(').length - 1;
+const passed = querySource.split('findValues(vocabulary,').length - 1;
+ok('and passes it to every value lookup it makes',
+  lookups > 0 && lookups === passed, `${passed}/${lookups} calls carry the index`);
+
+/* Nowhere in the application installs an index, because there is
+   nowhere to install one. */
+for (const path of [
+  'lib/command/plan.ts', 'lib/command/query.ts', 'lib/command/vocab.ts',
+  'lib/command/server/planner.ts', 'lib/command/server/vocabulary.ts',
+  'components/dashboard/CommandBar.tsx',
+]) {
+  ok(`${path} installs no vocabulary`, !/installVocabulary/.test(source(path)));
+}
+
+/* --- interleaved reads with different indexes --- */
+
+const idxA = buildIndex({ trailers: { make: [{ value: 'Onlyalpha', rows: 2 }] } });
+const idxB = buildIndex({ trailers: { make: [{ value: 'Onlybeta', rows: 2 }] } });
+const qA = 'how many Onlyalpha trailers in stock';
+const qB = 'how many Onlybeta trailers in stock';
+
+/* What each sentence means when read entirely on its own. */
+const aloneA = planHash(planCommand(qA, { vocabulary: idxA })!.plan);
+const aloneB = planHash(planCommand(qB, { vocabulary: idxB })!.plan);
+const aloneAEmpty = planHash(planCommand(qA, { vocabulary: EMPTY_VOCABULARY })!.plan);
+
+ok('each index is load bearing on its own sentence',
+  aloneA !== aloneAEmpty
+  && JSON.stringify(planCommand(qA, { vocabulary: idxA })!.plan).includes('Onlyalpha'));
+
+/* Now the same reads, interleaved in an order chosen to defeat any
+   carried over state: A, B, A with nothing, B, A. Every one must equal
+   what it produced alone. */
+const interleaved = [
+  [qA, idxA, aloneA],
+  [qB, idxB, aloneB],
+  [qA, EMPTY_VOCABULARY, aloneAEmpty],
+  [qB, idxB, aloneB],
+  [qA, idxA, aloneA],
+  [qB, EMPTY_VOCABULARY, planHash(planCommand(qB, { vocabulary: EMPTY_VOCABULARY })!.plan)],
+  [qA, idxA, aloneA],
+] as const;
+let independent = true;
+for (const [text, index, expected] of interleaved) {
+  independent = independent
+    && planHash(planCommand(text, { vocabulary: index })!.plan) === expected;
+}
+ok('interleaved reads with different indexes each mean what they mean alone', independent);
+
+/* And concurrently, which is what a server does. Promise.all resolves
+   them in an order nobody controls; each still reads its own index
+   because there is nothing between them to share. */
+const concurrent = await Promise.all(interleaved.map(async ([text, index, expected]) => {
+  await Promise.resolve();
+  return planHash(planCommand(text, { vocabulary: index })!.plan) === expected;
+}));
+ok('and concurrently, resolved in whatever order the runtime chooses',
+  concurrent.every(Boolean));
+
+/* A read with no index at all does not pick anything up from the reads
+   around it. */
+ok('a read given no vocabulary sees no vocabulary',
+  !JSON.stringify(planCommand(qA)!.plan).includes('Onlyalpha')
+  && !JSON.stringify(planCommand(qB)!.plan).includes('Onlybeta'));
 
 const plannerBody = plannerSource.slice(
   plannerSource.indexOf('export async function planAuthoritatively'),
@@ -579,7 +667,6 @@ ok('the planner awaits the vocabulary before planning and not after',
 
 /* ============================================================= */
 
-clearVocabulary();
 resetVocabularyCaches();
 
 }

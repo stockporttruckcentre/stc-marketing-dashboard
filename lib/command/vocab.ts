@@ -56,22 +56,29 @@ export type VocabularySnapshot =
 /**
  * word (lowercased) -> everywhere that word is a value
  *
- * An index is a VALUE. This module holds whichever one is currently
- * installed, because the reader underneath still reads a module global
- * and rewriting the reader is a separate job. Everything above it now
- * passes an index around explicitly.
+ * An index is a VALUE and nothing in this module holds one. It is
+ * built, passed to whoever is reading a sentence, and discarded.
  *
- * That distinction is not academic. Some of these values are visible to
- * one person and not another: `crm_contacts` restricts SELECT to rows
- * on a global list, a list you own, or a list shared with you, so the
- * company names and owners it yields differ per user. One process wide
- * index shared across requests meant whoever refreshed it last decided
- * what everybody else's sentences meant, and a value only one person
- * could see became a value everybody's bar could resolve.
+ * That is not tidiness. Some of these values are visible to one person
+ * and not another: `crm_contacts` restricts SELECT to rows on a global
+ * list, a list you own, or a list shared with you, so the company names
+ * and owners it yields differ per user. While this module held one
+ * index, whoever refreshed it last decided what everybody else's
+ * sentences meant, and a value only one person could see became a value
+ * everybody's bar could resolve. The fix put the index in the caller's
+ * hands and left a synchronous install underneath; this removes the
+ * install as well, so there is no shared thing left to get wrong.
  */
 export type VocabularyIndex = ReadonlyMap<string, ValueHit[]>;
 
-let INDEX: Map<string, ValueHit[]> = new Map();
+/**
+ * What a reader gets when nobody supplied one.
+ *
+ * Frozen, empty, and shared safely because there is nothing in it. This
+ * is what makes "no vocabulary" an explicit value rather than the
+ * absence of a load somebody forgot to do.
+ */
+export const EMPTY_VOCABULARY: VocabularyIndex = new Map();
 
 /** Columns worth indexing: declared free text, on a declared entity. */
 function indexable(entityId: string, column: string): { key: string } | null {
@@ -111,25 +118,13 @@ export function buildIndex(snapshot: VocabularySnapshot): VocabularyIndex {
   return index;
 }
 
-/** One index from several, for combining differently scoped sources. */
+/** One index from several, for combining differently sourced values. */
 export function mergeIndexes(...parts: VocabularyIndex[]): VocabularyIndex {
   const out = new Map<string, ValueHit[]>();
   for (const part of parts) {
     for (const [word, hits] of part) out.set(word, [...(out.get(word) ?? []), ...hits]);
   }
   return out;
-}
-
-/**
- * Put an index in place. Synchronous, and the only way this changes.
- *
- * The caller is responsible for the one rule that matters: install the
- * index that belongs to the actor being planned for, and plan in the
- * same synchronous run. Nothing may be awaited in between, because an
- * await is where another request gets to install its own.
- */
-export function installVocabulary(index: VocabularyIndex): void {
-  INDEX = index as Map<string, ValueHit[]>;
 }
 
 function forms(value: string): string[] {
@@ -147,28 +142,30 @@ const STOP = new Set([
 ]);
 
 /**
- * Everywhere this word is a stored value.
+ * Everywhere this word is a stored value, according to ONE index.
  *
  * Plurals are handled because people type them: "DAFs" and "Volvos" are
  * how anybody refers to more than one.
  */
-export function lookupValue(word: string): ValueHit[] {
+export function lookupValue(index: VocabularyIndex, word: string): ValueHit[] {
   const w = word.toLowerCase().trim();
-  const direct = INDEX.get(w);
+  const direct = index.get(w);
   if (direct?.length) return direct;
   if (w.endsWith('s')) {
-    const singular = INDEX.get(w.slice(0, -1));
+    const singular = index.get(w.slice(0, -1));
     if (singular?.length) return singular;
   }
   if (w.endsWith('es')) {
-    const singular = INDEX.get(w.slice(0, -2));
+    const singular = index.get(w.slice(0, -2));
     if (singular?.length) return singular;
   }
   return [];
 }
 
-/** The first value in a sentence that the data recognises. */
-export function findValues(text: string): { word: string; at: number; hits: ValueHit[] }[] {
+/** Every value in a sentence that one index recognises. */
+export function findValues(
+  index: VocabularyIndex, text: string,
+): { word: string; at: number; hits: ValueHit[] }[] {
   const t = text.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ');
   const words = t.split(/\s+/).filter(Boolean);
   const out: { word: string; at: number; hits: ValueHit[] }[] = [];
@@ -177,41 +174,17 @@ export function findValues(text: string): { word: string; at: number; hits: Valu
     const pos = t.indexOf(w, at);
     at = pos + w.length;
     if (w.length < 3 || STOP.has(w)) continue;
-    const hits = lookupValue(w);
+    const hits = lookupValue(index, w);
     if (hits.length) out.push({ word: w, at: pos, hits });
   }
   /* Two word values, checked after, so "Lawrence David" beats the two
      single word hits it also produces. */
   for (let i = 0; i < words.length - 1; i++) {
     const pair = `${words[i]} ${words[i + 1]}`;
-    const hits = lookupValue(pair);
+    const hits = lookupValue(index, pair);
     if (!hits.length) continue;
     const pos = t.indexOf(pair);
     out.unshift({ word: pair, at: pos, hits });
   }
   return out;
-}
-
-/**
- * Build and install in one step.
- *
- * For the browser, where the process serves exactly one person and
- * there is nobody else's vocabulary to confuse it with.
- */
-export function applyVocabulary(snapshot: VocabularySnapshot): void {
-  installVocabulary(buildIndex(snapshot));
-}
-
-/** Install nothing, which is how every caller behaved before any of this. */
-export function clearVocabulary(): void {
-  INDEX = new Map();
-}
-
-/** Nothing loaded means every caller behaves as it did before. */
-export function vocabularyLoaded(): boolean {
-  return INDEX.size > 0;
-}
-
-export function vocabularySize(): number {
-  return INDEX.size;
 }

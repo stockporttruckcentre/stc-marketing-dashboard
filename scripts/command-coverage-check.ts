@@ -16,7 +16,7 @@
 
    npm run check:coverage
    ============================================================= */
-import { parseQuery } from '../lib/command/query';
+import { parseQuery as readQuery } from '../lib/command/query';
 import { ENTITIES as ENTITIES_FOR_SPACE } from '../lib/command/schema';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
 import { STATE_PHRASES, BODY_TYPES, DEPOTS } from '../lib/command/lexicon';
@@ -32,7 +32,10 @@ import type { UserRole } from '../lib/types';
 
 /* The bar learns makes, depots and customers from the database. A check
    has none, so it gets a sample of what those columns hold. */
-loadSampleVocabulary();
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 let pass = 0, fail = 0;
 const failures: string[] = [];

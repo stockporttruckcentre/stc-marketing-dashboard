@@ -29,14 +29,20 @@
      npm run check:runtime
    ============================================================= */
 import { readFileSync } from 'fs';
-import { parseQuery, planToPayload } from '../lib/command/query';
+import { parseQuery as readQuery, planToPayload } from '../lib/command/query';
 import { planCommand, planningToQueryPayload } from '../lib/command/plan';
 import { executability } from '../lib/command/ir/execute';
 import { BODY_TYPES, DEPOTS, STATE_PHRASES } from '../lib/command/lexicon';
 import { ENTITIES } from '../lib/command/schema';
 import { loadSampleVocabulary } from './sample-vocabulary';
 
-loadSampleVocabulary();
+/* The fixture, as a value, bound to both entry points. Passing it to
+   `planCommand` as well is the point of this phase: the reader has no
+   other way to hear about it. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
+const plan = (text: string, caps?: Iterable<string>) =>
+  planCommand(text, { vocabulary: VOCABULARY, ...(caps ? { actorCapabilities: caps } : {}) });
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -260,7 +266,7 @@ const diffs: string[] = [];
 
 for (const text of sentences) {
   const legacyRead = parseQuery(text);
-  const planning = planCommand(text);
+  const planning = plan(text);
 
   /* The canonical entry point must understand exactly what the reader
      understands. Fewer means the migration lost sentences; more would
@@ -299,7 +305,7 @@ ok('every planned command surfaces plan, completion, requirements, confirmation 
    3. Representable, permitted, executable are three answers
    ============================================================= */
 
-const anyRead = planCommand('how many trailers in stock');
+const anyRead = plan('how many trailers in stock');
 ok('a read is representable', anyRead?.availability.representable === true);
 ok('a read is executable, because something performs it',
   anyRead?.availability.executable === true,
@@ -312,11 +318,11 @@ ok('a read derives a capability requirement as well as any permission',
 ok('with no actor named, permitted is unknown rather than yes',
   anyRead?.availability.permitted === null, String(anyRead?.availability.permitted));
 
-const asViewer = planCommand('how many contacts', { actorCapabilities: [] });
+const asViewer = plan('how many contacts', []);
 ok('an actor holding nothing is not permitted to read the CRM',
   asViewer?.availability.permitted === false,
   JSON.stringify(asViewer?.availability.missingPermissions));
-const asStaff = planCommand('how many contacts', { actorCapabilities: ['crm.view'] });
+const asStaff = plan('how many contacts', ['crm.view']);
 ok('an actor holding crm.view is permitted to read the CRM',
   asStaff?.availability.permitted === true,
   JSON.stringify(asStaff?.availability.missingPermissions));

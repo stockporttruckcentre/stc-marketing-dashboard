@@ -30,7 +30,7 @@
    from the plan.
    ============================================================= */
 import { parseQuery, type QueryPlan } from './query';
-import { installVocabulary, type VocabularyIndex } from './vocab';
+import type { VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
 import {
   validate, completion, derivedRequirements, needsConfirmation,
@@ -139,31 +139,24 @@ function availabilityOf(plan: Plan, actor?: Iterable<string>): Availability {
  * THE VOCABULARY IS AN INPUT, NOT AMBIENT STATE.
  *
  * What a sentence means depends on what the database holds, and some of
- * what it holds is visible to one person and not another. Leaving that
- * to a module global meant the answer to "what does this mean" depended
- * on who had last refreshed a cache, which on a shared server was
- * somebody else.
+ * what it holds is visible to one person and not another. While that
+ * lived in a module global, the answer to "what does this mean"
+ * depended on who had last refreshed a cache, which on a shared server
+ * was somebody else.
  *
- * The reader underneath still reads a module global, so this installs
- * the index and then reads, in one synchronous run. Nothing is awaited
- * between the two lines, and nothing may be: an await is where another
- * request gets to install its own. Rewriting the reader to take the
- * index directly removes even that, and is the next job rather than
- * this one.
+ * It is now an argument, passed straight through to the reader. There
+ * is no installation step and nothing shared between two calls, so two
+ * sentences read with two different indexes are two independent reads
+ * and the order they happen in cannot matter.
  *
- * Passing no vocabulary leaves whatever is installed alone, which is
- * right for the browser, where the process serves one person, and for
- * the checks, which install a fixture once.
+ * Omitting it means the empty index, which is a choice somebody made
+ * rather than a load they forgot.
  */
 export function planCommand(
   text: string,
   opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
 ): CommandPlanning | null {
-  /* These two statements are one unit. Do not put anything between
-     them, and do not make either of them asynchronous. */
-  if (opts?.vocabulary) installVocabulary(opts.vocabulary);
-  const read: QueryPlan | null = parseQuery(text);
-
+  const read: QueryPlan | null = parseQuery(text, opts?.vocabulary);
   if (!read) return null;
 
   const { plan, select } = adaptQueryPlan(read);

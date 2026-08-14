@@ -12,7 +12,7 @@ import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
-import { applyVocabulary } from '@/lib/command/vocab';
+import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -143,13 +143,18 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * it did before, so a slow or unavailable load costs coverage rather
    * than the whole feature.
    */
+  /* Held here rather than in the module it came from. The bar serves
+     one person, but an index that lives in a module is an index two
+     callers can disagree about, and there is no longer anywhere to put
+     one. */
+  const [vocabulary, setVocabularyIndex] = useState<VocabularyIndex>(EMPTY_VOCABULARY);
   useEffect(() => {
     let live = true;
     fetch('/api/command/vocabulary')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!live || !j?.vocabulary) return;
-        applyVocabulary(j.vocabulary);
+        setVocabularyIndex(buildIndex(j.vocabulary));
       })
       .catch(() => {});
     return () => { live = false; };
@@ -334,8 +339,10 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      that appears and then refuses teaches people the bar is
      unreliable. This is a filter on what to ask, never the answer. */
   const local = useMemo(
-    () => (text.trim().length >= 3 ? planCommand(text, { actorCapabilities: caps }) : null),
-    [text, caps]);
+    () => (text.trim().length >= 3
+      ? planCommand(text, { actorCapabilities: caps, vocabulary })
+      : null),
+    [text, caps, vocabulary]);
 
   /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
      The two sides do not know the same things. The live vocabulary is
