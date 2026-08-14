@@ -327,8 +327,26 @@ const EDITS: { q: string; key: string; op: string; value: unknown; target?: stri
   { q: 'change the sale price on STC143980 to 24k', key: 'sales_price', op: 'set', value: 24000, target: 'STC143980' },
   { q: 'add a note to Dawson: chasing tyre quote', key: 'notes', op: 'add', value: 'chasing tyre quote', target: 'Dawson' },
   { q: 'change the owner on Dawson Group to Dave', key: 'assigned_to', op: 'set', value: 'Dave', target: 'Dawson Group' },
-  { q: 'set the fleet size on Dawson to 45', key: 'fleet_size', op: 'set', value: 45, target: 'Dawson' },
 ];
+
+/* A column a trigger owns is not an instruction, however ordinary the
+   sentence sounds.
+
+   `crm_contacts.fleet_size` is declared in columns.ts as "derived from
+   trucks, trailers and vans by a trigger" and was ALSO curated into the
+   writable dictionary, so this case used to assert that setting it was
+   an instruction. It was: the bar read it, the route wrote it, and the
+   trigger overwrote it. The canonical validator refused the plan, which
+   is how the two dictionaries were found to disagree, and the curated
+   entry is now dropped rather than trusted. */
+const NOT_INSTRUCTIONS = [
+  'set the fleet size on Dawson to 45',
+];
+
+for (const q of NOT_INSTRUCTIONS) {
+  ok(`edit: "${q}" is not offered, because a trigger owns that column`,
+    parseEdit(q, CAPS.admin) === null, 'it was read as an instruction');
+}
 
 for (const c of EDITS) {
   const p = parseEdit(c.q, CAPS.admin);

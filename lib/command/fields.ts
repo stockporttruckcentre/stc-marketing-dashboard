@@ -243,8 +243,6 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['location', 'town', 'city', 'area', 'region', 'based in'] },
   { key: 'address', label: 'Address', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['address', 'postal address', 'street'] },
-  { key: 'fleet_size', label: 'Fleet size', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
-    capability: 'crm.edit', aliases: ['fleet size', 'fleet'] },
   { key: 'trucks', label: 'Trucks', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['trucks', 'tractor units', 'units'] },
   { key: 'trailers', label: 'Trailers', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
@@ -452,9 +450,31 @@ function generateTail(): WritableField[] {
 
 export const GENERATED_FIELDS: WritableField[] = generateTail();
 
-export const WRITABLE_FIELDS: WritableField[] = [
+/**
+ * Every field the bar may write.
+ *
+ * Filtered through `columns.ts` on the way out, because the two lists
+ * disagreed and nothing said so. `crm_contacts.fleet_size` is declared
+ * there as "derived from trucks, trailers and vans by a trigger" and
+ * was curated here as an editable number, so "set the fleet size on
+ * Dawson to 40" was a sentence this application would read, accept and
+ * write, and a trigger would then overwrite. The canonical validator
+ * caught it, which is what a second opinion is for.
+ *
+ * A curated entry naming a column `columns.ts` calls unwritable is a
+ * mistake in the curation, so it is dropped rather than trusted.
+ */
+function onlyWritableColumns(fields: WritableField[]): WritableField[] {
+  return fields.filter((f) => {
+    const table = TABLES.find((t) => t.table === ENTITY_TABLE[f.entity]);
+    const col = table?.columns.find((c) => c.name === f.key);
+    return !!col && col.writable !== false;
+  });
+}
+
+export const WRITABLE_FIELDS: WritableField[] = onlyWritableColumns([
   ...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS, ...GENERATED_FIELDS,
-];
+]);
 
 /** Every field this person is allowed to write, for the checks and the empty state. */
 export function writableFor(caps: Set<CrmCapability>): WritableField[] {
