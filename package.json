@@ -17,7 +17,9 @@
     "check:litmus": "tsx scripts/command-litmus.ts",
     "check:sweep": "tsx scripts/command-sweep.ts",
     "check:audit": "tsx scripts/command-audit.ts",
-    "check:score": "tsx scripts/command-score.ts"
+    "check:score": "tsx scripts/command-score.ts",
+    "check:ir": "tsx scripts/ir-equivalence-check.ts",
+    "check:ir-safety": "tsx scripts/ir-safety-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
