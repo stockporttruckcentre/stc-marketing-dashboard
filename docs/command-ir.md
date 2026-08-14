@@ -667,6 +667,78 @@ The browser still plans locally, with the actor's capabilities, to
 decide whether a half typed sentence is worth a round trip. That is a
 filter on what to ask, never the answer.
 
+### Vocabulary is not the same for everybody
+
+The first version of the authoritative planner cached the live
+vocabulary once per process, on the reasoning that it is a cache of what
+the database contains and therefore identical for everyone. That was
+wrong, and the reasoning was wrong because it was never checked against
+the policies.
+
+`stock_trailers`, `social_posts` and `calendar_events` all restrict
+SELECT to `auth.role() = 'authenticated'`. Every signed in person sees
+every row, so those values genuinely are the same for everybody.
+
+`crm_contacts` does not:
+
+```sql
+CREATE POLICY "crm_select" ON crm_contacts FOR SELECT USING (
+  auth.role() = 'authenticated' AND (
+    list_id IS NULL
+    OR EXISTS (SELECT 1 FROM crm_lists l WHERE l.id = crm_contacts.list_id
+      AND (l.is_global OR l.owner_id = auth.uid()
+           OR EXISTS (SELECT 1 FROM crm_list_members m
+                      WHERE m.list_id = l.id AND m.user_id = auth.uid())))
+  ));
+```
+
+`company_name`, `assigned_to`, `location` and `source` therefore differ
+per person. `buildVocabulary` runs through the requesting user's client,
+so whoever refreshed the shared cache put their own visible accounts
+into it, and for the next minute everybody else's sentences resolved
+against them. A company only one person could see became a company
+everybody's bar understood.
+
+So vocabulary sources are classified:
+
+| Scope | Tables | Cache |
+|---|---|---|
+| company | `stock_trailers`, `social_posts`, `calendar_events` | one, process wide |
+| actor | everything else, including `crm_contacts` | keyed by user id |
+
+Anything not explicitly listed as company wide is actor scoped, so a
+table added later is private until somebody has read its policy and said
+otherwise. A shorter TTL was not the fix: it shortens the window on a
+thing that must never happen at all.
+
+### Vocabulary is an input, not ambient state
+
+```ts
+planCommand(text, { actorCapabilities, vocabulary })
+```
+
+`vocabularyFor(supabase, userId)` returns an index; it installs nothing.
+`planAuthoritatively` awaits it and hands it to `planCommand`, which
+installs it and reads in one synchronous run:
+
+```ts
+if (opts?.vocabulary) installVocabulary(opts.vocabulary);
+const read = parseQuery(text);
+```
+
+Those two statements are one unit. Nothing may be awaited between them,
+because an await is where another request gets to install its own, and
+`planCommand` is synchronous so nothing can interleave inside it. The
+reader underneath still reads a module global; rewriting it to take the
+index directly removes even that, and is a reader migration rather than
+this job.
+
+`check:authority` proves the isolation with two actors in ONE process,
+interleaved and concurrent, with no reset between them. The previous
+version of that check cleared the global index before every case, which
+is exactly why it could not have caught this: a check that starts each
+case from an empty world cannot notice that the world is shared.
+
 **Still to come.** Mutation readers, the action registry, and the
 executor rewritten against `Select` directly. When that lands,
 `lib/command/ir/execute.ts` is deleted and nothing else changes.

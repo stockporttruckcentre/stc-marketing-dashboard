@@ -32,7 +32,7 @@
    ============================================================= */
 import { createHash } from 'crypto';
 import { planCommand, type CommandPlanning } from '../plan';
-import { ensureVocabulary, type VocabularySource } from './vocabulary';
+import type { VocabularySource } from './vocabulary';
 import type { Plan } from '../ir/types';
 
 /* -------------------------------------------------------------
@@ -105,6 +105,14 @@ export type PlanRequest = {
   text: string;
   /** The actor's capabilities, derived from their role by the caller. */
   capabilities: Iterable<string>;
+  /**
+   * The vocabulary valid for THIS actor.
+   *
+   * Awaited here and handed to `planCommand`, which installs it and
+   * reads in one synchronous run. Nothing is installed by this module,
+   * so there is no window between resolving somebody's vocabulary and
+   * planning with it in which another request could resolve theirs.
+   */
   vocabulary: VocabularySource;
 };
 
@@ -116,9 +124,15 @@ export type PlanRequest = {
  * the second means they named something this will not do.
  */
 export async function planAuthoritatively(req: PlanRequest): Promise<Planned | null> {
-  await ensureVocabulary(req.vocabulary);
+  /* Resolved first, then passed in. The last await in this function is
+     this one: everything from here to the plan is synchronous, so the
+     index that was installed is the index that was read. */
+  const vocabulary = await req.vocabulary();
 
-  const planning = planCommand(req.text, { actorCapabilities: req.capabilities });
+  const planning = planCommand(req.text, {
+    actorCapabilities: req.capabilities,
+    vocabulary,
+  });
   if (!planning) return null;
 
   const { availability, completion } = planning;

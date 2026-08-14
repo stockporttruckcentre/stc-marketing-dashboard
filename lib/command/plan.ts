@@ -30,6 +30,7 @@
    from the plan.
    ============================================================= */
 import { parseQuery, type QueryPlan } from './query';
+import { installVocabulary, type VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
 import {
   validate, completion, derivedRequirements, needsConfirmation,
@@ -134,12 +135,35 @@ function availabilityOf(plan: Plan, actor?: Iterable<string>): Availability {
  * from a plan that is refused: the first means the words said nothing
  * this application recognises, the second means they said something it
  * will not do.
+ *
+ * THE VOCABULARY IS AN INPUT, NOT AMBIENT STATE.
+ *
+ * What a sentence means depends on what the database holds, and some of
+ * what it holds is visible to one person and not another. Leaving that
+ * to a module global meant the answer to "what does this mean" depended
+ * on who had last refreshed a cache, which on a shared server was
+ * somebody else.
+ *
+ * The reader underneath still reads a module global, so this installs
+ * the index and then reads, in one synchronous run. Nothing is awaited
+ * between the two lines, and nothing may be: an await is where another
+ * request gets to install its own. Rewriting the reader to take the
+ * index directly removes even that, and is the next job rather than
+ * this one.
+ *
+ * Passing no vocabulary leaves whatever is installed alone, which is
+ * right for the browser, where the process serves one person, and for
+ * the checks, which install a fixture once.
  */
 export function planCommand(
   text: string,
-  opts?: { actorCapabilities?: Iterable<string> },
+  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
 ): CommandPlanning | null {
+  /* These two statements are one unit. Do not put anything between
+     them, and do not make either of them asynchronous. */
+  if (opts?.vocabulary) installVocabulary(opts.vocabulary);
   const read: QueryPlan | null = parseQuery(text);
+
   if (!read) return null;
 
   const { plan, select } = adaptQueryPlan(read);

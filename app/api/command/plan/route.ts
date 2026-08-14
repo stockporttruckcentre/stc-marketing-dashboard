@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { planAuthoritatively } from '@/lib/command/server/planner';
-import { supabaseVocabulary } from '@/lib/command/server/vocabulary';
+import { vocabularyFor } from '@/lib/command/server/vocabulary';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +28,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   const gate = await requireCapability();
   if (!gate.ok) return gate.response;
-  const { supabase, caps } = gate;
+  const { supabase, user, caps } = gate;
 
   /* Only the sentence is read. There is no shape a client could send
      that this would treat as a plan. */
@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
   const planned = await planAuthoritatively({
     text,
     capabilities: caps,
-    vocabulary: supabaseVocabulary(supabase),
+    /* Their vocabulary, not the last person's. */
+    vocabulary: vocabularyFor(supabase, user.id),
   });
 
   if (!planned) {

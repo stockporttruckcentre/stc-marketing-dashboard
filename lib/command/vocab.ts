@@ -53,8 +53,25 @@ export type ValueHit = {
 export type VocabularySnapshot =
   Record<string, Record<string, { value: string; rows: number }[]>>;
 
-/** word (lowercased) -> everywhere that word is a value */
-const INDEX = new Map<string, ValueHit[]>();
+/**
+ * word (lowercased) -> everywhere that word is a value
+ *
+ * An index is a VALUE. This module holds whichever one is currently
+ * installed, because the reader underneath still reads a module global
+ * and rewriting the reader is a separate job. Everything above it now
+ * passes an index around explicitly.
+ *
+ * That distinction is not academic. Some of these values are visible to
+ * one person and not another: `crm_contacts` restricts SELECT to rows
+ * on a global list, a list you own, or a list shared with you, so the
+ * company names and owners it yields differ per user. One process wide
+ * index shared across requests meant whoever refreshed it last decided
+ * what everybody else's sentences meant, and a value only one person
+ * could see became a value everybody's bar could resolve.
+ */
+export type VocabularyIndex = ReadonlyMap<string, ValueHit[]>;
+
+let INDEX: Map<string, ValueHit[]> = new Map();
 
 /** Columns worth indexing: declared free text, on a declared entity. */
 function indexable(entityId: string, column: string): { key: string } | null {
@@ -64,38 +81,55 @@ function indexable(entityId: string, column: string): { key: string } | null {
 }
 
 /**
- * Load values for one entity.
+ * Build an index from a snapshot. Pure: nothing is installed.
  *
- * Called with whatever the database actually holds. Passing the same
- * entity twice replaces it, so a refresh is a second call rather than a
- * reset and a rebuild.
+ * Building and installing are separated so a caller can prepare the
+ * right index while awaiting a database, and then put it in place in
+ * one synchronous step with nothing able to interleave.
  */
-export function setVocabulary(
-  entityId: string,
-  columns: Record<string, { value: string; rows: number }[]>,
-): void {
-  // Drop anything previously held for this entity, so a refresh shrinks
-  // as well as grows.
-  for (const [word, hits] of INDEX) {
-    const kept = hits.filter((h) => h.entity !== entityId);
-    if (kept.length) INDEX.set(word, kept); else INDEX.delete(word);
-  }
+export function buildIndex(snapshot: VocabularySnapshot): VocabularyIndex {
+  const index = new Map<string, ValueHit[]>();
 
-  for (const [column, values] of Object.entries(columns)) {
-    const spec = indexable(entityId, column);
-    if (!spec) continue;
-    for (const { value, rows } of values) {
-      const clean = String(value ?? '').trim();
-      if (clean.length < 2 || clean.length > 60) continue;
-      const hit: ValueHit = { entity: entityId, column, key: spec.key, value: clean, rows };
-      /* Indexed whole and by word, so "Lawrence David" is found by
-         somebody typing either half of it, and "Gray & Adams" survives
-         the punctuation being dropped. */
-      for (const form of forms(clean)) {
-        INDEX.set(form, [...(INDEX.get(form) ?? []), hit]);
+  for (const [entityId, columns] of Object.entries(snapshot)) {
+    for (const [column, values] of Object.entries(columns)) {
+      const spec = indexable(entityId, column);
+      if (!spec) continue;
+      for (const { value, rows } of values) {
+        const clean = String(value ?? '').trim();
+        if (clean.length < 2 || clean.length > 60) continue;
+        const hit: ValueHit = { entity: entityId, column, key: spec.key, value: clean, rows };
+        /* Indexed whole and by word, so "Lawrence David" is found by
+           somebody typing either half of it, and "Gray & Adams" survives
+           the punctuation being dropped. */
+        for (const form of forms(clean)) {
+          index.set(form, [...(index.get(form) ?? []), hit]);
+        }
       }
     }
   }
+
+  return index;
+}
+
+/** One index from several, for combining differently scoped sources. */
+export function mergeIndexes(...parts: VocabularyIndex[]): VocabularyIndex {
+  const out = new Map<string, ValueHit[]>();
+  for (const part of parts) {
+    for (const [word, hits] of part) out.set(word, [...(out.get(word) ?? []), ...hits]);
+  }
+  return out;
+}
+
+/**
+ * Put an index in place. Synchronous, and the only way this changes.
+ *
+ * The caller is responsible for the one rule that matters: install the
+ * index that belongs to the actor being planned for, and plan in the
+ * same synchronous run. Nothing may be awaited in between, because an
+ * await is where another request gets to install its own.
+ */
+export function installVocabulary(index: VocabularyIndex): void {
+  INDEX = index as Map<string, ValueHit[]>;
 }
 
 function forms(value: string): string[] {
@@ -158,20 +192,19 @@ export function findValues(text: string): { word: string; at: number; hits: Valu
   return out;
 }
 
-/** A whole snapshot at once, which is how both sides load it. */
+/**
+ * Build and install in one step.
+ *
+ * For the browser, where the process serves exactly one person and
+ * there is nobody else's vocabulary to confuse it with.
+ */
 export function applyVocabulary(snapshot: VocabularySnapshot): void {
-  for (const [entityId, columns] of Object.entries(snapshot)) setVocabulary(entityId, columns);
+  installVocabulary(buildIndex(snapshot));
 }
 
-/**
- * Forget everything.
- *
- * The index is process wide, which is right for a cache of what the
- * database contains and wrong to leave standing between two checks that
- * mean to load different vocabularies.
- */
+/** Install nothing, which is how every caller behaved before any of this. */
 export function clearVocabulary(): void {
-  INDEX.clear();
+  INDEX = new Map();
 }
 
 /** Nothing loaded means every caller behaves as it did before. */

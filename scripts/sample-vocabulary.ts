@@ -26,7 +26,7 @@
    ============================================================= */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setVocabulary } from '../lib/command/vocab';
+import { applyVocabulary } from '../lib/command/vocab';
 
 const SOURCE = join(process.cwd(), 'app/api/admin/import-sold-2026/rows.json');
 
@@ -73,24 +73,25 @@ export function loadSampleVocabulary(): void {
     ...[...new Set(Object.values(DEPOTS))].map((value) => ({ value, rows: 1 })),
   ];
 
-  setVocabulary('trailers', {
-    make: distinct(rows, 'make'),
-    model: distinct(rows, 'model'),
-    location: depots,
-    customer: distinct(rows, 'customer'),
-    sales_rep: distinct(rows, 'sales_rep'),
-  });
-
-  /* The CRM side of the same records. A company that bought a trailer is
-     a company in the CRM, and the reps are the same people. */
-  setVocabulary('contacts', {
-    location: depots,
-    assigned_to: distinct(rows, 'sales_rep'),
-  });
-  setVocabulary('deals', {
-    company_name: distinct(rows, 'customer'),
-    location: depots,
-    assigned_to: distinct(rows, 'sales_rep'),
+  applyVocabulary({
+    trailers: {
+      make: distinct(rows, 'make'),
+      model: distinct(rows, 'model'),
+      location: depots,
+      customer: distinct(rows, 'customer'),
+      sales_rep: distinct(rows, 'sales_rep'),
+    },
+    /* The CRM side of the same records. A company that bought a trailer
+       is a company in the CRM, and the reps are the same people. */
+    contacts: {
+      location: depots,
+      assigned_to: distinct(rows, 'sales_rep'),
+    },
+    deals: {
+      company_name: distinct(rows, 'customer'),
+      location: depots,
+      assigned_to: distinct(rows, 'sales_rep'),
+    },
   });
 }
 

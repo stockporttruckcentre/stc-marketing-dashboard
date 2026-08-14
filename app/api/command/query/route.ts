@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { ENTITIES } from '@/lib/command/schema';
 import { planForExecution } from '@/lib/command/server/planner';
-import { supabaseVocabulary } from '@/lib/command/server/vocabulary';
+import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { planningToQueryPayload } from '@/lib/command/plan';
 
 export const dynamic = 'force-dynamic';
@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
     text,
     previewHash,
     capabilities: caps,
-    vocabulary: supabaseVocabulary(supabase),
+    /* Their vocabulary, not the last person's. */
+    vocabulary: vocabularyFor(supabase, user.id),
   });
 
   if (!agreement.agreed && agreement.reason === 'not understood') {

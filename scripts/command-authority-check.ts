@@ -15,8 +15,21 @@
    database currently holds, and two readers holding different snapshots
    of that are two different readers.
 
-   Five things are proved here, against the real production modules and
-   an injected vocabulary rather than a database.
+   AND VOCABULARY IS NOT THE SAME FOR EVERYBODY.
+
+   `crm_contacts` restricts SELECT to rows on a global list, a list you
+   own, or a list shared with you, so the company names and account
+   owners it yields differ per person. A process wide cache of those
+   values meant whoever refreshed it last decided what everybody else's
+   sentences meant for the next minute, and a company only one person
+   could see became a company everybody's bar could resolve.
+
+   The earlier version of this file could not have caught that. It reset
+   the global index between every snapshot, so it measured a world with
+   one user in it.
+
+   Proved here, against the real production modules and injected
+   vocabularies rather than a database:
 
      1  a value known only from live data plans identically at preview
         and at execution
@@ -25,13 +38,17 @@
      4  a meaning that changes between preview and execution is refused
         and restated, never executed
      5  the 19,071 sentence corpus is untouched by any of it
+     6  two actors in ONE process, interleaved with no reset between
+        them, never see each other's RLS scoped vocabulary
 
      npm run check:authority
    ============================================================= */
 import { readFileSync } from 'fs';
 import { planAuthoritatively, planForExecution, planHash } from '../lib/command/server/planner';
-import { invalidateVocabulary } from '../lib/command/server/vocabulary';
-import { clearVocabulary, type VocabularySnapshot } from '../lib/command/vocab';
+import {
+  vocabularyFor, resetVocabularyCaches, visibilityOfEntity, visibilityOfTable,
+} from '../lib/command/server/vocabulary';
+import { buildIndex, clearVocabulary, type VocabularySnapshot } from '../lib/command/vocab';
 import { planCommand } from '../lib/command/plan';
 import { capabilitiesFor } from '../lib/crm/permissions';
 
@@ -45,11 +62,19 @@ const ok = (what: string, cond: boolean, got = '') => {
 
 const source = (path: string) => readFileSync(path, 'utf8');
 
-/** Load a vocabulary as if the database held exactly this. */
+/**
+ * A vocabulary source over a known snapshot.
+ *
+ * NOTHING IS RESET HERE, deliberately. The previous version cleared the
+ * process wide index before every case, which is what made it blind to
+ * the defect it should have caught: a check that starts each case from
+ * an empty world cannot notice that the world is shared. Every case
+ * below runs in whatever state the previous one left behind, which is
+ * what a server does.
+ */
 function withVocabulary(snapshot: VocabularySnapshot) {
-  clearVocabulary();
-  invalidateVocabulary();
-  return async () => snapshot;
+  const index = buildIndex(snapshot);
+  return async () => index;
 }
 
 /* A make nothing in this repository has ever heard of. If a sentence
@@ -120,11 +145,11 @@ ok('and it is the same canonical meaning, not merely the same hash',
 const routeSource = source('app/api/command/query/route.ts');
 ok('the query route plans through the authoritative planner',
   /planForExecution\(/.test(routeSource)
-  && /supabaseVocabulary\(supabase\)/.test(routeSource));
+  && /vocabularyFor\(supabase, user\.id\)/.test(routeSource));
 const planRouteSource = source('app/api/command/plan/route.ts');
 ok('the preview endpoint plans through the same planner with the same vocabulary',
   /planAuthoritatively\(/.test(planRouteSource)
-  && /supabaseVocabulary\(supabase\)/.test(planRouteSource));
+  && /vocabularyFor\(supabase, user\.id\)/.test(planRouteSource));
 ok('the vocabulary route and the server planner share one builder',
   /buildVocabulary/.test(source('app/api/command/vocabulary/route.ts')));
 
@@ -293,10 +318,232 @@ const b = await planAuthoritatively({
 ok('the hash is over the plan, so who is asking does not change it',
   a!.meaning.hash === b!.meaning.hash);
 
+/* =============================================================
+   6. Two actors, one process, no reset between them
+
+   The defect this section exists for. Everything above runs one actor
+   at a time; a shared cache is invisible until two people use it.
+
+   A and B are modelled the way RLS actually works: each has a client
+   that returns only the rows that person may SELECT. `crm_contacts` is
+   restricted per user, so their contact vocabularies differ.
+   `stock_trailers` is `auth.role() = \'authenticated\'`, so theirs is
+   the same and may legitimately be shared.
+   ============================================================= */
+
+/** A Supabase stand in that returns exactly what one person can see. */
+function clientSeeing(rows: Record<string, Record<string, unknown>[]>) {
+  return {
+    from: (table: string) => ({
+      select: () => ({
+        limit: async () => ({ data: rows[table] ?? [], error: null }),
+      }),
+    }),
+  };
+}
+
+/*
+ * Two private accounts, one each. Named without a word in common on
+ * purpose: a shared token would make these cases measure name overlap
+ * rather than isolation. The shared token case is below, and asserts
+ * the thing that overlap actually tests.
+ */
+const ALPHA = 'Alphacorp';
+const BETA = 'Betacorp';
+const ALPHA_Q = `how many ${ALPHA} deals`;
+const BETA_Q = `how many ${BETA} deals`;
+
+/* Both see the same stock. Only A can see Alpha's account, only B can
+   see Beta's, which is what their list membership decides. */
+const clientA = clientSeeing({
+  stock_trailers: [{ make: 'Krone', model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
+  crm_contacts: [{ company_name: ALPHA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+});
+const clientB = clientSeeing({
+  stock_trailers: [{ make: 'Krone', model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
+  crm_contacts: [{ company_name: BETA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+});
+
+resetVocabularyCaches();
+
+const forA = vocabularyFor(clientA, 'user-a');
+const forB = vocabularyFor(clientB, 'user-b');
+
+/* --- the classification itself --- */
+ok('crm backed entities are actor scoped, because their RLS is per user',
+  visibilityOfEntity('contacts') === 'actor' && visibilityOfEntity('deals') === 'actor');
+ok('stock is company wide, because every authenticated user sees every row',
+  visibilityOfEntity('trailers') === 'company');
+ok('a table nobody has classified is treated as private',
+  visibilityOfTable('some_table_added_next_year') === 'actor');
+
+/* --- 1. A can see Private Alpha and B cannot --- */
+const indexA = await forA();
+const indexB = await forB();
+ok('A can resolve their own account name', indexA.has('alphacorp'));
+ok('B cannot resolve A\'s account name', !indexB.has('alphacorp'));
+ok('B can resolve their own', indexB.has('betacorp'));
+ok('A cannot resolve B\'s', !indexA.has('betacorp'));
+
+/* Company wide values are shared, and that is the intended boundary.
+   B\'s index carries the stock vocabulary even though A\'s request is
+   what filled the shared cache, because every authenticated user sees
+   those rows. */
+ok('company wide vocabulary is shared between them', indexA.has('krone') && indexB.has('krone'));
+
+/* --- 2 and 3. Planning as A, then immediately as B, in one process --- */
+const planA1 = await planAuthoritatively({
+  text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forA,
+});
+const planB1 = await planAuthoritatively({
+  text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forB,
+});
+
+ok('planning as A recognises A\'s private company',
+  JSON.stringify(planA1!.planning.plan).includes(ALPHA), planA1!.meaning.summary);
+ok('planning as B immediately afterwards does not',
+  !JSON.stringify(planB1!.planning.plan).includes(ALPHA), planB1!.meaning.summary);
+
+/* --- 4. B\'s own private value still works, right after A populated --- */
+const planB2 = await planAuthoritatively({
+  text: BETA_Q, capabilities: EVERYTHING, vocabulary: forB,
+});
+ok('B\'s own private company is recognised for B',
+  JSON.stringify(planB2!.planning.plan).includes(BETA), planB2!.meaning.summary);
+
+const planA2 = await planAuthoritatively({
+  text: BETA_Q, capabilities: EVERYTHING, vocabulary: forA,
+});
+ok('and is not recognised for A',
+  !JSON.stringify(planA2!.planning.plan).includes(BETA), planA2!.meaning.summary);
+
+/* --- 5. Alternating, repeatedly, never contaminates either --- */
+let clean = true;
+for (let i = 0; i < 6; i++) {
+  const a = await planAuthoritatively({ text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forA });
+  const b = await planAuthoritatively({ text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forB });
+  const bOwn = await planAuthoritatively({ text: BETA_Q, capabilities: EVERYTHING, vocabulary: forB });
+  const aOther = await planAuthoritatively({ text: BETA_Q, capabilities: EVERYTHING, vocabulary: forA });
+  clean = clean
+    && JSON.stringify(a!.planning.plan).includes(ALPHA)
+    && !JSON.stringify(b!.planning.plan).includes(ALPHA)
+    && JSON.stringify(bOwn!.planning.plan).includes(BETA)
+    && !JSON.stringify(aOther!.planning.plan).includes(BETA);
+}
+ok('alternating between them repeatedly contaminates neither', clean);
+
+/* Interleaved concurrently, which is the shape a server actually sees.
+   The install and the read are one synchronous run, so a promise
+   resolving between two requests cannot land between them. */
+const raced = await Promise.all([
+  planAuthoritatively({ text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forA }),
+  planAuthoritatively({ text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forB }),
+  planAuthoritatively({ text: BETA_Q, capabilities: EVERYTHING, vocabulary: forB }),
+  planAuthoritatively({ text: BETA_Q, capabilities: EVERYTHING, vocabulary: forA }),
+]);
+ok('concurrent requests from both do not contaminate each other',
+  JSON.stringify(raced[0]!.planning.plan).includes(ALPHA)
+  && !JSON.stringify(raced[1]!.planning.plan).includes(ALPHA)
+  && JSON.stringify(raced[2]!.planning.plan).includes(BETA)
+  && !JSON.stringify(raced[3]!.planning.plan).includes(BETA));
+
+/* --- 6. Interpretation cannot reveal what B may not see --- */
+const bBlind = await planAuthoritatively({
+  text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: withVocabulary({}),
+});
+ok('B reads the sentence exactly as somebody with no CRM vocabulary would',
+  planB1!.meaning.hash === bBlind!.meaning.hash,
+  `${planB1!.meaning.summary}  vs  ${bBlind!.meaning.summary}`);
+ok('and differently from A, so the value really was A\'s alone',
+  planA1!.meaning.hash !== planB1!.meaning.hash);
+ok('nothing A can see appears anywhere in what B is told',
+  !JSON.stringify(planB1!.meaning).includes(ALPHA));
+
+/* A word both of them have an account for.
+ *
+ * The interesting case, and the one a pair of names sharing a token
+ * would have tested by accident. B typing a word that names something
+ * of A's must resolve to B's own account, never A's, and never to
+ * both. */
+const SHARED = 'Meridian';
+const sharedA = clientSeeing({
+  crm_contacts: [{ company_name: `${SHARED} North`, assigned_to: 'Dave' }],
+});
+const sharedB = clientSeeing({
+  crm_contacts: [{ company_name: `${SHARED} South`, assigned_to: 'Dave' }],
+});
+resetVocabularyCaches();
+const sharedQ = `how many ${SHARED} deals`;
+const sharedPlanA = await planAuthoritatively({
+  text: sharedQ, capabilities: EVERYTHING, vocabulary: vocabularyFor(sharedA, 'shared-a'),
+});
+const sharedPlanB = await planAuthoritatively({
+  text: sharedQ, capabilities: EVERYTHING, vocabulary: vocabularyFor(sharedB, 'shared-b'),
+});
+ok('a word both hold resolves to A\'s account for A',
+  JSON.stringify(sharedPlanA!.planning.plan).includes(`${SHARED} North`)
+  && !JSON.stringify(sharedPlanA!.planning.plan).includes(`${SHARED} South`),
+  sharedPlanA!.meaning.summary);
+ok('and to B\'s account for B, planned immediately afterwards',
+  JSON.stringify(sharedPlanB!.planning.plan).includes(`${SHARED} South`)
+  && !JSON.stringify(sharedPlanB!.planning.plan).includes(`${SHARED} North`),
+  sharedPlanB!.meaning.summary);
+
+/* --- 7. Preview and execution agree, per actor, interleaved --- */
+const aPreview = await planAuthoritatively({ text: ALPHA_Q, capabilities: EVERYTHING, vocabulary: forA });
+const bPreview = await planAuthoritatively({ text: BETA_Q, capabilities: EVERYTHING, vocabulary: forB });
+
+/* B previews and executes in between A previewing and executing. */
+const bRun = await planForExecution({
+  text: BETA_Q, previewHash: bPreview!.meaning.hash, capabilities: EVERYTHING, vocabulary: forB,
+});
+const aRun = await planForExecution({
+  text: ALPHA_Q, previewHash: aPreview!.meaning.hash, capabilities: EVERYTHING, vocabulary: forA,
+});
+ok('B\'s execution agrees with B\'s preview', bRun.agreed);
+ok('and A\'s still agrees with A\'s, after B ran in between', aRun.agreed);
+
+/* A\'s hash is not B\'s, so neither could run the other\'s reading even
+   by sending it. */
+const crossed = await planForExecution({
+  text: ALPHA_Q, previewHash: aPreview!.meaning.hash, capabilities: EVERYTHING, vocabulary: forB,
+});
+ok('B cannot execute the reading A previewed', !crossed.agreed);
+
+/* --- the architecture, asserted at the source --- */
+const vocabSource = source('lib/command/server/vocabulary.ts');
+ok('crm_contacts is not in the company wide list',
+  /COMPANY_WIDE_TABLES = new Set\(\[[^\]]*\]\)/.test(vocabSource)
+  && !/COMPANY_WIDE_TABLES = new Set\(\[[^\]]*crm_contacts/.test(vocabSource));
+ok('the actor cache is keyed by user id',
+  /actorCache = new Map<string, Cached>/.test(vocabSource)
+  && /actorIndex\(\s*\n?\s*supabase: Queryable, actorId: string/.test(vocabSource));
+ok('the server vocabulary module installs nothing itself',
+  !/installVocabulary/.test(vocabSource));
+
+const planSource = source('lib/command/plan.ts');
+const planBody = planSource.slice(planSource.indexOf('export function planCommand'));
+const install = planBody.indexOf('installVocabulary');
+const parse = planBody.indexOf('parseQuery(text)');
+ok('planCommand installs the vocabulary and then reads, with nothing between',
+  install > 0 && parse > install
+  && !/await/.test(planBody.slice(install, parse)),
+  planBody.slice(install, parse + 20).replace(/\s+/g, ' '));
+ok('planCommand is synchronous, so nothing can interleave inside it',
+  /export function planCommand/.test(planSource)
+  && !/export async function planCommand/.test(planSource));
+
+const plannerBody = plannerSource.slice(
+  plannerSource.indexOf('export async function planAuthoritatively'),
+  plannerSource.indexOf('const { availability, completion }'));
+ok('the planner awaits the vocabulary before planning and not after',
+  plannerBody.lastIndexOf('await') < plannerBody.indexOf('planCommand('),
+  plannerBody.replace(/\s+/g, ' ').slice(0, 200));
+
 /* ============================================================= */
 
 clearVocabulary();
-invalidateVocabulary();
+resetVocabularyCaches();
 
 }
 

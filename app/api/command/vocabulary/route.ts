@@ -19,6 +19,13 @@ export const dynamic = 'force-dynamic';
  * agreeing, and when they stopped agreeing the browser and the server
  * read one sentence as two different questions.
  *
+ * Read through the CALLER'S client, so what comes back is what their
+ * RLS lets them see and nothing else. `crm_contacts` restricts SELECT
+ * to rows on a global list, a list they own, or a list shared with
+ * them, so two people get two different responses here. That is
+ * correct, and it is why the server side cache of these values is
+ * keyed by user rather than shared.
+ *
  * Only declared free text columns are read, so the response can never
  * widen what is filterable. Values only, never row contents: a make and
  * a depot name are not private, and nothing here returns a price, a
@@ -29,5 +36,5 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  return NextResponse.json({ ok: true, vocabulary: await buildVocabulary(supabase) });
+  return NextResponse.json({ ok: true, vocabulary: await buildVocabulary(supabase, 'all') });
 }
