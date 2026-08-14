@@ -172,6 +172,15 @@ export type Output =
   | { kind: 'table' }
   | { kind: 'file'; format: 'csv' | 'xlsx' | 'pdf' | 'docx' };
 
+/**
+ * Where a result goes.
+ *
+ * Not presentation. `display` changes nothing, `email` leaves the
+ * company and cannot be recalled, `attach` changes a record. Each
+ * kind's effect, the capability that permits it, whether it is
+ * confirmed and whether it may run on a partly understood request are
+ * declared in `registry.DESTINATIONS` and enforced in `validate`.
+ */
 export type Destination =
   | { kind: 'display' }
   | { kind: 'download' }

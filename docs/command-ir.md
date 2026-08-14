@@ -447,12 +447,73 @@ being rejected for an unrelated typo.
    derived from every entity, field and relationship the plan reaches,
    including entities reached only by traversal.
 
-5. **An unresolved request does not get to write.** A plan carrying an
+5. **An unresolved request produces no outcome.** A plan carrying an
    unmet part, whether the reader reported it or the validator found it,
-   may still answer a question or produce a file. It may not create,
-   update, delete, or invoke anything that is not repeatable. Running
-   the understood half of an instruction is worse than running none of
-   it, because it looks like the instruction was carried out.
+   may put an answer on the screen and nothing else. It may not create,
+   update, delete, invoke anything that is not repeatable, download,
+   share, email or attach. Running the understood half of an instruction
+   is worse than running none of it, because it looks like the
+   instruction was carried out.
+
+6. **Where a result goes decides what it is.** See below.
+
+## Destinations are effects, not presentation
+
+`Emit` was one step kind covering "put this on the screen" and "send
+this to a customer", and the difference was written down nowhere. It was
+therefore enforced nowhere: the unresolved-request gate exempted every
+emit, so a sentence that was only half understood could not update a row
+and could email the half it understood out of the company.
+
+The difference lives in the registry, as data, for the same reason
+relationships do. Nothing in the parser knows the word "email".
+
+| Destination | Effect | Capability | Confirmed | May run unresolved |
+|---|---|---|---|---|
+| `display` | read | none | no | yes, as `partial` |
+| `download` | artefact | `rows.export` | no | no |
+| `share` | external | `rows.share` | yes | no |
+| `email` | external | `rows.email` | yes | no |
+| `attach` | mutation | `record.attach` | yes | no |
+
+Building a file and deciding where it goes are two permissions. Emailing
+a spreadsheet of the CRM derives both, and deriving only one of them let
+the other through. `derivedRequirements` also walks the destination
+itself: who a result is shared with and what it attaches to are
+expressions and sources, and a requirement hiding in one of them is a
+requirement nobody derived.
+
+Naming the wrong capability is not naming one. `rows.export` authorises
+building the file, not sending it to somebody, so an email that names it
+is refused. A `display` emit that names any capability is also refused,
+because it claims an effect the step does not have.
+
+### The screen is allowed to be partial. Nothing else is.
+
+`completion(plan)` returns one of three states, and the middle one is
+the point:
+
+```ts
+type Completion =
+  | { kind: 'refused'; problems: Problem[] }
+  | { kind: 'partial'; unresolved: string[] }
+  | { kind: 'complete' };
+```
+
+`partial` is not a softer `complete`. It carries what went unresolved so
+the screen can show it beside the answer, and it exists so that neither
+the executor nor the interface can describe the result as the command
+having been carried out. A plan that would download, share, email or
+attach never reaches `partial`: the gate refuses it first, because a
+spreadsheet in somebody's downloads folder and an email in a customer's
+inbox both arrive with no record of the question, which makes a partial
+answer indistinguishable from a complete one.
+
+`rows.share`, `rows.email` and `record.attach` are declared without
+handlers. Nothing in this application shares or emails a result yet, and
+recording a handler that does not exist is how a registry starts lying
+about what the product can do. Coverage reports 4 of 7 capabilities with
+a handler, which is the honest figure.
 
 ## Migration, corrected
 

@@ -485,6 +485,40 @@ export const CAPABILITIES: CapabilityDef[] = [
        requirement is what gates it. */
     handler: 'app/api/crm/export/xlsx/route.ts',
   },
+  {
+    id: 'rows.share',
+    label: 'Share rows with colleagues',
+    operates: 'emit',
+    /* "Make and share working lists" is what crm.manageLists already
+       means in permissions.ts. */
+    requires: 'crm.manageLists',
+    confirm: true,
+    /* Granting the same people the same access twice leaves the same
+       access. */
+    idempotent: true,
+    /* Declared, not built. Nothing in this application shares a result
+       yet, and recording a handler that does not exist is how a
+       registry starts lying about what the product can do. */
+  },
+  {
+    id: 'rows.email',
+    label: 'Email rows out of the company',
+    operates: 'emit',
+    /* Data leaving the business is the same permission as any other
+       bulk export. */
+    requires: 'crm.export',
+    confirm: true,
+    /* An email cannot be unsent, and a second send is a second email. */
+    idempotent: false,
+  },
+  {
+    id: 'record.attach',
+    label: 'Attach a file to a record',
+    operates: 'emit',
+    requires: 'crm.edit',
+    confirm: true,
+    idempotent: false,
+  },
 ];
 
 export function capability(id: string): CapabilityDef | undefined {
@@ -492,12 +526,85 @@ export function capability(id: string): CapabilityDef | undefined {
 }
 
 /**
- * The capability an `emit` step must name when it produces a file.
+ * The capability that gates turning rows into a file.
  *
- * Named here rather than inferred, so there is one answer to "what
- * gates an export" and it is visible in the registry.
+ * Separate from the destination, because building the file and deciding
+ * where it goes are two different permissions. Emailing a spreadsheet
+ * of the CRM needs both.
  */
 export const FILE_EMIT_CAPABILITY = 'rows.export';
+
+/* =============================================================
+   Destinations
+
+   An `Emit` was one step kind covering "put this on the screen" and
+   "send this to somebody outside the company", and the difference was
+   not written down anywhere. It was therefore not enforced anywhere:
+   the unresolved-request gate exempted every emit, so a sentence that
+   was only half understood could not update a row and could email the
+   half it understood to a customer.
+
+   The difference lives here, as data, for the same reason relationships
+   do. Nothing in the parser knows the word "email".
+   ============================================================= */
+
+export type DestinationKind = 'display' | 'download' | 'share' | 'email' | 'attach';
+
+export type DestinationDef = {
+  kind: DestinationKind;
+  label: string;
+  /**
+   * What actually happens.
+   *
+   *   read      nothing leaves and nothing changes
+   *   artefact  a file exists that did not exist before
+   *   external  it leaves the application and cannot be recalled
+   *   mutation  a record changes
+   */
+  effect: 'read' | 'artefact' | 'external' | 'mutation';
+  /** The capability an emit to here must name. Absent means read only. */
+  capability?: string;
+  /** A preview and an explicit yes before it happens. */
+  confirm: boolean;
+  /**
+   * May this run when part of the request went unresolved.
+   *
+   * True for the screen alone, and only because the screen can show
+   * what was not understood alongside what was. Everything else is a
+   * result somebody receives with no record of the question, so a
+   * partial answer is indistinguishable from a complete one.
+   */
+  allowsUnresolved: boolean;
+};
+
+export const DESTINATIONS: Record<DestinationKind, DestinationDef> = {
+  display: {
+    kind: 'display', label: 'On screen', effect: 'read',
+    confirm: false,
+    /* Allowed, but never as a completed command. See `completion`. */
+    allowsUnresolved: true,
+  },
+  download: {
+    kind: 'download', label: 'As a file to download', effect: 'artefact',
+    capability: 'rows.export', confirm: false, allowsUnresolved: false,
+  },
+  share: {
+    kind: 'share', label: 'Shared with colleagues', effect: 'external',
+    capability: 'rows.share', confirm: true, allowsUnresolved: false,
+  },
+  email: {
+    kind: 'email', label: 'Emailed out', effect: 'external',
+    capability: 'rows.email', confirm: true, allowsUnresolved: false,
+  },
+  attach: {
+    kind: 'attach', label: 'Attached to a record', effect: 'mutation',
+    capability: 'record.attach', confirm: true, allowsUnresolved: false,
+  },
+};
+
+export function destination(kind: string): DestinationDef | undefined {
+  return DESTINATIONS[kind as DestinationKind];
+}
 
 /* -------------------------------------------------------------
    Coverage, for the metrics the audit defined. Computed, never

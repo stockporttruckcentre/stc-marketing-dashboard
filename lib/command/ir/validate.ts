@@ -41,7 +41,7 @@ import type {
 } from './types';
 import { isResultRef, isSelect, isEntityRef } from './types';
 import {
-  entity, field, relationship, capability, FILE_EMIT_CAPABILITY,
+  entity, field, relationship, capability, destination, FILE_EMIT_CAPABILITY,
 } from './registry';
 
 export type Problem = {
@@ -454,12 +454,25 @@ export function validate(plan: Plan): Problem[] {
         if (isResultRef(e.from)) checkRef(e.from, `${at}.from`, 'emit.from', ctx);
         else walkSource(e.from, `${at}.from`, ctx);
 
-        /* Putting rows into a file and handing it over is an export.
-           An emit step that named no capability had no requirement to
-           derive, so nothing gated it. */
-        if (e.output.kind === 'file' && !e.capability) {
-          add(at, `a ${e.output.format} export must name the capability that permits it`);
+        /* WHERE IT GOES DECIDES WHAT IT IS.
+           An emit to the screen changes nothing. An emit to an email
+           address leaves the company and cannot be recalled. Both were
+           one step kind with no declared difference, so neither had a
+           requirement to derive and nothing gated either. The registry
+           states the difference and this enforces it. */
+        const dest = destination(e.to.kind);
+        if (!dest) {
+          add(`${at}.to`, `unknown destination "${e.to.kind}"`);
+        } else if (dest.capability && !e.capability) {
+          add(at, `sending this ${dest.label.toLowerCase()} must name the capability that permits it`);
+        } else if (dest.capability && e.capability !== dest.capability) {
+          add(`${at}.capability`,
+            `${e.to.kind} is permitted by "${dest.capability}", not by "${e.capability}"`);
+        } else if (!dest.capability && e.capability) {
+          add(`${at}.capability`,
+            `${e.to.kind} changes nothing and needs no capability, so naming "${e.capability}" claims an effect this step does not have`);
         }
+
         if (e.capability) {
           const cap = capability(e.capability);
           if (!cap) add(`${at}.capability`, `capability "${e.capability}" is not registered`);
@@ -473,8 +486,18 @@ export function validate(plan: Plan): Problem[] {
             }
           }
         }
-        if (e.to.kind === 'share') e.to.with.forEach((x, i) => walkExpr(x, `${at}.to.with[${i}]`, ctx));
-        if (e.to.kind === 'email') e.to.to.forEach((x, i) => walkExpr(x, `${at}.to.to[${i}]`, ctx));
+
+        /* Who it goes to is part of the plan and is checked like any
+           other expression. It is also where a requirement can hide: a
+           destination naming a colleague reads that colleague. */
+        if (e.to.kind === 'share') {
+          if (!e.to.with.length) add(`${at}.to`, 'a share with nobody is not a share');
+          e.to.with.forEach((x, i) => walkExpr(x, `${at}.to.with[${i}]`, ctx));
+        }
+        if (e.to.kind === 'email') {
+          if (!e.to.to.length) add(`${at}.to`, 'an email to nobody is not an email');
+          e.to.to.forEach((x, i) => walkExpr(x, `${at}.to.to[${i}]`, ctx));
+        }
         if (e.to.kind === 'attach') walkSource(e.to.to, `${at}.to.attach`, ctx);
         return;
       }
@@ -486,29 +509,27 @@ export function validate(plan: Plan): Problem[] {
   if (!plan.steps.length) add('steps', 'a plan with no steps does nothing');
 
   /* =============================================================
-     Pass three: unmet semantics may not run an effect.
+     Pass three: unmet semantics may not produce an outcome.
 
      "Everything except the sold ones, and archive them" where "except"
-     went unread archives the sold ones too. Executing the part that was
-     understood is the most dangerous option available, because it looks
-     like the instruction was carried out. A read can go ahead and say
-     what it could not do. A write cannot.
+     went unread archives the sold ones too. Carrying out the part that
+     was understood is the most dangerous option available, because it
+     looks like the instruction was carried out.
+
+     The screen is the one exception, and only because the screen can
+     show what was not understood next to what was. A spreadsheet in
+     somebody's downloads folder and an email in a customer's inbox both
+     arrive with no record of the question, so a partial answer there is
+     indistinguishable from a complete one. `completion` below is what
+     stops even the screen reporting success.
      ============================================================= */
-  const unresolved = [
-    ...plan.unmet.map((u) => `${u.part}: ${u.why}`),
-    ...problems.filter((p) => p.severity === 'unmet').map((p) => `${p.at}: ${p.what}`),
-  ];
+  const unresolved = unresolvedParts(plan, problems);
   if (unresolved.length) {
     for (const [i, s] of plan.steps.entries()) {
-      const effect =
-        s.op === 'create' || s.op === 'update' || s.op === 'delete'
-          ? `${s.op} ${(s as Mutate).target.entity}`
-          : s.op === 'invoke' && !capability((s as Invoke).capability)?.idempotent
-            ? `invoke ${(s as Invoke).capability}`
-            : null;
-      if (!effect) continue;
+      const outcome = effectOf(s);
+      if (!outcome) continue;
       add(`steps[${i}]`,
-        `this plan would ${effect} while ${unresolved.length} part(s) of the request went unresolved: `
+        `this plan would ${outcome} while ${unresolved.length} part(s) of the request went unresolved: `
         + `${unresolved.slice(0, 3).join('; ')}. Ask rather than run the understood part.`);
     }
   }
@@ -516,8 +537,65 @@ export function validate(plan: Plan): Problem[] {
   return problems;
 }
 
+/**
+ * What a step would actually do, or null when it would do nothing that
+ * outlives the answer.
+ */
+function effectOf(s: Step): string | null {
+  if (s.op === 'create' || s.op === 'update' || s.op === 'delete') {
+    return `${s.op} ${(s as Mutate).target.entity}`;
+  }
+  if (s.op === 'invoke') {
+    return capability((s as Invoke).capability)?.idempotent ? null : `invoke ${(s as Invoke).capability}`;
+  }
+  if (s.op === 'emit') {
+    const dest = destination((s as Emit).to.kind);
+    /* An unknown destination is not assumed harmless. */
+    if (!dest) return `emit to an unknown destination`;
+    return dest.allowsUnresolved ? null : `send the result ${dest.label.toLowerCase()}`;
+  }
+  return null;
+}
+
+function unresolvedParts(plan: Plan, problems: Problem[]): string[] {
+  return [
+    ...plan.unmet.map((u) => `${u.part}: ${u.why}`),
+    ...problems.filter((p) => p.severity === 'unmet').map((p) => `${p.at}: ${p.what}`),
+  ];
+}
+
 export function isRunnable(plan: Plan): boolean {
   return !validate(plan).some((p) => p.severity === 'fatal');
+}
+
+/* =============================================================
+   Whether running this plan answers the question that was asked.
+
+   Three outcomes, and the middle one is the point. A plan that refuses
+   is easy to report. A plan that succeeds is easy to report. A plan
+   that ran and answered PART of the request is the one that gets
+   reported as though it answered all of it, and that is the failure
+   this whole architecture exists to remove.
+
+   `partial` is not a softer `complete`. It carries what went
+   unresolved, and it exists so that neither the executor nor the
+   interface can describe the result as the command having been carried
+   out. On screen that means the unresolved parts are shown with the
+   answer. Nowhere else may reach this state at all: the gate above
+   refuses a partial plan that would download, share, email or attach.
+   ============================================================= */
+export type Completion =
+  | { kind: 'refused'; problems: Problem[] }
+  | { kind: 'partial'; unresolved: string[] }
+  | { kind: 'complete' };
+
+export function completion(plan: Plan): Completion {
+  const problems = validate(plan);
+  const fatal = problems.filter((p) => p.severity === 'fatal');
+  if (fatal.length) return { kind: 'refused', problems: fatal };
+  const unresolved = unresolvedParts(plan, problems);
+  if (unresolved.length) return { kind: 'partial', unresolved };
+  return { kind: 'complete' };
 }
 
 /* =============================================================
@@ -654,9 +732,24 @@ export function derivedRequirements(plan: Plan): Requirement[] {
       case 'emit': {
         const e = s as Emit;
         if (!isResultRef(e.from)) fromSource(e.from);
-        const capId = e.capability ?? (e.output.kind === 'file' ? FILE_EMIT_CAPABILITY : undefined);
-        const cap = capId ? capability(capId) : undefined;
-        need(cap?.requires, `emits ${e.output.kind}`);
+
+        /* Building the file and deciding where it goes are two
+           permissions. Emailing a spreadsheet of the CRM needs both,
+           and deriving only one of them let the other through. */
+        if (e.output.kind === 'file') {
+          need(capability(FILE_EMIT_CAPABILITY)?.requires, `puts rows into a ${e.output.format}`);
+        }
+        const dest = destination(e.to.kind);
+        const capId = e.capability ?? dest?.capability;
+        if (capId) need(capability(capId)?.requires, `sends it ${dest?.label.toLowerCase() ?? e.to.kind}`);
+
+        /* The destination is not just a label. Who it goes to and what
+           it attaches to are expressions and sources of their own, and
+           a requirement that hides in one of them is a requirement
+           nobody derived. */
+        if (e.to.kind === 'share') e.to.with.forEach(fromExpr);
+        if (e.to.kind === 'email') e.to.to.forEach(fromExpr);
+        if (e.to.kind === 'attach' && !isResultRef(e.to.to)) fromSource(e.to.to);
         return;
       }
     }
@@ -666,11 +759,24 @@ export function derivedRequirements(plan: Plan): Requirement[] {
   return out;
 }
 
-/** Every step whose capability declares that a preview is mandatory. */
+/**
+ * Whether this plan must be previewed and explicitly agreed to first.
+ *
+ * Every write, every capability that says so, and every destination
+ * that says so. Emailing a list of customers out of the company is not
+ * a read just because no row changed.
+ */
 export function needsConfirmation(plan: Plan): boolean {
   return plan.steps.some((s) => {
     if (s.op === 'create' || s.op === 'update' || s.op === 'delete') return true;
     if (s.op === 'invoke') return capability((s as Invoke).capability)?.confirm ?? true;
+    if (s.op === 'emit') {
+      const e = s as Emit;
+      const dest = destination(e.to.kind);
+      /* An unrecognised destination is confirmed, not waved through. */
+      if (!dest) return true;
+      return dest.confirm || (e.capability ? capability(e.capability)?.confirm ?? true : false);
+    }
     return false;
   });
 }

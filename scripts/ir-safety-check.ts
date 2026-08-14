@@ -1,9 +1,11 @@
 /* =============================================================
    What must hold before anything executes.
 
-   Five properties, each asserted as REFUSALS AND ACCEPTANCES in pairs,
+   Six properties, each asserted as REFUSALS AND ACCEPTANCES in pairs,
    so a validator that refused everything fails this as loudly as one
-   that accepted everything.
+   that accepted everything. Every refusal also asserts the REASON it
+   was refused, so a case cannot pass by being rejected for an
+   unrelated typo.
 
    1  DATAFLOW IS TYPED, AND EVERY SHAPE PARTICIPATES.
       A rowset cannot be consumed where a single record is required. A
@@ -33,13 +35,23 @@
       dangerous outcome available, because it looks like the whole
       instruction was carried out.
 
+   6  WHERE A RESULT GOES DECIDES WHAT IT IS.
+      Screen, download, share, email and attach were one step kind with
+      no declared difference. Each now declares its effect, the
+      capability that permits it, whether it is confirmed, and whether
+      it may run at all on a request that was only partly understood.
+      Only the screen may, and even then the result is `partial` and
+      never reported as the command having been carried out.
+
      npm run check:ir-safety
    ============================================================= */
-import { validate, derivedRequirements, needsConfirmation } from '../lib/command/ir/validate';
 import {
-  RELATIONSHIPS, CAPABILITIES, relationship, coverage,
+  validate, derivedRequirements, needsConfirmation, completion,
+} from '../lib/command/ir/validate';
+import {
+  RELATIONSHIPS, CAPABILITIES, DESTINATIONS, relationship, coverage,
 } from '../lib/command/ir/registry';
-import type { Plan, Select, Mutate, Step } from '../lib/command/ir/types';
+import type { Plan, Select, Mutate, Step, Emit, Expr } from '../lib/command/ir/types';
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -374,7 +386,7 @@ accepts('an invoke on the entity it applies to is accepted', [
 ]);
 
 refuses('an export naming no capability is refused',
-  'export must name the capability that permits it', [
+  'as a file to download must name the capability that permits it', [
   contactRows,
   {
     op: 'emit', id: 'e', from: { ref: 'rows', step: 'contactRows' },
@@ -482,8 +494,11 @@ refuses('a plan with an unresolved part may not spend a credit',
 
 accepts('a plan with an unresolved part may still answer the question', [contactRows], unmet);
 
-accepts('a plan with an unresolved part may still produce a file, which is repeatable',
-  exportPlan, unmet);
+/* This used to be an acceptance, and it was the defect. A spreadsheet
+   in somebody's downloads folder carries no record of the question, so
+   a partial answer in one is indistinguishable from a complete one. */
+refuses('a plan with an unresolved part may not produce a download',
+  'went unresolved', exportPlan, unmet);
 
 /* An unmet severity problem found by the validator itself counts the
    same as one the reader reported. Both mean part of the request went
@@ -558,10 +573,201 @@ const artefactChain: Step[] = [
     op: 'emit', id: 'sent', from: { ref: 'artefact', step: 'file' },
     output: { kind: 'file', format: 'xlsx' },
     to: { kind: 'email', to: [{ kind: 'context', slot: 'actor' }] },
-    capability: 'rows.export',
+    capability: 'rows.email',
   },
 ];
 accepts('class: rows to a file, then the file onward', artefactChain);
+
+/* =============================================================
+   6. Destinations: where a result goes decides what it is
+
+   An emit was one step kind covering "put this on the screen" and "send
+   this to a customer", with no declared difference between them, so
+   neither had a capability to derive and the unresolved-request gate
+   exempted both. A half understood sentence could not update a row and
+   could email the half it understood out of the company.
+   ============================================================= */
+
+const emitTo = (to: Emit['to'], capability?: string): Step[] => [
+  contactRows,
+  {
+    op: 'emit', id: 'e', from: { ref: 'rows', step: 'contactRows' },
+    output: { kind: 'rows' }, to, ...(capability ? { capability } : {}),
+  },
+];
+
+const someone: Expr = { kind: 'context', slot: 'actor' };
+
+/* --- 1 and 2: an unresolved request produces no outcome anywhere --- */
+
+refuses('an unresolved part refuses a csv download',
+  'went unresolved', [
+  contactRows,
+  {
+    op: 'emit', id: 'e', from: { ref: 'rows', step: 'contactRows' },
+    output: { kind: 'file', format: 'csv' }, to: { kind: 'download' }, capability: 'rows.export',
+  },
+], unmet);
+
+refuses('an unresolved part refuses an email',
+  'went unresolved', emitTo({ kind: 'email', to: [someone] }, 'rows.email'), unmet);
+
+refuses('an unresolved part refuses a share',
+  'went unresolved', emitTo({ kind: 'share', with: [someone] }, 'rows.share'), unmet);
+
+refuses('an unresolved part refuses an attachment',
+  'went unresolved', emitTo({ kind: 'attach', to: { entity: 'contacts' } }, 'record.attach'), unmet);
+
+/* --- 3, 4 and 5: an effect with no capability named --- */
+
+refuses('an email naming no capability is refused',
+  'emailed out must name the capability that permits it',
+  emitTo({ kind: 'email', to: [someone] }));
+
+refuses('a share naming no capability is refused',
+  'shared with colleagues must name the capability that permits it',
+  emitTo({ kind: 'share', with: [someone] }));
+
+refuses('an attachment naming no capability is refused',
+  'attached to a record must name the capability that permits it',
+  emitTo({ kind: 'attach', to: { entity: 'contacts' } }));
+
+/* Naming the wrong one is not naming one. An export capability does
+   not authorise sending the file to somebody. */
+refuses('the export capability does not authorise an email',
+  'email is permitted by "rows.email", not by "rows.export"',
+  emitTo({ kind: 'email', to: [someone] }, 'rows.export'));
+
+refuses('a capability on a display emit is refused, because it claims an effect it does not have',
+  'claims an effect this step does not have',
+  emitTo({ kind: 'display' }, 'rows.export'));
+
+accepts('an email naming the email capability is accepted',
+  emitTo({ kind: 'email', to: [someone] }, 'rows.email'));
+accepts('a share naming the share capability is accepted',
+  emitTo({ kind: 'share', with: [someone] }, 'rows.share'));
+accepts('an attachment naming the attach capability is accepted',
+  emitTo({ kind: 'attach', to: { entity: 'contacts' } }, 'record.attach'));
+
+refuses('an email addressed to nobody is refused',
+  'an email to nobody is not an email',
+  emitTo({ kind: 'email', to: [] }, 'rows.email'));
+
+/* --- 6: effects are confirmed, reads are not --- */
+
+const confirms = (steps: Step[]) => needsConfirmation({ steps, unmet: [] });
+
+ok('an email is confirmed before it is sent',
+  confirms(emitTo({ kind: 'email', to: [someone] }, 'rows.email')));
+ok('a share is confirmed before it happens',
+  confirms(emitTo({ kind: 'share', with: [someone] }, 'rows.share')));
+ok('an attachment is confirmed before it happens',
+  confirms(emitTo({ kind: 'attach', to: { entity: 'contacts' } }, 'record.attach')));
+ok('putting an answer on the screen is not confirmed',
+  !confirms(emitTo({ kind: 'display' })));
+ok('a download is not confirmed, because the file goes to the person who asked',
+  !confirms([
+    contactRows,
+    {
+      op: 'emit', id: 'e', from: { ref: 'rows', step: 'contactRows' },
+      output: { kind: 'file', format: 'csv' }, to: { kind: 'download' }, capability: 'rows.export',
+    },
+  ]));
+
+/* --- 7: the destination's requirement is derived --- */
+
+ok('emailing rows out requires the export capability',
+  caps(emitTo({ kind: 'email', to: [someone] }, 'rows.email')).includes('crm.export'),
+  caps(emitTo({ kind: 'email', to: [someone] }, 'rows.email')).join(','));
+
+ok('sharing rows requires the list managing capability',
+  caps(emitTo({ kind: 'share', with: [someone] }, 'rows.share')).includes('crm.manageLists'),
+  caps(emitTo({ kind: 'share', with: [someone] }, 'rows.share')).join(','));
+
+ok('attaching to a record requires the capability to change one',
+  caps(emitTo({ kind: 'attach', to: { entity: 'contacts' } }, 'record.attach')).includes('crm.edit'),
+  caps(emitTo({ kind: 'attach', to: { entity: 'contacts' } }, 'record.attach')).join(','));
+
+ok('showing an answer on screen requires nothing beyond reading it',
+  !caps(emitTo({ kind: 'display' })).includes('crm.export'),
+  caps(emitTo({ kind: 'display' })).join(','));
+
+/* Building the file and sending it are two permissions, and a plan
+   that does both derives both. */
+const emailedFile: Step[] = [
+  contactRows,
+  {
+    op: 'emit', id: 'e', from: { ref: 'rows', step: 'contactRows' },
+    output: { kind: 'file', format: 'xlsx' },
+    to: { kind: 'email', to: [someone] }, capability: 'rows.email',
+  },
+];
+ok('emailing a spreadsheet derives both the file and the sending requirement',
+  requirementsOf(emailedFile).some((r) => r.because.startsWith('puts rows into a'))
+  && requirementsOf(emailedFile).some((r) => r.because.startsWith('sends it')),
+  JSON.stringify(requirementsOf(emailedFile)));
+
+/* A destination that reaches a record reads that record, and the
+   requirement has to come from the destination and not only the rows. */
+const attachToContact: Step[] = [
+  trailerRows,
+  {
+    op: 'emit', id: 'e', from: { ref: 'rows', step: 'trailerRows' },
+    output: { kind: 'rows' },
+    to: { kind: 'attach', to: { entity: 'contacts' } }, capability: 'record.attach',
+  },
+];
+ok('a destination pointing at contacts derives the requirement to read contacts',
+  requirementsOf(attachToContact).some((r) => r.because === 'reads contacts'),
+  JSON.stringify(requirementsOf(attachToContact)));
+
+/* --- 8 and 9: what the screen may and may not claim --- */
+
+const cleanDisplay: Plan = { steps: emitTo({ kind: 'display' }), unmet: [] };
+const partialDisplay: Plan = { steps: emitTo({ kind: 'display' }), unmet };
+
+ok('a clean read that goes to the screen is allowed', fatal(cleanDisplay).length === 0,
+  why(cleanDisplay));
+ok('a clean read that goes to the screen is a completed command',
+  completion(cleanDisplay).kind === 'complete', completion(cleanDisplay).kind);
+
+ok('a screen result with an unresolved part is still allowed to run',
+  fatal(partialDisplay).length === 0, why(partialDisplay));
+
+const partial = completion(partialDisplay);
+ok('a screen result with an unresolved part is never reported as complete',
+  partial.kind === 'partial', partial.kind);
+ok('and it carries what went unresolved, so the screen can show it',
+  partial.kind === 'partial' && partial.unresolved.length === unmet.length,
+  JSON.stringify(partial));
+
+/* The three states are distinct. A refused plan is not a partial one. */
+ok('a refused plan is reported as refused, not as partial',
+  completion({ steps: emitTo({ kind: 'email', to: [someone] }), unmet: [] }).kind === 'refused');
+
+/* --- every destination is declared, and declares its own contract --- */
+for (const kind of Object.keys(DESTINATIONS) as (keyof typeof DESTINATIONS)[]) {
+  const d = DESTINATIONS[kind];
+  ok(`${kind} says whether it may run on an unresolved request`,
+    typeof d.allowsUnresolved === 'boolean');
+  /* Only the screen may, because only the screen can show the question
+     alongside the answer. */
+  if (d.allowsUnresolved) ok(`${kind} is read only`, d.effect === 'read', d.effect);
+  /* Anything that is not read only leaves something behind and needs a
+     capability naming who may do it. */
+  if (d.effect !== 'read') {
+    ok(`${kind} names the capability that permits it`, !!d.capability);
+    ok(`${kind} may not run on an unresolved request`, d.allowsUnresolved === false);
+    const cap = d.capability ? CAPABILITIES.find((c) => c.id === d.capability) : undefined;
+    ok(`${kind} names a registered capability`, !!cap, d.capability);
+    ok(`${kind} names a capability that operates on an emit`, cap?.operates === 'emit', cap?.operates);
+  }
+  /* Everything that leaves the company or changes a record is
+     confirmed first. A file to the person who asked for it is not. */
+  if (d.effect === 'external' || d.effect === 'mutation') {
+    ok(`${kind} is confirmed before it happens`, d.confirm);
+  }
+}
 
 /* =============================================================
    Relationship ambiguity and normalisation
