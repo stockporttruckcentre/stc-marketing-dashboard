@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from '@/lib/command/fields';
 import { capabilitiesFor } from '@/lib/crm/permissions';
-import type { Condition } from '@/lib/command/select';
+import { applyCond } from '@/lib/command/ir/resolve';
+import type { Cond } from '@/lib/command/ir/types';
 import type { UserRole } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -25,30 +26,39 @@ export const dynamic = 'force-dynamic';
  * The third counts the rows before it touches them, because "all" is a
  * word worth being sure about.
  *
+ * A description arrives as the same `Cond` a question is answered from,
+ * and is narrowed by the same `applyCond` a read uses. It used to arrive
+ * as one column and one value, which is why "every available
+ * curtainsider at Hyde" could not be typed as an instruction: the
+ * instruction side could only select on the field it was writing.
+ *
  * The client sends a field key, never a column. The key is looked up in
  * the same dictionary the parser used, and anything not in it is
  * refused. That is what stops a crafted request writing to a column the
  * bar was never meant to reach.
  */
 
-type TargetIn =
-  | { kind: 'stock' | 'company'; text: string }
-  | { kind: 'filter'; column: string; value: string; label?: string }
-  /**
-   * A composed set of rows: "every customer in Manchester with no owner
-   * nobody has rung in a month". Every condition narrows the last, and
-   * the preview counts what matched before anything is written.
-   */
-  | { kind: 'selection'; conditions: Condition[]; label?: string };
-
 type Body = {
   entity?: WritableEntity;
   fieldKey?: string;
   op?: 'set' | 'add' | 'subtract' | 'clear';
   value?: string | number | null;
-  /** One target, or several. Both accepted so older callers still work. */
+  /** One named record, still accepted so older callers work. */
   target?: string;
-  targets?: TargetIn[];
+  /**
+   * Which rows, in the two forms an instruction can name them.
+   *
+   * `named` is what the sentence called each record, matched loosely
+   * because people type the last few digits of a stock number. `match`
+   * is the canonical condition the reader produced, and for a described
+   * set it is the only thing that says which rows. There used to be a
+   * third form here, a `{column, value}` filter, and it could carry one
+   * enum and nothing else.
+   */
+  named?: string[];
+  match?: Cond | null;
+  /** How many rows the sentence named, never how many matched. */
+  expect?: 'one' | 'many';
   /** Chosen from the candidates on the second pass. */
   recordId?: string;
   recordIds?: string[];
@@ -147,38 +157,25 @@ export async function POST(req: NextRequest) {
     (c, i, a) => a.indexOf(c) === i,
   ).join(', ');
 
-  const targets: TargetIn[] = body.targets?.length
-    ? body.targets
-    : (body.target ? [{ kind: 'stock', text: body.target }] : []);
-
-  /* ---- a composed set of rows --------------------------------------- */
-  const selection = targets.find((t) => t.kind === 'selection') as
-    Extract<TargetIn, { kind: 'selection' }> | undefined;
-
-  if (selection) {
-    return applySelection(supabase, {
-      entity, field, table, titleColumn, select,
-      conditions: selection.conditions,
-      label: selection.label ?? 'those records',
-      op, value: body.value ?? null, confirm: !!body.confirm,
-    });
-  }
+  const named: string[] = body.named?.length
+    ? body.named
+    : (body.target ? [body.target] : []);
 
   /* ---- a description of rows, rather than named ones ---------------- */
-  const bulk = targets.find((t) => t.kind === 'filter') as
-    Extract<TargetIn, { kind: 'filter' }> | undefined;
-
-  if (bulk) {
-    if (!fieldFor(entity, bulk.column)) {
-      return NextResponse.json({ ok: false, message: 'I cannot narrow on that.' });
+  /* Only where the sentence said every match. A loose match on a name
+     that happens to fit forty accounts is an ambiguity to raise, which
+     is the named path below, not permission to write forty. */
+  if (!named.length && body.match && body.expect === 'many') {
+    const narrowed = applyCond(supabase.from(table).select(select), body.match);
+    if (narrowed.unsupported) {
+      return NextResponse.json({ ok: false, message: 'I could not narrow that down safely.' });
     }
-    const { data, error } = await supabase
-      .from(table).select(select).eq(bulk.column, bulk.value).limit(500);
+    const { data, error } = await narrowed.q.limit(500);
     if (error) return NextResponse.json({ ok: false, message: error.message });
 
     const rows = (data ?? []) as any[];
     if (!rows.length) {
-      return NextResponse.json({ ok: false, message: `Nothing is ${bulk.label ?? bulk.value} right now.` });
+      return NextResponse.json({ ok: false, message: 'Nothing matches that right now.' });
     }
 
     if (!body.confirm) {
@@ -190,21 +187,26 @@ export async function POST(req: NextRequest) {
         recordSub: rows.slice(0, 3).map((r) => labelOf(entity, r)).join(' · ')
           + (rows.length > 3 ? ` and ${rows.length - 3} more` : ''),
         fieldLabel: field.label,
-        before: display(field, bulk.value),
+        /* What they are now, read off the rows themselves. The old shape
+           printed the one value it had narrowed on, which was only ever
+           right because it could only narrow on the field being written. */
+        before: [...new Set(rows.map((r) => display(field, r[field.key])))].slice(0, 3).join(', '),
         after: display(field, body.value ?? null),
         caution: field.caution ?? null,
         link: { href: hrefFor(entity, rows[0].id), label: 'Open the screen' },
       });
     }
 
+    /* By id, not by re-running the condition. The rows above are the
+       rows the person was shown, and narrowing again would write to
+       whatever matches now. */
     const { error: writeErr } = await supabase
-      .from(table).update({ [field.key]: body.value ?? null }).eq(bulk.column, bulk.value);
+      .from(table).update({ [field.key]: body.value ?? null }).in('id', rows.map((r) => r.id));
     if (writeErr) return NextResponse.json({ ok: false, message: writeErr.message });
 
     return NextResponse.json({
       ok: true,
       message: `${rows.length} ${entity === 'posts' ? 'social post' : 'record'}${rows.length === 1 ? '' : 's'} set to ${display(field, body.value ?? null)}.`,
-      detail: `They were ${display(field, bulk.value)}.`,
       link: { href: hrefFor(entity, rows[0].id), label: 'Open the screen' },
     });
   }
@@ -219,11 +221,10 @@ export async function POST(req: NextRequest) {
     const { data } = await supabase.from(table).select(select).in('id', ids);
     found.push(...((data ?? []) as any[]));
   } else {
-    if (!targets.length) return NextResponse.json({ ok: false, message: 'Name the record to change.' });
+    if (!named.length) return NextResponse.json({ ok: false, message: 'Name the record to change.' });
 
-    for (const t of targets) {
-      if (t.kind === 'filter' || t.kind === 'selection') continue;
-      const term = String(t.text ?? '').trim();
+    for (const t of named) {
+      const term = String(t ?? '').trim();
       if (!term) continue;
 
       /* A trailer answers to more than one name. Somebody types the
@@ -356,102 +357,5 @@ export async function POST(req: NextRequest) {
           ? 'It was empty before.'
           : `It was ${display(field, first.current)}.`),
     link: { href: hrefFor(entity, first.record.id), label: many ? 'Open the first one' : 'Open the record' },
-  });
-}
-
-
-/**
- * Apply one field to every row a composed selector picks out.
- *
- * The conditions are rebuilt server side against an allowlist of the
- * columns this entity declares, so a crafted request cannot narrow on a
- * column the parser would never have produced, and cannot use the
- * selector as a way to read one.
- *
- * Nothing is written on the preview pass. It reports the count and a
- * sample, because "every customer in Manchester nobody has rung" is a
- * number somebody should see before it becomes an edit.
- */
-async function applySelection(
-  supabase: ReturnType<typeof createClient>,
-  o: {
-    entity: WritableEntity; field: WritableField; table: string;
-    titleColumn: string; select: string;
-    conditions: Condition[]; label: string;
-    op: 'set' | 'add' | 'subtract' | 'clear';
-    value: string | number | null; confirm: boolean;
-  },
-) {
-  const allowed = new Set(
-    WRITABLE_FIELDS.filter((f) => f.entity === o.entity).map((f) => f.key),
-  );
-  // Columns a selector may narrow on but nobody writes.
-  for (const extra of ['links', 'fleet_size', 'profit', 'profit_pct', 'total_nbv',
-                       'created_at', 'updated_at', 'last_activity_at']) allowed.add(extra);
-
-  const usable = o.conditions.filter((c) => c.kind === 'owner' || allowed.has(c.column));
-  if (!usable.length) {
-    return NextResponse.json({ ok: false, message: 'I could not narrow that down safely.' });
-  }
-
-  let q: any = supabase.from(o.table).select(o.select);
-  for (const c of usable) {
-    switch (c.kind) {
-      case 'eq': q = q.eq(c.column, c.value); break;
-      case 'ilike': q = q.ilike(c.column, `%${c.value}%`); break;
-      case 'empty': q = q.is(c.column, null); break;
-      case 'present': q = q.not(c.column, 'is', null); break;
-      case 'gte': q = q.gte(c.column, c.value); break;
-      case 'lte': q = q.lte(c.column, c.value); break;
-      case 'before': q = q.lt(c.column, c.value); break;
-      case 'after': q = q.gte(c.column, c.value); break;
-      case 'owner':
-        q = c.value === null
-          ? q.is('assigned_to', null)
-          : q.ilike('assigned_to', `%${c.value}%`);
-        break;
-    }
-  }
-
-  const { data, error } = await q.limit(1000);
-  if (error) return NextResponse.json({ ok: false, message: error.message });
-
-  const rows = (data ?? []) as any[];
-  if (!rows.length) {
-    return NextResponse.json({ ok: false, message: `Nothing matches ${o.label}.` });
-  }
-
-  const next = o.op === 'clear' ? null
-    : (o.field.kind === 'money' || o.field.kind === 'number')
-      ? Number(o.value) : o.value;
-
-  if (!o.confirm) {
-    return NextResponse.json({
-      ok: true, preview: true, bulk: true,
-      count: rows.length,
-      recordIds: rows.map((r) => r.id),
-      recordLabel: `${rows.length} ${rows.length === 1 ? 'record' : 'records'}`,
-      recordSub: `${o.label}. ${rows.slice(0, 3).map((r) => labelOf(o.entity, r)).join(', ')}`
-        + (rows.length > 3 ? ` and ${rows.length - 3} more` : ''),
-      fieldLabel: o.field.label,
-      before: 'as they are',
-      after: display(o.field, next),
-      caution: rows.length > 50
-        ? `That is ${rows.length} records in one go. Worth reading the list first.`
-        : (o.field.caution ?? null),
-      link: { href: hrefFor(o.entity, rows[0].id), label: 'Open the first one' },
-    });
-  }
-
-  const ids = rows.map((r) => r.id);
-  const { error: writeErr } = await supabase
-    .from(o.table).update({ [o.field.key]: next }).in('id', ids);
-  if (writeErr) return NextResponse.json({ ok: false, message: writeErr.message });
-
-  return NextResponse.json({
-    ok: true,
-    message: `${o.field.label} set on ${ids.length} ${ids.length === 1 ? 'record' : 'records'}.`,
-    detail: o.label,
-    link: { href: hrefFor(o.entity, ids[0]), label: 'Open the first one' },
   });
 }

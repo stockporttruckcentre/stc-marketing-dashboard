@@ -159,7 +159,7 @@ function literalOf(e: Expr): string | number | boolean | null | undefined {
  * sold ones at Hyde" into "everything", which is the single most
  * dangerous way for a write to go wrong.
  */
-function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
+export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
   switch (c.kind) {
     case 'and': {
       let out = q;

@@ -33,7 +33,8 @@
    presentation and scoring, not meaning, and the equivalence check
    knows to ignore them.
    ============================================================= */
-import type { QueryPlan, PlanFilter } from '../query';
+import type { QueryPlan } from '../query';
+import { condFor, fieldExpr, literal } from './conditions';
 import type {
   Select, Cond, Expr, Period, Scope, Shape, Plan, Unmet,
 } from './types';
@@ -41,70 +42,6 @@ import type {
 /* -------------------------------------------------------------
    Filters
    ------------------------------------------------------------- */
-
-function fieldExpr(entity: string, field: string): Expr {
-  return { kind: 'field', of: { entity, field } };
-}
-
-function literal(v: string | number): Expr {
-  return { kind: 'literal', value: v };
-}
-
-/**
- * One PlanFilter as a condition.
- *
- * `anyOf` is the interesting one. It spreads a single idea across the
- * columns that actually carry it, which in the old shape was two
- * parallel arrays and here is an `or` of comparisons: the same meaning,
- * with the structure visible rather than implied by a convention the
- * executor had to know about.
- */
-function condFor(entityId: string, f: PlanFilter): Cond {
-  const target = fieldExpr(entityId, f.column);
-  let base: Cond;
-
-  switch (f.op) {
-    case 'eq':
-      base = { kind: 'cmp', op: 'eq', left: target, right: literal(f.value) };
-      break;
-    case 'ilike':
-      base = { kind: 'cmp', op: 'contains', left: target, right: literal(f.value) };
-      break;
-    case 'gte':
-      base = { kind: 'cmp', op: 'gte', left: target, right: literal(Number(f.value)) };
-      break;
-    case 'lte':
-      base = { kind: 'cmp', op: 'lte', left: target, right: literal(Number(f.value)) };
-      break;
-    case 'empty':
-      base = { kind: 'empty', of: target };
-      break;
-    case 'present':
-      base = { kind: 'not', of: { kind: 'empty', of: target } };
-      break;
-    case 'anyOf': {
-      const columns = f.columns?.length ? f.columns : [f.column];
-      const values = f.values?.length ? f.values : [f.value];
-      const branches: Cond[] = [];
-      for (const c of columns) {
-        for (const v of values) {
-          branches.push({
-            kind: 'cmp', op: 'contains',
-            left: fieldExpr(entityId, c), right: literal(v),
-          });
-        }
-      }
-      base = branches.length === 1 ? branches[0] : { kind: 'or', of: branches };
-      break;
-    }
-    default:
-      base = { kind: 'cmp', op: 'eq', left: target, right: literal(f.value) };
-  }
-
-  /* Negation was a boolean on the filter. Here it is a node, which is
-     what allows it to wrap a group rather than only a leaf. */
-  return f.negate ? { kind: 'not', of: base } : base;
-}
 
 /* -------------------------------------------------------------
    Period

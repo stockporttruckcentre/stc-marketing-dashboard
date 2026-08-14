@@ -165,7 +165,7 @@ for (const f of sample(WRITABLE_FIELDS, 2)) {
     assert(s, 'no plan', !!p);
     if (!p) continue;
     assert(s, `column ${f.key}`, p.field.key === f.key, p.field.key);
-    assert(s, 'record', p.target?.text === record, p.target?.text ?? 'none');
+    assert(s, 'record', p.named[0] === record, p.named[0] ?? 'none');
     assert(s, 'complete', p.missing.length === 0, p.missing.join(','));
   }
 }

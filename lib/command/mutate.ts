@@ -31,23 +31,17 @@
    about to change is a trap.
    ============================================================= */
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from './fields';
+import { parseQuery } from './query';
+import { condForFilters } from './ir/conditions';
+import { entity as entityDef } from './ir/registry';
+import type { Cardinality, Cond } from './ir/types';
+import { EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
 import { DEPOTS, isReservedWord } from './lexicon';
 import { distance } from './normalise';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
 
 export type EditOp = 'set' | 'add' | 'subtract' | 'clear';
 
-export type EditTarget =
-  /** One record, named by its stock number or its company name. */
-  | { kind: 'stock'; text: string; label: string }
-  | { kind: 'company'; text: string; label: string }
-  /**
-   * Every record matching a description, for the instructions people
-   * give in bulk: "mark all outstanding social posts as approved". The
-   * confirmation counts them before anything is written, because "all"
-   * is a word worth being sure about.
-   */
-  | { kind: 'filter'; text: string; label: string; column: string; value: string };
 
 export type EditPlan = {
   entity: WritableEntity;
@@ -56,14 +50,29 @@ export type EditPlan = {
   /** Null for a clear, and null while the value is still missing. */
   value: string | number | null;
   valueLabel: string;
-  /** The first record named. Kept for the single record case. */
-  target: EditTarget | null;
   /**
-   * Every record named. "Mark STC143580 and 144504 as sold" is two
-   * units, and answering it for one of them is a bug that looks like it
-   * worked.
+   * Which rows, in the canonical condition language.
+   *
+   * The same `Cond` a question produces, from the same machinery. There
+   * used to be a separate `EditTarget` union here with its own reader,
+   * and it could express less than the read side could: `readBulkTarget`
+   * narrowed on one enum on the field being written, so an instruction
+   * could say "all the outstanding ones" and could not say "at Hyde".
+   * Deleting it did not lose a feature, it removed a ceiling.
    */
-  targets: EditTarget[];
+  match: Cond | null;
+  /**
+   * How many rows the SENTENCE named, never how many matched.
+   *
+   * `many` only where the words say every match. A company name that
+   * turns out to fit forty accounts is an ambiguity to raise, not
+   * permission to write forty.
+   */
+  expect: Cardinality;
+  /** The rows in words, for the preview. */
+  matchLabel: string;
+  /** Each record the sentence named, for a preview that lists them. */
+  named: string[];
   /**
    * Some instructions are understood here and carried out somewhere
    * else. Selling raises a commission line on a tracker and needs a
@@ -475,7 +484,11 @@ function findCompany(original: string, fieldAlias: string): string | null {
  * has already typed. Missing the amount is a question worth asking.
  * Missing the whole instruction is not.
  */
-export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | null {
+export function parseEdit(
+  input: string,
+  caps?: CrmCapabilities,
+  vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
+): EditPlan | null {
   const raw = input.trim();
   if (raw.length < 4) return null;
 
@@ -607,28 +620,51 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
      anyway, or when the sentence already named a record properly. That
      is what stops "set refurb 143980 on STC1" reading the amount as a
      second trailer. */
-  const asTarget = (t: string): EditTarget => ({ kind: 'stock', text: t, label: t });
-  let targets: EditTarget[] = [];
+  let named: string[] = [];
 
   if (stcNoField) {
-    targets = [...refs.coded, ...refs.bare].map(asTarget);
+    named = [...refs.coded, ...refs.bare];
   } else {
-    targets = refs.stc.map(asTarget);
+    named = [...refs.stc];
     const numeric = spec.kind === 'money' || spec.kind === 'number';
-    if (!numeric || targets.length) {
-      for (const b of refs.bare) if (!targets.some((t) => t.text.endsWith(b))) targets.push(asTarget(b));
-      if (!numeric) for (const c of refs.coded) targets.push(asTarget(c));
+    if (!numeric || named.length) {
+      for (const b of refs.bare) if (!named.some((t) => t.endsWith(b))) named.push(b);
+      if (!numeric) for (const c of refs.coded) named.push(c);
     }
-    if (!targets.length && spec.entity === 'contacts') {
+    if (!named.length && spec.entity === 'contacts') {
       const name = findCompany(raw, field.alias);
-      if (name) targets = [{ kind: 'company', text: name, label: name }];
-    }
-    if (!targets.length) {
-      const bulk = readBulkTarget(raw, spec, String(value ?? ''));
-      if (bulk) targets = [bulk];
+      if (name) named = [name];
     }
   }
-  const target = targets[0] ?? null;
+
+  /* THE SAME CONDITION MACHINERY A QUESTION USES.
+     A named record is a loose match on the entity's own title. A
+     described set goes through `parseQuery`, which is the reader that
+     already knows what "available curtainsiders at Hyde" means, and its
+     filters become a `Cond` through the one function that turns filters
+     into conditions. `readBulkTarget` is gone: it read one enum on the
+     field being written and nothing else. */
+  const title = entityDef(spec.entity)?.titleField ?? null;
+  let match: Cond | null = null;
+  let expect: Cardinality = 'one';
+  let matchLabel = '';
+
+  if (named.length && title) {
+    const conds: Cond[] = named.map((t) => ({
+      kind: 'cmp', op: 'contains',
+      left: { kind: 'field', of: { entity: spec.entity, field: title } },
+      right: { kind: 'literal', value: t },
+    }));
+    match = conds.length === 1 ? conds[0] : { kind: 'or', of: conds };
+    matchLabel = named.join(' and ');
+  } else if (!named.length) {
+    const described = readDescribedSet(raw, spec, value, vocabulary);
+    if (described) {
+      match = described.match;
+      expect = 'many';
+      matchLabel = described.label;
+    }
+  }
 
   /* Selling is understood here and carried out elsewhere. It needs a
      price and it raises a commission line on somebody's tracker, so the
@@ -636,10 +672,10 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
      status column. */
   const handoff = spec.key === 'status' && spec.entity === 'trailers' && value === 'sold'
     ? ('markSold' as const) : undefined;
-  if (handoff && !targets.length) return null;
+  if (handoff && !match) return null;
 
   const missing: ('target' | 'value')[] = [];
-  if (!target) missing.push('target');
+  if (!match) missing.push('target');
   if (op !== 'clear' && value == null) missing.push('value');
 
   /* A bare field name with nothing else said is somebody starting a
@@ -654,54 +690,68 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
     op,
     value,
     valueLabel,
-    target,
-    targets,
+    match,
+    expect,
+    matchLabel,
+    named,
     handoff,
     missing,
     summary: handoff
-      ? `Mark ${targets.map((t) => t.label).join(' and ')} sold`
-      : describe(spec, op, valueLabel, target, targets),
-    confidence: confidenceOf(spec, op, value, target, opWord),
+      ? `Mark ${matchLabel} sold`
+      : describe(spec, op, valueLabel, matchLabel),
+    confidence: confidenceOf(spec, op, value, { named: named.length, stock: refs.stc.length > 0 }, opWord),
   };
 }
 
 /**
- * "All the outstanding ones", rather than a named record.
+ * "All the outstanding ones at Hyde", rather than a named record.
  *
- * Only fires on a word that genuinely means every match, and only when
- * the sentence also says which ones. "Mark all outstanding social posts
- * as approved" narrows to the ones awaiting approval; "approve
- * everything" names no subset and is refused, because a bar that acts on
- * a whole table from four words is a bar that ruins somebody's afternoon.
+ * Read by `parseQuery`, which is the machinery that already knows what
+ * a described set of rows is. `readBulkTarget` used to live here and
+ * did the job badly: it matched one enum value on the field being
+ * written, so it could read "all the outstanding posts" and could not
+ * read "every available curtainsider at Hyde". Deleting it removed a
+ * ceiling rather than a feature.
  *
- * Nothing is written on the strength of this. The confirmation counts
- * the matches first and says the number out loud.
+ * Still refuses a sentence that names no subset. "Approve everything"
+ * is four words and a whole table, and a bar that acts on that is a bar
+ * that ruins somebody's afternoon.
  */
-function readBulkTarget(raw: string, spec: WritableField, newValue: string): EditTarget | null {
+function readDescribedSet(
+  raw: string, spec: WritableField, value: string | number | null,
+  vocabulary: VocabularyIndex,
+): { match: Cond; label: string } | null {
   const t = soften(raw);
+  /* A word that genuinely means every match. Without one, a sentence
+     with no named record is incomplete rather than a bulk write. */
   if (!/\b(all|every|any|the lot|everything|each)\b/.test(t)) return null;
 
-  /* Which subset, from the same vocabulary that supplies the new value,
-     and read from the half of the sentence before "as". That is where
-     the description of the rows lives; after it is where they are
-     going. */
-  if (spec.kind !== 'enum' || !spec.vocabulary) return null;
-  const subject = soften(splitOnAs(raw).subject);
-  let hit = '';
-  let hitValue = '';
-  for (const [word, value] of Object.entries(spec.vocabulary)) {
-    if (value === newValue) continue;            // that is the destination, not the subset
-    if (!subject.includes(` ${word} `)) continue;
-    if (word.length > hit.length) { hit = word; hitValue = value; }
-  }
-  if (!hit) return null;
+  /* The half of the sentence before "as" describes the rows; the half
+     after it says what they become. Reading the whole string would let
+     the destination narrow the selection. */
+  const subject = splitOnAs(raw).subject;
+  const read = parseQuery(subject, vocabulary);
+  if (!read || read.entity.id !== spec.entity) return null;
+
+  /* The destination is not a description of the rows.
+     "Approve all outstanding posts" has no "as" to split on, so the word
+     the value came from is still in the subject, and selecting on it
+     would pick the posts that are already approved.
+
+     Only that exact value goes, not every mention of the column. The
+     column being written is very often the column the rows are described
+     by: "move every available curtainsider at Hyde to Bredbury" writes
+     the location and selects on it, and dropping the whole column
+     narrowed that to every trailer in the yard. */
+  const filters = read.filters.filter(
+    (f) => !(f.column === spec.key && String(f.value ?? '') === String(value ?? '')),
+  );
+  const match = condForFilters(spec.entity, filters);
+  if (!match) return null;
 
   return {
-    kind: 'filter',
-    text: hit,
-    label: `every ${spec.entity === 'posts' ? 'post' : 'record'} currently ${hit}`,
-    column: spec.key,
-    value: hitValue,
+    match,
+    label: read.summary.replace(/^Count of /i, 'every ').replace(/^List of /i, 'every '),
   };
 }
 
@@ -750,11 +800,9 @@ function formatMoney(n: number): string {
 }
 
 function describe(
-  spec: WritableField, op: EditOp, valueLabel: string,
-  target: EditTarget | null, targets: EditTarget[] = [],
+  spec: WritableField, op: EditOp, valueLabel: string, matchLabel: string,
 ): string {
-  const named = targets.length ? targets.map((t) => t.label).join(' and ') : target?.label;
-  const on = named ? ` on ${named}` : '';
+  const on = matchLabel ? ` on ${matchLabel}` : '';
   switch (op) {
     case 'clear': return `Clear ${spec.label}${on}`;
     case 'add':
@@ -766,13 +814,22 @@ function describe(
   }
 }
 
+/**
+ * How sure this reading is.
+ *
+ * `selection` is what the sentence gave us to find rows with, not the
+ * `Cond` it became. Scoring the condition tree would say a loose title
+ * match and a stock number are the same shape, and they are not: a stock
+ * number is one unit and nothing else, whereas a company name is a guess
+ * that happens to be expressible as the same comparison.
+ */
 function confidenceOf(
   spec: WritableField, op: EditOp, value: string | number | null,
-  target: EditTarget | null, opWord: string,
+  selection: { named: number; stock: boolean }, opWord: string,
 ): number {
   let score = 4;
-  if (target?.kind === 'stock') score += 4;        // a stock number is unambiguous
-  else if (target) score += 2;
+  if (selection.stock) score += 4;                 // a stock number is unambiguous
+  else if (selection.named) score += 2;
   if (value != null) score += 3;
   if (opWord) score += 2;
   if (op === 'clear') score += 1;

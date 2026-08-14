@@ -26,6 +26,7 @@ import { parseEdit, composeEdits } from '../lib/command/mutate';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { parseSelection, selectionSpace } from '../lib/command/select';
 import { attributeNames } from '../lib/command/attributes';
+import type { Cond } from '../lib/command/ir/types';
 import { loadSampleVocabulary } from './sample-vocabulary';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
 import type { UserRole } from '../lib/types';
@@ -355,7 +356,7 @@ for (const c of EDITS) {
   ok(`edit: "${c.q}" -> column`, p.field.key === c.key, `got ${p.field.key}, want ${c.key}`);
   ok(`edit: "${c.q}" -> operation`, p.op === c.op, `got ${p.op}, want ${c.op}`);
   ok(`edit: "${c.q}" -> value`, p.value === c.value, `got ${String(p.value)}, want ${String(c.value)}`);
-  if (c.target) ok(`edit: "${c.q}" -> record`, p.target?.text === c.target, `got ${p.target?.text}`);
+  if (c.target) ok(`edit: "${c.q}" -> record`, p.named[0] === c.target, `got ${p.named[0]}`);
   ok(`edit: "${c.q}" is complete`, p.missing.length === 0, p.missing.join(','));
   ok(`edit: "${c.q}" is confident enough to act on`, p.confidence >= 10, String(p.confidence));
 }
@@ -379,8 +380,8 @@ for (const q of [
 const soldPlan = parseEdit('mark STC143580 and 144504 as sold', CAPS.admin);
 ok('selling is understood', !!soldPlan);
 ok('selling is handed to the sold flow', soldPlan?.handoff === 'markSold', String(soldPlan?.handoff));
-ok('selling names both units', soldPlan?.targets.map((t) => t.text).join(',') === 'STC143580,144504',
-  soldPlan?.targets.map((t) => t.text).join(','));
+ok('selling names both units', soldPlan?.named.join(',') === 'STC143580,144504',
+  soldPlan?.named.join(','));
 
 /* ---------- the ten typed out verbatim ----------
 
@@ -401,8 +402,9 @@ const VERBATIM_EDITS: { q: string; key: string; op: string; value: unknown; targ
   // a number.
   { q: 'Move 143480 to bredbury ',
     key: 'location', op: 'set', value: 'Bredbury', targets: ['143480'] },
-  { q: 'mark all outstanding social posts as approved',
-    key: 'status', op: 'set', value: 'approved', targets: ['outstanding'] },
+  // Named records only. Describing the rows is asserted below, where
+  // the assertion can be about the condition rather than about a list
+  // of names that a described set does not have.
 ];
 
 for (const c of VERBATIM_EDITS) {
@@ -413,22 +415,69 @@ for (const c of VERBATIM_EDITS) {
   ok(`verbatim: "${c.q.trim()}" -> operation`, p.op === c.op, `got ${p.op}`);
   ok(`verbatim: "${c.q.trim()}" -> value`, p.value === c.value, `got ${String(p.value)}`);
   ok(`verbatim: "${c.q.trim()}" -> records`,
-    p.targets.map((t) => t.text).join(',') === c.targets.join(','),
-    `got ${p.targets.map((t) => t.text).join(',')}`);
+    p.named.join(',') === c.targets.join(','),
+    `got ${p.named.join(',')}`);
   ok(`verbatim: "${c.q.trim()}" is complete`, p.missing.length === 0, p.missing.join(','));
 }
+
+/**
+ * The comparisons a condition tree makes, flattened.
+ *
+ * For asserting what a described set narrows on. A tree rather than a
+ * list is the point: "every available curtainsider at Hyde" is three
+ * comparisons, one of which is a disjunction over every word people use
+ * for a curtainsider, and an assertion should be able to say the depot
+ * is in there without walking that shape by hand.
+ */
+function conditionsOf(c: Cond | null): { column: string; value: string }[] {
+  if (!c) return [];
+  switch (c.kind) {
+    case 'and':
+    case 'or':
+      return c.of.flatMap(conditionsOf);
+    case 'cmp':
+      return c.left.kind === 'field' && !('via' in c.left.of) && c.right.kind === 'literal'
+        ? [{ column: c.left.of.field, value: String(c.right.value ?? '') }]
+        : [];
+    default:
+      return [];
+  }
+}
+
+const describeCond = (c: Cond | null) =>
+  conditionsOf(c).map((x) => `${x.column}=${x.value}`).join(' + ') || 'nothing';
 
 /* A bulk instruction describes the rows rather than naming them, and the
    half after "as" is where they are going. Reading the longest state
    word won meant "mark all outstanding as approved" set every approved
    post back to outstanding: the instruction exactly inverted. */
 const bulk = parseEdit('mark all outstanding social posts as approved', CAPS.admin);
-ok('bulk: targets a description', bulk?.target?.kind === 'filter', bulk?.target?.kind);
+ok('bulk: names no record', bulk?.named.length === 0, String(bulk?.named.length));
+ok('bulk: the sentence said every match', bulk?.expect === 'many', String(bulk?.expect));
 ok('bulk: narrows on the state described',
-  bulk?.target?.kind === 'filter' && bulk.target.value === 'pending_review',
-  bulk?.target?.kind === 'filter' ? bulk.target.value : '-');
+  conditionsOf(bulk?.match ?? null).some((c) => c.column === 'status' && c.value === 'pending_review'),
+  describeCond(bulk?.match ?? null));
+ok('bulk: does not narrow on where the rows are going',
+  !conditionsOf(bulk?.match ?? null).some((c) => c.value === 'approved'),
+  describeCond(bulk?.match ?? null));
 ok('bulk: approving needs the approve capability',
   !parseEdit('mark all outstanding social posts as approved', CAPS.marketer));
+
+/* A described set is not limited to the column being written.
+
+   The old reader could only narrow on one enum on the field it was
+   writing, so this sentence had no way to be expressed: it selects on
+   the status, the body type and the depot, and writes the depot. It is
+   the same condition machinery a question uses, which is why nothing
+   had to be added for it. */
+const moved = parseEdit('move every available curtainsider at hyde to bredbury', CAPS.admin);
+ok('bulk: a described set can narrow on more than the written column',
+  conditionsOf(moved?.match ?? null).length >= 3, describeCond(moved?.match ?? null));
+ok('bulk: it selects on the depot it is moving them from',
+  conditionsOf(moved?.match ?? null).some((c) => c.column === 'location' && c.value === 'Hyde'),
+  describeCond(moved?.match ?? null));
+ok('bulk: and writes the depot they are going to',
+  moved?.field.key === 'location' && moved.value === 'Bredbury', String(moved?.value));
 
 /* "All" on its own is not a subset. A bar that acts on a whole table
    from four words ruins somebody's afternoon, so the instruction is

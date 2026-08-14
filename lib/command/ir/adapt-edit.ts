@@ -23,7 +23,8 @@
      entity      -> Mutate.target
      field       -> Mutate.set[0].field
      op + value  -> Mutate.set[0].to, as an expression
-     targets     -> Mutate.match, a Select whose where is a Cond
+     match       -> Mutate.match, a Select whose where is that Cond
+     expect      -> Mutate.expect
      missing     -> Plan.unmet
      handoff     -> an Invoke naming a capability, never a field write
 
@@ -31,9 +32,9 @@
    presentation and scoring, not meaning, and the equivalence check
    knows to ignore them.
    ============================================================= */
-import type { EditPlan, EditTarget, EditOp } from '../mutate';
+import type { EditPlan, EditOp } from '../mutate';
 import type { WritableField } from '../fields';
-import type { Cardinality, Cond, Expr, Mutate, Plan, Select, Step, Unmet } from './types';
+import type { Cond, Expr, Mutate, Plan, Select, Step, Unmet } from './types';
 import { entity as entityDef } from './registry';
 
 /* -------------------------------------------------------------
@@ -54,57 +55,24 @@ export function titleColumnOf(entityId: string): string | null {
 }
 
 /**
- * How a named record is recognised.
+ * The rows to change, as the read side would express them.
  *
- * Loosely, because people type the last few digits of a stock number
- * and the first word of a company. That is why `expect: 'one'` matters:
- * the loose match is what makes several rows possible, and the
- * cardinality is what makes that an ambiguity to ask about rather than
- * a set to write.
+ * There is no translation left to do here. `parseEdit` now produces a
+ * `Cond` from the same machinery `parseQuery` filters go through, so
+ * this only wraps it in the `Select` that `Mutate.match` holds. The
+ * three functions that used to live here, one to turn a target into a
+ * condition, one to join several with `or`, and one to guess a
+ * cardinality from the shapes of those targets, all described a second
+ * selection language that no longer exists.
  */
-function condForTarget(entity: string, title: string, t: EditTarget): Cond {
-  const field = (name: string): Expr => ({ kind: 'field', of: { entity, field: name } });
-  const lit = (v: string): Expr => ({ kind: 'literal', value: v });
-
-  if (t.kind === 'filter') {
-    return { kind: 'cmp', op: 'eq', left: field(t.column), right: lit(t.value) };
-  }
-  return { kind: 'cmp', op: 'contains', left: field(title), right: lit(t.text) };
-}
-
-/**
- * Several named records are an `or`, not several statements.
- *
- * "Mark STC143580 and 144504 as sold" is one instruction about two
- * units, and splitting it into two plans is how one of them succeeds
- * and the other does not.
- */
-function matchFor(entity: string, targets: EditTarget[]): Select | null {
-  if (!targets.length) return null;
-  const title = titleColumnOf(entity);
-  /* Without a title column there is no way to recognise a named record,
-     and guessing one is how a plan comes to match nothing. */
-  if (!title && targets.some((t) => t.kind !== 'filter')) return null;
-  const conds = targets.map((t) => condForTarget(entity, title ?? '', t));
+function matchFor(entity: string, where: Cond | null): Select | null {
+  if (!where) return null;
   return {
     op: 'select',
     from: { entity },
-    where: conds.length === 1 ? conds[0] : { kind: 'or', of: conds },
+    where,
     produces: { kind: 'rows', entity },
   };
-}
-
-/**
- * How many rows the SENTENCE named.
- *
- * `many` only where the reader found a described subset, which it only
- * produces for a word that genuinely means every match alongside a
- * named subset. Everything else is one. Nothing here counts anything:
- * a company name that turns out to fit forty accounts is an ambiguity
- * for `resolve` to raise, not permission to write forty.
- */
-export function cardinalityOf(targets: EditTarget[]): Cardinality {
-  return targets.some((t) => t.kind === 'filter') ? 'many' : 'one';
 }
 
 /* -------------------------------------------------------------
@@ -163,7 +131,7 @@ export function adaptEditPlan(p: EditPlan): AdaptedEdit {
       : 'the instruction did not say what to change it to',
   }));
 
-  const match = matchFor(entity, p.targets);
+  const match = matchFor(entity, p.match);
 
   /* A discrete business operation, not a column.
      Selling raises a commission line, flips the stock unit and tells
@@ -206,7 +174,10 @@ export function adaptEditPlan(p: EditPlan): AdaptedEdit {
   const mutate: Mutate = {
     op: 'update',
     id: 's1',
-    expect: cardinalityOf(p.targets),
+    /* Straight from the reader. How many rows the sentence named is a
+       fact about the sentence, and it was decided where the words were
+       read rather than re-derived from the shape of a condition. */
+    expect: p.expect,
     target: { entity },
     match,
     set: [{ field: { entity, field: p.field.key }, to, ...(mode ? { mode } : {}) }],

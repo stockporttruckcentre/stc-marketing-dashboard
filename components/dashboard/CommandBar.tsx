@@ -535,9 +535,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         entity: p.entity, fieldKey: p.field.key, op: p.op, value: p.value,
-        targets: p.targets.map((t) => (t.kind === 'filter'
-          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
-          : { kind: t.kind, text: t.text })),
+        named: p.named, match: p.match, expect: p.expect,
         recordId, handoff: p.handoff,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
@@ -565,11 +563,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         entity: edit.entity, fieldKey: edit.field.key, op: edit.op, value: edit.value,
-        // A bulk change is defined by its description, not by ids, so the
-        // targets go back up rather than the rows they matched.
-        targets: edit.targets.map((t) => (t.kind === 'filter'
-          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
-          : { kind: t.kind, text: t.text })),
+        // The description goes back up as well as the ids it matched, so
+        // the server can tell a bulk change from a named one.
+        named: edit.named, match: edit.match, expect: edit.expect,
         recordIds: editPreview.recordIds, recordId: editPreview.recordId,
         confirm: true,
       }),

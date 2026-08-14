@@ -46,8 +46,6 @@ const ok = (sentence: string, what: string, cond: boolean, detail = '') => {
    The canonical description of an instruction's meaning
    ============================================================= */
 
-type TargetFact = { op: string; column: string; value: string };
-
 type Semantics = {
   entity: string;
   field: string;
@@ -55,14 +53,21 @@ type Semantics = {
   operation: 'replace' | 'clear' | 'append' | 'increase' | 'decrease';
   value: string | null;
   expect: 'one' | 'many' | null;
-  targets: TargetFact[];
+  /**
+   * Which rows, as the condition itself.
+   *
+   * This used to be a list of facts recovered from two different
+   * representations, because the reader had its own target union and the
+   * IR had conditions. There is one representation now, so the honest
+   * assertion is that the adapter carries the reader's `Cond` through
+   * unchanged: it may wrap it in a `Select`, it may not reshape it, drop
+   * a disjunct or invent a comparison.
+   */
+  match: string;
   unmet: string[];
   /** A discrete operation rather than a column write. */
   invokes: string | null;
 };
-
-const sortTargets = (ts: TargetFact[]) =>
-  ts.slice().sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
 function canonical(x: unknown): string {
   if (x === null || typeof x !== 'object') return JSON.stringify(x) ?? 'null';
@@ -83,25 +88,39 @@ function fromEditPlan(p: EditPlan): Semantics {
         : p.op === 'subtract' ? 'decrease'
           : 'replace';
 
-  /* A named record is recognised by the entity's own title column,
-     whatever shape the words took. */
-  const title = titleColumnOf(p.entity) ?? '';
-  const targets: TargetFact[] = p.targets.map((t) =>
-    t.kind === 'filter'
-      ? { op: 'eq', column: t.column, value: t.value }
-      : { op: 'contains', column: title, value: t.text });
-
   return {
     entity: p.entity,
     field: p.field.key,
     operation,
     value: p.op === 'clear' ? null : (p.value == null ? null : String(p.value)),
     /* A handoff writes no column, so it has no cardinality to carry. */
-    expect: p.handoff ? null : (p.targets.length ? (p.targets.some((t) => t.kind === 'filter') ? 'many' : 'one') : null),
-    targets: sortTargets(targets),
+    expect: p.handoff ? null : (p.match ? p.expect : null),
+    match: canonical(p.match ?? null),
     unmet: (p.missing ?? []).slice().sort(),
     invokes: p.handoff === 'markSold' ? 'deal.markSold' : null,
   };
+}
+
+/**
+ * Every named record must be recognised on the entity's own title.
+ *
+ * Separate from the equivalence, because it is a fact about the reader
+ * rather than about the crossing. "Set the contact name on STC144504"
+ * is an instruction about a contact, and a condition comparing
+ * `stc_no` on `crm_contacts` matches nothing however faithfully it
+ * survives the adapter.
+ */
+function namedOnTitle(sentence: string, p: EditPlan): void {
+  if (!p.named.length || !p.match) return;
+  const title = titleColumnOf(p.entity);
+  const columns = new Set(
+    disjuncts(p.match)
+      .map((c) => (c.kind === 'cmp' ? plainField(c.left) : null))
+      .filter((x): x is string => x !== null),
+  );
+  ok(sentence, `a named record is matched on ${p.entity}'s own title column`,
+    !!title && columns.size === 1 && columns.has(title),
+    `      title ${title}, matched on ${[...columns].join(', ')}`);
 }
 
 /* -------------------------------------------------------------
@@ -120,19 +139,9 @@ function disjuncts(c: Cond | undefined): Cond[] {
   return c.kind === 'or' ? c.of.flatMap(disjuncts) : [c];
 }
 
-function recoverTargets(match: Select | undefined): TargetFact[] {
-  const out: TargetFact[] = [];
-  for (const c of disjuncts(match?.where)) {
-    if (c.kind !== 'cmp') { out.push({ op: `unreadable:${c.kind}`, column: '', value: '' }); continue; }
-    const column = plainField(c.left);
-    const value = literal(c.right);
-    if (column === null || value === null) {
-      out.push({ op: 'unreadable:cmp', column: String(column), value: String(value) });
-      continue;
-    }
-    out.push({ op: c.op, column, value });
-  }
-  return sortTargets(out);
+/** The condition a step selects rows with, or nothing. */
+function recoverMatch(match: Select | undefined): string {
+  return canonical(match?.where ?? null);
 }
 
 function recoverOperation(a: Mutate['set'] extends (infer U)[] | undefined ? U : never):
@@ -165,7 +174,7 @@ function fromIR(adapted: ReturnType<typeof adaptEditPlan>): Semantics {
       operation: 'replace',
       value: null,
       expect: null,
-      targets: recoverTargets(subject && 'op' in subject ? subject : undefined),
+      match: recoverMatch(subject && 'op' in subject ? subject : undefined),
       unmet: adapted.plan.unmet.map((u) => u.part).sort(),
       invokes: step.capability,
     };
@@ -175,7 +184,7 @@ function fromIR(adapted: ReturnType<typeof adaptEditPlan>): Semantics {
   if (!m || m.op === 'create') {
     return {
       entity: '', field: '', operation: 'replace', value: null, expect: null,
-      targets: [], unmet: adapted.plan.unmet.map((u) => u.part).sort(), invokes: null,
+      match: canonical(null), unmet: adapted.plan.unmet.map((u) => u.part).sort(), invokes: null,
     };
   }
 
@@ -192,7 +201,7 @@ function fromIR(adapted: ReturnType<typeof adaptEditPlan>): Semantics {
     operation,
     value,
     expect: m.expect,
-    targets: recoverTargets(match),
+    match: recoverMatch(match),
     unmet: adapted.plan.unmet.map((u) => u.part).sort(),
     invokes: null,
   };
@@ -214,6 +223,7 @@ function difference(a: Semantics, b: Semantics): string {
 
 function compare(sentence: string, p: EditPlan): void {
   const adapted = adaptEditPlan(p);
+  namedOnTitle(sentence, p);
 
   ok(sentence, 'the adapter recorded nothing as lost', adapted.lost.length === 0,
     `      ${adapted.lost.map((l) => `${l.part}: ${l.why}`).join('; ')}`);
@@ -224,7 +234,7 @@ function compare(sentence: string, p: EditPlan): void {
   /* An instruction missing its record or its value produces no step,
      which both sides describe as an empty plan carrying what is
      missing. A half instruction is not a plan with a hole in it. */
-  const incomplete = (!p.targets.length || (p.op !== 'clear' && p.value == null)) && !p.handoff;
+  const incomplete = (!p.match || (p.op !== 'clear' && p.value == null)) && !p.handoff;
   if (incomplete) {
     ok(sentence, 'a half read instruction produces no step',
       adapted.plan.steps.length === 0 && adapted.plan.unmet.length > 0,
