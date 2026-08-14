@@ -7,14 +7,25 @@
    not: a sale raises a commission line, flips the stock unit, and tells
    every other rep chasing the same unit that it is gone.
 
-   Lifted out of `app/api/tracker/mark-sold/route.ts` unchanged so the
-   route and the command bar's capability run the SAME code. Two
-   implementations of a sale is how one of them ends up not cascading.
+   ALL THREE, OR NONE.
+
+   This used to do them as three separate statements and had an explicit
+   partial path: the tracker updated, the stock update failed, and it
+   said so. That leaves a deal marked won against a unit still showing
+   as available, which is the exact state a sale is supposed to remove,
+   and it leaves somebody to work out by hand which half happened.
+
+   So the writes are `command_mark_sold`, one plpgsql function and
+   therefore one transaction. The commission arithmetic went with them,
+   because a figure worked out here and written there can disagree.
+
+   Both callers run this: the tracker route the sales list uses, and the
+   command bar's `deal.markSold` capability. Two implementations of a
+   sale is how one of them ends up not cascading.
 
    Nothing here decides permission. Both callers gate on `stock.edit`
-   first, which is what the route's own comment explains: RLS covers the
-   caller's own tracker row and covers neither the stock unit nor the
-   other reps' rows.
+   first, and the function is SECURITY INVOKER so RLS still applies:
+   this makes a set of writes atomic and widens nothing.
    ============================================================= */
 
 export type MarkSoldInput = {
@@ -35,14 +46,15 @@ export type MarkSoldResult =
       stockUpdated: boolean;
       /** Other reps' rows on the same unit, told it is gone. */
       cascadedOthers: number;
-      /** Exactly what changed, for a preview or an audit line. */
-      changes: { table: string; id: string; set: Record<string, unknown> }[];
     }
-  | { ok: false; error: string; partial?: boolean };
+  /* No `partial`. There is no partial outcome to report: the writes
+     are one transaction, so it happened or it did not. */
+  | { ok: false; error: string };
 
 /** The slice of Supabase this needs, so nothing here imports a client. */
 type Queryable = {
   from: (table: string) => any;
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 };
 
 export type Actor = { id: string };
@@ -69,91 +81,42 @@ export async function markSold(
 ): Promise<MarkSoldResult> {
   if (!input.trackerId) return { ok: false, error: 'no deal named' };
 
-  const { data: row, error: readErr } = await supabase
-    .from('crm_contacts').select('*').eq('id', input.trackerId).single();
-  if (readErr || !row) return { ok: false, error: readErr?.message ?? 'that deal is not there' };
-
-  /* Commission follows the row's own rate unless somebody supplied a
-     figure. Ten percent is the fallback the tracker has always used. */
-  const profit = input.profit ?? row.profit ?? null;
-  const rate = row.commission_rate ?? 0.10;
-  const commission = input.commission
-    ?? (profit != null ? Number((Number(profit) * rate).toFixed(2)) : null);
-
+  /* The rep's initials are what the stock list shows, and they come
+     from the caller's profile rather than from the request. */
   const { data: profile } = await supabase
     .from('profiles').select('full_name').eq('id', actor.id).single();
-  const repName = repInitials(profile?.full_name);
 
-  const changes: { table: string; id: string; set: Record<string, unknown> }[] = [];
+  const { data, error } = await supabase.rpc('command_mark_sold', {
+    p_tracker_id: input.trackerId,
+    p_rep_initials: repInitials(profile?.full_name),
+    p_sale_price: input.salePrice ?? null,
+    p_profit: input.profit ?? null,
+    p_commission: input.commission ?? null,
+    p_dispatch_date: input.dispatchDate ?? null,
+    p_today: today,
+  });
 
-  /* 1. The tracker row itself. */
-  const trackerUpdate: Record<string, unknown> = {
-    status: 'customer',
-    sale_price: input.salePrice ?? row.sale_price,
-    profit,
-    commission,
-    order_date: row.order_date ?? today,
+  if (error) {
+    const message = String((error as { message?: string }).message ?? error);
+    /* No partial state to report, because there is no partial state.
+       The transaction either committed or it did not. */
+    return { ok: false, error: message };
+  }
+
+  const result = (data ?? {}) as {
+    trackerId?: string;
+    commission?: number | null;
+    stockTrailerId?: string | null;
+    stockUpdated?: boolean;
+    cascadedOthers?: number;
   };
-  if (input.dispatchDate) trackerUpdate.dispatch_date = input.dispatchDate;
-
-  const { error: tErr } = await supabase
-    .from('crm_contacts').update(trackerUpdate).eq('id', input.trackerId);
-  if (tErr) return { ok: false, error: `the deal did not update: ${tErr.message}` };
-  changes.push({ table: 'crm_contacts', id: input.trackerId, set: trackerUpdate });
-
-  /* 2. The stock unit, when the deal is linked to one. */
-  let stockUpdated = false;
-  if (row.stock_trailer_id) {
-    const stockUpdate: Record<string, unknown> = {
-      status: 'sold',
-      customer: row.company_name,
-      sales_rep: repName,
-      sales_price: input.salePrice ?? row.sale_price,
-      profit,
-      order_date: trackerUpdate.order_date,
-    };
-    if (input.dispatchDate) stockUpdate.dispatch_date = input.dispatchDate;
-    const { error: sErr } = await supabase
-      .from('stock_trailers').update(stockUpdate).eq('id', row.stock_trailer_id);
-    if (sErr) {
-      return {
-        ok: false,
-        error: `the deal updated, but the stock unit did not: ${sErr.message}`,
-        partial: true,
-      };
-    }
-    stockUpdated = true;
-    changes.push({ table: 'stock_trailers', id: row.stock_trailer_id, set: stockUpdate });
-  }
-
-  /* 3. Everybody else chasing the same unit.
-     First to sell wins. Their row says sold; their commission and
-     dispatch date stay empty, because they did not make the sale.
-     Leaving those alone is what keeps the numbers honest. */
-  let cascadedOthers = 0;
-  if (row.stock_trailer_id) {
-    const { data: others, error: cErr } = await supabase
-      .from('crm_contacts')
-      .update({ status: 'customer' })
-      .eq('stock_trailer_id', row.stock_trailer_id)
-      .neq('id', input.trackerId)
-      .not('status', 'eq', 'customer')
-      .select('id');
-    if (!cErr && others) {
-      cascadedOthers = others.length;
-      for (const other of others as { id: string }[]) {
-        changes.push({ table: 'crm_contacts', id: other.id, set: { status: 'customer' } });
-      }
-    }
-  }
 
   return {
     ok: true,
-    trackerId: input.trackerId,
-    commission,
-    stockTrailerId: row.stock_trailer_id ?? null,
-    stockUpdated,
-    cascadedOthers,
-    changes,
+    trackerId: result.trackerId ?? input.trackerId,
+    commission: result.commission ?? null,
+    stockTrailerId: result.stockTrailerId ?? null,
+    stockUpdated: !!result.stockUpdated,
+    cascadedOthers: result.cascadedOthers ?? 0,
   };
 }

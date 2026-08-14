@@ -55,9 +55,29 @@ export type ResolvedReference = {
   value: unknown;
 };
 
+/** One row a reference could have meant. */
+export type ReferenceCandidate = { id: string; label: string; value: unknown };
+
+/**
+ * What became of one symbolic reference.
+ *
+ * Four outcomes, and the two failures that used to be one are the
+ * point. "Dave" matching nobody is a mistake in the instruction and
+ * there is nothing to ask about. "Dave" matching two people is a
+ * question with two answers, and the interface can only ask it if the
+ * answers come back. Collapsing both into "ambiguous" left the caller
+ * unable to tell an empty list from a choice.
+ */
+export type ReferenceOutcome =
+  | { state: 'resolved'; at: string; entity: string; id: string; value: unknown }
+  | { state: 'no match'; at: string; entity: string; why: string }
+  | { state: 'ambiguous'; at: string; entity: string; why: string; candidates: ReferenceCandidate[] }
+  | { state: 'unresolvable'; at: string; entity: string; why: string };
+
 export type Resolution =
   | {
       ok: true;
+      stepId: string;
       rows: ResolvedRow[];
       references: ResolvedReference[];
       /** Every field read or written, which is what the hash covers. */
@@ -66,10 +86,13 @@ export type Resolution =
     }
   | {
       ok: false;
+      stepId: string;
       reason: 'nothing matched' | 'ambiguous' | 'unresolvable';
       why: string;
-      /** For `ambiguous`: the rows it could have meant. Never one of them. */
+      /** For an ambiguous SELECTION: the rows it could have meant. */
       candidates?: ResolvedRow[];
+      /** For an ambiguous REFERENCE: which one, and what it could mean. */
+      reference?: ReferenceOutcome;
     };
 
 /** The slice of Supabase this needs, so nothing here imports a client. */
@@ -213,126 +236,181 @@ function labelOf(row: Record<string, unknown>, title: string | null): string {
  */
 async function resolveReferences(
   supabase: Queryable, m: Mutate,
-): Promise<{ ok: true; refs: ResolvedReference[] } | { ok: false; reason: Resolution extends { ok: false } ? never : never; why: string; ambiguous: boolean; candidates?: ResolvedRow[] }> {
+): Promise<{ ok: true; refs: ResolvedReference[] } | { ok: false; outcome: ReferenceOutcome }> {
   const refs: ResolvedReference[] = [];
 
-  const walk = async (e: Expr, at: string): Promise<string | null> => {
+  const lookup = async (e: Extract<Expr, { kind: 'reference' }>, at: string): Promise<ReferenceOutcome> => {
+    const def = entityDef(e.entity);
+    if (!def) return { state: 'unresolvable', at, entity: e.entity, why: `nothing here holds ${e.entity}` };
+
+    const title = def.titleField ?? null;
+    const columns = [...new Set(['id', e.select, ...(title ? [title] : [])])].join(', ');
+    const narrowed = applyCond(supabase.from(def.table).select(columns), e.where);
+    if (narrowed.unsupported) {
+      return {
+        state: 'unresolvable', at, entity: e.entity,
+        why: `that needs ${narrowed.unsupported}, which cannot be looked up`,
+      };
+    }
+
+    const { data, error } = await narrowed.q.limit(50);
+    if (error) {
+      return { state: 'unresolvable', at, entity: e.entity, why: String((error as any).message ?? error) };
+    }
+    const rows = (data ?? []) as Record<string, unknown>[];
+
+    if (!rows.length) {
+      return { state: 'no match', at, entity: e.entity, why: `no ${def.labelOne} here matches that` };
+    }
+    if (rows.length > 1 && e.onAmbiguity !== 'all') {
+      return {
+        state: 'ambiguous', at, entity: e.entity,
+        why: `${rows.length} ${def.label} match that, so it is not clear which was meant`,
+        candidates: rows.map((r) => ({
+          id: String(r.id),
+          label: labelOf(r, title),
+          value: r[e.select],
+        })),
+      };
+    }
+    return { state: 'resolved', at, entity: e.entity, id: String(rows[0].id), value: rows[0][e.select] };
+  };
+
+  /** Every reference inside one expression, in the order they appear. */
+  const walk = async (e: Expr, at: string): Promise<ReferenceOutcome | null> => {
     if (e.kind === 'binary') {
       return (await walk(e.left, `${at}.left`)) ?? (await walk(e.right, `${at}.right`));
     }
     if (e.kind === 'shift') return walk(e.of, `${at}.of`);
     if (e.kind !== 'reference') return null;
 
-    const def = entityDef(e.entity);
-    if (!def) return `nothing here holds ${e.entity}`;
-
-    const title = def.titleField ?? null;
-    const columns = [...new Set(['id', e.select, ...(title ? [title] : [])])].join(', ');
-    let q = supabase.from(def.table).select(columns);
-    const narrowed = applyCond(q, e.where);
-    if (narrowed.unsupported) return `${at} needs ${narrowed.unsupported}, which cannot be looked up`;
-    q = narrowed.q;
-
-    const { data, error } = await q.limit(50);
-    if (error) return `${at} could not be looked up: ${error.message ?? error}`;
-    const rows = (data ?? []) as Record<string, unknown>[];
-
-    if (!rows.length) return `nothing here is called that`;
-    if (rows.length > 1 && e.onAmbiguity !== 'all') {
-      return `more than one ${def.labelOne} matches, so it is not clear which was meant`;
-    }
-    refs.push({
-      at, entity: e.entity, id: String(rows[0].id), value: rows[0][e.select],
-    });
+    const outcome = await lookup(e, at);
+    if (outcome.state !== 'resolved') return outcome;
+    refs.push({ at, entity: outcome.entity, id: outcome.id, value: outcome.value });
     return null;
   };
 
   for (const [i, a] of (m.set ?? []).entries()) {
     const problem = await walk(a.to, `set[${i}].to`);
-    if (problem) return { ok: false, reason: undefined as never, why: problem, ambiguous: true };
+    if (problem) return { ok: false, outcome: problem };
   }
   return { ok: true, refs };
 }
 
 export type ResolveOptions = {
   supabase: Queryable;
-  /** How many rows a bulk write may touch before it is refused. */
-  limit?: number;
+  /**
+   * Which step to resolve.
+   *
+   * Required. A plan is a program and may hold several mutations, and
+   * a resolver that picked the first one silently carried out part of a
+   * command while reporting the whole of it. Choosing is the caller's
+   * job, and `orchestrate.ts` is what does the choosing for a whole
+   * plan.
+   */
+  stepId: string;
+  /**
+   * How many rows to read before giving up.
+   *
+   * A guard on this function's own memory, not a rule about how large a
+   * command may be. Whether a large change is allowed is execution
+   * policy and lives in `orchestrate.ts`: the language must be able to
+   * represent a change to a thousand records whatever policy then says
+   * about running it.
+   */
+  readCap?: number;
 };
 
 /**
- * Find the rows a plan is about, and what they currently hold.
+ * Find the rows one step is about, and what they currently hold.
  *
  * Refuses rather than narrows. A sentence that named one record and
  * found six comes back as `ambiguous` with all six, and the caller asks.
+ * Nothing here decides whether a large change is allowed: the language
+ * has to be able to represent a change to a thousand records, and
+ * whether it runs is execution policy.
  */
 export async function resolveMutation(
   plan: Plan, opts: ResolveOptions,
 ): Promise<Resolution> {
-  const step = plan.steps.find((s) => s.op === 'update' || s.op === 'delete') as Mutate | undefined;
-  if (!step || step.op === 'create') {
-    return { ok: false, reason: 'unresolvable', why: 'this plan changes no existing rows' };
+  const stepId = opts.stepId;
+  const step = plan.steps.find((s) => s.id === stepId) as Mutate | undefined;
+  type Failure = Extract<Resolution, { ok: false }>;
+  const fail = (reason: Failure['reason'], why: string, extra: Partial<Failure> = {}): Failure =>
+    ({ ok: false, stepId, reason, why, ...extra });
+
+  if (!step) return fail('unresolvable', `this plan has no step "${stepId}"`);
+  if (step.op !== 'update' && step.op !== 'delete') {
+    return fail('unresolvable', `step "${stepId}" changes no existing rows`);
   }
 
   const def = entityDef(step.target.entity);
-  if (!def) return { ok: false, reason: 'unresolvable', why: `nothing here holds ${step.target.entity}` };
+  if (!def) return fail('unresolvable', `nothing here holds ${step.target.entity}`);
 
   const match = step.match;
   if (!match || !('op' in match)) {
-    return { ok: false, reason: 'unresolvable', why: 'this plan does not say which rows' };
+    return fail('unresolvable', `step "${stepId}" does not say which rows`);
   }
 
   /* References first. A value that cannot be resolved means the write
-     has no value, and finding that out after selecting ten thousand
-     rows helps nobody. */
+     has no value, and finding that out after reading ten thousand rows
+     helps nobody. */
   const refs = await resolveReferences(opts.supabase, step);
-  if (!refs.ok) return { ok: false, reason: 'ambiguous', why: refs.why };
+  if (!refs.ok) {
+    const o = refs.outcome;
+    /* `resolved` never reaches here, and the four states map onto three
+       reasons without either failure losing its own meaning. */
+    return fail(
+      o.state === 'no match' ? 'nothing matched'
+        : o.state === 'ambiguous' ? 'ambiguous' : 'unresolvable',
+      o.state === 'resolved' ? 'that reference resolved' : o.why,
+      { reference: o },
+    );
+  }
 
   const fields = fieldsTouched(step);
   const title = def.titleField ?? null;
   const columns = [...new Set(['id', ...(title ? [title] : []), ...fields])].join(', ');
 
-  let q = opts.supabase.from(def.table).select(columns);
-  const narrowed = applyCond(q, (match as Select).where ?? { kind: 'and', of: [] });
+  const narrowed = applyCond(
+    opts.supabase.from(def.table).select(columns),
+    (match as Select).where ?? { kind: 'and', of: [] },
+  );
   if (narrowed.unsupported) {
-    return { ok: false, reason: 'unresolvable', why: `this selection needs ${narrowed.unsupported}` };
+    return fail('unresolvable', `this selection needs ${narrowed.unsupported}`);
   }
-  q = narrowed.q;
 
-  const cap = opts.limit ?? 500;
-  const { data, error } = await q.limit(cap + 1);
-  if (error) return { ok: false, reason: 'unresolvable', why: String(error.message ?? error) };
+  /* A ceiling on what this function reads into memory, not a ceiling on
+     what may be asked for. Reaching it is reported so the caller knows
+     the set is bigger than what came back. */
+  const readCap = opts.readCap ?? 5_000;
+  const { data, error } = await narrowed.q.limit(readCap + 1);
+  if (error) return fail('unresolvable', String((error as any).message ?? error));
 
   const found = (data ?? []) as Record<string, unknown>[];
+  if (found.length > readCap) {
+    return fail('unresolvable',
+      `that is more than ${readCap.toLocaleString('en-GB')} records, which is more than can be read at once`);
+  }
+
   const rows: ResolvedRow[] = found.map((r) => ({
     id: String(r.id),
     label: labelOf(r, title),
     before: Object.fromEntries(fields.map((f) => [f, r[f] ?? null])),
   }));
 
-  if (!rows.length) {
-    return { ok: false, reason: 'nothing matched', why: 'nothing here matches that' };
-  }
+  if (!rows.length) return fail('nothing matched', 'nothing here matches that');
 
   /* WHAT THE SENTENCE SAID, against what was found. */
   if (step.expect === 'one' && rows.length > 1) {
-    return {
-      ok: false,
-      reason: 'ambiguous',
-      why: `that names ${rows.length} records, and the instruction was about one`,
-      candidates: rows.slice(0, 25),
-    };
-  }
-  if (step.expect === 'many' && rows.length > cap) {
-    return {
-      ok: false,
-      reason: 'unresolvable',
-      why: `that is more than ${cap} records, which is more than this will change at once`,
-    };
+    return fail('ambiguous',
+      `that names ${rows.length} records, and the instruction was about one`,
+      { candidates: rows.slice(0, 25) });
   }
 
   return {
     ok: true,
+    stepId,
     rows,
     references: refs.refs,
     fields,

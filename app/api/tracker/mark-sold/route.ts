@@ -7,10 +7,15 @@ export const dynamic = 'force-dynamic';
 /**
  * Mark a tracker row sold, and carry it through to the stock unit.
  *
- * The operation itself is in `lib/crm/mark-sold.ts` so the command bar's
- * `deal.markSold` capability runs exactly this and not a second version
- * of it. Two implementations of a sale is how one of them ends up not
- * cascading to the other reps.
+ * The operation itself is in `lib/crm/mark-sold.ts`, which calls the
+ * `command_mark_sold` function, so the command bar's `deal.markSold`
+ * capability runs exactly this and not a second version of it. Two
+ * implementations of a sale is how one of them ends up not cascading to
+ * the other reps.
+ *
+ * The three writes are one transaction. This route used to do them as
+ * three statements and report a partial failure, which left a deal
+ * marked won against a unit still showing as available.
  *
  * The comment this route used to carry said RLS handles ownership, and
  * for the caller's own tracker row it does. It does not cover the two
@@ -41,8 +46,10 @@ export async function POST(req: NextRequest) {
   });
 
   if (!result.ok) {
+    /* No partial status to report. The three writes are one
+       transaction, so nothing was changed. */
     return NextResponse.json(
-      { error: result.error, ...(result.partial ? { partial: true } : {}) },
+      { error: result.error },
       { status: result.error.includes('not there') ? 404 : 500 },
     );
   }
