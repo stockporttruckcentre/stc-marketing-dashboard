@@ -12,10 +12,15 @@ the types rather than adding notes to them.
 write "those results" or "that new list", so the chaining claim was
 false. Two additions fix it:
 
-- every step carries an **id** and declares **what it produces**
+- every step carries an **id**, and **what it produces is derived from
+  the step** by the validator. A step may also declare it, and the
+  declaration is checked against the derivation rather than believed:
+  a select over contacts that claims to produce one `crm_lists` record
+  is refused, and so is a create of `crm_lists` claiming trailer rows
 - a **`ResultRef`** can name a previous step's rows, record, scalar,
-  field or artefact, and a `ResultRef` is usable anywhere a source or a
-  value is accepted
+  series, field or artefact, and a `ResultRef` is usable anywhere a
+  source or a value is accepted. Every member of `Produces` has a
+  member here, so no shape can be produced and then not be consumable
 
 Nothing here names a list, a share or a CRM concept.
 
@@ -70,7 +75,7 @@ type Produces =
   | { kind: 'rows';   entity: string }
   | { kind: 'record'; entity: string }
   | { kind: 'scalar' }
-  | { kind: 'series' }
+  | { kind: 'series'; entity?: string }
   | { kind: 'artefact' };
 
 /**
@@ -78,14 +83,21 @@ type Produces =
  *
  * This is the whole of the dataflow model. It is deliberately generic:
  * `record` is any single row a step created or resolved, `rows` is any
- * set, `field` reaches inside a produced record, `artefact` is a file
- * or document. Nothing here knows what kind of record it is.
+ * set, `series` is a grouped aggregate, `field` reaches inside a
+ * produced record, `artefact` is a file or document. Nothing here knows
+ * what kind of record it is.
+ *
+ * A `field` reference is satisfied by a `record` and NOT by `rows`. Ten
+ * thousand contacts have ten thousand email addresses and no honest
+ * single value, so reducing a set to one value goes through `agg`,
+ * which says which reduction was meant.
  */
 type ResultRef =
   | { ref: 'rows';     step: StepId }
   | { ref: 'record';   step: StepId }
   | { ref: 'field';    step: StepId; field: string }
   | { ref: 'scalar';   step: StepId; as?: string }
+  | { ref: 'series';   step: StepId }
   | { ref: 'artefact'; step: StepId };
 
 /** Anywhere a set of rows is accepted. */
@@ -403,6 +415,44 @@ Adding a second kind of collection, or a third entity with members,
 requires registry entries and no IR change.
 
 ---
+
+## What the validator enforces before anything runs
+
+Five properties, each proved by `npm run check:ir-safety` with a refusal
+and a matching acceptance, so a validator that rejected everything would
+fail the suite as loudly as one that accepted everything. Every refusal
+case also asserts the REASON it was refused, so a case cannot pass by
+being rejected for an unrelated typo.
+
+1. **Dataflow is typed, and every shape takes part.** A rowset cannot be
+   consumed where a record is required. A series can be produced,
+   referenced and emitted with no cast anywhere in the validator.
+
+2. **A step's declared output is not believed.** The contract is derived
+   from the step: a select yields rows of its source entity, or a scalar
+   when it aggregates, or a series when it aggregates and groups; a
+   create yields one record of its target; an update or delete yields
+   rows of its target; an invoke yields whatever its capability
+   declares, and nothing if the capability declares none. A declaration
+   that disagrees is fatal, and references are judged on the derivation.
+
+3. **Identity is checked, not only shape.** Rows of contacts cannot
+   choose which trailers a write touches. A write to trailers cannot set
+   a field belonging to contacts. A select over trailers cannot filter
+   on a contacts column without going through a declared relationship.
+
+4. **Capability contracts are enforced.** `operates` is checked against
+   the step operation, `entities` against the subject, and an export to
+   a file must name the capability that permits it. Requirements are
+   derived from every entity, field and relationship the plan reaches,
+   including entities reached only by traversal.
+
+5. **An unresolved request does not get to write.** A plan carrying an
+   unmet part, whether the reader reported it or the validator found it,
+   may still answer a question or produce a file. It may not create,
+   update, delete, or invoke anything that is not repeatable. Running
+   the understood half of an instruction is worse than running none of
+   it, because it looks like the instruction was carried out.
 
 ## Migration, corrected
 

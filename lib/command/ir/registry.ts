@@ -22,6 +22,7 @@ import { TABLES, type ColumnKind } from '../columns';
 import { ENTITIES } from '../schema';
 import { WRITABLE_FIELDS } from '../fields';
 import type { CrmCapability } from '../../crm/permissions';
+import type { ProducesKind } from './types';
 
 /* =============================================================
    Fields
@@ -161,13 +162,37 @@ export type RelationshipDef = {
 export type CapabilityDef = {
   id: string;
   label: string;
-  /** What kind of step can invoke it. */
+  /**
+   * Which step operation may name it.
+   *
+   * Checked, not decorative. `record.updateField` operates `update`, so
+   * an `invoke` step naming it is a malformed plan: it would have gone
+   * through the invoke path and never reached the field level write
+   * gate that `update` steps go through.
+   */
   operates: 'select' | 'create' | 'update' | 'delete' | 'invoke' | 'emit';
-  /** Entities it applies to. Empty means any. */
+  /** Entities it applies to. Absent or empty means any. */
   entities?: string[];
   requires?: CrmCapability;
   /** Whether a preview and confirmation is mandatory before execution. */
   confirm: boolean;
+  /**
+   * What an `invoke` or `emit` naming this makes available downstream.
+   *
+   * Absent means the result cannot be referenced. Nothing else can be
+   * derived about a capability's output from the step alone, so a
+   * capability that does not declare this cannot be chained from.
+   */
+  produces?: ProducesKind;
+  /**
+   * Safe to perform twice with the same outcome.
+   *
+   * Read by the unmet gate. A plan carrying something it did not
+   * understand may still run a repeatable step, because the worst case
+   * is a wasted call. Spending an enrichment credit is not repeatable
+   * and does not get to run on a half understood sentence.
+   */
+  idempotent: boolean;
   /** Present when something actually performs it. Absent means declared only. */
   handler?: string;
 };
@@ -187,6 +212,19 @@ function roleFor(kind: ColumnKind, name: string): FieldRole {
 }
 
 let CACHE: EntityDef[] | null = null;
+
+/**
+ * What somebody needs before they may read an entity at all.
+ *
+ * `crm.view` is defined in `permissions.ts` as "see the CRM tab at
+ * all", so it is the existing rule for the tables that tab is built on,
+ * not a new gate invented here. Trailers are visible from stock screens
+ * outside the CRM, so they carry no entity level requirement and are
+ * gated per action instead.
+ */
+function readRequiresFor(table: string): CrmCapability | undefined {
+  return /^(crm_|contact_)/.test(table) ? 'crm.view' : undefined;
+}
 
 /** Fields for one entity, given its table and its optional query spec. */
 function fieldsFor(
@@ -258,6 +296,7 @@ export function entities(): EntityDef[] {
       subtitleFields: spec.subtitleColumns,
       defaultDateField: spec.dateColumn,
       fields: fieldsFor(spec.id, t, spec, writableByEntity.get(spec.id) ?? new Map()),
+      readRequires: readRequiresFor(spec.table),
     });
   }
 
@@ -274,6 +313,7 @@ export function entities(): EntityDef[] {
       addressable: false,
       subtitleFields: [],
       fields: fieldsFor(t.table, t, undefined, writableByEntity.get(t.table) ?? new Map()),
+      readRequires: readRequiresFor(t.table),
     });
   }
 
@@ -305,6 +345,8 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     label: 'the customer who bought it',
     inverse: 'customer.trailers',
     approximate: true,
+    /* It lands on crm_contacts, so traversing it is reading the CRM. */
+    requires: ['crm.view'],
     join: {
       via: 'match',
       on: [{ local: 'customer', remote: 'company_name', op: 'eq' }],
@@ -359,6 +401,7 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     from: 'contacts', to: 'crm_lists', cardinality: 'many',
     label: 'lists it appears on',
     approximate: false,
+    requires: ['crm.view'],
     join: { via: 'through', table: 'crm_list_members', localKey: 'contact_id', remoteKey: 'list_id' },
   },
   {
@@ -366,6 +409,7 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     from: 'contacts', to: 'contact_addresses', cardinality: 'many',
     label: 'its sites',
     approximate: false,
+    requires: ['crm.view'],
     join: { via: 'key', localField: 'id', remoteField: 'contact_id' },
   },
   {
@@ -373,6 +417,7 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     from: 'contacts', to: 'contact_notes', cardinality: 'many',
     label: 'notes against it',
     approximate: false,
+    requires: ['crm.view'],
     join: { via: 'key', localField: 'id', remoteField: 'contact_id' },
   },
 ];
@@ -400,6 +445,7 @@ export const CAPABILITIES: CapabilityDef[] = [
     label: 'Answer a question about records',
     operates: 'select',
     confirm: false,
+    idempotent: true,
     handler: 'app/api/command/query/route.ts',
   },
   {
@@ -407,13 +453,51 @@ export const CAPABILITIES: CapabilityDef[] = [
     label: 'Change a field on a record',
     operates: 'update',
     confirm: true,
+    /* Setting a field to a value twice leaves the same value. The unmet
+       gate stops it anyway, because every mutation is stopped. */
+    idempotent: true,
     handler: 'app/api/command/edit/route.ts',
+  },
+  {
+    id: 'contact.enrich',
+    label: 'Look up a contact through Lusha',
+    operates: 'invoke',
+    entities: ['contacts'],
+    requires: 'crm.enrich',
+    confirm: true,
+    produces: 'record',
+    /* Every call spends a purchased credit whether or not it finds
+       anything, so running it on a sentence that was only partly
+       understood costs real money for a guess. */
+    idempotent: false,
+    handler: 'app/api/lusha/enrich/route.ts',
+  },
+  {
+    id: 'rows.export',
+    label: 'Put rows into a file',
+    operates: 'emit',
+    requires: 'crm.export',
+    confirm: false,
+    produces: 'artefact',
+    idempotent: true,
+    /* The route exists and builds the file. It does not currently check
+       a capability of its own, so on the IR path the derived
+       requirement is what gates it. */
+    handler: 'app/api/crm/export/xlsx/route.ts',
   },
 ];
 
 export function capability(id: string): CapabilityDef | undefined {
   return CAPABILITIES.find((c) => c.id === id);
 }
+
+/**
+ * The capability an `emit` step must name when it produces a file.
+ *
+ * Named here rather than inferred, so there is one answer to "what
+ * gates an export" and it is visible in the registry.
+ */
+export const FILE_EMIT_CAPABILITY = 'rows.export';
 
 /* -------------------------------------------------------------
    Coverage, for the metrics the audit defined. Computed, never

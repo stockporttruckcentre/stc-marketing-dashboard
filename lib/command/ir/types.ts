@@ -33,15 +33,19 @@ export type StepId = string;
 /**
  * What a step makes available to later steps.
  *
- * Declared rather than inferred, so a plan can be checked before any
- * data exists. `validate` uses this to refuse a plan that consumes rows
- * where a record is required.
+ * A step MAY declare this, and the declaration is documentation and a
+ * cross-check, never an authority. `validate` derives the real output
+ * contract from the step itself and refuses a declaration that does not
+ * match. A plan arriving from a client could otherwise write
+ * `produces: record` on a select over ten thousand contacts and have
+ * every downstream check wave it through.
  */
 export type Produces =
   | { kind: 'rows'; entity: string }
   | { kind: 'record'; entity: string }
   | { kind: 'scalar' }
-  | { kind: 'series' }
+  /** A grouped or compared aggregate: several keyed values, not one. */
+  | { kind: 'series'; entity?: string }
   | { kind: 'artefact' };
 
 export type ProducesKind = Produces['kind'];
@@ -50,16 +54,21 @@ export type ProducesKind = Produces['kind'];
  * A reference to something an earlier step produced.
  *
  * Deliberately generic. `record` is any single row a step created or
- * resolved, `rows` is any set, `field` reaches inside a produced
- * record, `artefact` is a file or document. Nothing here knows what
- * kind of record it is, which is what stops the dataflow model growing
- * a case per feature.
+ * resolved, `rows` is any set, `series` is a grouped aggregate, `field`
+ * reaches inside a produced record, `artefact` is a file or document.
+ * Nothing here knows what kind of record it is, which is what stops the
+ * dataflow model growing a case per feature.
+ *
+ * Every member of `Produces` has a member here. When it did not, a
+ * `series` could be produced and never consumed, and the gap was hidden
+ * by a cast in the validator rather than showing up as a type error.
  */
 export type ResultRef =
   | { ref: 'rows'; step: StepId }
   | { ref: 'record'; step: StepId }
   | { ref: 'field'; step: StepId; field: string }
   | { ref: 'scalar'; step: StepId; as?: string }
+  | { ref: 'series'; step: StepId }
   | { ref: 'artefact'; step: StepId };
 
 export type ResultRefKind = ResultRef['ref'];
@@ -218,6 +227,15 @@ export type Emit = {
   from: Source;
   output: Output;
   to: Destination;
+  /**
+   * A capability id from the registry.
+   *
+   * Required when `output` is a file. Putting rows into a spreadsheet
+   * and handing it over is an export whoever asked may not be allowed to
+   * perform, and an emit step that named nothing had no requirement to
+   * derive and so was gated by nothing.
+   */
+  capability?: string;
   produces?: Produces;
 };
 

@@ -18,6 +18,7 @@
      entity      -> Select.from
      measure     -> Select.select, an agg expression
      amountColumn-> the agg's argument
+     derived     -> its own select column, alongside any aggregate
      filters     -> Select.where, one Cond per filter, and the tree
      groupBy     -> Shape.groupBy
      range       -> a `within` Cond on rangeColumn
@@ -25,7 +26,6 @@
      scope       -> Select.scope
      order       -> Shape.orderBy
      limit       -> Shape.limit
-     derived     -> a duration expression
      compare     -> Shape.compare
      unmet       -> Plan.unmet
 
@@ -125,40 +125,66 @@ function periodFor(range: NonNullable<QueryPlan['range']>): Period {
    Measure
    ------------------------------------------------------------- */
 
-function measureExpr(p: QueryPlan): { as: string; expr: Expr } | null {
+/**
+ * The derived attribute, as the expression its name stood for.
+ *
+ * Four named ids with a `how` in the old shape. Here `stock age` is the
+ * subtraction it always was, which is why nothing has to be added when
+ * somebody asks for a fifth.
+ */
+function derivedExpr(p: QueryPlan): Expr | null {
+  if (!p.derived) return null;
   const entityId = p.entity.id;
+  const from = fieldExpr(entityId, p.derived.from);
+  const now: Expr = { kind: 'context', slot: 'now' };
+  if (p.derived.how === 'days until') return { kind: 'duration', from: now, to: from, unit: 'day' };
+  if (p.derived.how === 'days since') return { kind: 'duration', from, to: now, unit: 'day' };
+  return { kind: 'binary', op: '/', left: from, right: fieldExpr(entityId, 'sales_price') };
+}
 
-  /* A derived attribute is a subtraction from a date. In the old shape
-     it was one of four named ids with a `how`; here it is the
-     expression that name stood for. */
-  if (p.derived) {
-    const from = fieldExpr(entityId, p.derived.from);
-    const now: Expr = { kind: 'context', slot: 'now' };
-    const expr: Expr = p.derived.how === 'days until'
-      ? { kind: 'duration', from: now, to: from, unit: 'day' }
-      : p.derived.how === 'days since'
-        ? { kind: 'duration', from, to: now, unit: 'day' }
-        : { kind: 'binary', op: '/', left: from, right: fieldExpr(entityId, 'sales_price') };
+/**
+ * What the select clause holds.
+ *
+ * A list, because counting rows and working out an attribute of them
+ * are two separate things a sentence can ask for at once. "How many
+ * trailers have been sat here over 60 days" carries both, and returning
+ * only the count dropped the attribute entirely: the plan came out
+ * saying `count(*)` with no trace that stock age had been read.
+ */
+function selectColumns(p: QueryPlan): { as: string; expr: Expr }[] {
+  const entityId = p.entity.id;
+  const derived = derivedExpr(p);
+  const aggregating = p.measure === 'sum' || p.measure === 'avg';
+  const fn = p.measure === 'avg' ? 'avg' : 'sum';
+  const out: { as: string; expr: Expr }[] = [];
+  let amountCarried = false;
 
-    if (p.measure === 'count') return { as: 'count', expr: { kind: 'agg', fn: 'count' } };
-    if (p.measure === 'list') return { as: p.derived.id, expr };
-    return {
+  if (p.measure === 'count') out.push({ as: 'count', expr: { kind: 'agg', fn: 'count' } });
+
+  if (derived && p.derived) {
+    out.push({
       as: p.derived.id,
-      expr: { kind: 'agg', fn: p.measure === 'avg' ? 'avg' : 'sum', of: expr },
-    };
+      expr: aggregating ? { kind: 'agg', fn, of: derived } : derived,
+    });
+  } else if (aggregating && p.amountColumn) {
+    out.push({
+      as: p.amountColumn,
+      expr: { kind: 'agg', fn, of: fieldExpr(entityId, p.amountColumn) },
+    });
+    amountCarried = true;
   }
 
-  if (p.measure === 'count') return { as: 'count', expr: { kind: 'agg', fn: 'count' } };
-  if (p.measure === 'list') return null;
-  if (!p.amountColumn) return null;
-  return {
-    as: p.amountColumn,
-    expr: {
-      kind: 'agg',
-      fn: p.measure === 'avg' ? 'avg' : 'sum',
-      of: fieldExpr(entityId, p.amountColumn),
-    },
-  };
+  /* The amount column is not only what an aggregate sums. "Trailers at
+     Carrington with no retail price" is a list, and retail price is
+     still the column the question is about. Dropping it because nothing
+     was being added up lost which number the answer should show, and it
+     took an exact comparison to notice: every earlier assertion was
+     about aggregates and simply never looked. */
+  if (p.amountColumn && !amountCarried) {
+    out.push({ as: p.amountColumn, expr: fieldExpr(entityId, p.amountColumn) });
+  }
+
+  return out;
 }
 
 /* -------------------------------------------------------------
@@ -213,7 +239,21 @@ export function adaptQueryPlan(p: QueryPlan): Adapted {
     };
   }
 
-  const measure = measureExpr(p);
+  const columns = selectColumns(p);
+
+  if ((p.measure === 'sum' || p.measure === 'avg') && !p.derived && !p.amountColumn) {
+    lost.push({ part: 'measure', why: `${p.measure} was asked for with no column to measure` });
+  }
+
+  /* One number, several keyed numbers, or the rows themselves. A
+     grouped count is not a scalar: "how many by depot" has one answer
+     per depot, and calling that a scalar let it be consumed anywhere a
+     single figure was wanted. */
+  const aggregated = columns.some((c) => c.expr.kind === 'agg');
+  const grouped = !!p.groupBy || !!p.compare;
+  const produces = aggregated
+    ? (grouped ? { kind: 'series' as const, entity: entityId } : { kind: 'scalar' as const })
+    : { kind: 'rows' as const, entity: entityId };
 
   const select: Select = {
     op: 'select',
@@ -221,9 +261,9 @@ export function adaptQueryPlan(p: QueryPlan): Adapted {
     from: { entity: entityId },
     ...(where ? { where } : {}),
     ...(scope ? { scope } : {}),
-    ...(measure ? { select: [measure] } : {}),
+    ...(columns.length ? { select: columns } : {}),
     ...(Object.keys(shape).length ? { shape } : {}),
-    produces: p.measure === 'list' ? { kind: 'rows', entity: entityId } : { kind: 'scalar' },
+    produces,
   };
 
   return {
