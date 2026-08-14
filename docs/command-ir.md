@@ -613,6 +613,60 @@ registry declares `operates: 'create'` or `'delete'` yet. That is the
 honest state while the mutation readers are unmigrated, and it is
 asserted rather than assumed.
 
+### One planner is not one planning environment
+
+The slice above put every read through `planCommand`, and that was not
+enough. `planCommand` was being called in two places with two different
+amounts of knowledge.
+
+Nothing in any file says Chereau is a make. It is a make because it
+appears in `stock_trailers.make`, so what a sentence means depends on
+what the database currently holds. The browser loaded that vocabulary
+from `/api/command/vocabulary`; the server planned the same text with an
+empty index. Same function, same sentence, different plan, and every
+gate passing on both sides because each was internally consistent.
+
+So the meaning a person is shown now comes from the server:
+
+```
+preview    POST /api/command/plan  { text }
+           requireCapability -> caps
+           ensureVocabulary -> planCommand(text, caps)
+           -> { summary, hash, runnable, confirm, completion,
+                unresolved, blocked, availability, requirements }
+
+execute    POST /api/command/query { text, hash }
+           requireCapability -> caps
+           ensureVocabulary -> planCommand(text, caps)
+           hash must match the reading that was agreed to
+           -> gates -> compatibility layer -> executor
+```
+
+`planAuthoritatively` loads the vocabulary before it plans, so a caller
+cannot forget. The vocabulary route and the server planner share one
+builder in `lib/command/server/vocabulary.ts`, because two functions
+reading the same columns the same way are two functions that eventually
+stop agreeing.
+
+**The hash is a drift detector, not a token.** The server replans from
+the raw text on execution whatever the client sends, so nothing rests on
+it being unforgeable. What it catches is a sentence that honestly means
+something different by the time somebody presses Enter, because a
+trailer was sold or a customer was added and a word that named nothing
+now names a make. That comes back as a 409 carrying the new reading, for
+preview, rather than executing a question nobody asked. It is hashed
+over the plan and not the summary, so a reworded summary does not refuse
+every previewed command, and not over the actor, so who is asking does
+not change it.
+
+**A client plan is never accepted.** `planAuthoritatively` takes a
+string. There is no parameter one could arrive through, which is a
+property of the signature rather than of anybody's discipline.
+
+The browser still plans locally, with the actor's capabilities, to
+decide whether a half typed sentence is worth a round trip. That is a
+filter on what to ask, never the answer.
+
 **Still to come.** Mutation readers, the action registry, and the
 executor rewritten against `Select` directly. When that lands,
 `lib/command/ir/execute.ts` is deleted and nothing else changes.

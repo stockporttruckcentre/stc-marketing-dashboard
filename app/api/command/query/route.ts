@@ -1,29 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { ENTITIES } from '@/lib/command/schema';
-import { planCommand, planningToQueryPayload } from '@/lib/command/plan';
+import { planForExecution } from '@/lib/command/server/planner';
+import { supabaseVocabulary } from '@/lib/command/server/vocabulary';
+import { planningToQueryPayload } from '@/lib/command/plan';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Answers a question, planned canonically.
+ * Answers a question, planned canonically, on the reading that was
+ * agreed to.
  *
- * The body is the sentence somebody typed. The plan is built here, by
- * the same `planCommand` the bar calls, so the client cannot hand
- * craft a query that never went through the canonical path. What runs
- * below is derived from the canonical `Select` and not from the
- * reader's output.
+ * The body is the sentence somebody typed and the hash of the meaning
+ * they were shown. The plan is built HERE, from the text, through the
+ * same `planAuthoritatively` the preview endpoint calls and with the
+ * same live vocabulary loaded. A client cannot send a plan: there is no
+ * parameter one could arrive through.
  *
- * Four gates before anything reaches the database, in this order:
+ * The hash is not a credential. The plan that runs is the one built
+ * here whatever the client sends. What the hash catches is a sentence
+ * that honestly means something different now than when it was
+ * previewed, because a trailer was sold or a customer was added and a
+ * word that named nothing now names a make. That gets previewed again
+ * rather than run.
+ *
+ * Then four gates, in this order:
  *
  *   1  the plan is well formed                validate
  *   2  the actor holds every permission        derivedRequirements
  *   3  something actually performs it          executability
  *   4  the request was understood in full      completion
- *
- * Three and four are new. A capability with no handler used to be
- * indistinguishable from one with a handler, and a sentence understood
- * in part used to be answered as though it had been understood in full.
  *
  * Every column still comes from the dictionary in lib/command/schema,
  * never from the request, so an unexpected filter key is dropped rather
@@ -35,22 +41,40 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return gate.response;
   const { supabase, user, caps } = gate;
 
-  const raw = await req.json().catch(() => ({})) as { text?: unknown };
+  const raw = await req.json().catch(() => ({})) as { text?: unknown; hash?: unknown };
   const text = typeof raw.text === 'string' ? raw.text : '';
+  const previewHash = typeof raw.hash === 'string' ? raw.hash : '';
   if (!text.trim()) return NextResponse.json({ error: 'no question' }, { status: 400 });
 
-  const planning = planCommand(text, { actorCapabilities: caps });
-  if (!planning) {
-    return NextResponse.json({ error: 'nothing in that question matched anything here' }, { status: 400 });
+  const agreement = await planForExecution({
+    text,
+    previewHash,
+    capabilities: caps,
+    vocabulary: supabaseVocabulary(supabase),
+  });
+
+  if (!agreement.agreed && agreement.reason === 'not understood') {
+    return NextResponse.json(
+      { error: 'nothing in that question matched anything here' }, { status: 400 });
+  }
+  if (!agreement.agreed) {
+    /* The words mean something else now. The new reading goes back for
+       preview: answering the question nobody asked would look exactly
+       like answering the one they did. */
+    return NextResponse.json({
+      error: 'what that means has changed since you typed it',
+      restated: true,
+      ...agreement.planned.meaning,
+    }, { status: 409 });
   }
 
-  if (planning.completion.kind === 'refused') {
-    return NextResponse.json({
-      error: 'that plan will not run',
-      problems: planning.completion.problems.map((p) => `${p.at}: ${p.what}`),
-    }, { status: 400 });
+  const { planning, meaning } = agreement.planned;
+
+  if (meaning.completion === 'refused') {
+    return NextResponse.json({ error: 'that plan will not run', problems: meaning.blocked },
+      { status: 400 });
   }
-  if (planning.availability.permitted === false) {
+  if (!planning.availability.permitted) {
     return NextResponse.json({
       error: 'you do not have access to that',
       missing: planning.availability.missingPermissions,
@@ -70,10 +94,11 @@ export async function POST(req: NextRequest) {
 
   /* Partial is never reported as complete. The answer goes back with
      what could not be read, and the bar shows both. */
-  const unresolved = planning.completion.kind === 'partial' ? planning.completion.unresolved : [];
+  const unresolved = meaning.unresolved;
   const answered = (extra: Record<string, unknown>) => NextResponse.json({
     ok: true,
-    complete: planning.completion.kind === 'complete',
+    hash: meaning.hash,
+    complete: meaning.completion === 'complete',
     unresolved,
     ...extra,
   });

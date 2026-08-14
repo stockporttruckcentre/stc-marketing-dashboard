@@ -41,6 +41,18 @@ export type ValueHit = {
   rows: number;
 };
 
+/**
+ * Everything the database holds, for the columns that carry values.
+ *
+ * The wire shape and the argument shape at once, so the browser and the
+ * server load the SAME thing rather than two things built the same way.
+ * A make that exists only because somebody typed it into a row has to
+ * mean the same on both sides, or the sentence the bar showed and the
+ * sentence the server ran are different sentences.
+ */
+export type VocabularySnapshot =
+  Record<string, Record<string, { value: string; rows: number }[]>>;
+
 /** word (lowercased) -> everywhere that word is a value */
 const INDEX = new Map<string, ValueHit[]>();
 
@@ -144,6 +156,22 @@ export function findValues(text: string): { word: string; at: number; hits: Valu
     out.unshift({ word: pair, at: pos, hits });
   }
   return out;
+}
+
+/** A whole snapshot at once, which is how both sides load it. */
+export function applyVocabulary(snapshot: VocabularySnapshot): void {
+  for (const [entityId, columns] of Object.entries(snapshot)) setVocabulary(entityId, columns);
+}
+
+/**
+ * Forget everything.
+ *
+ * The index is process wide, which is right for a cache of what the
+ * database contains and wrong to leave standing between two checks that
+ * mean to load different vocabularies.
+ */
+export function clearVocabulary(): void {
+  INDEX.clear();
 }
 
 /** Nothing loaded means every caller behaves as it did before. */

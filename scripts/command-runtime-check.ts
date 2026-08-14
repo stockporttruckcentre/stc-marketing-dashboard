@@ -55,7 +55,9 @@ const source = (path: string) => readFileSync(path, 'utf8');
 const PRODUCTION = [
   'components/dashboard/CommandBar.tsx',
   'app/api/command/query/route.ts',
+  'app/api/command/plan/route.ts',
   'lib/command/plan.ts',
+  'lib/command/server/planner.ts',
   'lib/command/ir/execute.ts',
 ];
 
@@ -77,19 +79,23 @@ const bar = source('components/dashboard/CommandBar.tsx');
 ok('the command bar plans through the canonical entry point',
   /from '@\/lib\/command\/plan'/.test(bar) && /planCommand\(/.test(bar));
 ok('the command bar decides from the canonical plan, not a confidence on a QueryPlan',
-  /planning\.availability\.representable/.test(bar) && /planning\.availability\.executable/.test(bar));
-ok('the command bar posts the sentence rather than a query it built itself',
-  /JSON\.stringify\(\{ text: p\.text \}\)/.test(bar));
+  /local\.availability\.representable/.test(bar) && /local\.availability\.executable/.test(bar));
+ok('the command bar posts the sentence and the agreed reading, not a query it built itself',
+  /JSON\.stringify\(\{ text, hash: m\.hash \}\)/.test(bar));
 
 const route = source('app/api/command/query/route.ts');
-ok('the query route plans through the canonical entry point',
-  /from '@\/lib\/command\/plan'/.test(route) && /planCommand\(/.test(route));
+/* The route reaches `planCommand` through the authoritative planner,
+   which is the same function with the vocabulary loaded first. Calling
+   it directly is what let the server plan a sentence in conditions the
+   browser never saw. */
+ok('the query route plans through the authoritative planner',
+  /from '@\/lib\/command\/server\/planner'/.test(route) && /planForExecution\(/.test(route));
 ok('the query route builds what it runs from the canonical plan',
   /planningToQueryPayload\(planning\)/.test(route));
 ok('the query route refuses a plan the validator refuses',
-  /completion\.kind === 'refused'/.test(route));
+  /meaning\.completion === 'refused'/.test(route));
 ok('the query route checks derived permissions',
-  /availability\.permitted === false/.test(route));
+  /!planning\.availability\.permitted/.test(route));
 ok('the query route refuses what nothing can perform',
   /availability\.executable/.test(route));
 ok('the query route never reads a query out of the request body',

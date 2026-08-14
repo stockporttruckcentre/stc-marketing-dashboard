@@ -20,7 +20,8 @@
     "check:score": "tsx scripts/command-score.ts",
     "check:ir": "tsx scripts/ir-equivalence-check.ts",
     "check:ir-safety": "tsx scripts/ir-safety-check.ts",
-    "check:runtime": "tsx scripts/command-runtime-check.ts"
+    "check:runtime": "tsx scripts/command-runtime-check.ts",
+    "check:authority": "tsx scripts/command-authority-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

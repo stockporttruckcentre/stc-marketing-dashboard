@@ -10,8 +10,9 @@ import { composeSuggestions } from '@/lib/command/compose';
 import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
-import { planCommand, type CommandPlanning } from '@/lib/command/plan';
-import { setVocabulary } from '@/lib/command/vocab';
+import { planCommand } from '@/lib/command/plan';
+import type { PlannedMeaning } from '@/lib/command/server/planner';
+import { applyVocabulary } from '@/lib/command/vocab';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -148,9 +149,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!live || !j?.vocabulary) return;
-        for (const [entityId, columns] of Object.entries(j.vocabulary)) {
-          setVocabulary(entityId, columns as any);
-        }
+        applyVocabulary(j.vocabulary);
       })
       .catch(() => {});
     return () => { live = false; };
@@ -329,11 +328,45 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
-  /* One planning entry point. The reader still runs underneath it, but
-     everything below decides from the canonical plan it produces and
-     nothing here sees a QueryPlan. */
-  const planning = useMemo(
-    () => (text.trim().length >= 3 ? planCommand(text) : null), [text]);
+  /* A local read, for deciding whether a half typed sentence is worth
+     asking the server about. Planned with the actor's capabilities, so
+     a command somebody may not run is not offered as one: an action
+     that appears and then refuses teaches people the bar is
+     unreliable. This is a filter on what to ask, never the answer. */
+  const local = useMemo(
+    () => (text.trim().length >= 3 ? planCommand(text, { actorCapabilities: caps }) : null),
+    [text, caps]);
+
+  /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
+     The two sides do not know the same things. The live vocabulary is
+     what makes a word a make or a customer, and the browser and the
+     server load it at different moments, so the same sentence can
+     honestly mean two things. The one that counts is the one the server
+     will act on, and it arrives with a hash of its meaning. */
+  const [meaning, setMeaning] = useState<PlannedMeaning | null>(null);
+
+  const worthAsking = !!local
+    && local.presentation.confidence >= 8
+    && local.availability.representable
+    && local.availability.executable
+    && local.availability.permitted !== false;
+
+  useEffect(() => {
+    if (!worthAsking) { setMeaning(null); return; }
+    let live = true;
+    /* Typing is faster than a round trip. Ask about the sentence that
+       stopped changing, not every keystroke on the way to it. */
+    const timer = setTimeout(() => {
+      fetch('/api/command/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (live) setMeaning(j?.ok && j.understood ? j : null); })
+        .catch(() => { if (live) setMeaning(null); });
+    }, 180);
+    return () => { live = false; clearTimeout(timer); };
+  }, [text, worthAsking]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
   /* Words that can only be a read.
@@ -347,20 +380,15 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
   // An instruction outranks the question its words could also be, and a
   // question outranks a browse. A read verb outranks a write intent.
-  /* A plan the application cannot represent, or cannot carry out
-     because nothing performs it, is not offered. An action that appears
-     and then refuses teaches people the bar is unreliable, and a
-     capability with no handler behind it is the same failure wearing a
-     different hat. */
-  const useQuery = !editReady && !!planning
-    && planning.presentation.confidence >= 8
-    && planning.availability.representable
-    && planning.availability.executable
+  /* Offered only when the server says it is runnable. `runnable` is
+     every gate at once, decided in one place rather than in each
+     caller's own idea of what "can I run this" means: well formed,
+     permitted for this person, something performs it, and not refused. */
+  const useQuery = !editReady && !!meaning?.runnable
     && (readsOnly || !preview?.intent?.writes);
 
   /* Said out loud rather than left for the answer to imply. */
-  const partial = planning?.completion.kind === 'partial'
-    ? planning.completion.unresolved : [];
+  const partial = meaning?.unresolved ?? [];
   const [answered, setAnswered] = useState<any | null>(null);
   const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
   const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
@@ -452,16 +480,31 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     }
   }
 
-  /* The sentence goes to the server, not a query built here. The
-     server plans it through the same `planCommand`, so a client cannot
-     hand craft a request that never went through the canonical path,
-     and the plan the bar previewed is the plan that runs. */
-  async function runQuery(p: CommandPlanning) {
+  /**
+   * Run the reading that was shown.
+   *
+   * The sentence and the hash of the meaning go up; nothing else. The
+   * server replans from the text in the same environment it previewed
+   * in, and the hash is how it knows whether the reading it arrives at
+   * is the one somebody agreed to. A client cannot send a plan, so
+   * there is nothing here to hand craft.
+   */
+  async function runQuery(m: PlannedMeaning) {
     setStage('running');
     const res = await fetch('/api/command/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: p.text }),
+      body: JSON.stringify({ text, hash: m.hash }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+
+    /* The words mean something else now, because the data moved under
+       them. Show the new reading rather than the answer to a question
+       nobody asked, and let them press Enter on what it says now. */
+    if (!res.ok && res.restated) {
+      setMeaning(res);
+      setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
+      setStage('idle');
+      return;
+    }
     if (!res.ok) {
       setOutcome({ ok: false, message: res.error ?? 'That query did not run.' });
       setStage('done');
@@ -533,7 +576,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     // An instruction first. "Add £1k refurb to STC143980" is not a
     // question about trailers, however much it reads like one.
     if (editReady && edit) return previewEdit(edit);
-    if (useQuery && planning) return runQuery(planning);
+    if (useQuery && meaning) return runQuery(meaning);
     const parsed = parse(text);
     if (!parsed.intent) {
       setOutcome({
@@ -680,7 +723,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {useQuery && planning && (
+            {useQuery && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -690,7 +733,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
-                  {planning.presentation.summary}
+                  {meaning.summary}
                 </span>
                 {partial.length > 0 && (
                   <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
@@ -926,7 +969,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {useQuery && planning && (
+            {useQuery && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -936,7 +979,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
-                  {planning.presentation.summary}
+                  {meaning.summary}
                 </span>
                 {partial.length > 0 && (
                   <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
