@@ -67,6 +67,10 @@ import { vocabularyFor, resetVocabularyCaches, cachedActors } from '../lib/comma
 import { buildIndex, EMPTY_VOCABULARY, type VocabularySnapshot } from '../lib/command/vocab';
 import { planCommand } from '../lib/command/plan';
 import { capabilitiesFor } from '../lib/crm/permissions';
+import { authoriseFieldWrite } from '../lib/command/authorise';
+import { WRITABLE_FIELDS } from '../lib/command/fields';
+import { parseEdit } from '../lib/command/mutate';
+import type { UserRole } from '../lib/types';
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -664,6 +668,85 @@ const plannerBody = plannerSource.slice(
 ok('the planner awaits the vocabulary before planning and not after',
   plannerBody.lastIndexOf('await') < plannerBody.indexOf('planCommand('),
   plannerBody.replace(/\s+/g, ' ').slice(0, 200));
+
+/* =============================================================
+   Capability, at the write path rather than at the interface
+
+   The bar filters what it offers, and that is a courtesy. This is the
+   boundary: the server decides from the field's own declared
+   requirement and the actor's capabilities, whatever arrived and
+   whatever sent it.
+
+   `crm.assign` and `marketing.approve` are the two that matter most
+   here, because they are FINER than the table level policies
+   underneath. `crm_update` is `current_role_safe() IN
+   ('admin','marketer','sales')`, so PostgreSQL will let a marketer
+   write any writable column of any contact they can see. Nothing below
+   this application enforces "who may reassign an account" or "who may
+   approve a post", so if this check is wrong, nothing else is checking.
+   ============================================================= */
+
+const ROLE_CAPS: Record<UserRole, ReturnType<typeof capabilitiesFor>> = {
+  admin: capabilitiesFor({ role: 'admin' } as never),
+  sales: capabilitiesFor({ role: 'sales' } as never),
+  marketer: capabilitiesFor({ role: 'marketer' } as never),
+  viewer: capabilitiesFor({ role: 'viewer' } as never),
+};
+
+/* The two named cases, first and by name. */
+const assignAsMarketer = authoriseFieldWrite('contacts', 'assigned_to', ROLE_CAPS.marketer);
+ok('a marketer may not reassign an account',
+  !assignAsMarketer.ok && assignAsMarketer.reason === 'not permitted',
+  assignAsMarketer.ok ? 'it was allowed' : assignAsMarketer.reason);
+ok('and the refusal names the capability it wanted',
+  !assignAsMarketer.ok && assignAsMarketer.needed === 'crm.assign',
+  assignAsMarketer.ok ? '' : String(assignAsMarketer.needed));
+ok('while somebody who has crm.assign may',
+  authoriseFieldWrite('contacts', 'assigned_to', ROLE_CAPS.sales).ok);
+
+const approveAsMarketer = authoriseFieldWrite('posts', 'status', ROLE_CAPS.marketer);
+ok('a marketer may not approve their own post',
+  !approveAsMarketer.ok && approveAsMarketer.reason === 'not permitted',
+  approveAsMarketer.ok ? 'it was allowed' : approveAsMarketer.reason);
+ok('and the refusal names marketing.approve',
+  !approveAsMarketer.ok && approveAsMarketer.needed === 'marketing.approve',
+  approveAsMarketer.ok ? '' : String(approveAsMarketer.needed));
+ok('while somebody who has marketing.approve may',
+  authoriseFieldWrite('posts', 'status', ROLE_CAPS.admin).ok);
+ok('and a marketer may still write the fields marketing.edit covers',
+  authoriseFieldWrite('posts', 'caption', ROLE_CAPS.marketer).ok);
+
+/* Then every field against every role, both directions, so a field
+   added later is covered without anybody writing a case for it. */
+let swept = 0;
+for (const f of WRITABLE_FIELDS) {
+  for (const role of ['admin', 'sales', 'marketer', 'viewer'] as UserRole[]) {
+    const caps = ROLE_CAPS[role];
+    const decided = authoriseFieldWrite(f.entity, f.key, caps);
+    const allowed = caps.has(f.capability);
+    swept += 1;
+    ok(`${role} on ${f.entity}.${f.key} matches its declared capability`,
+      decided.ok === allowed,
+      `capability ${f.capability}, ${allowed ? 'held' : 'not held'}, ${decided.ok ? 'allowed' : 'refused'}`);
+  }
+}
+ok('the sweep covered every field against every role',
+  swept === WRITABLE_FIELDS.length * 4, String(swept));
+
+/* A name no dictionary holds is refused as unknown rather than as a
+   permission problem, because they are different answers and only one
+   of them is about the person asking. */
+const invented = authoriseFieldWrite('contacts', 'commission_rate_override', ROLE_CAPS.admin);
+ok('a column no dictionary holds is refused even for an administrator',
+  !invented.ok && invented.reason === 'unknown field',
+  invented.ok ? 'it was allowed' : invented.reason);
+
+/* The parser refuses it too, which is the courtesy rather than the
+   boundary. Asserted so the two cannot silently disagree. */
+ok('and the reader does not offer a marketer the approval field either',
+  !parseEdit('mark all outstanding social posts as approved', ROLE_CAPS.marketer));
+ok('nor the owner field',
+  !parseEdit('assign STC143580 to Dave', ROLE_CAPS.marketer));
 
 /* ============================================================= */
 

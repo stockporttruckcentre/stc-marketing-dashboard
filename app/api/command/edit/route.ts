@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from '@/lib/command/fields';
+import type { WritableField, WritableEntity } from '@/lib/command/fields';
+import { authoriseFieldWrite } from '@/lib/command/authorise';
 import { capabilitiesFor } from '@/lib/crm/permissions';
-import { applyCond } from '@/lib/command/ir/resolve';
+import { postgrestStore } from '@/lib/command/store/postgrest';
 import type { Cond } from '@/lib/command/ir/types';
 import type { UserRole } from '@/lib/types';
 
@@ -104,10 +105,6 @@ const SCREEN_NAME: Record<WritableEntity, string> = {
   trailers: 'stock list', contacts: 'CRM', posts: 'planner', meetings: 'calendar',
 };
 
-function fieldFor(entity: string, key: string): WritableField | null {
-  return WRITABLE_FIELDS.find((f) => f.entity === entity && f.key === key) ?? null;
-}
-
 function display(field: WritableField, v: unknown): string {
   if (v == null || v === '') return 'empty';
   if (field.kind === 'money') return `£${Number(v).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
@@ -136,19 +133,23 @@ export async function POST(req: NextRequest) {
   const entity = (['trailers', 'contacts', 'posts', 'meetings'] as const).find((e) => e === body.entity) ?? null;
   if (!entity) return NextResponse.json({ ok: false, message: 'I did not understand what to change.' });
 
-  const field = fieldFor(entity, String(body.fieldKey ?? ''));
-  if (!field) return NextResponse.json({ ok: false, message: 'That is not a field I can write.' });
-
   const { data: profile } = await supabase
     .from('profiles').select('role, full_name').eq('id', user.id).single();
   const role = ((profile as { role?: UserRole } | null)?.role ?? 'viewer') as UserRole;
   const caps = capabilitiesFor({ role });
 
-  // The bar already hides what somebody cannot do. This is the check
-  // that actually matters, because the bar is only the interface.
-  if (!caps.has(field.capability)) {
-    return NextResponse.json({ ok: false, message: `You do not have access to change ${field.label.toLowerCase()}.` });
+  /* The field and the permission to write it, in one call. The bar
+     already hides what somebody cannot do, and hiding is a courtesy
+     rather than a boundary: this runs on every request whatever sent
+     it. */
+  const authority = authoriseFieldWrite(entity, String(body.fieldKey ?? ''), caps);
+  if (!authority.ok) {
+    return NextResponse.json({
+      ok: false,
+      message: `${authority.why.charAt(0).toUpperCase()}${authority.why.slice(1)}.`,
+    });
   }
+  const field = authority.field;
 
   const op = body.op ?? 'set';
   const table = TABLES[entity];
@@ -166,14 +167,18 @@ export async function POST(req: NextRequest) {
      that happens to fit forty accounts is an ambiguity to raise, which
      is the named path below, not permission to write forty. */
   if (!named.length && body.match && body.expect === 'many') {
-    const narrowed = applyCond(supabase.from(table).select(select), body.match);
-    if (narrowed.unsupported) {
-      return NextResponse.json({ ok: false, message: 'I could not narrow that down safely.' });
+    const read = await postgrestStore(supabase).read({
+      table, columns: select.split(', '), where: body.match, limit: 500,
+    });
+    if (!read.ok) {
+      return NextResponse.json({
+        ok: false,
+        message: read.reason === 'unsupported'
+          ? 'I could not narrow that down safely.' : read.why,
+      });
     }
-    const { data, error } = await narrowed.q.limit(500);
-    if (error) return NextResponse.json({ ok: false, message: error.message });
 
-    const rows = (data ?? []) as any[];
+    const rows = read.rows as any[];
     if (!rows.length) {
       return NextResponse.json({ ok: false, message: 'Nothing matches that right now.' });
     }

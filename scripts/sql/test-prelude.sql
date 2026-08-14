@@ -67,48 +67,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
 
 -- -------------------------------------------------------------
--- The helper schema.sql calls and does not define.
+-- Nothing else.
 --
--- `migrations/001_dashboard.sql` says so in its own header: schema.sql
--- "calls is_list_member_safe(), which is defined nowhere in this
--- repository, so a fresh run of it fails partway". The live database
--- must have it, because the policies that call it work there.
+-- `is_list_member_safe` used to be defined here, because `schema.sql`
+-- calls it and this repository did not define it. It does now:
+-- `migrations/009_list_visibility_recursion.sql` adds it, along with the
+-- two policies that closed the circle around it. A prelude that still
+-- carried its own copy would be testing the prelude.
 --
--- SECURITY DEFINER is not decoration. Without it the policy on
--- crm_contacts consults crm_lists, whose policy consults
--- crm_list_members, whose policy consults crm_lists, and Postgres stops
--- with "infinite recursion detected in policy". Defining it here is
--- what lets this test database enforce the real policies at all.
+-- Row level security on `crm_list_members` used to be switched off here
+-- as well, for the same reason: the policies could not be evaluated. It
+-- stays on now, so the assertions in `validate-007.sql` run against the
+-- policies this repository actually contains.
 -- -------------------------------------------------------------
-CREATE OR REPLACE FUNCTION is_list_member_safe(p_list UUID)
-RETURNS BOOLEAN
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM crm_list_members m
-    WHERE m.list_id = p_list AND m.user_id = auth.uid()
-  );
-$$;
-
--- -------------------------------------------------------------
--- Row level security on the join table, switched off HERE ONLY.
---
--- `crm_select` on crm_contacts contains an inline
--- `EXISTS (SELECT 1 FROM crm_list_members ...)`. That consults
--- `members_all` on crm_list_members, which consults crm_lists, whose
--- `lists_select` consults crm_list_members again, and Postgres stops
--- with "infinite recursion detected in policy". The policies that read
--- notes avoid this by calling `is_list_member_safe`, a SECURITY DEFINER
--- helper; the one on crm_contacts inlines the same query instead.
---
--- This is a real property of the repository's SQL and is reported
--- rather than fixed here: changing a live security policy is not a
--- change to make as a side effect of building a test harness. Turning
--- it off in this database keeps the assertions about crm_contacts
--- honest, because the paths being tested are the global list and the
--- owned list, neither of which needs the join table.
--- -------------------------------------------------------------
-ALTER TABLE crm_list_members DISABLE ROW LEVEL SECURITY;

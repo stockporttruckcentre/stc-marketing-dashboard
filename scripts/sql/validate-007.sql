@@ -250,7 +250,24 @@ RESET ROLE;
 -- and says nothing about which COLUMN, so at the database level any of
 -- those three may write any writable column of any contact they can
 -- see, including `assigned_to`, whatever `crm.assign` says.
+--
+-- Nobody, before changing anybody's role. A `set_config` with `FALSE`
+-- lasts the whole session, so B's claims are still in force here, and
+-- the project has a trigger on `profiles` that refuses a role change
+-- from anybody who is not an administrator. Leaving B in place made
+-- that trigger reject this line, which left the owner a viewer, which
+-- made the next assertion fail for a reason that has nothing to do with
+-- what it is about.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT set_config('request.jwt.claim.role', '', FALSE);
 UPDATE profiles SET role = 'sales' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+-- Asserted, because a refused role change is silent and every
+-- conclusion after it would be about the wrong person.
+SELECT assert('the list owner has a role that may edit contacts',
+  (SELECT role FROM profiles WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001') = 'sales',
+  (SELECT role FROM profiles WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001'));
+
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
 SELECT set_config('request.jwt.claim.role', 'authenticated', FALSE);
@@ -299,6 +316,129 @@ $$;
 RESET ROLE;
 SELECT set_config('request.jwt.claim.sub', '', FALSE);
 SELECT set_config('request.jwt.claim.role', '', FALSE);
+
+-- -------------------------------------------------------------
+-- The four ways a contact can be visible, with the join table's own
+-- policy switched ON.
+--
+-- These could not be asserted at all until migration 009. `crm_select`
+-- consulted `crm_lists`, whose `lists_select` consulted
+-- `crm_list_members`, whose `members_all` consulted `crm_lists`, and
+-- Postgres refused to evaluate any of it:
+--
+--   ERROR: infinite recursion detected in policy for relation
+--          "crm_list_members"
+--
+-- The test database used to switch row level security off on
+-- `crm_list_members` to get past that, which meant the assertions above
+-- ran against policies the repository does not contain. It is on here.
+-- -------------------------------------------------------------
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT set_config('request.jwt.claim.role', '', FALSE);
+
+-- A's own list is above. This adds a list of B's that A was added to,
+-- and one of B's that A was not.
+INSERT INTO crm_lists (id, name, owner_id, is_global) VALUES
+  ('cccccccc-0000-0000-0000-000000000005', 'TEST shared with A', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE),
+  ('cccccccc-0000-0000-0000-000000000006', 'TEST B only',        'bbbbbbbb-0000-0000-0000-000000000002', FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO crm_list_members (list_id, user_id)
+VALUES ('cccccccc-0000-0000-0000-000000000005', 'aaaaaaaa-0000-0000-0000-000000000001')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO crm_contacts (id, company_name, list_id, status, source) VALUES
+  ('eeeeeeee-0000-0000-0000-000000000001', 'TEST unlisted co', NULL, 'lead', 'manual'),
+  ('eeeeeeee-0000-0000-0000-000000000002', 'TEST global co', (SELECT id FROM crm_lists WHERE is_global LIMIT 1), 'lead', 'manual'),
+  ('eeeeeeee-0000-0000-0000-000000000003', 'TEST shared co', 'cccccccc-0000-0000-0000-000000000005', 'lead', 'manual'),
+  ('eeeeeeee-0000-0000-0000-000000000004', 'TEST b only co', 'cccccccc-0000-0000-0000-000000000006', 'lead', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+-- Every one of them is really there, checked as the owner before
+-- anybody becomes anybody. A row that failed its foreign key looks
+-- exactly like a row row level security is hiding, and an assertion that
+-- cannot tell those apart passes for the wrong reason. That has already
+-- happened once in this file.
+SELECT assert('all four visibility fixtures exist',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name IN
+    ('TEST unlisted co','TEST global co','TEST shared co','TEST b only co')) = 4,
+  (SELECT string_agg(company_name, ', ' ORDER BY company_name) FROM crm_contacts
+   WHERE company_name LIKE 'TEST %'));
+
+SELECT assert('and A really is a member of B''s shared list',
+  (SELECT COUNT(*) FROM crm_list_members
+   WHERE list_id='cccccccc-0000-0000-0000-000000000005'
+     AND user_id='aaaaaaaa-0000-0000-0000-000000000001') = 1);
+
+-- Forced, because the fixtures belong to the same role that is about to
+-- read them and a table owner is exempt from its own policies.
+ALTER TABLE crm_contacts     FORCE ROW LEVEL SECURITY;
+ALTER TABLE crm_lists        FORCE ROW LEVEL SECURITY;
+ALTER TABLE crm_list_members FORCE ROW LEVEL SECURITY;
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+SELECT set_config('request.jwt.claim.role', 'authenticated', FALSE);
+
+-- That this returns at all is the repair. Before 009 it raised.
+SELECT assert('a contact on no list is visible',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name='TEST unlisted co') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name='TEST unlisted co'));
+
+SELECT assert('a contact on the global list is visible',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name='TEST global co') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name='TEST global co'));
+
+SELECT assert('a contact on a list you own is visible',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name='TEST hidden co') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name='TEST hidden co'));
+
+SELECT assert('a contact on a list you were added to is visible',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name='TEST shared co') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name='TEST shared co'));
+
+SELECT assert('a contact on somebody else''s list you are not on is not',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name='TEST b only co') = 0,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name='TEST b only co'));
+
+-- The same four rules, on the lists themselves.
+SELECT assert('the lists you can see are the global one, yours, and the one shared with you',
+  (SELECT COUNT(*) FROM crm_lists WHERE name LIKE 'TEST %') = 2,
+  (SELECT string_agg(name, ', ' ORDER BY name) FROM crm_lists WHERE name LIKE 'TEST %'));
+
+-- And a change through `command_apply` reaches a shared row.
+DO $$
+DECLARE changed INTEGER;
+BEGIN
+  SELECT command_apply('[{"table":"crm_contacts","id":"eeeeeeee-0000-0000-0000-000000000003","set":{"phone":"0161"}}]'::JSONB)
+    INTO changed;
+  PERFORM assert('a change to a contact on a shared list goes through', changed = 1, changed::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a change to a contact on a shared list goes through', FALSE, SQLERRM);
+END
+$$;
+
+-- And does not reach one on a list nobody shared.
+DO $$
+BEGIN
+  PERFORM command_apply('[{"table":"crm_contacts","id":"eeeeeeee-0000-0000-0000-000000000004","set":{"phone":"0161"}}]'::JSONB);
+  PERFORM assert('a change to a contact on a list you cannot see fails', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a change to a contact on a list you cannot see fails',
+    SQLERRM LIKE '%exactly one row%', SQLERRM);
+END
+$$;
+
+RESET ROLE;
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT set_config('request.jwt.claim.role', '', FALSE);
+
+ALTER TABLE crm_contacts     NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE crm_lists        NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE crm_list_members NO FORCE ROW LEVEL SECURITY;
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %';
+DELETE FROM crm_lists    WHERE name LIKE 'TEST %';
 
 -- =============================================================
 -- 6. command_mark_sold

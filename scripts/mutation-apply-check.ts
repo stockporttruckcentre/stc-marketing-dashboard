@@ -18,6 +18,7 @@
    ============================================================= */
 import { resolveMutation, resolutionHash, fieldsTouched } from '../lib/command/ir/resolve';
 import { resolveProgramme, executeProgramme } from '../lib/command/ir/orchestrate';
+import { postgrestStore } from '../lib/command/store/postgrest';
 import { evaluate } from '../lib/command/ir/evaluate';
 import { validate } from '../lib/command/ir/validate';
 import type { Expr, Mutate, Plan, Select } from '../lib/command/ir/types';
@@ -280,7 +281,7 @@ test('one record, named', async () => {
   ok('the plan validates', validate(plan).every((p) => p.severity !== 'fatal'),
     validate(plan).map((p) => p.what).join('; '));
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('one named record resolves to one row', preview.ok && preview.changes.length === 1,
     preview.ok ? '' : preview.why);
   if (!preview.ok) return;
@@ -289,7 +290,7 @@ test('one record, named', async () => {
   ok('and shows what it holds now', preview.units[0].preview[0].before.retail_price === 20000);
   ok('and what it will hold', preview.units[0].preview[0].after.retail_price === 24995);
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the write goes through', done.ok, done.ok ? '' : done.why);
   ok('by primary key, against exactly the previewed row',
     db.writes.length === 1 && db.writes[0].ids.join(',') === 't1', JSON.stringify(db.writes));
@@ -304,12 +305,12 @@ test('a described set, in bulk', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('many', atHydeInStock, [{ field: trailer('location'), to: lit('Bredbury') }]);
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it resolves to every row it describes', preview.ok && preview.changes.length === 2,
     preview.ok ? String(preview.changes.length) : preview.why);
   if (!preview.ok) return;
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the bulk write goes through', done.ok, done.ok ? '' : done.why);
   ok('against exactly the two previewed rows',
     db.writes.map((w) => w.ids).flat().sort().join(',') === 't1,t2', JSON.stringify(db.writes));
@@ -322,7 +323,7 @@ test('a described set, in bulk', async () => {
 test('a sentence about one that finds several', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('one', byStc('STC1435'), [{ field: trailer('location'), to: lit('Bredbury') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
 
   ok('it is unresolved rather than written', !preview.ok && preview.reason === 'unresolved');
   ok('and the resolution says which kind of unresolved',
@@ -336,14 +337,14 @@ test('a sentence about one that finds several', async () => {
 test('the same selection when the sentence said many', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('many', byStc('STC1435'), [{ field: trailer('location'), to: lit('Bredbury') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it resolves', preview.ok && preview.changes.length === 2, preview.ok ? '' : preview.why);
 });
 
 test('nothing matching', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('one', byStc('STC000000'), [{ field: trailer('location'), to: lit('Bredbury') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('is refused rather than written',
     !preview.ok && preview.resolution?.ok === false && preview.resolution.reason === 'nothing matched');
   ok('and nothing was written', db.writes.length === 0);
@@ -356,9 +357,9 @@ test('arithmetic is worked out per row', async () => {
     to: { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(250) },
   }]);
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the increase goes through', done.ok, done.ok ? '' : done.why);
   ok('so 500 becomes 750', db.tables.stock_trailers.find((r) => r.id === 't1')?.refurb_costs === 750);
   ok('and 250 becomes 500', db.tables.stock_trailers.find((r) => r.id === 't2')?.refurb_costs === 500);
@@ -375,7 +376,7 @@ test('an empty column is not zero', async () => {
     field: trailer('refurb_costs'),
     to: { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(250) },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('adding to nothing refuses rather than writing 250',
     !preview.ok && /empty/.test(preview.why), preview.ok ? 'it resolved' : preview.why);
   ok('and nothing was written', db.writes.length === 0);
@@ -388,7 +389,7 @@ test('a word is not a number', async () => {
     field: trailer('refurb_costs'),
     to: { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(250) },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it refuses', !preview.ok && /not a number/.test(preview.why),
     preview.ok ? 'it resolved' : preview.why);
   ok('and nothing was written', db.writes.length === 0);
@@ -401,7 +402,7 @@ test('a sum that overflows', async () => {
     field: trailer('retail_price'),
     to: { kind: 'binary', op: '*', left: f('retail_price'), right: lit(10) },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('does not come to a number, so it refuses',
     !preview.ok && /does not come to a number/.test(preview.why),
     preview.ok ? 'it resolved' : preview.why);
@@ -414,7 +415,7 @@ test('division by zero', async () => {
     field: trailer('retail_price'),
     to: { kind: 'binary', op: '/', left: f('nbv'), right: lit(0) },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('refuses rather than writing empty',
     !preview.ok && /divide by zero/.test(preview.why), preview.ok ? 'it resolved' : preview.why);
   ok('and nothing was written', db.writes.length === 0);
@@ -441,20 +442,20 @@ test('a column the expression reads changing is drift', async () => {
     to: { kind: 'binary', op: '*', left: f('nbv'), right: lit(1.2) },
   }]);
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
   ok('the fingerprint covers the column being READ',
     preview.units[0].resolution.fields.includes('nbv'));
 
   db.tables.stock_trailers.find((r) => r.id === 't1')!.nbv = 30000;
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it is drift', !done.ok && done.reason === 'drift', done.ok ? 'it wrote anyway' : done.why);
   ok('and nothing was written', db.writes.length === 0);
 
-  const again = await resolveProgramme(plan, { supabase: db.supabase });
+  const again = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!again.ok) { ok('it re-previews', false, again.why); return; }
-  const second = await executeProgramme(plan, { supabase: db.supabase, agreedHash: again.hash });
+  const second = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: again.hash });
   ok('after a fresh preview it writes the new figure', second.ok, second.ok ? '' : second.why);
   ok('which is 36000, not 18000',
     db.tables.stock_trailers.find((r) => r.id === 't1')?.retail_price === 36000);
@@ -463,7 +464,7 @@ test('a column the expression reads changing is drift', async () => {
 test('a row arriving into the set is drift', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('many', atHydeInStock, [{ field: trailer('location'), to: lit('Bredbury') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
 
   db.tables.stock_trailers.push({
@@ -471,7 +472,7 @@ test('a row arriving into the set is drift', async () => {
     category: 'curtainsider', retail_price: 1, nbv: 1, refurb_costs: 0, mot_date: '2029-01-01', notes: null,
   });
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it is drift', !done.ok && done.reason === 'drift', done.ok ? 'it wrote anyway' : done.why);
   ok('and the newcomer was not swept up', db.writes.length === 0);
 });
@@ -479,19 +480,19 @@ test('a row arriving into the set is drift', async () => {
 test('somebody else editing the same column is drift', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('retail_price'), to: lit(24995) }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
   db.tables.stock_trailers.find((r) => r.id === 't1')!.retail_price = 21000;
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it is drift', !done.ok && done.reason === 'drift', done.ok ? 'it wrote anyway' : done.why);
 });
 
 test('an unchanged world is not drift', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('retail_price'), to: lit(24995) }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it writes', done.ok, done.ok ? '' : done.why);
 });
 
@@ -502,9 +503,9 @@ test('an unchanged world is not drift', async () => {
 test('clearing a clearable column', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('notes'), to: lit(null) }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it empties the column', done.ok && db.writes[0]?.set.notes === null, JSON.stringify(db.writes[0]));
 });
 
@@ -513,9 +514,9 @@ test('appending keeps what was there', async () => {
   const plan = update('one', byStc('STC143580'), [{
     field: trailer('notes'), to: lit('chasing tyres'), mode: 'append',
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('both notes are there',
     String(db.tables.stock_trailers.find((r) => r.id === 't1')?.notes) === 'first note\nchasing tyres');
 });
@@ -526,9 +527,9 @@ test('a date moved back a month', async () => {
     field: trailer('mot_date'),
     to: { kind: 'shift', of: f('mot_date'), by: { n: 1, unit: 'month' }, direction: 'back' },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('is a month earlier',
     db.tables.stock_trailers.find((r) => r.id === 't1')?.mot_date === '2027-02-14',
     String(db.tables.stock_trailers.find((r) => r.id === 't1')?.mot_date));
@@ -553,13 +554,13 @@ test('a reference that names one row', async () => {
 
   ok('the plan itself holds no row id', !JSON.stringify(plan).includes('p3'));
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it resolves at resolution time', preview.ok, preview.ok ? '' : preview.why);
   if (!preview.ok) return;
   ok('and records which row it landed on',
     preview.units[0].resolution.references[0]?.id === 'p3');
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the resolved value is written',
     done.ok && db.writes[0]?.set.sales_rep === 'Tom Clarke', JSON.stringify(db.writes[0]?.set));
 });
@@ -567,7 +568,7 @@ test('a reference that names one row', async () => {
 test('a reference matching nobody is not ambiguity', async () => {
   const db = fakeDb({ stock_trailers: trailerRows(), profiles: profileRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('sales_rep'), to: nameContains('Nigel') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it is unresolved', !preview.ok);
   const r = !preview.ok ? preview.resolution : undefined;
   ok('reported as nothing matching, not as a choice',
@@ -581,7 +582,7 @@ test('a reference matching nobody is not ambiguity', async () => {
 test('a reference matching two carries both', async () => {
   const db = fakeDb({ stock_trailers: trailerRows(), profiles: profileRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('sales_rep'), to: nameContains('Dave') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it is unresolved', !preview.ok);
   const r = !preview.ok ? preview.resolution : undefined;
   ok('reported as ambiguous', r?.ok === false && r.reason === 'ambiguous');
@@ -599,7 +600,7 @@ test('a reference into an entity nothing holds', async () => {
     field: trailer('sales_rep'),
     to: { ...(nameContains('Tom') as Extract<Expr, { kind: 'reference' }>), entity: 'wizards' },
   }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   const r = !preview.ok ? preview.resolution : undefined;
   ok('is unresolvable rather than ambiguous',
     r?.ok === false && r.reference?.state === 'unresolvable');
@@ -608,10 +609,10 @@ test('a reference into an entity nothing holds', async () => {
 test('a renamed reference is drift', async () => {
   const db = fakeDb({ stock_trailers: trailerRows(), profiles: profileRows() });
   const plan = update('one', byStc('STC143580'), [{ field: trailer('sales_rep'), to: nameContains('Tom') }]);
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
   db.tables.profiles.find((r) => r.id === 'p3')!.full_name = 'Thomas Clarke';
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it is drift', !done.ok && done.reason === 'drift', done.ok ? 'it wrote anyway' : done.why);
 });
 
@@ -622,13 +623,13 @@ test('a renamed reference is drift', async () => {
 test('a two step plan resolves both steps', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('both steps are in the programme', preview.ok && preview.units.length === 2,
     preview.ok ? String(preview.units.length) : preview.why);
   if (!preview.ok) return;
   ok('and both changes are previewed', preview.changes.length === 2);
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('both are carried out', done.ok && done.changed === 2, done.ok ? '' : done.why);
   ok('the first step landed',
     db.tables.stock_trailers.find((r) => r.id === 't1')?.location === 'Bredbury');
@@ -639,12 +640,12 @@ test('a two step plan resolves both steps', async () => {
 test('drift in the SECOND step refuses the whole plan', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
 
   db.tables.stock_trailers.find((r) => r.id === 't2')!.location = 'Atherton';
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it is drift', !done.ok && done.reason === 'drift', done.ok ? 'it wrote anyway' : done.why);
   ok('and the FIRST step was not written either', db.writes.length === 0);
   ok('so the first row is untouched',
@@ -655,7 +656,7 @@ test('a step this cannot execute refuses the whole plan', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
   plan.steps.push({ op: 'create', id: 's3', target: { entity: 'contacts' } });
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it refuses rather than doing the two it can',
     !preview.ok && preview.reason === 'cannot execute', preview.ok ? 'it resolved' : preview.why);
   ok('naming the step that stopped it', !preview.ok && preview.stepId === 's3');
@@ -669,11 +670,167 @@ test('an invoke nothing can run inside a transaction refuses the plan', async ()
     op: 'invoke', id: 's3', capability: 'deal.markSold',
     subject: { entity: 'deals' }, produces: { kind: 'record', entity: 'deals' },
   });
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('the plan is refused whole',
     !preview.ok && preview.reason === 'cannot execute', preview.ok ? 'it resolved' : preview.why);
   ok('and says why rather than skipping it',
     !preview.ok && /same transaction/.test(preview.why), preview.ok ? '' : preview.why);
+});
+
+/* =============================================================
+   Steps that need each other
+
+   The four shapes the orchestrator has to tell apart. Every change in a
+   programme is computed from the rows as they stand before any of them
+   and applied in one call, which is right for steps that have nothing to
+   do with each other and silently wrong for a step that was meant to run
+   after another. Refusing is the only honest third option: reading these
+   as parallel writes produces a number that was never true and reports
+   success.
+   ============================================================= */
+
+test('independent steps run together', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  /* Two different records, two different values, neither reading what
+     the other writes. This is the case the whole mechanism exists to
+     allow, so it is asserted first. */
+  const preview = await resolveProgramme(twoUpdates(), { store: postgrestStore(db.supabase) });
+  ok('two independent updates are allowed', preview.ok, preview.ok ? '' : preview.why);
+  ok('and both are in the one programme', preview.ok && preview.changes.length === 2);
+});
+
+test('a step computing from what another step writes is refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{
+          field: trailer('retail_price'),
+          to: { kind: 'binary', op: '*', left: f('retail_price'), right: lit(1.1) },
+        }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        /* The new price, except it would be the old one. */
+        op: 'update', id: 's2', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143581')),
+        set: [{
+          field: trailer('nbv'),
+          to: { kind: 'binary', op: '-', left: f('retail_price'), right: lit(1000) },
+        }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('it is refused', !preview.ok && preview.reason === 'dependent steps',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('naming the field that makes them dependent',
+    !preview.ok && /retail_price/.test(preview.why), preview.ok ? '' : preview.why);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('a step selecting on what another step writes is refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'many', target: { entity: 'trailers' },
+        match: selectTrailers(atHydeInStock),
+        set: [{ field: trailer('location'), to: lit('Bredbury') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        /* Which trailers are at Bredbury depends on whether the step
+           above has happened, and in one call it has not. */
+        op: 'update', id: 's2', expect: 'many', target: { entity: 'trailers' },
+        match: selectTrailers({ kind: 'cmp', op: 'eq', left: f('location'), right: lit('Bredbury') }),
+        set: [{ field: trailer('notes'), to: lit('moved') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('the second selection depending on the first change is refused',
+    !preview.ok && preview.reason === 'dependent steps',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('a step consuming another step\'s result is refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{ field: trailer('location'), to: lit('Bredbury') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        /* The rows the first step changed, which do not exist as a
+           result until it has run. */
+        op: 'update', id: 's2', expect: 'many', target: { entity: 'trailers' },
+        match: { ref: 'rows', step: 's1' },
+        set: [{ field: trailer('notes'), to: lit('moved') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('it is refused as dependent rather than resolved',
+    !preview.ok && preview.reason === 'dependent steps',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('naming the step it depends on',
+    !preview.ok && /"s1"/.test(preview.why), preview.ok ? '' : preview.why);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('two steps changing the same record are refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{ field: trailer('location'), to: lit('Bredbury') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        /* A different field, the same unit. Nothing in the sentence says
+           which of the two changes to that row wins. */
+        op: 'update', id: 's2', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('143580')),
+        set: [{ field: trailer('notes'), to: lit('moved') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('the overlap is found from the rows, not from the plan',
+    !preview.ok && preview.reason === 'dependent steps',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('the same field on different records is not a dependence', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  /* The rule is about rows, not about columns. Two units moving to two
+     different depots write the same column and are independent, and a
+     check on the field alone would have refused the commonest multi step
+     instruction there is. */
+  const preview = await resolveProgramme(twoUpdates(), { store: postgrestStore(db.supabase) });
+  ok('writing one column from two steps is allowed', preview.ok, preview.ok ? '' : preview.why);
 });
 
 /* =============================================================
@@ -683,12 +840,12 @@ test('an invoke nothing can run inside a transaction refuses the plan', async ()
 test('one failing change leaves none of them written', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
 
   db.refuse((c) => c.id === 't2');
 
-  const done = await executeProgramme(plan, { supabase: db.supabase, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('it fails', !done.ok && done.reason === 'failed', done.ok ? 'it succeeded' : done.why);
   ok('and NOTHING was written, including the change before the failure',
     db.writes.length === 0, JSON.stringify(db.writes));
@@ -704,9 +861,9 @@ test('the executor sends one call, not one per row', async () => {
     rpc: (name: string, args: Record<string, unknown>) => { calls += 1; return db.supabase.rpc(name, args); },
   };
   const plan = update('many', atHydeInStock, [{ field: trailer('location'), to: lit('Bredbury') }]);
-  const preview = await resolveProgramme(plan, { supabase: counted });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(counted) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
-  const done = await executeProgramme(plan, { supabase: counted, agreedHash: preview.hash });
+  const done = await executeProgramme(plan, { store: postgrestStore(counted), agreedHash: preview.hash });
   ok('two rows changed', done.ok && done.changed === 2, done.ok ? '' : done.why);
   ok('in exactly one transaction', calls === 1, String(calls));
 });
@@ -737,12 +894,12 @@ test('a large change is representable and resolvable', async () => {
   const db = fakeDb({ stock_trailers: many });
   const plan = update('many', atHydeInStock, [{ field: trailer('location'), to: lit('Bredbury') }]);
 
-  const preview = await resolveProgramme(plan, { supabase: db.supabase });
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('602 records resolve without the language refusing',
     preview.ok && preview.changes.length === 602,
     preview.ok ? String(preview.changes.length) : preview.why);
 
-  const policed = await resolveProgramme(plan, { supabase: db.supabase, policy: { maxRows: 500 } });
+  const policed = await resolveProgramme(plan, { store: postgrestStore(db.supabase), policy: { maxRows: 500 } });
   ok('and a configured ceiling blocks it as policy, not as incomprehension',
     !policed.ok && policed.reason === 'blocked by policy',
     policed.ok ? 'it was allowed' : policed.reason);

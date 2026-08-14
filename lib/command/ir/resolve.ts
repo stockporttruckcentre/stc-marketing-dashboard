@@ -31,8 +31,9 @@
    is a question to ask, not permission to write forty.
    ============================================================= */
 import { createHash } from 'crypto';
-import type { Cond, Expr, Mutate, Plan, Select } from './types';
+import type { Expr, Mutate, Plan, Select } from './types';
 import { entity as entityDef, field as fieldDef } from './registry';
+import type { Store } from './store';
 
 /* -------------------------------------------------------------
    What comes back
@@ -95,8 +96,8 @@ export type Resolution =
       reference?: ReferenceOutcome;
     };
 
-/** The slice of Supabase this needs, so nothing here imports a client. */
-export type Queryable = { from: (table: string) => any };
+/* Where the rows come from is a `Store`, which knows nothing about how
+   they are stored. See `lib/command/ir/store.ts`. */
 
 /* -------------------------------------------------------------
    Which fields the mutation touches
@@ -139,86 +140,6 @@ export function fieldsTouched(m: Mutate): string[] {
 }
 
 /* -------------------------------------------------------------
-   Conditions, as a query
-   ------------------------------------------------------------- */
-
-const escape = (v: unknown) => String(v).replace(/[,()]/g, '');
-
-function plainField(e: Expr): string | null {
-  return e.kind === 'field' && !('via' in e.of) ? e.of.field : null;
-}
-function literalOf(e: Expr): string | number | boolean | null | undefined {
-  return e.kind === 'literal' ? e.value : undefined;
-}
-
-/**
- * Narrow a PostgREST query by a condition.
- *
- * Only the shapes a plan can currently contain. Anything else refuses,
- * rather than being quietly dropped: a filter that vanishes turns "the
- * sold ones at Hyde" into "everything", which is the single most
- * dangerous way for a write to go wrong.
- */
-export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
-  switch (c.kind) {
-    case 'and': {
-      let out = q;
-      for (const inner of c.of) {
-        const step = applyCond(out, inner);
-        if (step.unsupported) return step;
-        out = step.q;
-      }
-      return { q: out };
-    }
-    case 'or': {
-      /* Every branch has to be a simple comparison for PostgREST's `or`
-         to express it. That is what the adapter produces. */
-      const clauses: string[] = [];
-      for (const b of c.of) {
-        if (b.kind !== 'cmp') return { q, unsupported: `or over ${b.kind}` };
-        const column = plainField(b.left);
-        const value = literalOf(b.right);
-        if (column === null || value === undefined) return { q, unsupported: 'or over an unreadable comparison' };
-        clauses.push(b.op === 'contains'
-          ? `${column}.ilike.%${escape(value)}%`
-          : `${column}.eq.${escape(value)}`);
-      }
-      return { q: q.or(clauses.join(',')) };
-    }
-    case 'cmp': {
-      const column = plainField(c.left);
-      const value = literalOf(c.right);
-      if (column === null || value === undefined) return { q, unsupported: 'an unreadable comparison' };
-      switch (c.op) {
-        case 'eq': return { q: q.eq(column, value) };
-        case 'neq': return { q: q.neq(column, value) };
-        case 'contains': return { q: q.ilike(column, `%${escape(value)}%`) };
-        case 'startsWith': return { q: q.ilike(column, `${escape(value)}%`) };
-        case 'gt': return { q: q.gt(column, value) };
-        case 'gte': return { q: q.gte(column, value) };
-        case 'lt': return { q: q.lt(column, value) };
-        case 'lte': return { q: q.lte(column, value) };
-        default: return { q, unsupported: `the ${c.op} comparison` };
-      }
-    }
-    case 'empty': {
-      const column = plainField(c.of);
-      if (column === null) return { q, unsupported: 'an unreadable emptiness test' };
-      return { q: q.or(`${column}.is.null,${column}.eq.`) };
-    }
-    case 'within': {
-      const column = plainField(c.of);
-      if (column === null || c.period.kind !== 'absolute') {
-        return { q, unsupported: 'that period' };
-      }
-      return { q: q.gte(column, c.period.from.slice(0, 10)).lte(column, c.period.to.slice(0, 10)) };
-    }
-    default:
-      return { q, unsupported: `the ${c.kind} condition` };
-  }
-}
-
-/* -------------------------------------------------------------
    Resolving
    ------------------------------------------------------------- */
 
@@ -235,7 +156,7 @@ function labelOf(row: Record<string, unknown>, title: string | null): string {
  * reference decides, and there is no policy that means "pick one".
  */
 async function resolveReferences(
-  supabase: Queryable, m: Mutate,
+  store: Store, m: Mutate,
 ): Promise<{ ok: true; refs: ResolvedReference[] } | { ok: false; outcome: ReferenceOutcome }> {
   const refs: ResolvedReference[] = [];
 
@@ -244,20 +165,21 @@ async function resolveReferences(
     if (!def) return { state: 'unresolvable', at, entity: e.entity, why: `nothing here holds ${e.entity}` };
 
     const title = def.titleField ?? null;
-    const columns = [...new Set(['id', e.select, ...(title ? [title] : [])])].join(', ');
-    const narrowed = applyCond(supabase.from(def.table).select(columns), e.where);
-    if (narrowed.unsupported) {
+    const read = await store.read({
+      table: def.table,
+      columns: [...new Set(['id', e.select, ...(title ? [title] : [])])],
+      where: e.where,
+      limit: 50,
+    });
+    if (!read.ok) {
       return {
         state: 'unresolvable', at, entity: e.entity,
-        why: `that needs ${narrowed.unsupported}, which cannot be looked up`,
+        why: read.reason === 'unsupported'
+          ? `that needs ${read.why}, which cannot be looked up`
+          : read.why,
       };
     }
-
-    const { data, error } = await narrowed.q.limit(50);
-    if (error) {
-      return { state: 'unresolvable', at, entity: e.entity, why: String((error as any).message ?? error) };
-    }
-    const rows = (data ?? []) as Record<string, unknown>[];
+    const rows = read.rows;
 
     if (!rows.length) {
       return { state: 'no match', at, entity: e.entity, why: `no ${def.labelOne} here matches that` };
@@ -298,7 +220,7 @@ async function resolveReferences(
 }
 
 export type ResolveOptions = {
-  supabase: Queryable;
+  store: Store;
   /**
    * Which step to resolve.
    *
@@ -334,6 +256,7 @@ export async function resolveMutation(
   plan: Plan, opts: ResolveOptions,
 ): Promise<Resolution> {
   const stepId = opts.stepId;
+  const store = opts.store;
   const step = plan.steps.find((s) => s.id === stepId) as Mutate | undefined;
   type Failure = Extract<Resolution, { ok: false }>;
   const fail = (reason: Failure['reason'], why: string, extra: Partial<Failure> = {}): Failure =>
@@ -355,7 +278,7 @@ export async function resolveMutation(
   /* References first. A value that cannot be resolved means the write
      has no value, and finding that out after reading ten thousand rows
      helps nobody. */
-  const refs = await resolveReferences(opts.supabase, step);
+  const refs = await resolveReferences(opts.store, step);
   if (!refs.ok) {
     const o = refs.outcome;
     /* `resolved` never reaches here, and the four states map onto three
@@ -370,24 +293,23 @@ export async function resolveMutation(
 
   const fields = fieldsTouched(step);
   const title = def.titleField ?? null;
-  const columns = [...new Set(['id', ...(title ? [title] : []), ...fields])].join(', ');
-
-  const narrowed = applyCond(
-    opts.supabase.from(def.table).select(columns),
-    (match as Select).where ?? { kind: 'and', of: [] },
-  );
-  if (narrowed.unsupported) {
-    return fail('unresolvable', `this selection needs ${narrowed.unsupported}`);
-  }
 
   /* A ceiling on what this function reads into memory, not a ceiling on
      what may be asked for. Reaching it is reported so the caller knows
      the set is bigger than what came back. */
   const readCap = opts.readCap ?? 5_000;
-  const { data, error } = await narrowed.q.limit(readCap + 1);
-  if (error) return fail('unresolvable', String((error as any).message ?? error));
+  const read = await store.read({
+    table: def.table,
+    columns: [...new Set(['id', ...(title ? [title] : []), ...fields])],
+    where: (match as Select).where ?? { kind: 'and', of: [] },
+    limit: readCap + 1,
+  });
+  if (!read.ok) {
+    return fail('unresolvable',
+      read.reason === 'unsupported' ? `this selection needs ${read.why}` : read.why);
+  }
 
-  const found = (data ?? []) as Record<string, unknown>[];
+  const found = read.rows;
   if (found.length > readCap) {
     return fail('unresolvable',
       `that is more than ${readCap.toLocaleString('en-GB')} records, which is more than can be read at once`);

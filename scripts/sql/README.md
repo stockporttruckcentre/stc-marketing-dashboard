@@ -27,49 +27,57 @@ su postgres -s /bin/bash -c "PATH=$PATH pg_ctl -D $PGDATA \
 ## Building the database
 
 ```bash
-psql -p 55432 -U postgres -c "DROP DATABASE IF EXISTS stctest" -c "CREATE DATABASE stctest"
-psql -p 55432 -U postgres -d stctest -f scripts/sql/test-prelude.sql
+./scripts/sql/build-test-db.sh
+```
 
-# Twice, because schema.sql and migrations 001 to 006 are written to be
-# applied incrementally to a live database rather than to an empty one.
-for pass in 1 2; do
-  psql -p 55432 -U postgres -d stctest -f supabase/schema.sql
-  for m in supabase/migrations/00[1-6]*.sql; do psql -p 55432 -U postgres -d stctest -f "$m"; done
-done
+Two passes over `schema.sql` and migrations 001 to 006, because they are
+written to be applied incrementally to a live database rather than to an empty
+one, and `009` in between because `schema.sql` calls `is_list_member_safe` in a
+policy and will not create that policy until the function exists. `009` runs
+again at the end because the second pass of `schema.sql` recreates `crm_select`
+in its recursive form.
 
-psql -p 55432 -U postgres -d stctest -f scripts/sql/test-prelude.sql
-psql -p 55432 -U postgres -d stctest -v ON_ERROR_STOP=1 -f supabase/migrations/007_command_apply.sql
-psql -p 55432 -U postgres -d stctest -v ON_ERROR_STOP=1 -f supabase/migrations/008_writable_columns_seed.sql
+## Running the assertions
 
+```bash
 psql -p 55432 -U postgres -d stctest -f scripts/sql/validate-007.sql 2>&1 \
   | grep -oE "(ok|FAIL) +[a-z].*"
 ```
 
-37 assertions. Any `FAIL` is a failure.
+48 assertions. Any `FAIL` is a failure. Rebuild before every run: a database
+that has already been asserted against is a database whose state nobody can
+describe, and two of the assertions here passed for the wrong reason on a
+second run before that was true.
 
 ## What the prelude is, and what it is not
 
 `test-prelude.sql` is the smallest set of roles, schemas and functions this
 project's SQL references, so the real schema can be applied locally: the `auth`
 and `storage` schemas, `auth.uid()` and `auth.role()` reading session settings
-so a test can say who it is, and two things worth naming.
+so a test can say who it is, and stub tables for `auth.users`,
+`storage.buckets` and `storage.objects`.
 
-**`is_list_member_safe` is defined in the prelude and nowhere in this
-repository.** `migrations/001_dashboard.sql` says so in its own header:
-schema.sql calls it, so a fresh run of schema.sql fails partway. The live
-database must have it. It has to be `SECURITY DEFINER`, and the prelude's
-version is.
+`auth.users` carries `email` and `raw_user_meta_data` because the project's own
+`handle_new_user` trigger reads them. A stub with only an id makes every insert
+fail inside that trigger, which is a fact about the stub and not about the
+project.
 
-**Row level security on `crm_list_members` is switched off in the test database
-only.** The `crm_select` policy on `crm_contacts` inlines
-`EXISTS (SELECT 1 FROM crm_list_members ...)` rather than calling
-`is_list_member_safe`, and that consults `members_all`, which consults
-`crm_lists`, whose `lists_select` consults `crm_list_members` again. Postgres
-stops with "infinite recursion detected in policy". The policies that read
-notes avoid this by calling the helper; the one on contacts does not. That is a
-property of the repository's SQL, reported rather than fixed here, because
-changing a live security policy is not a change to make as a side effect of
-building a test harness.
+**It carries no test-only security changes.** It used to carry two, and both
+were there because the repository's list visibility policies could not be
+evaluated at all:
+
+- a copy of `is_list_member_safe`, which `schema.sql` calls and nothing in the
+  repository defined
+- `ALTER TABLE crm_list_members DISABLE ROW LEVEL SECURITY`, because
+  `crm_select` consulted `crm_lists`, whose `lists_select` consulted
+  `crm_list_members`, whose `members_all` consulted `crm_lists`, and Postgres
+  stopped with `infinite recursion detected in policy for relation
+  "crm_list_members"`
+
+`migrations/009_list_visibility_recursion.sql` fixes both, so the assertions
+run against the policies this repository actually contains. The four visibility
+rules it preserves are asserted directly: no list, the global list, a list you
+own, a list you were added to, and the one you were not.
 
 ## Tearing it down
 

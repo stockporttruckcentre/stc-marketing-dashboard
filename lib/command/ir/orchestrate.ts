@@ -42,9 +42,9 @@
 import type { Mutate, Plan, Step } from './types';
 import { entity as entityDef, capability } from './registry';
 import { evaluate, type EvalContext } from './evaluate';
-import {
-  resolveMutation, resolutionHash, type Queryable, type Resolution, type ResolvedReference,
-} from './resolve';
+import { resolveMutation, resolutionHash, type Resolution, type ResolvedReference } from './resolve';
+import type { Change, Store } from './store';
+import { dependencesAmong, overlappingRows } from './dependence';
 
 /* -------------------------------------------------------------
    Which steps have an effect
@@ -86,8 +86,7 @@ function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
    A resolved programme
    ------------------------------------------------------------- */
 
-/** One change to one row, ready to be written. */
-export type Change = { table: string; id: string; set: Record<string, unknown> };
+export type { Change } from './store';
 
 export type Unit = {
   stepId: string;
@@ -105,7 +104,7 @@ export type Programme =
   | { ok: true; units: Unit[]; changes: Change[]; hash: string }
   | {
       ok: false;
-      reason: 'nothing to do' | 'cannot execute' | 'unresolved' | 'blocked by policy';
+      reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved' | 'blocked by policy';
       why: string;
       /** The step that stopped it, when one did. */
       stepId?: string;
@@ -133,7 +132,7 @@ export type ExecutionPolicy = {
 };
 
 export type OrchestrateOptions = {
-  supabase: Queryable;
+  store: Store;
   policy?: ExecutionPolicy;
   now?: string;
   readCap?: number;
@@ -162,13 +161,32 @@ export async function resolveProgramme(
     }
   }
 
+  /* STEPS THAT NEED EACH OTHER ARE REFUSED, NOT RESHUFFLED.
+
+     Everything below computes each step's changes from the rows as they
+     stand now, and hands all of them over together. That is right for
+     steps that have nothing to do with each other and wrong for a step
+     that was meant to run after another: it would read the old value,
+     write a number that was never true, and report success. */
+  const dependent = dependencesAmong(effects);
+  if (dependent.length) {
+    const d = dependent[0];
+    return {
+      ok: false,
+      reason: 'dependent steps',
+      why: `"${d.stepId}" depends on "${d.needs}": ${d.why}. `
+        + 'Ask for them one at a time.',
+      stepId: d.stepId,
+    };
+  }
+
   const now = opts.now ?? new Date().toISOString().slice(0, 10);
   const units: Unit[] = [];
 
   for (const s of effects) {
     const step = s as Mutate & { id: string };
     const resolution = await resolveMutation(plan, {
-      supabase: opts.supabase, stepId: step.id, readCap: opts.readCap,
+      store: opts.store, stepId: step.id, readCap: opts.readCap,
     });
     if (!resolution.ok) {
       return { ok: false, reason: 'unresolved', why: resolution.why, stepId: step.id, resolution };
@@ -216,6 +234,20 @@ export async function resolveProgramme(
       stepId: step.id, kind: 'update', entity: step.target.entity,
       table: def.table, resolution, changes, preview,
     });
+  }
+
+  /* The same question as above, asked of the rows rather than of the
+     plan. Two updates over the same entity usually pick out different
+     rows and are independent; it is only when the conditions actually
+     overlap that one row would receive two changes in one call. */
+  const overlap = overlappingRows(units);
+  if (overlap) {
+    return {
+      ok: false,
+      reason: 'dependent steps',
+      why: `"${overlap.stepId}" and "${overlap.needs}" ${overlap.why}. Ask for them one at a time.`,
+      stepId: overlap.stepId,
+    };
   }
 
   const changes = units.flatMap((u) => u.changes);
@@ -284,25 +316,15 @@ export async function executeProgramme(
     };
   }
 
-  /* ONE CALL. One function, one transaction: every change commits or
-     none does. Batching this into several statements is what made a
-     failed third batch leave the first two written. */
-  const { data, error } = await (opts.supabase as unknown as {
-    rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
-  }).rpc('command_apply', { p_changes: fresh.changes });
-
-  if (error) {
-    return {
-      ok: false,
-      reason: 'failed',
-      why: String((error as { message?: string }).message ?? error),
-      programme: fresh,
-    };
+  /* ONE CALL. The store promises all of them or none of them, and how
+     it keeps that promise is its business. Handing it the changes one at
+     a time is what made a failed third change leave the first two
+     written, and it is not something this layer can put right
+     afterwards: a compensating update can fail too. */
+  const applied = await opts.store.apply(fresh.changes);
+  if (!applied.ok) {
+    return { ok: false, reason: 'failed', why: applied.why, programme: fresh };
   }
 
-  const changed = typeof data === 'number' ? data
-    : Array.isArray(data) ? data.length
-      : (data as { changed?: number } | null)?.changed ?? fresh.changes.length;
-
-  return { ok: true, changed, changes: fresh.changes, hash: fresh.hash };
+  return { ok: true, changed: applied.changed, changes: fresh.changes, hash: fresh.hash };
 }
