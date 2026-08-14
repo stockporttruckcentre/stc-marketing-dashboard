@@ -110,6 +110,7 @@ function containsAgg(e: Expr): boolean {
     case 'binary': return containsAgg(e.left) || containsAgg(e.right);
     case 'duration': return containsAgg(e.from) || containsAgg(e.to);
     case 'window': return containsAgg(e.of);
+    case 'shift': return containsAgg(e.of);
     case 'case':
       return e.when.some((w) => containsAgg(w.then)) || (e.else ? containsAgg(e.else) : false);
     default: return false;
@@ -253,6 +254,36 @@ export function validate(plan: Plan): Problem[] {
     switch (e.kind) {
       case 'result': checkRef(e.of, at, 'expr', ctx); return;
       case 'field': checkFieldRef(e.of, at, ctx); return;
+      case 'reference': {
+        /* A value that names a row. Checked as a lookup in its OWN
+           entity, not in whatever entity the step is over: "the profile
+           named Dave" is a question about profiles asked from a step
+           about contacts. */
+        if (!entity(e.entity)) { add(at, `unknown entity "${e.entity}"`); return; }
+        if (!field(e.entity, e.select)) {
+          add(at, `${e.entity} has no field "${e.select}" to take a value from`, 'unmet');
+        }
+        walkCond(e.where, `${at}.where`, { index: ctx.index, entity: e.entity });
+        /* A reference that resolves to several rows and takes them all
+           is not one value. Whatever it named, it named more than one
+           thing, and writing one of them is picking. */
+        if (e.onAmbiguity === 'all') {
+          add(at, 'a reference that yields every match is not a single value');
+        }
+        return;
+      }
+      case 'shift':
+        walkExpr(e.of, `${at}.of`, ctx);
+        if (!Number.isFinite(e.by.n)) add(`${at}.by`, 'a shift needs a number of units');
+        /* Shifting something that is not a date is meaningless, and the
+           registry knows which columns are dates. */
+        if (e.of.kind === 'field' && !('via' in e.of.of)) {
+          const def = field(e.of.of.entity, e.of.of.field);
+          if (def && def.kind !== 'date') {
+            add(at, `${e.of.of.field} is a ${def.kind}, so it cannot be moved by an interval`);
+          }
+        }
+        return;
       case 'agg':
         if (e.of) walkExpr(e.of, `${at}.of`, ctx);
         if (e.where) walkCond(e.where, `${at}.where`, ctx);
@@ -395,6 +426,15 @@ export function validate(plan: Plan): Problem[] {
            trailers to update. */
         if (m.match) walkSource(m.match, `${at}.match`, ctx, target);
         if (m.op !== 'create' && !m.match) add(at, `${m.op} with no match would touch every row`);
+
+        /* HOW MANY ROWS THE SENTENCE SAID, not how many matched.
+           The type requires this on update and delete; a plan arriving
+           as JSON has not been through the type, so it is checked here
+           as well. Deciding cardinality from the row count is how a
+           sentence naming one customer quietly writes forty. */
+        if (m.op !== 'create' && m.expect !== 'one' && m.expect !== 'many') {
+          add(at, `${m.op} must say whether the request named one row or many`);
+        }
         m.set?.forEach((w, i) => {
           if ('via' in (w.field as PathRef)) {
             add(`${at}.set[${i}].field`, 'a write through a relationship is not expressible');
@@ -408,6 +448,18 @@ export function validate(plan: Plan): Problem[] {
           checkFieldRef(w.field, `${at}.set[${i}].field`, ctx);
           const def = field(w.field.entity, w.field.field);
           if (def && !def.writable) add(`${at}.set[${i}]`, `${w.field.field} is not writable`);
+
+          /* Emptying a column the database declares NOT NULL fails at
+             the last moment with a constraint error nobody can act on.
+             The registry knows which columns those are, and a column
+             nobody has checked reads as not clearable. */
+          const clearing = w.to.kind === 'literal' && w.to.value === null;
+          if (clearing && def && !def.clearable) {
+            add(`${at}.set[${i}]`, `${w.field.field} cannot be emptied`);
+          }
+          if (w.mode === 'append' && def && def.kind !== 'longtext') {
+            add(`${at}.set[${i}]`, `${w.field.field} is a ${def.kind}, so nothing can be appended to it`);
+          }
           /* `to` is an Expr, so dataflow into it arrives as
              `{kind:'result'}` and is checked by the expression walker.
              There is no second path to guard. */
@@ -667,6 +719,12 @@ export function derivedRequirements(plan: Plan): Requirement[] {
   const fromExpr = (e: Expr): void => {
     switch (e.kind) {
       case 'field': fromPath(e.of); return;
+      case 'reference':
+        /* Looking a value up in another table is reading that table. */
+        fromEntity(e.entity, `reads ${e.entity}`);
+        fromCond(e.where);
+        return;
+      case 'shift': fromExpr(e.of); return;
       case 'agg':
         if (e.of) fromExpr(e.of);
         if (e.where) fromCond(e.where);

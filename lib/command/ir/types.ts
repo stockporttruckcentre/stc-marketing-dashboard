@@ -77,6 +77,21 @@ export type ResultRefKind = ResultRef['ref'];
    References into the data model
    ============================================================= */
 
+/**
+ * What happens when something names more than one row.
+ *
+ * There is deliberately no `first` and no `closest`. Silently picking
+ * one of several matching customers produces a confident wrong answer,
+ * which is the failure this architecture exists to stop. If the caller
+ * wants every match they say so with `all`; otherwise it stops and
+ * asks, or refuses.
+ *
+ * Declared here rather than in the registry because expressions carry
+ * one too: a value that names a row without saying which row has to say
+ * what happens when the name fits two.
+ */
+export type AmbiguityPolicy = 'ask' | 'fail' | 'all';
+
 export type EntityRef = { entity: string };
 export type FieldRef = { entity: string; field: string };
 
@@ -102,6 +117,16 @@ export type TimeUnit = 'day' | 'week' | 'month' | 'quarter' | 'year';
 export type WindowFn = 'delta' | 'growth' | 'trend' | 'rank' | 'share' | 'lag';
 export type BinaryOp = '+' | '-' | '*' | '/' | '%';
 
+/**
+ * A span of time, typed.
+ *
+ * "A month" is a number and a unit, not a string somebody parses again
+ * later. Both a period and a date shift are built from these, so
+ * "in the last month" and "push the MOT back a month" are the same
+ * quantity used two ways.
+ */
+export type Interval = { n: number; unit: TimeUnit };
+
 export type Expr =
   | { kind: 'field'; of: FieldRef | PathRef }
   | { kind: 'literal'; value: string | number | boolean | null }
@@ -109,6 +134,37 @@ export type Expr =
   | { kind: 'context'; slot: string }
   /** Dataflow into an expression. */
   | { kind: 'result'; of: ResultRef }
+  /**
+   * A value that names a row without saying which row.
+   *
+   * "The profile named Dave" is a reference: the plan knows what was
+   * meant and does not know which record that is, because finding out
+   * requires the database. Resolving it during planning would put a row
+   * id inside the semantic plan, so a plan built at ten past would
+   * differ from the identical sentence planned at quarter past for no
+   * reason a person could see, and the hash that is meant to detect a
+   * changed MEANING would fire on changed DATA.
+   *
+   * So planning keeps the reference and `resolve` turns it into a
+   * value. Nothing here knows about owners or reps: `entity`, `where`
+   * and `select` describe any lookup at all.
+   */
+  | {
+      kind: 'reference';
+      entity: string;
+      where: Cond;
+      /** Which column of the matched row becomes the value. */
+      select: string;
+      onAmbiguity: AmbiguityPolicy;
+    }
+  /**
+   * A date moved by an interval.
+   *
+   * Distinct from `duration`, which is the number of days BETWEEN two
+   * dates. This is a date, and the difference matters: one answers "how
+   * old is this" and the other answers "when should this be".
+   */
+  | { kind: 'shift'; of: Expr; by: Interval; direction: 'forward' | 'back' }
   | { kind: 'agg'; fn: AggFn; of?: Expr; where?: Cond; partitionBy?: Expr[] }
   | { kind: 'binary'; op: BinaryOp; left: Expr; right: Expr }
   | { kind: 'duration'; from: Expr; to: Expr; unit: TimeUnit }
@@ -140,6 +196,8 @@ export type Cond =
 
 export type Period =
   | { kind: 'relative'; n: number; unit: TimeUnit; direction: 'past' | 'next' }
+  /* `relative` predates `Interval` and says the same thing. Left as it
+     is so no existing plan changes shape; new work uses Interval. */
   | { kind: 'named'; name: string }
   | { kind: 'absolute'; from: string; to: string }
   | { kind: 'bucketed'; span: Period; by: TimeUnit };
@@ -203,8 +261,29 @@ export type Select = {
   produces?: Produces;
 };
 
-export type Mutate = {
-  op: 'create' | 'update' | 'delete';
+export type Assignment = {
+  field: FieldRef;
+  to: Expr;
+  /**
+   * `replace` is the default and covers arithmetic too, because "add a
+   * thousand" is `binary('+', field, 1000)` and replacing a value with
+   * an expression over itself is what that is. `append` survives only
+   * for long text, where adding a note must not overwrite the notes.
+   */
+  mode?: 'replace' | 'append';
+};
+
+/**
+ * How many rows the SENTENCE says this touches.
+ *
+ * Never derived from how many rows matched. "Set the price on Dawson"
+ * says one; if it matches forty, that is an ambiguity to ask about, and
+ * reading the forty as permission to write forty is exactly how a bulk
+ * write happens by accident. `many` requires a word that says so.
+ */
+export type Cardinality = 'one' | 'many';
+
+type MutateCommon = {
   id?: StepId;
   target: EntityRef;
   /**
@@ -216,9 +295,19 @@ export type Mutate = {
    * different behaviour.
    */
   match?: Source;
-  set?: { field: FieldRef; to: Expr; mode?: 'replace' | 'add' | 'append' }[];
+  set?: Assignment[];
   produces?: Produces;
 };
+
+/**
+ * `expect` is required on update and delete and absent on create,
+ * expressed in the type so it cannot be forgotten rather than only
+ * refused by the validator. A create makes one row and has no selection
+ * to be ambiguous about.
+ */
+export type Mutate =
+  | ({ op: 'create' } & MutateCommon)
+  | ({ op: 'update' | 'delete'; expect: Cardinality } & MutateCommon);
 
 export type Invoke = {
   op: 'invoke';

@@ -49,7 +49,7 @@ import {
   validate, derivedRequirements, needsConfirmation, completion,
 } from '../lib/command/ir/validate';
 import {
-  RELATIONSHIPS, CAPABILITIES, DESTINATIONS, relationship, coverage,
+  RELATIONSHIPS, CAPABILITIES, DESTINATIONS, relationship, coverage, field,
 } from '../lib/command/ir/registry';
 import type { Plan, Select, Mutate, Step, Emit, Expr } from '../lib/command/ir/types';
 
@@ -152,7 +152,7 @@ refuses('a series consumed as a scalar is refused',
   'wants scalar, but step "byDepot" produces series', [
   byDepot,
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [{
       field: { entity: 'trailers', field: 'status' },
       to: { kind: 'result', of: { ref: 'scalar', step: 'byDepot' } },
@@ -164,7 +164,7 @@ refuses('a series consumed as a source is refused',
   'a series result cannot be used here', [
   byDepot,
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
     match: { ref: 'series', step: 'byDepot' },
     set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
   },
@@ -175,7 +175,7 @@ refuses('a field taken from rows is refused, because a set has many values',
   'wants field, but step "contactRows" produces rows', [
   contactRows,
   {
-    op: 'update', id: 'u', target: { entity: 'contacts' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'contacts' },
     match: { ref: 'rows', step: 'contactRows' },
     set: [{
       field: { entity: 'contacts', field: 'status' },
@@ -187,7 +187,7 @@ refuses('a field taken from rows is refused, because a set has many values',
 accepts('a field taken from a record is accepted', [
   newContact,
   {
-    op: 'update', id: 'u', target: { entity: 'contacts' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'contacts' },
     match: { ref: 'record', step: 'newContact' },
     set: [{
       field: { entity: 'contacts', field: 'status' },
@@ -282,7 +282,7 @@ refuses('rows of contacts cannot choose which trailers a write touches',
   'produces rows of contacts, but trailers is required here', [
   contactRows,
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
     match: { ref: 'rows', step: 'contactRows' },
     set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
   },
@@ -291,7 +291,7 @@ refuses('rows of contacts cannot choose which trailers a write touches',
 refuses('a bare set of contacts cannot match a write to trailers',
   'this is a set of contacts, but trailers is required here', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'contacts' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'contacts' },
     set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
   },
 ]);
@@ -299,7 +299,7 @@ refuses('a bare set of contacts cannot match a write to trailers',
 refuses('a write to trailers cannot set a field belonging to contacts',
   'sets contacts.status, but this update targets trailers', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [{ field: { entity: 'contacts', field: 'status' }, to: { kind: 'literal', value: 'live' } }],
   },
 ]);
@@ -340,7 +340,7 @@ refuses('an unknown relationship is refused',
 refuses('an update with no match is refused',
   'update with no match would touch every row', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
     set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
   },
 ]);
@@ -348,7 +348,7 @@ refuses('an update with no match is refused',
 refuses('writing a field that is not writable is refused',
   'profit is not writable', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [{ field: { entity: 'trailers', field: 'profit' }, to: { kind: 'literal', value: 1 } }],
   },
 ]);
@@ -415,7 +415,7 @@ ok('reading trailers alone does not require seeing the CRM',
   !caps([trailerRows]).includes('crm.view'), caps([trailerRows]).join(','));
 
 const writeStatus: Step[] = [{
-  op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+  op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
   set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
 }];
 ok('writing a trailer field requires the capability that field declares',
@@ -478,14 +478,14 @@ const unmet = [{ part: 'order', why: 'nothing here records mileage' }];
 refuses('a plan with an unresolved part may not update',
   'went unresolved', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [{ field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } }],
   },
 ], unmet);
 
 refuses('a plan with an unresolved part may not delete',
   'went unresolved', [
-  { op: 'delete', id: 'd', target: { entity: 'trailers' }, match: { entity: 'trailers' } },
+  { op: 'delete', id: 'd', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' } },
 ], unmet);
 
 refuses('a plan with an unresolved part may not spend a credit',
@@ -508,14 +508,14 @@ refuses('a plan with an unresolved part may not produce a download',
 refuses('an unknown field found during validation also stops a write',
   'went unresolved', [
   {
-    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [
       { field: { entity: 'trailers', field: 'status' }, to: { kind: 'literal', value: 'sold' } },
     ],
     // a second write to a column nothing has
   },
   {
-    op: 'update', id: 'u2', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    op: 'update', id: 'u2', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
     set: [{ field: { entity: 'trailers', field: 'mileage' }, to: { kind: 'literal', value: 1 } }],
   },
 ]);
@@ -549,7 +549,7 @@ const chained: Step[] = [
   },
   { op: 'create', id: 's2', target: { entity: 'contacts' }, produces: { kind: 'record', entity: 'contacts' } },
   {
-    op: 'update', id: 's3', target: { entity: 'contacts' }, match: { ref: 'record', step: 's2' },
+    op: 'update', id: 's3', expect: 'many', target: { entity: 'contacts' }, match: { ref: 'record', step: 's2' },
     set: [{ field: { entity: 'contacts', field: 'status' }, to: { kind: 'literal', value: 'live' } }],
   },
 ];
@@ -559,7 +559,7 @@ ok('that chained plan needs confirmation', needsConfirmation({ steps: chained, u
 const contextual: Step[] = [
   { op: 'select', id: 's1', from: { entity: 'trailers' }, produces: { kind: 'rows', entity: 'trailers' } },
   {
-    op: 'update', id: 's2', target: { entity: 'trailers' }, match: { ref: 'rows', step: 's1' },
+    op: 'update', id: 's2', expect: 'many', target: { entity: 'trailers' }, match: { ref: 'rows', step: 's1' },
     set: [{ field: { entity: 'trailers', field: 'location' }, to: { kind: 'literal', value: 'Hyde' } }],
   },
 ];
@@ -770,6 +770,240 @@ for (const kind of Object.keys(DESTINATIONS) as (keyof typeof DESTINATIONS)[]) {
     ok(`${kind} is confirmed before it happens`, d.confirm);
   }
 }
+
+/* =============================================================
+   7. Mutations: cardinality, clearability, references, intervals
+
+   The pieces a write needs that a read does not. Every one of these is
+   a way for an instruction to do more than it said.
+   ============================================================= */
+
+const trailer = (field: string) => ({ entity: 'trailers', field });
+const lit = (value: string | number | null): Expr => ({ kind: 'literal', value });
+
+/* --- cardinality comes from the sentence --- */
+
+/* The type requires `expect` on update and delete. A plan arriving as
+   JSON has not been through the type, so the validator checks it too. */
+refuses('an update that does not say how many rows the request named is refused',
+  'must say whether the request named one row or many', [
+  {
+    op: 'update', id: 'u', target: { entity: 'trailers' }, match: { entity: 'trailers' },
+    set: [{ field: trailer('location'), to: lit('Hyde') }],
+  } as unknown as Step,
+]);
+
+refuses('a delete that does not say how many is refused',
+  'must say whether the request named one row or many', [
+  { op: 'delete', id: 'd', target: { entity: 'trailers' }, match: { entity: 'trailers' } } as unknown as Step,
+]);
+
+accepts('a named record says one', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: {
+      op: 'select', from: { entity: 'trailers' },
+      where: { kind: 'cmp', op: 'eq', left: { kind: 'field', of: trailer('stc_no') }, right: lit('STC143580') },
+    },
+    set: [{ field: trailer('retail_price'), to: lit(24995) }],
+  },
+]);
+
+accepts('a described set says many', [
+  {
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
+    match: {
+      op: 'select', from: { entity: 'trailers' },
+      where: {
+        kind: 'and',
+        of: [
+          { kind: 'cmp', op: 'eq', left: { kind: 'field', of: trailer('status') }, right: lit('in_stock') },
+          { kind: 'cmp', op: 'eq', left: { kind: 'field', of: trailer('location') }, right: lit('Hyde') },
+        ],
+      },
+    },
+    set: [{ field: trailer('location'), to: lit('Bredbury') }],
+  },
+]);
+
+/* A create has no selection to be ambiguous about, so it declares no
+   cardinality and must not be asked for one. */
+accepts('a create needs no cardinality', [
+  { op: 'create', id: 'c', target: { entity: 'contacts' } },
+]);
+
+/* --- clearing --- */
+
+refuses('emptying a column the database will not accept as empty is refused',
+  'status cannot be emptied', [
+  {
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
+    match: { entity: 'trailers' }, set: [{ field: trailer('status'), to: lit(null) }],
+  },
+]);
+
+accepts('emptying a nullable column is accepted', [
+  {
+    op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' },
+    match: { entity: 'trailers' }, set: [{ field: trailer('location'), to: lit(null) }],
+  },
+]);
+
+ok('a field nobody has checked for nullability is not clearable',
+  field('trailers', 'status')?.clearable === false
+  && field('trailers', 'location')?.clearable === true);
+
+/* --- appending --- */
+
+refuses('appending to something that is not long text is refused',
+  'so nothing can be appended to it', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{ field: trailer('location'), to: lit(' extra'), mode: 'append' }],
+  },
+]);
+
+accepts('appending to long text is accepted', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{ field: trailer('notes'), to: lit('chasing tyres'), mode: 'append' }],
+  },
+]);
+
+/* --- arithmetic is an expression, not a mode --- */
+
+accepts('adding to a number is the number plus the amount', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{
+      field: trailer('refurb_costs'),
+      to: { kind: 'binary', op: '+', left: { kind: 'field', of: trailer('refurb_costs') }, right: lit(1000) },
+    }],
+  },
+]);
+
+/* The same shape carries a proportion, which is why it is an expression
+   and not an `add` flag: nothing had to be added to express it. */
+accepts('a proportional change needs no new operator', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{
+      field: trailer('retail_price'),
+      to: {
+        kind: 'binary', op: '*',
+        left: { kind: 'field', of: trailer('retail_price') }, right: lit(1.1),
+      },
+    }],
+  },
+]);
+
+/* --- references stay symbolic --- */
+
+const ownerNamedDave: Expr = {
+  kind: 'reference', entity: 'profiles', select: 'full_name', onAmbiguity: 'ask',
+  where: {
+    kind: 'cmp', op: 'contains',
+    left: { kind: 'field', of: { entity: 'profiles', field: 'full_name' } },
+    right: lit('Dave'),
+  },
+};
+
+accepts('a value that names a row without saying which row is accepted', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'contacts' },
+    match: { entity: 'contacts' },
+    set: [{ field: { entity: 'contacts', field: 'assigned_to' }, to: ownerNamedDave }],
+  },
+]);
+
+/* Reading profiles needs nothing, per `profiles_select_all`, so that
+   reference derives no permission and correctly says so. A reference
+   into a gated entity must derive its gate. */
+const customerNamed: Expr = {
+  kind: 'reference', entity: 'contacts', select: 'company_name', onAmbiguity: 'ask',
+  where: {
+    kind: 'cmp', op: 'contains',
+    left: { kind: 'field', of: { entity: 'contacts', field: 'company_name' } },
+    right: lit('Dawson'),
+  },
+};
+const setCustomer: Step[] = [{
+  op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+  match: { entity: 'trailers' },
+  set: [{ field: trailer('customer'), to: customerNamed }],
+}];
+ok('a reference derives the requirement to read what it looks in',
+  requirementsOf(setCustomer).some((r) => r.because === 'reads contacts' && r.id === 'crm.view'),
+  JSON.stringify(requirementsOf(setCustomer)));
+ok('and the write still derives the capability the field itself needs',
+  requirementsOf(setCustomer).some((r) => r.because === 'writes trailers.customer'),
+  JSON.stringify(requirementsOf(setCustomer)));
+
+refuses('a reference into an entity nothing knows about is refused',
+  'unknown entity "wizards"', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'contacts' },
+    match: { entity: 'contacts' },
+    set: [{
+      field: { entity: 'contacts', field: 'assigned_to' },
+      to: { ...ownerNamedDave, entity: 'wizards' },
+    }],
+  },
+]);
+
+refuses('a reference that would take every match is not one value',
+  'not a single value', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'contacts' },
+    match: { entity: 'contacts' },
+    set: [{
+      field: { entity: 'contacts', field: 'assigned_to' },
+      to: { ...ownerNamedDave, onAmbiguity: 'all' },
+    }],
+  },
+]);
+
+/* --- moving a date by an interval --- */
+
+accepts('a date moved by an interval is accepted', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{
+      field: trailer('mot_date'),
+      to: {
+        kind: 'shift', of: { kind: 'field', of: trailer('mot_date') },
+        by: { n: 1, unit: 'month' }, direction: 'back',
+      },
+    }],
+  },
+]);
+
+refuses('moving something that is not a date by an interval is refused',
+  'cannot be moved by an interval', [
+  {
+    op: 'update', id: 'u', expect: 'one', target: { entity: 'trailers' },
+    match: { entity: 'trailers' },
+    set: [{
+      field: trailer('retail_price'),
+      to: {
+        kind: 'shift', of: { kind: 'field', of: trailer('retail_price') },
+        by: { n: 1, unit: 'month' }, direction: 'forward',
+      },
+    }],
+  },
+]);
+
+/* --- the discrete operation stays an invoke --- */
+
+ok('marking a deal sold is a capability, not a field write',
+  CAPABILITIES.find((c) => c.id === 'deal.markSold')?.operates === 'invoke');
+ok('and it has something behind it',
+  !!CAPABILITIES.find((c) => c.id === 'deal.markSold')?.handler);
 
 /* =============================================================
    Relationship ambiguity and normalisation

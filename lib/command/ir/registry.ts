@@ -22,7 +22,7 @@ import { TABLES, type ColumnKind } from '../columns';
 import { ENTITIES } from '../schema';
 import { WRITABLE_FIELDS } from '../fields';
 import type { CrmCapability } from '../../crm/permissions';
-import type { ProducesKind } from './types';
+import type { ProducesKind, AmbiguityPolicy } from './types';
 
 /* =============================================================
    Fields
@@ -47,6 +47,16 @@ export type FieldDef = {
   groupable: boolean;
   aggregatable: boolean;
   writable: boolean;
+  /**
+   * May it be emptied?
+   *
+   * Absent from the writable dictionary means no. A column the database
+   * declares NOT NULL cannot be cleared, and offering to clear it
+   * produces a constraint error at the last moment that nobody can act
+   * on. Unknown nullability reads as not clearable, which costs a
+   * command rather than costing data.
+   */
+  clearable: boolean;
   /** Capability required to write. Reads are gated at the entity. */
   writeRequires?: CrmCapability;
   /** Values a person may say, mapped to what is stored. */
@@ -124,20 +134,18 @@ export type Normalisation =
 /**
  * What happens when a value match finds more than one row.
  *
- * There is deliberately no `first` and no `closest`. A relationship
- * that silently picks one of several matching customers produces a
- * confident wrong answer, and a confident wrong answer is the failure
- * this whole architecture exists to stop. If the caller wants every
- * match they say so with `all`; otherwise the plan stops and asks, or
- * refuses.
+ * Declared in `types.ts`, because expressions carry one too: a value
+ * that names a row without saying which row has to say what happens
+ * when the name fits two. Re-exported here so a relationship reads as
+ * one thing.
+ *
+ * There is deliberately no `first` and no `closest`. Silently picking
+ * one of several matching customers produces a confident wrong answer,
+ * and a confident wrong answer is the failure this whole architecture
+ * exists to stop. If the caller wants every match they say so with
+ * `all`; otherwise the plan stops and asks, or refuses.
  */
-export type AmbiguityPolicy =
-  /** Stop and ask which one. The default for anything user facing. */
-  | 'ask'
-  /** Refuse the step. For writes, where asking is not safe enough. */
-  | 'fail'
-  /** Every match is intended, as in a one-to-many traversal. */
-  | 'all';
+export type { AmbiguityPolicy } from './types';
 
 export type RelationshipDef = {
   id: string;
@@ -252,6 +260,7 @@ function fieldsFor(
       groupable: !!dimSpec,
       aggregatable: !!amtSpec || role === 'measure',
       writable: c.writable !== false && !!w,
+      clearable: c.writable !== false && !!w && w.clearable === true,
       writeRequires: w?.capability,
       vocabulary: filterSpec?.vocabulary,
       spans: filterSpec?.key === 'category' && id === 'trailers'
@@ -486,6 +495,21 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'app/api/crm/export/xlsx/route.ts',
   },
   {
+    id: 'deal.markSold',
+    label: 'Mark a deal sold and carry it through to the stock unit',
+    operates: 'invoke',
+    entities: ['deals'],
+    /* The same capability the manual route gates on, because it is the
+       same operation. */
+    requires: 'stock.edit',
+    confirm: true,
+    produces: 'record',
+    /* It raises a commission line and flips a stock unit. Running it
+       twice is not the same as running it once. */
+    idempotent: false,
+    handler: 'lib/crm/mark-sold.ts',
+  },
+  {
     id: 'rows.share',
     label: 'Share rows with colleagues',
     operates: 'emit',
@@ -621,6 +645,7 @@ export function coverage() {
     groupable: fields.filter((f) => f.groupable).length,
     aggregatable: fields.filter((f) => f.aggregatable).length,
     writable: fields.filter((f) => f.writable).length,
+    clearable: fields.filter((f) => f.clearable).length,
     relationships: RELATIONSHIPS.length,
     relationshipsApproximate: RELATIONSHIPS.filter((r) => r.approximate).length,
     capabilities: CAPABILITIES.length,
