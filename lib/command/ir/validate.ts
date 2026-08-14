@@ -612,22 +612,44 @@ export function completion(plan: Plan): Completion {
    would have missed it.
    ============================================================= */
 export type Requirement = {
-  capability: string;
+  /**
+   * Two different questions, which were one field and therefore muddled.
+   *
+   *   permission  an actor capability from `permissions.ts`, such as
+   *               `crm.view`. Answers "is this person allowed".
+   *   capability  a registry entry, such as `data.read`. Answers "does
+   *               anything in this application actually perform it".
+   *
+   * A plan can pass the first and fail the second. `rows.email` is a
+   * real capability with a real permission behind it and no handler, so
+   * a plan that emails a result is permitted and cannot be carried out.
+   * Reporting that as available is how a bar starts offering things it
+   * cannot do.
+   */
+  kind: 'permission' | 'capability';
+  id: string;
   because: string;
 };
 
 export function derivedRequirements(plan: Plan): Requirement[] {
   const out: Requirement[] = [];
   const seen = new Set<string>();
-  const need = (cap: string | undefined, because: string) => {
-    if (!cap) return;
-    const key = `${cap}|${because}`;
+  const need = (kind: Requirement['kind'], id: string | undefined, because: string) => {
+    if (!id) return;
+    const key = `${kind}|${id}|${because}`;
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ capability: cap, because });
+    out.push({ kind, id, because });
+  };
+  /** A registry capability, plus whatever permission it declares. */
+  const needCapability = (id: string | undefined, because: string) => {
+    if (!id) return;
+    need('capability', id, because);
+    need('permission', capability(id)?.requires, because);
   };
 
-  const fromEntity = (id: string, because: string) => need(entity(id)?.readRequires, because);
+  const fromEntity = (id: string, because: string) =>
+    need('permission', entity(id)?.readRequires, because);
 
   const fromPath = (f: FieldRef | PathRef): void => {
     if (!('via' in f)) { fromEntity(f.entity, `reads ${f.entity}`); return; }
@@ -636,7 +658,7 @@ export function derivedRequirements(plan: Plan): Requirement[] {
     for (const step of f.via) {
       const rel = relationship(step);
       if (!rel) return;
-      for (const r of rel.requires ?? []) need(r, `traverses ${step}`);
+      for (const r of rel.requires ?? []) need('permission', r, `traverses ${step}`);
       current = rel.to;
       fromEntity(current, `reads ${current}`);
     }
@@ -673,7 +695,7 @@ export function derivedRequirements(plan: Plan): Requirement[] {
     switch (c.kind) {
       case 'related': {
         const rel = relationship(c.via);
-        for (const r of rel?.requires ?? []) need(r, `traverses ${c.via}`);
+        for (const r of rel?.requires ?? []) need('permission', r, `traverses ${c.via}`);
         if (rel) fromEntity(rel.to, `reads ${rel.to}`);
         if (c.where) fromCond(c.where);
         return;
@@ -704,25 +726,25 @@ export function derivedRequirements(plan: Plan): Requirement[] {
         if (sel.shape?.having) fromCond(sel.shape.having);
         sel.shape?.orderBy?.forEach((o) => fromExpr(o.by));
         if (sel.shape?.compare && 'by' in sel.shape.compare) fromExpr(sel.shape.compare.by);
-        need('data.read', 'answers a question');
+        needCapability('data.read', 'answers a question');
         return;
       }
       case 'create': case 'update': case 'delete': {
         const m = s as Mutate;
         fromEntity(m.target.entity, `writes ${m.target.entity}`);
+        if (m.op === 'update') needCapability('record.updateField', `updates ${m.target.entity}`);
         if (m.match) fromSource(m.match);
         for (const w of m.set ?? []) {
           if ('via' in (w.field as PathRef)) continue;
           const def = field(w.field.entity, w.field.field);
-          need(def?.writeRequires, `writes ${w.field.entity}.${w.field.field}`);
+          need('permission', def?.writeRequires, `writes ${w.field.entity}.${w.field.field}`);
           fromExpr(w.to);
         }
         return;
       }
       case 'invoke': {
         const v = s as Invoke;
-        const cap = capability(v.capability);
-        need(cap?.requires, `invokes ${v.capability}`);
+        needCapability(v.capability, `invokes ${v.capability}`);
         if (v.subject) fromSource(v.subject);
         for (const a of Object.values(v.args ?? {})) {
           if (!isResultRef(a as ResultRef)) fromExpr(a as Expr);
@@ -737,11 +759,11 @@ export function derivedRequirements(plan: Plan): Requirement[] {
            permissions. Emailing a spreadsheet of the CRM needs both,
            and deriving only one of them let the other through. */
         if (e.output.kind === 'file') {
-          need(capability(FILE_EMIT_CAPABILITY)?.requires, `puts rows into a ${e.output.format}`);
+          needCapability(FILE_EMIT_CAPABILITY, `puts rows into a ${e.output.format}`);
         }
         const dest = destination(e.to.kind);
         const capId = e.capability ?? dest?.capability;
-        if (capId) need(capability(capId)?.requires, `sends it ${dest?.label.toLowerCase() ?? e.to.kind}`);
+        if (capId) needCapability(capId, `sends it ${dest?.label.toLowerCase() ?? e.to.kind}`);
 
         /* The destination is not just a label. Who it goes to and what
            it attaches to are expressions and sources of their own, and

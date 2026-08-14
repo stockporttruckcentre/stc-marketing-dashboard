@@ -10,7 +10,7 @@ import { composeSuggestions } from '@/lib/command/compose';
 import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
-import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
+import { planCommand, type CommandPlanning } from '@/lib/command/plan';
 import { setVocabulary } from '@/lib/command/vocab';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
@@ -329,7 +329,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
-  const plan = useMemo(() => (text.trim().length >= 3 ? parseQuery(text) : null), [text]);
+  /* One planning entry point. The reader still runs underneath it, but
+     everything below decides from the canonical plan it produces and
+     nothing here sees a QueryPlan. */
+  const planning = useMemo(
+    () => (text.trim().length >= 3 ? planCommand(text) : null), [text]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
   /* Words that can only be a read.
@@ -343,8 +347,20 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
   // An instruction outranks the question its words could also be, and a
   // question outranks a browse. A read verb outranks a write intent.
-  const useQuery = !editReady && !!plan && plan.confidence >= 8
+  /* A plan the application cannot represent, or cannot carry out
+     because nothing performs it, is not offered. An action that appears
+     and then refuses teaches people the bar is unreliable, and a
+     capability with no handler behind it is the same failure wearing a
+     different hat. */
+  const useQuery = !editReady && !!planning
+    && planning.presentation.confidence >= 8
+    && planning.availability.representable
+    && planning.availability.executable
     && (readsOnly || !preview?.intent?.writes);
+
+  /* Said out loud rather than left for the answer to imply. */
+  const partial = planning?.completion.kind === 'partial'
+    ? planning.completion.unresolved : [];
   const [answered, setAnswered] = useState<any | null>(null);
   const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
   const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
@@ -436,11 +452,15 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     }
   }
 
-  async function runQuery(p: QueryPlan) {
+  /* The sentence goes to the server, not a query built here. The
+     server plans it through the same `planCommand`, so a client cannot
+     hand craft a request that never went through the canonical path,
+     and the plan the bar previewed is the plan that runs. */
+  async function runQuery(p: CommandPlanning) {
     setStage('running');
     const res = await fetch('/api/command/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(planToPayload(p)),
+      body: JSON.stringify({ text: p.text }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
     if (!res.ok) {
       setOutcome({ ok: false, message: res.error ?? 'That query did not run.' });
@@ -513,7 +533,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     // An instruction first. "Add £1k refurb to STC143980" is not a
     // question about trailers, however much it reads like one.
     if (editReady && edit) return previewEdit(edit);
-    if (useQuery && plan) return runQuery(plan);
+    if (useQuery && planning) return runQuery(planning);
     const parsed = parse(text);
     if (!parsed.intent) {
       setOutcome({
@@ -660,7 +680,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {useQuery && plan && (
+            {useQuery && planning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -669,7 +689,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                  {planning.presentation.summary}
+                </span>
+                {partial.length > 0 && (
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    answers part of that
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to answer
                 </span>
@@ -899,7 +926,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 </span>
               </div>
             )}
-            {useQuery && plan && (
+            {useQuery && planning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -908,7 +935,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                  {planning.presentation.summary}
+                </span>
+                {partial.length > 0 && (
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    answers part of that
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to answer
                 </span>
@@ -1141,14 +1175,16 @@ function Answer({ answered, onGo, onReset }: {
     <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
       <Label>{answered.summary}</Label>
 
-      {/* What was asked for and could not be answered here. Said out
-          loud rather than quietly left out of the result. */}
-      {(answered.unmet ?? []).length > 0 && (
+      {/* What was asked for and could not be answered here. The server
+          sends this with the answer, and an answer that carries any of
+          it is not the question having been answered. */}
+      {(answered.unresolved ?? []).length > 0 && (
         <div style={{
           marginTop: 8, fontSize: 12, color: 'var(--text-muted)',
           display: 'flex', flexDirection: 'column', gap: 2,
         }}>
-          {answered.unmet.map((u: string) => (
+          <span style={{ fontWeight: 600 }}>This answers part of what you asked.</span>
+          {answered.unresolved.map((u: string) => (
             <span key={u}>Could not do this part: {u}</span>
           ))}
         </div>

@@ -404,7 +404,9 @@ refuses('an emit naming a select capability is refused',
 ]);
 
 /* --- requirements come from everything a plan reaches --- */
-const caps = (steps: Step[]) => requirementsOf(steps).map((r) => r.capability);
+/** Permission atoms only: what the actor must be allowed to do. */
+const caps = (steps: Step[]) =>
+  requirementsOf(steps).filter((r) => r.kind === 'permission').map((r) => r.id);
 
 ok('reading contacts requires seeing the CRM',
   caps([contactRows]).includes('crm.view'), caps([contactRows]).join(','));

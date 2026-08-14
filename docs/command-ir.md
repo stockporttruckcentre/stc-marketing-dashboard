@@ -532,3 +532,87 @@ stay green throughout, unchanged.
 
 Only when equivalence holds do readers begin emitting `Select`
 directly, one at a time.
+
+**Step 4, the first runtime slice.** Reads now run through the IR in the
+application, not only in a check.
+
+Before:
+
+```
+CommandBar
+  text -> parseQuery -> QueryPlan
+                        |  confidence >= 8 decides whether to run
+                        |  summary decides what is shown
+                        +- planToPayload -> POST /api/command/query
+                                            route reads entityId,
+                                            filters, measure ... off
+                                            the request body
+```
+
+Two semantic authorities and no agreement between them. The `QueryPlan`
+decided everything, the route trusted a query the client had built, and
+the IR existed beside the arrangement with nothing consulting it.
+
+After:
+
+```
+CommandBar
+  text -> planCommand(text) -> CommandPlanning
+                               plan, completion, requirements,
+                               confirm, availability
+                        |  availability decides whether to offer it
+                        +- POST /api/command/query { text }
+
+route
+  text -> planCommand(text) -> CommandPlanning
+          1 validate            is it well formed
+          2 permissions         is this person allowed
+          3 executability       does anything perform it
+          4 completion          was the whole question understood
+                        |
+                        +- planningToQueryPayload
+                             reads the canonical Select
+                        -> existing executor
+```
+
+One semantic authority: the `Plan`. `parseQuery` is still underneath
+`planCommand` and is untouched, but it is a reader now rather than an
+authority, and `lib/command/plan.ts` is the only module in the
+application that can reach it. `selectToQueryPayload` takes a `Select`
+and cannot consult a `QueryPlan` even if somebody wanted it to, which is
+a stronger guarantee than a comment asking them not to.
+
+The bar posts the sentence rather than a query it assembled, so a client
+cannot hand craft a request that never went through the canonical path,
+and the plan the bar previewed is the plan that runs.
+
+### Representable, permitted, executable
+
+Three answers that used to be one word.
+
+| | Question | Source |
+|---|---|---|
+| representable | Is the plan well formed | `validate` |
+| permitted | Is this person allowed | `derivedRequirements`, permission entries |
+| executable | Does anything actually perform it | `executability`, capability entries with a handler |
+
+`Requirement` now says which of the last two it is. A `permission` entry
+names an actor capability from `permissions.ts`. A `capability` entry
+names a registry entry that must have a handler behind it.
+
+A plan can pass the first two and fail the third. `rows.email` is a real
+capability with a real permission and no handler, so a plan that emails
+a result is representable, can be permitted, and is not something this
+application can carry out. The bar filters on all three before offering
+anything, because an action that appears and then fails teaches people
+the tool is unreliable, and a handlerless capability is that same
+failure wearing a different hat.
+
+Creates and deletes are not executable either, because nothing in the
+registry declares `operates: 'create'` or `'delete'` yet. That is the
+honest state while the mutation readers are unmigrated, and it is
+asserted rather than assumed.
+
+**Still to come.** Mutation readers, the action registry, and the
+executor rewritten against `Select` directly. When that lands,
+`lib/command/ir/execute.ts` is deleted and nothing else changes.

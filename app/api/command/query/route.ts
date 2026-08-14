@@ -1,34 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
 import { ENTITIES } from '@/lib/command/schema';
+import { planCommand, planningToQueryPayload } from '@/lib/command/plan';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Runs a composed query.
+ * Answers a question, planned canonically.
  *
- * Every column comes from the dictionary in lib/command/schema, never
- * from the request, so an unexpected filter key is dropped rather than
- * reaching the database. Values are still passed as parameters through
- * the Supabase builder.
+ * The body is the sentence somebody typed. The plan is built here, by
+ * the same `planCommand` the bar calls, so the client cannot hand
+ * craft a query that never went through the canonical path. What runs
+ * below is derived from the canonical `Select` and not from the
+ * reader's output.
+ *
+ * Four gates before anything reaches the database, in this order:
+ *
+ *   1  the plan is well formed                validate
+ *   2  the actor holds every permission        derivedRequirements
+ *   3  something actually performs it          executability
+ *   4  the request was understood in full      completion
+ *
+ * Three and four are new. A capability with no handler used to be
+ * indistinguishable from one with a handler, and a sentence understood
+ * in part used to be answered as though it had been understood in full.
+ *
+ * Every column still comes from the dictionary in lib/command/schema,
+ * never from the request, so an unexpected filter key is dropped rather
+ * than reaching the database. Values are still passed as parameters
+ * through the Supabase builder.
  */
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const gate = await requireCapability();
+  if (!gate.ok) return gate.response;
+  const { supabase, user, caps } = gate;
 
-  const body = await req.json().catch(() => ({})) as any;
-  const entity = ENTITIES.find((e) => e.id === body.entityId);
+  const raw = await req.json().catch(() => ({})) as { text?: unknown };
+  const text = typeof raw.text === 'string' ? raw.text : '';
+  if (!text.trim()) return NextResponse.json({ error: 'no question' }, { status: 400 });
+
+  const planning = planCommand(text, { actorCapabilities: caps });
+  if (!planning) {
+    return NextResponse.json({ error: 'nothing in that question matched anything here' }, { status: 400 });
+  }
+
+  if (planning.completion.kind === 'refused') {
+    return NextResponse.json({
+      error: 'that plan will not run',
+      problems: planning.completion.problems.map((p) => `${p.at}: ${p.what}`),
+    }, { status: 400 });
+  }
+  if (planning.availability.permitted === false) {
+    return NextResponse.json({
+      error: 'you do not have access to that',
+      missing: planning.availability.missingPermissions,
+    }, { status: 403 });
+  }
+  /* Representable, permitted, and still nothing performs it. Saying so
+     is better than a five hundred from a route that was never written. */
+  if (!planning.availability.executable) {
+    return NextResponse.json({
+      error: 'nothing here can carry that out yet',
+      missing: planning.availability.unavailable.map((u) => `${u.need}: ${u.why}`),
+    }, { status: 501 });
+  }
+
+  const payload = planningToQueryPayload(planning);
+  if (!payload) return NextResponse.json({ error: 'that plan is not a single read' }, { status: 400 });
+
+  /* Partial is never reported as complete. The answer goes back with
+     what could not be read, and the bar shows both. */
+  const unresolved = planning.completion.kind === 'partial' ? planning.completion.unresolved : [];
+  const answered = (extra: Record<string, unknown>) => NextResponse.json({
+    ok: true,
+    complete: planning.completion.kind === 'complete',
+    unresolved,
+    ...extra,
+  });
+
+  const entity = ENTITIES.find((e) => e.id === payload.entityId);
   if (!entity) return NextResponse.json({ error: 'unknown entity' }, { status: 400 });
 
-  const measure: string = ['count', 'sum', 'avg', 'list'].includes(body.measure) ? body.measure : 'count';
+  const body = payload;
+
+  const measure = body.measure;
 
   // Only columns the dictionary knows about.
   const allowedFilterColumns = new Set(entity.filters.map((f) => f.column));
   const allowedAmounts = new Set(entity.amounts.map((a) => a.column));
   const allowedDimensions = new Set(entity.dimensions.map((d) => d.column));
 
-  const amountColumn = allowedAmounts.has(body.amountColumn) ? body.amountColumn : null;
+  const amountColumn = body.amountColumn && allowedAmounts.has(body.amountColumn)
+    ? body.amountColumn : null;
   const groupColumn = body.groupBy && allowedDimensions.has(body.groupBy.column) ? body.groupBy.column : null;
 
   /* Every date the entity declares, which is the allowlist for sorting
@@ -216,10 +279,10 @@ export async function POST(req: NextRequest) {
         .sort((a, b) => (measure === 'count' ? b.count - a.count : b.total - a.total))
         .slice(0, 12);
     }
-    return NextResponse.json({
-      ok: true, kind: 'grouped', measure, entity: entity.label,
+    return answered({
+      kind: 'grouped', measure, entity: entity.label,
       amountLabel: body.derived?.label ?? body.amountLabel ?? null,
-      groupLabel: body.groupBy.label,
+      groupLabel: body.groupBy?.label ?? groupColumn,
       total: rows.length,
       groups,
       money: !body.derived,
@@ -238,8 +301,8 @@ export async function POST(req: NextRequest) {
      question with a limit comes back as rows. */
   if (orderColumn && limit) {
     const kept = rows.slice(0, limit);
-    return NextResponse.json({
-      ok: true, kind: 'rows', measure: 'list', entity: entity.label,
+    return answered({
+      kind: 'rows', measure: 'list', entity: entity.label,
       value: kept.length,
       total: rows.length,
       orderLabel: body.order?.label ?? null,
@@ -260,8 +323,8 @@ export async function POST(req: NextRequest) {
 
   // ---- single figure ----
   if (measure === 'count' || (!amountColumn && !derivedFrom)) {
-    return NextResponse.json({
-      ok: true, kind: 'number', measure: 'count', entity: entity.label,
+    return answered({
+      kind: 'number', measure: 'count', entity: entity.label,
       value: rows.length, summary: body.summary,
       sample: rows.slice(0, 5).map((r) => ({
         id: r.id,
@@ -276,8 +339,8 @@ export async function POST(req: NextRequest) {
   const total = values.reduce((a, b) => a + b, 0);
   const withValue = values.filter((v) => v !== 0).length;
 
-  return NextResponse.json({
-    ok: true, kind: 'number', measure, entity: entity.label,
+  return answered({
+    kind: 'number', measure, entity: entity.label,
     amountLabel: body.derived?.label ?? body.amountLabel ?? null,
     value: measure === 'avg' ? (withValue ? total / withValue : 0) : total,
     rowCount: rows.length,
