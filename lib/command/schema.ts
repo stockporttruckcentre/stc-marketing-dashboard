@@ -57,6 +57,16 @@ export type EntitySpec = {
   hrefFor?: (row: any) => string;
   dateColumn?: string;
   /**
+   * When a sale happened, for entities that have sales.
+   *
+   * Two columns and a rule rather than one column, because that is what
+   * the business means: the date it went out, or the date it was
+   * ordered when it has not gone out yet. Declared once here so nothing
+   * downstream has to choose, and absent on entities where a sale is
+   * not a thing that happens.
+   */
+  saleDate?: { primary: string; fallback: string };
+  /**
    * Every date a person can order by or ask about, not only the one
    * periods are measured against.
    *
@@ -101,6 +111,19 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'stc_no',
     subtitleColumns: ['make', 'model', 'category', 'location'],
     dateColumn: 'dispatch_date',
+    /* WHEN A SALE HAPPENED, SAID ONCE.
+
+       The sales tracker has always read it as `dispatch_date ||
+       order_date`: a unit that has gone out is dated by when it went,
+       and one that is sold and not yet dispatched is dated by when it
+       was ordered. Anything reading only `dispatch_date` misses every
+       sale still waiting to go out, which at any moment is most of the
+       recent ones.
+
+       Declared here so the question reader, the exporter and any
+       commission figure consume the same meaning instead of each
+       choosing a column. */
+    saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
     dates: [
       { key: 'received', column: 'received_date', label: 'date in',
         words: ['added', 'arrived', 'came in', 'received', 'booked in', 'landed', 'in stock since', 'taken in'] },
@@ -173,6 +196,8 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'company_name',
     subtitleColumns: ['contact_name', 'status', 'location'],
     dateColumn: 'date_of_enquiry',
+    /* The same rule on the tracker side, where the commission lives. */
+    saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
     dates: [
       { key: 'enquiry', column: 'date_of_enquiry', label: 'enquiry date',
         words: ['enquired', 'enquiry', 'came in', 'raised', 'opened'] },

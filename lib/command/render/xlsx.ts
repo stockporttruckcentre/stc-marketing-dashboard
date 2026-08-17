@@ -89,9 +89,10 @@ export async function renderXlsx(table: Table): Promise<Artefact> {
   });
 
   const foot = ws.getRow(6 + table.rows.length);
-  foot.getCell(1).value = table.capped
-    ? `${table.count} rows, which is as many as one export carries. Narrow the request to see the rest.`
-    : `${table.count} ${table.count === 1 ? 'row' : 'rows'}.`;
+  /* Every row the selection described. A file that holds fewer than
+     it says is refused before it is built, so this figure is the whole
+     answer rather than as much of it as fitted. */
+  foot.getCell(1).value = `${table.count} ${table.count === 1 ? 'row' : 'rows'}.`;
   foot.getCell(1).font = { size: 9, italic: true, color: { argb: THEME.muted } };
 
   ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: table.columns.length } };

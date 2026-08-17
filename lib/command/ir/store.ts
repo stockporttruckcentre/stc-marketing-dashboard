@@ -60,8 +60,12 @@ export type ReadRequest = {
    *
    * Always given. A read with no ceiling is how a command that names
    * half the CRM takes the process down before anybody sees a preview.
+   * It is a PAGE size rather than a semantic ceiling: a caller that
+   * wants every row pages until the pages stop coming.
    */
   limit: number;
+  /** How many rows to skip, for the page after the first. */
+  offset?: number;
 };
 
 export type ReadOutcome =

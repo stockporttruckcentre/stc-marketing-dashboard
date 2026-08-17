@@ -172,9 +172,8 @@ export function renderPdf(table: Table): Artefact {
       }
 
       pieces.push({
-        text: table.capped
-          ? `${table.count} rows, which is as many as one export carries. Narrow the request to see the rest.`
-          : `${table.count} ${table.count === 1 ? 'row' : 'rows'}.  Page ${p + 1} of ${total}${groups.length > 1 ? `, part ${g + 1} of ${groups.length}` : ''}.`,
+        text: `${table.count} ${table.count === 1 ? 'row' : 'rows'}.  `
+          + `Page ${p + 1} of ${total}${groups.length > 1 ? `, part ${g + 1} of ${groups.length}` : ''}.`,
         x: PAGE.margin, y: PAGE.margin, size: SIZE.subtitle, bold: false,
       });
 

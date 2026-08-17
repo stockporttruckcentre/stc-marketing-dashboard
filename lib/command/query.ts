@@ -69,6 +69,15 @@ export type QueryPlan = {
    * nothing said why.
    */
   rangeColumn?: string;
+  /**
+   * The period is about when a sale happened, rather than about one
+   * column.
+   *
+   * Carried so the adapter can build the two branch condition the
+   * business means: dispatched in the period, or ordered in it and not
+   * dispatched at all.
+   */
+  rangeIsSaleDate?: boolean;
   scope: 'mine' | 'all';
   /** Sort, from a superlative or an explicit ordering. */
   order?: { column: string; direction: 'asc' | 'desc'; label: string };
@@ -789,8 +798,26 @@ export function parseQuery(
   /* Which date the period is about. The sentence usually says: added,
      arrived, sold, dispatched, ordered. Falls back to the entity's own
      default when it does not. */
+  /* Words that mean a sale happened, rather than naming a date column.
+     Grouped rather than listed for the usual reason: "sold", "sales"
+     and "sale" are one idea. */
+  const SALE_WORDS = ['sold', 'sale', 'sales', 'selling', 'commission', 'invoiced', 'won'];
+
+  const namedDate = range
+    ? entity.dates?.find((d) => d.words.some((w) => lower.includes(w)))?.column
+    : undefined;
+
+  /* A PERIOD ABOUT A SALE IS ABOUT THE SALE DATE.
+
+     "Sold in the last six months" and "sales this quarter" are about
+     when the sale happened, which this entity declares as two columns
+     and a rule. Naming a date explicitly still wins: "dispatched last
+     month" is about dispatch and nothing else. */
+  const aboutASale = !!entity.saleDate && !namedDate
+    && SALE_WORDS.some((w) => lower.includes(w));
+
   const rangeColumn = range
-    ? (entity.dates?.find((d) => d.words.some((w) => lower.includes(w)))?.column ?? entity.dateColumn)
+    ? (namedDate ?? (aboutASale ? entity.saleDate!.primary : entity.dateColumn))
     : undefined;
 
   // --- whose ----------------------------------------------------------
@@ -949,7 +976,8 @@ export function parseQuery(
   ].filter(Boolean);
 
   return {
-    entity, measure, amountColumn, amountLabel, filters, groupBy, range, rangeColumn, scope,
+    entity, measure, amountColumn, amountLabel, filters, groupBy, range, rangeColumn,
+    rangeIsSaleDate: aboutASale, scope,
     order, limit, derived, compare,
     unmet: unmet.length ? unmet : undefined,
     summary: bits.join(' '),

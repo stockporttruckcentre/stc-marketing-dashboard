@@ -146,7 +146,37 @@ export function adaptQueryPlan(p: QueryPlan): Adapted {
      which is what `rangeColumn` already recorded. */
   if (p.range) {
     const column = p.rangeColumn ?? p.entity.dateColumn;
-    if (column) {
+    const sale = p.entity.saleDate;
+
+    if (p.rangeIsSaleDate && sale) {
+      /* WHEN A SALE HAPPENED IS TWO COLUMNS AND A RULE.
+
+         `dispatch_date` when it has gone out, `order_date` when it is
+         sold and still in the yard. Written as a condition rather than
+         as a coalesced column because a condition is a thing every
+         store can express, and because it says the rule out loud:
+
+           dispatched in the period
+           OR (nothing dispatched yet AND ordered in the period)
+
+         A period on `dispatch_date` alone misses every sale still
+         waiting to go out, which at any moment is most of the recent
+         ones. */
+      const period = periodFor(p.range);
+      conds.push({
+        kind: 'or',
+        of: [
+          { kind: 'within', of: fieldExpr(entityId, sale.primary), period },
+          {
+            kind: 'and',
+            of: [
+              { kind: 'empty', of: fieldExpr(entityId, sale.primary) },
+              { kind: 'within', of: fieldExpr(entityId, sale.fallback), period },
+            ],
+          },
+        ],
+      });
+    } else if (column) {
       conds.push({
         kind: 'within',
         of: fieldExpr(entityId, column),

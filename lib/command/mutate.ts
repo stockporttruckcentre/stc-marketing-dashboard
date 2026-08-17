@@ -641,7 +641,16 @@ export function parseEdit(
     if (twin) spec = twin;
   }
 
-  const { op: rawOp, word: opWord } = findOp(raw);
+  /* WITHOUT THE FIELD'S OWN NAME IN IT.
+
+     "Clear the refurb update on STC143580" was read as a SET with no
+     value, because "update" is one of the words that means set and it
+     is longer than "clear", and it is in the sentence only because it
+     is half the field's name. A verb inside the column's own name is
+     not a verb. */
+  const { op: rawOp, word: opWord } = findOp(
+    raw.replace(new RegExp(field.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' '),
+  );
 
   /* The value hunt runs on the sentence with the record reference and
      the field name taken out. Without that, "add 1k refurb to STC143980"

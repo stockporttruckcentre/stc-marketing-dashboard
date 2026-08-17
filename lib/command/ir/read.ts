@@ -125,15 +125,35 @@ export function projectionFor(select: Select): { columns: string[]; labels: stri
 export type RunSelectOptions = {
   store: Store;
   /**
-   * The most rows to read.
+   * How many rows to fetch per request.
    *
-   * No default. A ceiling invented here would become the size of every
-   * export by accident, which is exactly how "the first thousand" comes
-   * to be reported as "all of them".
+   * A page size, not a ceiling. The read pages until the pages stop
+   * coming, because a selection that matches eight thousand records
+   * means eight thousand records: an implementation limit that quietly
+   * returns five thousand of them produces an answer that looks
+   * complete and is not.
    */
-  cap: number;
+  pageSize?: number;
+  /**
+   * The most rows this caller will accept, if it has a maximum at all.
+   *
+   * Absent means no maximum. Present and exceeded means REFUSE, never
+   * truncate: the whole point is that the semantic selection and the set
+   * that gets acted on or written out are the same set.
+   */
+  ceiling?: number;
 };
 
+/** Rows per request. Nothing about this number is semantic. */
+export const PAGE_SIZE = 1000;
+
+/**
+ * Every row a selection describes.
+ *
+ * Pages until it has them all. `capped` is true only where a ceiling was
+ * given AND exceeded, and every caller of this treats that as a refusal
+ * rather than as a set to work with.
+ */
 export async function runSelect(select: Select, opts: RunSelectOptions): Promise<ReadResult> {
   const id = 'entity' in select.from ? (select.from as { entity: string }).entity : null;
   const def = id ? entityDef(id) : null;
@@ -148,37 +168,49 @@ export async function runSelect(select: Select, opts: RunSelectOptions): Promise
       : null))
     .filter((x): x is { column: string; direction: 'asc' | 'desc' } => x !== null);
 
-  /* A limit the sentence asked for is part of the answer: "the five
-     cheapest" is five. The cap is a different thing, and the smaller of
-     the two wins so neither can be quietly ignored. */
+  /* A limit the SENTENCE asked for is part of the answer: "the five
+     cheapest" is five, and "the top 100" is a hundred. A ceiling the
+     IMPLEMENTATION imposes is a different thing entirely and is never
+     applied by narrowing the answer. */
   const asked = select.shape?.limit;
-  const want = asked != null ? Math.min(asked, opts.cap) : opts.cap;
+  const pageSize = Math.max(opts.pageSize ?? PAGE_SIZE, 1);
+  const columns = [...new Set(['id', ...projection.columns])];
+  const where = select.where ?? { kind: 'and' as const, of: [] };
 
-  const read = await opts.store.read({
-    table: def.table,
-    columns: [...new Set(['id', ...projection.columns])],
-    where: select.where ?? { kind: 'and', of: [] },
-    orderBy,
-    /* One more than wanted, so reaching the ceiling can be reported
-       rather than looking like the end of the data. */
-    limit: want + 1,
-  });
+  const rows: Record<string, unknown>[] = [];
+  let offset = 0;
 
-  if (!read.ok) {
-    return {
-      ok: false,
-      why: read.reason === 'unsupported'
-        ? `this selection needs ${read.why}` : read.why,
-    };
+  for (;;) {
+    /* One past the ceiling, so exceeding it can be reported rather than
+       looking like the end of the data. */
+    const remainingToAsk = asked != null ? asked - rows.length : Infinity;
+    if (remainingToAsk <= 0) break;
+    const want = Math.min(pageSize, remainingToAsk === Infinity ? pageSize : remainingToAsk);
+
+    const page = await opts.store.read({
+      table: def.table, columns, where, orderBy, limit: want, offset,
+    });
+    if (!page.ok) {
+      return {
+        ok: false,
+        why: page.reason === 'unsupported' ? `this selection needs ${page.why}` : page.why,
+      };
+    }
+
+    rows.push(...page.rows);
+    if (opts.ceiling != null && rows.length > opts.ceiling) {
+      return { ok: true, entity: def.id, columns: projection.columns, labels: projection.labels, rows, capped: true };
+    }
+    if (page.rows.length < want) break;
+    offset += page.rows.length;
   }
 
-  const capped = read.rows.length > want;
   return {
     ok: true,
     entity: def.id,
     columns: projection.columns,
     labels: projection.labels,
-    rows: read.rows.slice(0, want),
-    capped,
+    rows,
+    capped: false,
   };
 }

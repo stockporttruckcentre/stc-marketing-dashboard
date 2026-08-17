@@ -33,6 +33,7 @@ import { postgrestStore } from '../lib/command/store/postgrest';
 import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
+import { planCommand } from '../lib/command/plan';
 import { EMPTY_VOCABULARY } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
 
@@ -1006,7 +1007,191 @@ test('somebody without crm.manageLists cannot make one', async () => {
 });
 
 /* =============================================================
-   12. A question is still a question
+   12. The set the sentence meant, or nothing
+
+   Three ways a truncation could creep in, and none of them may.
+   ============================================================= */
+
+test('an operation over more records than a ceiling allows refuses', async () => {
+  /* 501 deals against a ceiling of 500. Performing it on 500 of them
+     would be atomic, would report success, and would be wrong. */
+  const units: Record<string, unknown>[] = [];
+  const deals: Record<string, unknown>[] = [];
+  for (let i = 0; i < 501; i++) {
+    units.push({
+      id: `u${i}`, stc_no: `STC90${String(i).padStart(4, '0')}`,
+      status: 'in_stock', category: 'Curtainsider', location: 'Hyde',
+    });
+    deals.push({
+      id: `d${i}`, company_name: `Buyer ${i}`, stock_trailer_id: `u${i}`,
+      sale_price: 1000, profit: 100, commission_rate: 0.1, status: 'quoted',
+    });
+  }
+  const db = fakeDb({ stock_trailers: units, crm_contacts: deals });
+
+  const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db, false);
+  ok('it plans', !!planned);
+  if (!planned) return;
+
+  const { previewMutation } = await import('../lib/command/server/mutation');
+  const preview = await previewMutation(
+    planned.planned.planning, postgrestStore(db.supabase),
+    { maxRows: 500 },
+  );
+
+  ok('the whole operation is refused', !preview.ok, 'it previewed');
+  if (preview.ok) return;
+  ok('saying it is more than it is allowed to act on',
+    /more than 500|500/.test(preview.why), preview.why);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('the same operation with no ceiling acts on every one of them', async () => {
+  const units: Record<string, unknown>[] = [];
+  const deals: Record<string, unknown>[] = [];
+  for (let i = 0; i < 501; i++) {
+    units.push({
+      id: `u${i}`, stc_no: `STC90${String(i).padStart(4, '0')}`,
+      status: 'in_stock', category: 'Curtainsider', location: 'Hyde',
+    });
+    deals.push({
+      id: `d${i}`, company_name: `Buyer ${i}`, stock_trailer_id: `u${i}`,
+      sale_price: 1000, profit: 100, commission_rate: 0.1, status: 'quoted',
+    });
+  }
+  const db = fakeDb({ stock_trailers: units, crm_contacts: deals });
+
+  const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  /* THE WHOLE SET, NOT A PAGE OF IT. The read pages under the surface;
+     501 is deliberately more than one page. */
+  ok('all 501 deals are in the preview', preview.count === 501, String(preview.count));
+
+  const done = await applyMutation({
+    text: 'mark all the in stock curtainsiders as sold', ...actor('admin'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('and all 501 are sold', done.ok && done.changed === 501,
+    done.ok ? String(done.changed) : done.why);
+});
+
+test('an export holds every row the selection describes', async () => {
+  /* 6,001 rows, which is more than the flat five thousand that used to
+     be applied to every format, and more than one page. */
+  const many: Record<string, unknown>[] = [];
+  for (let i = 0; i < 6001; i++) {
+    many.push({
+      id: `x${i}`, stc_no: `STC80${String(i).padStart(4, '0')}`,
+      status: 'in_stock', location: 'Hyde', category: 'Curtainsider',
+      sales_price: 1000 + i,
+    });
+  }
+  const db = fakeDb({ stock_trailers: many });
+
+  const planning = planCommand('export the in stock trailers as a CSV', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  ok('holding all 6,001 rows', out.rows === 6001, String(out.rows));
+
+  const body = new TextDecoder().decode(out.artefact.bytes);
+  ok('the first row is in it', body.includes('STC800000'));
+  ok('and so is the last', body.includes('STC806000'));
+});
+
+test('a user asked limit is still honoured', async () => {
+  const many: Record<string, unknown>[] = [];
+  for (let i = 0; i < 300; i++) {
+    many.push({
+      id: `x${i}`, stc_no: `STC80${String(i).padStart(4, '0')}`,
+      status: 'in_stock', location: 'Hyde', category: 'Curtainsider',
+      sales_price: 1000 + i,
+    });
+  }
+  const db = fakeDb({ stock_trailers: many });
+  const planning = planCommand('export the 100 most expensive trailers in stock as a CSV', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  /* A limit the SENTENCE asked for is part of the answer. A limit the
+     implementation imposes is not. */
+  ok('holding exactly the hundred that were asked for', out.rows === 100, String(out.rows));
+});
+
+/* =============================================================
+   13. When a sale happened is two columns and a rule
+   ============================================================= */
+
+test('sold in the last six months finds the dispatched and the ordered', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      /* Gone out inside the period. */
+      { id: 's1', stc_no: 'STC100001', status: 'sold', customer: 'Dawson Group', dispatch_date: '2026-06-14', order_date: '2026-05-01' },
+      /* Sold and still in the yard, ordered inside the period. This is
+         the one a period on dispatch_date alone misses, and at any
+         moment it is most of the recent sales. */
+      { id: 's2', stc_no: 'STC100002', status: 'sold', customer: 'Dawson Group', dispatch_date: null, order_date: '2026-07-02' },
+      /* Ordered inside the period but dispatched long before it, which
+         is not a sale in this period. */
+      { id: 's3', stc_no: 'STC100003', status: 'sold', customer: 'Dawson Group', dispatch_date: '2024-01-01', order_date: '2026-07-02' },
+      /* Neither. */
+      { id: 's4', stc_no: 'STC100004', status: 'sold', customer: 'Dawson Group', dispatch_date: null, order_date: '2024-02-02' },
+    ],
+  });
+
+  const planning = planCommand('export the trailers sold to Dawson in the last 6 months as a CSV', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  ok('it plans', !!planning);
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+
+  const body = new TextDecoder().decode(out.artefact.bytes);
+  ok('the dispatched one is in it', body.includes('STC100001'));
+  ok('and the one ordered but not dispatched yet', body.includes('STC100002'));
+  ok('the one dispatched years ago is not', !body.includes('STC100003'));
+  ok('nor the old one', !body.includes('STC100004'));
+  ok('two rows', out.rows === 2, String(out.rows));
+});
+
+test('naming a date explicitly still means that date', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 's1', stc_no: 'STC100001', status: 'sold', dispatch_date: '2026-06-14', order_date: '2026-05-01' },
+      { id: 's2', stc_no: 'STC100002', status: 'sold', dispatch_date: null, order_date: '2026-07-02' },
+    ],
+  });
+  /* "Dispatched" is about dispatch and nothing else, so the one still
+     in the yard is not in it. */
+  const planning = planCommand('export the trailers dispatched in the last 6 months as a CSV', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  ok('only the dispatched one', out.rows === 1, String(out.rows));
+});
+
+/* =============================================================
+   14. A question is still a question
    ============================================================= */
 
 test('a question does not become an instruction', async () => {

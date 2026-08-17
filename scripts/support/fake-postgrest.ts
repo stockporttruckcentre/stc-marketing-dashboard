@@ -66,16 +66,12 @@ function matches(row: Row, op: Op): boolean {
     /* Ordering narrows nothing. It is applied when the rows come back. */
     case 'order': return true;
     case 'or':
-      /* `col.ilike.%x%`, `col.eq.x` and `col.is.null`, which is what the
-         resolver emits and nothing more. */
-      return op.clauses.some((clause) => {
-        const [column, verb, ...rest] = clause.split('.');
-        const value = rest.join('.');
-        if (verb === 'ilike') return like(row[column], value);
-        if (verb === 'eq') return String(row[column] ?? '') === value;
-        if (verb === 'is' && value === 'null') return row[column] == null;
-        return false;
-      });
+      /* The same nested filter grammar PostgREST accepts: a flat
+         comparison, or `and(...)` and `or(...)` around more of them.
+         The flat version was all this understood, so a period over a
+         sale date, which is an `or` containing an `and`, matched
+         nothing here while working against the real thing. */
+      return op.clauses.some((clause) => filterMatches(row, clause));
   }
 }
 
@@ -83,6 +79,71 @@ export type Recorded = { table: string; set: Row; ids: string[] };
 
 /** The same allowlist the database holds, from the same registry. */
 const ALLOWED = new Set(writableColumns().map((c) => `${c.table}.${c.column}`));
+
+/** Split on commas that are not inside brackets. */
+function topLevelParts(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0, current = '';
+  for (const ch of body) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) { out.push(current); current = ''; continue; }
+    current += ch;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+/** One PostgREST filter expression, against one row. */
+function filterMatches(row: Row, clause: string): boolean {
+  const trimmed = clause.trim();
+
+  const group = /^(and|or|not)\((.*)\)$/s.exec(trimmed);
+  if (group) {
+    const parts = topLevelParts(group[2]);
+    if (group[1] === 'and') return parts.every((p) => filterMatches(row, p));
+    if (group[1] === 'or') return parts.some((p) => filterMatches(row, p));
+    return !parts.every((p) => filterMatches(row, p));
+  }
+
+  const [column, verb, ...rest] = trimmed.split('.');
+  const value = rest.join('.');
+  const left = row[column];
+
+  switch (verb) {
+    case 'eq': return String(left ?? '') === value;
+    case 'neq': return String(left ?? '') !== value;
+    case 'is': return value === 'null' ? left == null : String(left) === value;
+    case 'ilike': {
+      const body = value.replace(/^\*|\*$/g, '').toLowerCase();
+      const s = String(left ?? '').toLowerCase();
+      if (value.startsWith('*') && value.endsWith('*')) return s.includes(body);
+      if (value.endsWith('*')) return s.startsWith(body);
+      return s === body;
+    }
+    case 'gt': return compare(left, value) > 0;
+    case 'gte': return compare(left, value) >= 0;
+    case 'lt': return compare(left, value) < 0;
+    case 'lte': return compare(left, value) <= 0;
+    default: return false;
+  }
+}
+
+/** Matching rows, in whatever order the query asked for. */
+function sortedRows(table: string, ops: Op[], tables: Record<string, Row[]>): Row[] {
+  const rows = (tables[table] ?? []).filter((r) => ops.every((o) => matches(r, o)));
+  for (const o of ops) {
+    if (o.kind !== 'order') continue;
+    rows.sort((a, b) => {
+      const x = a[o.column], y = b[o.column];
+      const c = x == null ? 1 : y == null ? -1
+        : typeof x === 'number' && typeof y === 'number' ? x - y
+          : String(x).localeCompare(String(y));
+      return o.ascending ? c : -c;
+    });
+  }
+  return rows;
+}
 
 export function fakeDb(tables: Record<string, Row[]>) {
   const writes: Recorded[] = [];
@@ -99,23 +160,24 @@ export function fakeDb(tables: Record<string, Row[]>) {
       lt: (column: string, value: unknown) => builder(table, [...ops, { kind: 'lt', column, value }], columns, update),
       lte: (column: string, value: unknown) => builder(table, [...ops, { kind: 'lte', column, value }], columns, update),
       ilike: (column: string, pattern: string) => builder(table, [...ops, { kind: 'ilike', column, pattern }], columns, update),
-      or: (expr: string) => builder(table, [...ops, { kind: 'or', clauses: expr.split(',') }], columns, update),
+      /* Split on the commas BETWEEN branches, not on the ones inside
+         them. A plain split turned `and(a,b),and(c,d)` into four broken
+         fragments, and a row matched whichever fragment happened to
+         parse. */
+      or: (expr: string) => builder(table, [...ops, { kind: 'or', clauses: topLevelParts(expr) }], columns, update),
       in: (column: string, values: unknown[]) => builder(table, [...ops, { kind: 'in', column, values }], columns, update),
       order: (column: string, o?: { ascending?: boolean }) =>
         builder(table, [...ops, { kind: 'order', column, ascending: o?.ascending !== false }], columns, update),
       update: (set: Row) => builder(table, ops, columns, set),
+      range: async (from: number, to: number) => {
+        const all = sortedRows(table, ops, tables);
+        const projected = columns
+          ? all.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])))
+          : all;
+        return { data: projected.slice(from, to + 1), error: null };
+      },
       limit: async (n: number) => {
-        const rows = (tables[table] ?? []).filter((r) => ops.every((o) => matches(r, o)));
-        for (const o of ops) {
-          if (o.kind !== 'order') continue;
-          rows.sort((a, b) => {
-            const x = a[o.column], y = b[o.column];
-            const c = x == null ? 1 : y == null ? -1
-              : typeof x === 'number' && typeof y === 'number' ? x - y
-                : String(x).localeCompare(String(y));
-            return o.ascending ? c : -c;
-          });
-        }
+        const rows = sortedRows(table, ops, tables);
         const projected = columns
           ? rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])))
           : rows;

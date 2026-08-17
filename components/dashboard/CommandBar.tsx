@@ -572,11 +572,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     URL.revokeObjectURL(url);
 
     const rows = Number(res.headers.get('X-Command-Rows') ?? 0);
-    const capped = res.headers.get('X-Command-Capped') === '1';
     setOutcome({
       ok: true,
       message: `${name} downloaded, ${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
-      detail: capped ? 'That is as many rows as one file carries. Narrow the request to get the rest.' : undefined,
     });
     setStage('done');
   }

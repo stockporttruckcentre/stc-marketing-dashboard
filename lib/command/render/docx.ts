@@ -96,9 +96,7 @@ export async function renderDocx(table: Table): Promise<Artefact> {
         new Paragraph({
           spacing: { before: 240 },
           children: [new TextRun({
-            text: table.capped
-              ? `${table.count} rows, which is as many as one export carries. Narrow the request to see the rest.`
-              : `${table.count} ${table.count === 1 ? 'row' : 'rows'}.`,
+            text: `${table.count} ${table.count === 1 ? 'row' : 'rows'}.`,
             size: 15, color: MUTED, italics: true,
           })],
         }),

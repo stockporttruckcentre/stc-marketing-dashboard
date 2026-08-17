@@ -95,7 +95,10 @@ export async function POST(req: NextRequest) {
       'Content-Type': done.artefact.mime,
       'Content-Disposition': `attachment; filename="${done.artefact.filename}"`,
       'X-Command-Rows': String(done.rows),
-      'X-Command-Capped': done.capped ? '1' : '0',
+      /* Always complete. A selection too large for the format is
+         refused above rather than trimmed, so there is no partial file
+         to warn about. */
+      'X-Command-Complete': '1',
       'Cache-Control': 'no-store',
     },
   });

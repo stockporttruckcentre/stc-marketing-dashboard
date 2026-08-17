@@ -67,10 +67,26 @@ export type InvokePlan = {
 
 export type InvokeResolution =
   | { ok: true; plan: InvokePlan }
-  | { ok: false; reason: 'unknown' | 'nothing matched' | 'unresolved' | 'incomplete'; why: string };
+  | {
+      ok: false;
+      reason: 'unknown' | 'nothing matched' | 'unresolved' | 'incomplete' | 'too many';
+      why: string;
+    };
 
-/** How many rows one invocation reads. */
-const SUBJECT_CAP = 500;
+/**
+ * The most records one operation may run on, if a caller sets one.
+ *
+ * There is deliberately no number here. A command that names six
+ * hundred records means six hundred records, and performing it on five
+ * hundred of them is the worst outcome available: it looks like it
+ * worked, it is atomic, and it is wrong. Where a ceiling exists it is
+ * execution policy, it arrives from the caller, and exceeding it refuses
+ * the whole operation before anything runs.
+ */
+export type InvokeLimits = { maxSubjects?: number };
+
+/** How many keys one lookup carries. A request size, nothing semantic. */
+const KEY_PAGE = 200;
 
 function labelOf(row: Record<string, unknown>, title: string | null): string {
   const v = title ? row[title] : null;
@@ -86,7 +102,7 @@ function labelOf(row: Record<string, unknown>, title: string | null): string {
 export async function resolveInvoke(
   plan: Plan,
   step: Invoke,
-  opts: { store: Store; args?: Record<string, unknown> },
+  opts: { store: Store; args?: Record<string, unknown>; limits?: InvokeLimits },
 ): Promise<InvokeResolution> {
   const cap = capability(step.capability);
   if (!cap) return { ok: false, reason: 'unknown', why: `nothing here knows ${step.capability}` };
@@ -105,8 +121,23 @@ export async function resolveInvoke(
     return { ok: false, reason: 'unresolved', why: 'that operation does not say which records' };
   }
 
-  const read = await runSelect(select, { store: opts.store, cap: SUBJECT_CAP });
+  const ceiling = opts.limits?.maxSubjects;
+  const read = await runSelect(select, { store: opts.store, ceiling });
   if (!read.ok) return { ok: false, reason: 'unresolved', why: read.why };
+
+  /* THE SET THE SENTENCE MEANT, OR NOTHING.
+
+     `capped` can only be true where a ceiling was configured and
+     exceeded. Carrying on with the rows that came back would perform
+     the operation on a subset nobody described. */
+  if (read.capped) {
+    return {
+      ok: false,
+      reason: 'too many',
+      why: `that names more than ${ceiling?.toLocaleString('en-GB')} records, `
+        + 'which is more than this is configured to act on in one go. Narrow it down.',
+    };
+  }
   if (!read.rows.length) return { ok: false, reason: 'nothing matched', why: 'nothing here matches that' };
 
   /* Which entity the operation runs on. A capability that names none
@@ -158,20 +189,25 @@ export async function resolveInvoke(
       ...inputs.map((i) => i.from).filter((c): c is string => !!c),
     ])];
 
-    const found = await opts.store.read({
-      table: wantedDef.table,
-      columns: wantedColumns,
-      where: {
-        kind: 'in',
-        of: { kind: 'field', of: { entity: wanted, field: join.remoteField } },
-        values: keys.map((k) => ({ kind: 'literal' as const, value: String(k) })),
-      },
-      limit: SUBJECT_CAP + 1,
-    });
-    if (!found.ok) return { ok: false, reason: 'unresolved', why: found.why };
-
+    /* Paged, like everything else. One key per subject means this read
+       is the same size as the selection, and a page size that happened
+       to be smaller than it would have dropped the difference. */
     const byKey = new Map<string, Record<string, unknown>>();
-    for (const row of found.rows) byKey.set(String(row[join.remoteField]), row);
+    for (let from = 0; from < keys.length; from += KEY_PAGE) {
+      const slice = keys.slice(from, from + KEY_PAGE);
+      const found = await opts.store.read({
+        table: wantedDef.table,
+        columns: wantedColumns,
+        where: {
+          kind: 'in',
+          of: { kind: 'field', of: { entity: wanted, field: join.remoteField } },
+          values: slice.map((k) => ({ kind: 'literal' as const, value: String(k) })),
+        },
+        limit: slice.length,
+      });
+      if (!found.ok) return { ok: false, reason: 'unresolved', why: found.why };
+      for (const row of found.rows) byKey.set(String(row[join.remoteField]), row);
+    }
 
     for (const row of read.rows) {
       const key = String(row[join.localField]);

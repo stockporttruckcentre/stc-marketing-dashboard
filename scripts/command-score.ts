@@ -205,6 +205,11 @@ const YARD = (): Record<string, DbRow[]> => ({
     { id: 'y2', stc_no: 'STC143581', status: 'in_stock', location: 'Carrington', category: 'Curtainsider', retail_price: 24000, sales_price: 26000, nbv: 18000, refurb_costs: 250, mot_date: '2027-06-01', notes: null, customer: null, sales_rep: null },
     { id: 'y3', stc_no: 'STC144504', status: 'sold', location: 'Carrington', category: 'Flatbed', retail_price: 30000, sales_price: 31000, nbv: 22000, refurb_costs: 0, mot_date: '2026-12-01', notes: null, customer: 'Wincanton', sales_rep: 'AE' },
     { id: 'y4', stc_no: 'STC199999', status: 'in_stock', location: 'Bredbury', category: 'Flatbed', retail_price: 21000, sales_price: 23000, nbv: 16000, refurb_costs: 100, mot_date: '2028-01-01', notes: null, customer: null, sales_rep: null },
+    /* An old cheap unit. Every yard has one, and without it the corpus
+       sentence about trailers under £5,000 exercises the export against
+       an empty selection, which is a true answer and tells you nothing
+       about whether the file holds the right rows. */
+    { id: 'y5', stc_no: 'STC100001', status: 'in_stock', location: 'Carrington', category: 'Curtainsider', retail_price: 4500, sales_price: 4750, nbv: 3000, refurb_costs: 0, mot_date: '2027-01-01', notes: null, customer: null, sales_rep: null },
   ],
   social_posts: [
     { id: 'z1', content: 'One', platform: ['linkedin'], scheduled_date: '2026-09-01', status: 'pending_review', created_by: 'tester', hashtags: [] },
@@ -436,9 +441,8 @@ async function scoreWithEffect(c: Case): Promise<Row> {
   if (e.operation === 'export') {
     /* The output is observed when a file comes back and nothing was
        written producing it. A selection that matches nothing is a true
-       answer and still a file: how many rows it holds is reported
-       rather than being the pass mark, because otherwise the fixture
-       decides whether the export works. */
+       answer and still a correct file, so an empty result is not a
+       product failure: the row count is reported either way. */
     const made = await produceFile(c.sentence);
     row.effect = made.bytes > 0 ? 'PASS' : 'FAIL';
     row.note += `${row.note ? '; ' : ''}${made.why || `${made.rows} rows, ${made.bytes} bytes`}`;

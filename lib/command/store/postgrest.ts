@@ -48,6 +48,60 @@ function literalOf(e: Expr): string | number | boolean | null | undefined {
  * sold ones at Hyde" into "everything", which is the single most
  * dangerous way for a write to go wrong.
  */
+/**
+ * A condition as one PostgREST filter string.
+ *
+ * Needed inside `or`, where the branches cannot be separate calls on the
+ * builder. PostgREST nests with `and(...)` and `or(...)`, so an `or` over
+ * anything more than plain comparisons is expressible after all: the
+ * first version of this refused everything but a flat list of them,
+ * which is why "sold in the last six months" could not be asked at all
+ * once the sale date became two columns and a rule.
+ *
+ * `null` means this store genuinely cannot express it, and the caller
+ * refuses rather than dropping the branch.
+ */
+function serialise(c: Cond): string | null {
+  switch (c.kind) {
+    case 'and':
+    case 'or': {
+      const parts = c.of.map(serialise);
+      if (parts.some((p) => p === null)) return null;
+      return `${c.kind}(${parts.join(',')})`;
+    }
+    case 'not': {
+      const inner = serialise(c.of);
+      return inner === null ? null : `not.${inner}`;
+    }
+    case 'cmp': {
+      const column = plainField(c.left);
+      const value = literalOf(c.right);
+      if (column === null || value === undefined) return null;
+      switch (c.op) {
+        case 'eq': return `${column}.eq.${escape(value)}`;
+        case 'neq': return `${column}.neq.${escape(value)}`;
+        case 'contains': return `${column}.ilike.*${escape(value)}*`;
+        case 'startsWith': return `${column}.ilike.${escape(value)}*`;
+        case 'gt': return `${column}.gt.${escape(value)}`;
+        case 'gte': return `${column}.gte.${escape(value)}`;
+        case 'lt': return `${column}.lt.${escape(value)}`;
+        case 'lte': return `${column}.lte.${escape(value)}`;
+        default: return null;
+      }
+    }
+    case 'empty': {
+      const column = plainField(c.of);
+      return column === null ? null : `${column}.is.null`;
+    }
+    case 'within': {
+      const column = plainField(c.of);
+      if (column === null || c.period.kind !== 'absolute') return null;
+      return `and(${column}.gte.${c.period.from.slice(0, 10)},${column}.lte.${c.period.to.slice(0, 10)})`;
+    }
+    default: return null;
+  }
+}
+
 export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
   switch (c.kind) {
     case 'and': {
@@ -60,17 +114,10 @@ export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
       return { q: out };
     }
     case 'or': {
-      /* Every branch has to be a simple comparison for PostgREST's `or`
-         to express it. That is what the adapter produces. */
-      const clauses: string[] = [];
-      for (const b of c.of) {
-        if (b.kind !== 'cmp') return { q, unsupported: `or over ${b.kind}` };
-        const column = plainField(b.left);
-        const value = literalOf(b.right);
-        if (column === null || value === undefined) return { q, unsupported: 'or over an unreadable comparison' };
-        clauses.push(b.op === 'contains'
-          ? `${column}.ilike.%${escape(value)}%`
-          : `${column}.eq.${escape(value)}`);
+      const clauses = c.of.map(serialise);
+      const bad = clauses.find((x) => x === null);
+      if (bad === null && clauses.some((x) => x === null)) {
+        return { q, unsupported: 'an or this cannot express' };
       }
       return { q: q.or(clauses.join(',')) };
     }
@@ -139,7 +186,12 @@ export function postgrestStore(supabase: Queryable): Store {
         q = q.order(o.column, { ascending: o.direction === 'asc', nullsFirst: false });
       }
 
-      const { data, error } = await q.limit(req.limit);
+      /* `range` rather than `limit`, because a page after the first
+         needs an offset and PostgREST expresses both as one call. */
+      const from = req.offset ?? 0;
+      const { data, error } = from
+        ? await q.range(from, from + req.limit - 1)
+        : await q.limit(req.limit);
       if (error) {
         return { ok: false, reason: 'failed', why: String((error as { message?: string }).message ?? error) };
       }
