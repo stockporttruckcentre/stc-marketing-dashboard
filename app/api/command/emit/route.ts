@@ -96,6 +96,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: done.message, rows: done.rows, people: done.people });
   }
 
+  /* An attachment is left on the record. Handing the file back as well
+     would download a copy nobody asked for. */
+  if (done.kind === 'attached') {
+    return NextResponse.json({
+      message: done.message, rows: done.rows, onto: done.onto, filename: done.artefact.filename,
+    });
+  }
+
   /* The file itself, not a link to one. Nothing is stored, so there is
      nothing to clean up afterwards and nothing sitting in a bucket with
      somebody's customer list in it. */

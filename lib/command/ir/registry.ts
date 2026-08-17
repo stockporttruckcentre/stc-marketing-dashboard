@@ -224,6 +224,17 @@ export type CapabilityDef = {
   idempotent: boolean;
   /** Present when something actually performs it. Absent means declared only. */
   handler?: string;
+  /**
+   * What is missing, exactly, when there is no handler.
+   *
+   * "Nothing performs it yet" is true of a capability nobody has got to
+   * and of one that cannot be built here at all, and those are
+   * completely different situations for whoever reads the message. A
+   * capability blocked on something outside this repository says which
+   * thing, by name, so the answer is a decision somebody can make rather
+   * than a wait for work that is not coming.
+   */
+  needs?: string;
 };
 
 /* =============================================================
@@ -636,6 +647,20 @@ export const CAPABILITIES: CapabilityDef[] = [
     confirm: true,
     /* An email cannot be unsent, and a second send is a second email. */
     idempotent: false,
+    /* THE ONE THING HERE THAT CANNOT BE BUILT HERE.
+       Everything around it is finished: the sentence is read, the
+       recipients are resolved to real people by name, the permission is
+       derived, the confirmation is required and the file is the same
+       file an export produces. What is absent is the transport, and it
+       is absent from the repository and from the environment alike:
+       package.json carries no mail client of any kind, and there is no
+       SMTP host, no API key and no sender address anywhere in the
+       environment or in the Supabase project. Choosing a provider and
+       holding its credentials is a decision for the business, not a
+       gap in this layer. */
+    needs: 'an outbound email transport, which this application does not have: '
+      + 'no mail client in package.json, and no SMTP or provider credentials '
+      + 'in the environment. A provider has to be chosen and its key held first.',
   },
   {
     id: 'record.attach',
@@ -643,7 +668,12 @@ export const CAPABILITIES: CapabilityDef[] = [
     operates: 'emit',
     requires: 'crm.edit',
     confirm: true,
+    /* A second run leaves a second copy on the record. */
     idempotent: false,
+    /* Bytes on the row, covered by the row's own policy. A bucket would
+       put an export of the CRM behind a second set of access rules
+       written separately from the ones on the records it is about. */
+    handler: 'supabase/migrations/014_command_attachments.sql',
   },
 ];
 

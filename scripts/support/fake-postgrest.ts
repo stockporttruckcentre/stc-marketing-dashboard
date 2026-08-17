@@ -341,6 +341,46 @@ export function fakeDb(tables: Record<string, Row[]>) {
       };
     }
 
+    /* Leaving a file on a record, as bytes on a row covered by the
+       row's own policy. */
+    if (name === 'command_attach_file') {
+      const table = String(args.p_entity ?? '');
+      const record = args.p_record == null ? '' : String(args.p_record);
+      const base64 = String(args.p_base64 ?? '');
+      if (!['stock_trailers', 'crm_contacts'].includes(table)) {
+        return { data: null, error: { message: `nothing here attaches things to ${table}` } };
+      }
+      if (!record) return { data: null, error: { message: 'nothing said which record to attach it to' } };
+      if (!base64) return { data: null, error: { message: 'there is nothing to attach' } };
+
+      const size = Buffer.from(base64, 'base64').length;
+      const ceiling = 8 * 1024 * 1024;
+      if (size > ceiling) {
+        return {
+          data: null,
+          error: { message: `that file is ${size} bytes, and the most that can be attached to a record is ${ceiling}` },
+        };
+      }
+      if (!(tables[table] ?? []).some((r) => String(r.id) === record)) {
+        return { data: null, error: { message: 'that record is not there' } };
+      }
+
+      const id = `att${((tables.record_attachments ?? []).length) + 1}`;
+      (tables.record_attachments ??= []).push({
+        id, entity: table, record_id: record,
+        filename: String(args.p_filename ?? 'attachment'),
+        mime: String(args.p_mime ?? 'application/octet-stream'),
+        size_bytes: size,
+        described_as: args.p_described == null ? null : String(args.p_described),
+      });
+      writes.push({ table: 'record_attachments', set: { record_id: record }, ids: [id] });
+
+      return {
+        data: { attachmentId: id, recordId: record, filename: args.p_filename, size },
+        error: null,
+      };
+    }
+
     if (name !== 'command_apply') return { data: null, error: { message: `no function ${name}` } };
     const changes = (args.p_changes ?? []) as
       { op?: 'update' | 'insert' | 'delete'; table: string; id?: string; set?: Row }[];

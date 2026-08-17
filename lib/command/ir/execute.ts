@@ -244,7 +244,15 @@ export type Unavailable = {
   step: number;
   /** The registry capability that is missing, or a description of what is. */
   need: string;
-  why: 'nothing performs it' | 'nothing is registered to perform it';
+  /**
+   * Why it cannot run.
+   *
+   * The two fixed phrases are the default. A capability that declares
+   * `needs` in the registry says exactly what is absent instead, because
+   * "nothing performs it yet" is true both of work nobody has got to and
+   * of work that cannot be done in this repository at all.
+   */
+  why: string;
 };
 
 /** Which registry capabilities a step needs in order to run at all. */
@@ -278,7 +286,11 @@ export function executability(plan: Plan): { executable: boolean; missing: Unava
     for (const id of ids) {
       const cap = capability(id);
       if (!cap) { missing.push({ step, need: id, why: 'nothing is registered to perform it' }); continue; }
-      if (!cap.handler) missing.push({ step, need: id, why: 'nothing performs it' });
+      /* What is missing, by name, where the registry says. "Nothing
+         performs it yet" is true both of work nobody has got to and of
+         work that cannot be done in this repository at all, and those
+         are different answers for whoever is reading. */
+      if (!cap.handler) missing.push({ step, need: id, why: cap.needs ?? 'nothing performs it' });
     }
   });
   return { executable: missing.length === 0, missing };

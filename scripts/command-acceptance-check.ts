@@ -1481,6 +1481,71 @@ test('the four clause sentence makes the list, the file and the grant', async ()
   ok('nothing was left undone', !done.deliveryFailed, done.deliveryFailed ?? '');
 });
 
+/* =============================================================
+   17. The other two destinations
+
+   Attaching leaves the file on the record. Emailing cannot happen here
+   and says exactly what is missing rather than "not yet".
+   ============================================================= */
+
+test('a file can be left on the record it is about', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  const text = 'export the sold curtainsiders as a PDF and attach it to STC143580';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as one programme with two deliveries',
+    planned.planned.planning.plan.steps.filter((s) => s.op === 'emit').length === 2,
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+  ok('and something performs the attaching',
+    planned.planned.planning.availability.executable,
+    JSON.stringify(planned.planned.planning.availability.unavailable));
+
+  const preview = planned.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok) return;
+  /* One file, produced once. The attaching clause names no format, and
+     defaulting it to a spreadsheet would download a PDF and attach a
+     workbook. */
+  ok('both deliveries are the PDF that was asked for',
+    preview.deliveries.every((d) => d.label === 'a PDF'), JSON.stringify(preview.deliveries));
+
+  const done = await applyMutation({
+    text, ...actor('admin'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    actorName: 'Alex Ellis',
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('and says which record it went on', /STC143580/.test(done.message), done.message);
+  ok('the attachment was written', db.writes.some((w) => w.table === 'record_attachments'),
+    JSON.stringify(db.writes.map((w) => w.table)));
+  ok('and nothing else was', db.writes.every((w) => w.table === 'record_attachments'),
+    JSON.stringify(db.writes.map((w) => w.table)));
+});
+
+test('emailing says exactly what is missing, not "not yet"', async () => {
+  const planning = planCommand('email the sold trailers to Dave as a PDF', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  ok('it is understood', !!planning);
+  if (!planning) return;
+  ok('and it reads as an email rather than a field write',
+    planning.plan.steps.some((s) => s.op === 'emit' && s.to.kind === 'email'),
+    JSON.stringify(planning.plan.steps.map((s) => s.op)));
+  ok('it is well formed', planning.availability.representable, JSON.stringify(planning.problems));
+  ok('but nothing can carry it out', !planning.availability.executable);
+
+  const why = planning.availability.unavailable.map((u) => u.why).join(' ');
+  /* A capability nobody has got to and one that cannot be built here at
+     all are different answers for whoever is reading. */
+  ok('and the reason names the dependency by name',
+    /mail client in package\.json/.test(why) && /credentials/.test(why), why);
+});
+
 test('a clause nobody understood refuses the whole programme', async () => {
   /* Half a programme is not a programme. If the last clause is not
      understood, creating the list and not exporting it, then reporting

@@ -196,7 +196,21 @@ export async function resolveProgramme(
      also produces is built afterwards, by the emit executor, from the
      rows as they stand once the change has committed. */
   const effects = transactionalSteps(plan);
-  if (!effects.length) return { ok: false, reason: 'nothing to do', why: 'this plan changes nothing' };
+  if (!effects.length) {
+    /* A PROGRAMME CAN HAVE AN EFFECT AND NO TRANSACTION.
+
+       "Export the sold curtainsiders as a PDF and attach it to
+       STC143580" writes no column and performs no operation from here:
+       it produces a file and leaves it on a record, which happens after
+       the transaction that does not exist. Refusing it as "this plan
+       changes nothing" was reading the absence of a transaction as the
+       absence of an effect, and an attachment on a customer record is
+       plainly an effect. */
+    if (deliverySteps(plan).length) {
+      return { ok: true, units: [], changes: [], hash: programmeHash([]) };
+    }
+    return { ok: false, reason: 'nothing to do', why: 'this plan changes nothing' };
+  }
 
   /* Every step, before any of them. A plan containing one thing this
      can do and one it cannot is refused whole: running the half it
@@ -480,6 +494,13 @@ export async function executeProgramme(
      `resolveProgramme` has already established, so there is exactly one
      call either way. */
   const operations = fresh.units.filter((u): u is InvokeUnit => u.kind === 'invoke');
+
+  /* Nothing to write. A programme whose only effect is a delivery has
+     no transaction to run, and calling `apply` with no changes would
+     ask the database to do nothing and report a number. */
+  if (!operations.length && !fresh.changes.length) {
+    return { ok: true, changed: 0, changes: [], hash: fresh.hash };
+  }
 
   if (operations.length) {
     let performed = 0;

@@ -29,6 +29,7 @@
 import type { CommandPlanning } from './plan';
 import { isResultRef, type Emit, type Invoke, type Mutate, type Plan, type ResultRef,
   type Select, type Source, type Step } from './ir/types';
+import { nounFor, type FileFormat } from './output';
 
 /** What a step makes available to the one after it. */
 function produces(step: Step): ResultRef | null {
@@ -125,10 +126,28 @@ function stepsOf(planning: CommandPlanning): Step[] {
  * to Excel", and leaving that in the preview tells somebody the file
  * holds every customer when it holds the result of the clause before.
  */
-function describe(planning: CommandPlanning, consumed: boolean): string {
+function describe(planning: CommandPlanning, consumed: boolean, instead?: string): string {
   const { summary, outputLabel } = planning.presentation;
-  if (!consumed || !outputLabel) return summary;
-  return `that result as ${/^[aeiou]/i.test(outputLabel) ? 'an' : 'a'} ${outputLabel}`;
+  const label = instead ?? outputLabel;
+  if (!consumed || !label) return summary;
+  return `that result as ${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
+}
+
+/**
+ * A clause that takes an earlier clause's FILE takes that file.
+ *
+ * "Export the sold curtainsiders as a PDF and attach it to STC143580"
+ * is one file, produced once and then put somewhere. Read clause by
+ * clause the second one names no format, defaults to a spreadsheet, and
+ * the programme downloads a PDF and attaches an Excel workbook. The
+ * output is adopted from the step being consumed, so there is one file
+ * and the preview names it correctly.
+ */
+function adoptOutput(consumer: Step, from: ResultRef, steps: Step[]): Step {
+  if (consumer.op !== 'emit' || from.ref !== 'artefact') return consumer;
+  const source = steps.find((s) => s.id === from.step);
+  if (!source || source.op !== 'emit') return consumer;
+  return { ...(consumer as Emit), output: (source as Emit).output };
 }
 
 export type Composed = {
@@ -197,13 +216,23 @@ export function composeProgramme(
     };
 
     const consumer = at >= 0 ? mine[at] : null;
+    let adopted: string | undefined;
+
     const kept = survivors
       .map((s, j) => ({ ...s, id: `c${i + 1}s${j + 1}` } as Step))
-      .map((s, j) => (survivors[j] === consumer && earlier ? withSource(s, earlier) : s))
+      .map((s, j) => {
+        if (survivors[j] !== consumer || !earlier) return s;
+        const wired = withSource(s, earlier);
+        const taken = adoptOutput(wired, earlier, steps);
+        if (taken !== wired && taken.op === 'emit' && taken.output.kind === 'file') {
+          adopted = nounFor(taken.output.format as FileFormat);
+        }
+        return taken;
+      })
       .map((s) => remap(s, resolve));
 
     steps.push(...kept);
-    summaries.push(describe(clause.planning, dropped.size > 0));
+    summaries.push(describe(clause.planning, dropped.size > 0, adopted));
 
     /* What the LAST step of this clause makes available. */
     previous = produces(kept[kept.length - 1]) ?? previous;

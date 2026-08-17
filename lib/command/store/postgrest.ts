@@ -286,6 +286,20 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_can_edit: c.args.canEdit ?? true,
     }),
   },
+  'record.attach': {
+    name: 'command_attach_file',
+    /* The subject is the record it goes on. The file itself is an
+       argument, base64 encoded, because PostgREST carries JSON and JSON
+       has no bytes. */
+    args: (c) => ({
+      p_entity: c.args.table ?? null,
+      p_record: c.subjects[0] ?? null,
+      p_filename: c.args.filename ?? 'attachment',
+      p_mime: c.args.mime ?? 'application/octet-stream',
+      p_base64: c.args.base64 ?? '',
+      p_described: c.args.describedAs ?? null,
+    }),
+  },
   'deal.markSold': {
     name: 'command_mark_sold_many',
     args: (c) => ({

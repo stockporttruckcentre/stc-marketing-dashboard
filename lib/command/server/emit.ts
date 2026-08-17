@@ -65,6 +65,12 @@ export const FORMAT_MAXIMUM: Record<FileFormat, number | null> = {
 export type EmitOutcome =
   /** A file, handed over. */
   | { ok: true; kind: 'artefact'; artefact: Artefact; rows: number; capped: boolean }
+  /** A file, left on a record rather than handed over. */
+  | {
+      ok: true; kind: 'attached'; artefact: Artefact; rows: number;
+      /** The record it went on, by its own name. */
+      onto: string; message: string;
+    }
   /**
    * Access granted, which is what sharing is here.
    *
@@ -226,8 +232,27 @@ export async function runEmit(
 export async function runEmitStep(
   planning: CommandPlanning,
   emit: Emit,
-  opts: { store: Store; actorName: string; now: Date },
+  opts: {
+    store: Store; actorName: string; now: Date;
+    /**
+     * Files earlier steps in this programme already built, by step id.
+     *
+     * "Export the sold curtainsiders as a PDF and attach it to
+     * STC143580" is one file, produced once and then put somewhere.
+     * Without this the attaching clause rendered a second file of its
+     * own, in whatever format it defaulted to, so the PDF was
+     * downloaded and a spreadsheet was attached.
+     */
+    produced?: Map<string, { artefact: Artefact; rows: number }>;
+  },
 ): Promise<EmitOutcome> {
+  /* The very file the step points at, when a step in this programme
+     already made it. */
+  const from = emit.from;
+  if (emit.to.kind === 'attach' && 'ref' in from && from.ref === 'artefact') {
+    const already = opts.produced?.get(from.step);
+    if (already) return attachArtefact(planning, emit, already.artefact, already.rows, opts.store);
+  }
 
   const select = selectBehind(planning.plan, emit.from);
   if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
@@ -239,11 +264,11 @@ export async function runEmitStep(
   if (emit.output.kind !== 'file') {
     return { ok: false, reason: 'unsupported', why: 'only a file can be produced from here yet' };
   }
-  if (emit.to.kind !== 'download') {
-    /* Email and attach are declared in the registry. `executability`
-       refuses them before anything gets here, off the registry's own
-       record of which capabilities have a handler, so this is the last
-       line rather than the gate. */
+  if (emit.to.kind !== 'download' && emit.to.kind !== 'attach') {
+    /* Email is declared in the registry with no handler and with the
+       exact reason why. `executability` refuses it before anything gets
+       here, off the registry's own record, so this is the last line
+       rather than the gate. */
     return { ok: false, reason: 'unsupported', why: `nothing here ${emit.to.kind}s a file yet` };
   }
 
@@ -287,5 +312,78 @@ export async function runEmitStep(
       : format === 'xlsx' ? await renderXlsx(table)
         : await renderDocx(table);
 
+  if (emit.to.kind === 'attach') {
+    return attachArtefact(planning, emit, artefact, table.count, opts.store);
+  }
+
   return { ok: true, kind: 'artefact', artefact, rows: table.count, capped: table.capped };
+}
+
+/**
+ * Leaving the file on a record instead of handing it over.
+ *
+ * The record is a selection of one, resolved through the same store
+ * everything else reads through. Several matches is a question rather
+ * than a choice made here: "attach it to Dawson" where the CRM holds two
+ * Dawsons must not put a customer list on whichever came back first.
+ */
+async function attachArtefact(
+  planning: CommandPlanning,
+  emit: Emit,
+  artefact: Artefact,
+  rows: number,
+  store: Store,
+): Promise<EmitOutcome> {
+  if (emit.to.kind !== 'attach') {
+    return { ok: false, reason: 'unsupported', why: 'that is not an attachment' };
+  }
+
+  const target = selectBehind(planning.plan, emit.to.to);
+  if (!target) {
+    return { ok: false, reason: 'unresolved', why: 'nothing said which record to attach it to' };
+  }
+
+  const found = await runSelect(target, { store });
+  if (!found.ok) return { ok: false, reason: 'failed', why: found.why };
+
+  const def = entityDef(found.entity);
+  const title = def?.titleField ?? 'id';
+  if (!found.rows.length) {
+    return { ok: false, reason: 'unresolved', why: 'that record is not here' };
+  }
+  if (found.rows.length > 1) {
+    return {
+      ok: false,
+      reason: 'unresolved',
+      why: `${found.rows.length} records match that, so it is not clear which one to attach it to`,
+      candidates: found.rows.slice(0, 20).map((r) => ({
+        id: String(r.id), label: String(r[title] ?? r.id),
+      })),
+    };
+  }
+
+  const row = found.rows[0];
+  const done = await store.invoke({
+    capability: 'record.attach',
+    subjects: [String(row.id)],
+    args: {
+      table: def?.table,
+      filename: artefact.filename,
+      mime: artefact.mime,
+      base64: Buffer.from(artefact.bytes).toString('base64'),
+      describedAs: planning.presentation.summary,
+    },
+  });
+  if (!done.ok) return { ok: false, reason: 'failed', why: done.why };
+
+  const onto = String(row[title] ?? row.id);
+  return {
+    ok: true,
+    kind: 'attached',
+    artefact,
+    rows,
+    onto,
+    message: `${artefact.filename} is on ${onto}, holding `
+      + `${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
+  };
 }

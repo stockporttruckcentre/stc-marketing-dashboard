@@ -865,7 +865,61 @@ END
 $$;
 
 -- =============================================================
--- 7. The allowlist matches the registry
+-- 7. Attaching a file to a record
+-- =============================================================
+\echo '--- attaching a file ---'
+
+SELECT reset_fixtures();
+
+DO $$
+DECLARE unit UUID; out JSONB;
+BEGIN
+  SELECT id INTO unit FROM stock_trailers LIMIT 1;
+
+  SELECT command_attach_file('stock_trailers', unit, 'TEST report.pdf', 'application/pdf',
+    encode('%PDF-1.4 not really a pdf'::BYTEA, 'base64'), 'TEST the sold curtainsiders') INTO out;
+  PERFORM assert('a file is attached to a record', (out ->> 'size')::INT > 0, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a file is attached to a record', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the bytes really came back out intact',
+  (SELECT convert_from(bytes, 'UTF8') FROM record_attachments WHERE filename = 'TEST report.pdf')
+    = '%PDF-1.4 not really a pdf',
+  (SELECT convert_from(bytes, 'UTF8') FROM record_attachments WHERE filename = 'TEST report.pdf'));
+
+-- A table the command bar does not attach to.
+DO $$
+BEGIN
+  PERFORM command_attach_file('profiles', gen_random_uuid(), 'TEST no.pdf', 'application/pdf',
+    encode('x'::BYTEA, 'base64'), NULL);
+  PERFORM assert('a table it does not attach to is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a table it does not attach to is refused',
+    SQLERRM LIKE '%attaches things to%', SQLERRM);
+END
+$$;
+
+-- A record that is not there.
+DO $$
+BEGIN
+  PERFORM command_attach_file('stock_trailers', '00000000-0000-0000-0000-0000000000ff',
+    'TEST no.pdf', 'application/pdf', encode('x'::BYTEA, 'base64'), NULL);
+  PERFORM assert('a record that is not there is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a record that is not there is refused',
+    SQLERRM LIKE '%not there%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nothing was stored for either of those',
+  (SELECT COUNT(*) FROM record_attachments WHERE filename = 'TEST no.pdf') = 0);
+
+DELETE FROM record_attachments WHERE filename LIKE 'TEST %';
+
+-- =============================================================
+-- 8. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

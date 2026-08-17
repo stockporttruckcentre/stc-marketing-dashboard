@@ -40,7 +40,7 @@ import { planAuthoritatively, planForExecution, planHash, type Planned, type Pla
 import { resolveProgramme, executeProgramme, deliverySteps, type Programme } from '../ir/orchestrate';
 import type { ExecutionPolicy } from '../ir/orchestrate';
 import type { Store } from '../ir/store';
-import type { Emit, Mutate, Plan } from '../ir/types';
+import type { Cond, Emit, Mutate, Plan } from '../ir/types';
 import { WRITABLE_FIELDS, type WritableField } from '../fields';
 import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
@@ -84,6 +84,16 @@ export type DeliveryPreview = {
   label: string;
   /** Where it goes, so leaving the company is never silent. */
   destination: string;
+  /**
+   * Who it goes to, as the sentence named them.
+   *
+   * By name rather than resolved to people here: the preview says what
+   * was asked for, and the executor resolves it and stops if a name
+   * fits two colleagues. Showing "shared with colleagues" and not
+   * saying which is a confirmation that withholds the only part
+   * somebody needs to check.
+   */
+  recipients: string[];
 };
 
 export type MutationPreview =
@@ -187,6 +197,30 @@ function invokeArgs(plan: Plan): Record<string, unknown> {
   return out;
 }
 
+/**
+ * The names a destination carries, read back out of its references.
+ *
+ * A recipient is stored as "the person whose full name contains Dave",
+ * so the name is the literal inside that condition. Reading it back
+ * rather than carrying the words separately keeps one source of truth:
+ * what the preview says is what the executor will look up.
+ */
+function namesIn(to: Emit['to']): string[] {
+  const refs = to.kind === 'share' ? to.with : to.kind === 'email' ? to.to : [];
+  const out: string[] = [];
+
+  const literals = (c: Cond): void => {
+    if (c.kind === 'and' || c.kind === 'or') { c.of.forEach(literals); return; }
+    if (c.kind === 'not') { literals(c.of); return; }
+    if (c.kind === 'cmp' && c.right.kind === 'literal' && c.right.value != null) {
+      out.push(String(c.right.value));
+    }
+  };
+
+  for (const r of refs) if (r.kind === 'reference') literals(r.where);
+  return [...new Set(out)];
+}
+
 /** What a programme hands over once its change has committed. */
 function deliveries(plan: Plan): DeliveryPreview[] {
   return deliverySteps(plan).map((s) => {
@@ -202,6 +236,7 @@ function deliveries(plan: Plan): DeliveryPreview[] {
         ? `${/^[aeiou]/i.test(format) ? 'an' : 'a'} ${format}`
         : 'access to those records',
       destination: dest?.label ?? emit.to.kind,
+      recipients: namesIn(emit.to),
     };
   });
 }
@@ -417,11 +452,16 @@ export async function applyMutation(
     ? (capabilityLabel(planning.plan) ?? 'That')
     : fields.map((f) => f.label).join(' and ');
 
-  const message = operation
-    ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
-    : done.changed === 1
-      ? `${what} changed on one record.`
-      : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`;
+  /* A programme whose only effect is a delivery changed no record, and
+     saying " changed on 0 records" in front of what it DID do reads as
+     a failure. */
+  const message = !operation && !fields.length && done.changed === 0
+    ? ''
+    : operation
+      ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
+      : done.changed === 1
+        ? `${what} changed on one record.`
+        : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`;
 
   /* THE FILE THE SAME SENTENCE ASKED FOR.
 
@@ -440,11 +480,17 @@ export async function applyMutation(
      over the spreadsheet and tell somebody Dave could see the list. */
   let out: MutationOutcome = { ok: true, changed: done.changed, message };
 
+  /* One file, produced once. A later step that attaches what an earlier
+     one built takes that file rather than rendering a second one in
+     whatever format it happens to default to. */
+  const produced = new Map<string, { artefact: Artefact; rows: number }>();
+
   for (const step of outgoing) {
     const delivered = await runEmitStep(planning, step as Emit, {
       store: req.store,
       actorName: req.actorName ?? 'the command bar',
       now: new Date(),
+      produced,
     });
 
     if (!delivered.ok) {
@@ -457,16 +503,19 @@ export async function applyMutation(
       };
     }
     if (!out.ok) continue;
+    if (delivered.kind !== 'granted' && step.id) {
+      produced.set(step.id, { artefact: delivered.artefact, rows: delivered.rows });
+    }
 
-    out = delivered.kind === 'granted'
-      /* Sharing grants access rather than producing anything, so there
-         is no file to carry back and the message says what actually
-         happened to whom. */
-      ? { ...out, message: `${out.message} ${delivered.message}` }
+    out = delivered.kind === 'granted' || delivered.kind === 'attached'
+      /* Sharing grants access and attaching leaves the file on a
+         record. Neither hands anything back, so the message says what
+         actually happened and to what. */
+      ? { ...out, message: `${out.message} ${delivered.message}`.trim() }
       : {
           ...out,
-          message: `${out.message} ${delivered.rows.toLocaleString('en-GB')} `
-            + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`,
+          message: (`${out.message} ${delivered.rows.toLocaleString('en-GB')} `
+            + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`).trim(),
           artefact: delivered.artefact,
           artefactRows: delivered.rows,
         };
