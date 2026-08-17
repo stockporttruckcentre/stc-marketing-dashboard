@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { publishSelection } from '@/lib/command/selection';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent } from 'ag-grid-community';
 import { useRouter } from 'next/navigation';
@@ -398,7 +399,14 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
           getRowId={(p) => p.data.id}
           onRowDoubleClicked={(e) => setEditing(e.data ? { row: e.data } : null)}
           onCellContextMenu={onCellContextMenu}
-          onSelectionChanged={(e) => setSelectedCount(e.api.getSelectedRows().length)}
+          onSelectionChanged={(e) => {
+            const rows = e.api.getSelectedRows();
+            setSelectedCount(rows.length);
+            /* Told to the command bar, so "move these to Bredbury" means
+               the ones ticked here. Ids only, and the server reads every
+               one of them back through the caller's own session. */
+            publishSelection({ entity: 'trailers', ids: rows.map((r: any) => String(r.id)) });
+          }}
         />
       </div>
 

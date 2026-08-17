@@ -33,6 +33,7 @@
 import { createHash } from 'crypto';
 import { planCommand, type CommandPlanning } from '../plan';
 import type { VocabularySource } from './vocabulary';
+import type { CommandContext } from '../context';
 import type { Plan } from '../ir/types';
 
 /* -------------------------------------------------------------
@@ -114,6 +115,14 @@ export type PlanRequest = {
    * planning with it in which another request could resolve theirs.
    */
   vocabulary: VocabularySource;
+  /**
+   * What the screen had open or selected.
+   *
+   * Arrives with the request, is planned with, and goes into the hash,
+   * so the reading somebody agreed to includes what they were pointing
+   * at. A client that sends none can point at nothing.
+   */
+  context?: CommandContext;
 };
 
 /**
@@ -132,6 +141,7 @@ export async function planAuthoritatively(req: PlanRequest): Promise<Planned | n
   const planning = planCommand(req.text, {
     actorCapabilities: req.capabilities,
     vocabulary,
+    context: req.context,
   });
   if (!planning) return null;
 

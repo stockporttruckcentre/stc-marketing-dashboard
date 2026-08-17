@@ -36,6 +36,9 @@ import { condForFilters } from './ir/conditions';
 import { capability, entity as entityDef } from './ir/registry';
 import type { Cardinality, Cond } from './ir/types';
 import { EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
 import { DEPOTS, isReservedWord } from './lexicon';
 import { distance } from './normalise';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
@@ -384,6 +387,11 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
     if (caps && !caps.has(f.capability)) continue;
     for (const a of f.aliases) {
       if (!t.includes(` ${a} `) && !t.includes(` ${a}s `) && !fuzzyContains(t, a)) continue;
+      /* A word somebody is POINTING at is the thing, not a column of
+         it. "Add a note to this customer" was filed as a change to a
+         trailer's customer column, because "customer" is a longer alias
+         than "note" and nothing looked at the word in front of it. */
+      if (pointedAt(t, a)) continue;
       if (!best || a.length > best.alias.length) best = { field: f, alias: a };
     }
   }
@@ -463,6 +471,13 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
     if (hit) return hit;
   }
   return null;
+}
+
+/** Words that point at what is on the screen rather than at a column. */
+const POINTING = ['this', 'that', 'these', 'those', 'the current', 'the open'];
+
+function pointedAt(softened: string, alias: string): boolean {
+  return POINTING.some((p) => softened.includes(` ${p} ${alias} `));
 }
 
 /** Marking verbs, which is what turns a state word into an instruction. */
@@ -596,6 +611,7 @@ export function parseEdit(
   input: string,
   caps?: CrmCapabilities,
   vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
+  context: CommandContext = EMPTY_CONTEXT,
 ): EditPlan | null {
   const raw = input.trim();
   if (raw.length < 4) return null;
@@ -766,11 +782,27 @@ export function parseEdit(
     match = conds.length === 1 ? conds[0] : { kind: 'or', of: conds };
     matchLabel = named.join(' and ');
   } else if (!named.length) {
-    const described = readDescribedSet(raw, spec, value, vocabulary);
-    if (described) {
-      match = described.match;
-      expect = 'many';
-      matchLabel = described.label;
+    /* WHAT IS ON THE SCREEN, WHEN THE SENTENCE POINTS AT IT.
+
+       "Add a note to this customer" and "move these to Bredbury" are
+       about records the person is looking at, and the screen sends what
+       it has. It resolves to ids and nothing else, so a context that
+       resolved to a name could never match a record nobody was looking
+       at. Read before the described set, because "these" is not a
+       description of anything. */
+    const pointed = readContextReference(raw);
+    const fromScreen = pointed ? resolveContext(pointed, context, spec.entity) : null;
+    if (fromScreen) {
+      match = fromScreen.match;
+      expect = fromScreen.expect;
+      matchLabel = fromScreen.label;
+    } else {
+      const described = readDescribedSet(raw, spec, value, vocabulary);
+      if (described) {
+        match = described.match;
+        expect = 'many';
+        matchLabel = described.label;
+      }
     }
   }
 

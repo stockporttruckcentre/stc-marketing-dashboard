@@ -33,6 +33,10 @@ import { parseQuery, type QueryPlan } from './query';
 import { parseEdit, type EditPlan } from './mutate';
 import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
+import { ENTITIES } from './schema';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
 import type { VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
 import { adaptEditPlan } from './ir/adapt-edit';
@@ -168,9 +172,23 @@ function availabilityOf(plan: Plan, actor?: Iterable<string>): Availability {
  * Omitting it means the empty index, which is a choice somebody made
  * rather than a load they forgot.
  */
+export type PlanOptions = {
+  actorCapabilities?: Iterable<string>;
+  vocabulary?: VocabularyIndex;
+  /**
+   * What the screen the sentence was typed on has open or selected.
+   *
+   * Part of the meaning, so it goes into the plan and therefore into
+   * the plan hash: "move these to Bredbury" with two trailers selected
+   * and with three is not the same command. Absent means the sentence
+   * cannot point at anything, which is a refusal rather than a licence.
+   */
+  context?: CommandContext;
+};
+
 export function planCommand(
   text: string,
-  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
+  opts?: PlanOptions,
 ): CommandPlanning | null {
   /* AN INSTRUCTION WINS OVER THE QUESTION ITS WORDS COULD ALSO BE.
 
@@ -199,10 +217,42 @@ export function planCommand(
   const output = readOutput(text);
   const asked = output ? output.rest : text;
 
-  const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary);
+  /* "EXPORT THESE TO EXCEL" NAMES NO ENTITY, AND DOES NOT NEED TO.
+
+     The screen named it when somebody ticked the rows. The reader has
+     nothing to work with in the word "these", so the entity comes from
+     the context and the sentence is read again with it, which is how
+     one word ends up meaning a selection of forty customers. */
+  const pointedFirst = readContextReference(asked);
+  const pointedEntity = pointedFirst
+    ? resolveContext(pointedFirst, opts?.context ?? EMPTY_CONTEXT)?.entity
+    : undefined;
+
+  const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary)
+    ?? (pointedEntity ? parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary) : null);
   if (!read) return null;
 
   const { plan, select } = adaptQueryPlan(read);
+
+  /* A QUESTION CAN POINT AT THE SCREEN TOO.
+
+     "Export these to Excel" is a selection of exactly the rows somebody
+     ticked, and narrowing it any other way would produce a file that
+     does not hold what they were looking at. The condition is over ids
+     and is added to whatever else the sentence said, so "export these
+     that are still in stock" narrows twice. */
+  const pointed = pointedFirst;
+  const fromScreen = pointed
+    ? resolveContext(
+        pointed, opts?.context ?? EMPTY_CONTEXT,
+        'entity' in select.from ? select.from.entity : undefined,
+      )
+    : null;
+  if (fromScreen) {
+    select.where = select.where
+      ? { kind: 'and', of: [select.where, fromScreen.match] }
+      : fromScreen.match;
+  }
 
   /* One emit step, over the result of the select. Not a copy of the
      select: the file has to be built from exactly the rows the question
@@ -234,7 +284,10 @@ export function planCommand(
     confirm: needsConfirmation(plan),
     availability: availabilityOf(plan, opts?.actorCapabilities),
     presentation: {
-      summary: output ? `${read.summary}, as a ${output.label}` : read.summary,
+      summary: [
+        fromScreen ? `${read.summary}, ${fromScreen.label}` : read.summary,
+        output ? `as ${/^[aeiou]/i.test(output.label) ? 'an' : 'a'} ${output.label}` : null,
+      ].filter(Boolean).join(', '),
       confidence: read.confidence,
       amountLabel: read.amountLabel ?? null,
       groupLabel: read.groupBy?.label ?? null,
@@ -261,13 +314,15 @@ export function planCommand(
  */
 function readInstruction(
   text: string,
-  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
+  opts?: PlanOptions,
 ): CommandPlanning | null {
   if (!opts?.actorCapabilities) return null;
   if (text.trim().length < 4) return null;
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
-  const edit: EditPlan | null = parseEdit(text, caps, opts.vocabulary);
+  const edit: EditPlan | null = parseEdit(
+    text, caps, opts.vocabulary, opts.context ?? EMPTY_CONTEXT,
+  );
   if (!edit) return null;
   if (edit.missing.length > 0 || edit.confidence < INSTRUCTION_THRESHOLD) return null;
 
@@ -297,6 +352,13 @@ function readInstruction(
   };
 }
 
+/** The plainest noun for an entity, so a pointing word can be read. */
+function nounFor(entityId: string): string {
+  return ENTITIES.find((e) => e.id === entityId)?.nouns[1]
+    ?? ENTITIES.find((e) => e.id === entityId)?.nouns[0]
+    ?? '';
+}
+
 /**
  * Creating a record, or deleting one.
  *
@@ -305,7 +367,7 @@ function readInstruction(
  */
 function readLifecycle(
   text: string,
-  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
+  opts?: PlanOptions,
 ): CommandPlanning | null {
   if (!opts?.actorCapabilities) return null;
 

@@ -14,6 +14,8 @@ import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
 import type { MutationPreview } from '@/lib/command/server/mutation';
 import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
+import { currentSelection, onSelectionChange, type ScreenSelection } from '@/lib/command/selection';
+import type { CommandContext } from '@/lib/command/context';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -39,6 +41,18 @@ export function readsOnlyText(text: string): boolean {
   return /\b(export|download|list|show me|how many|how much|count|total|value of|give me|what are|which|report on)\b/i
     .test(text);
 }
+
+/**
+ * Which query parameter each screen keeps its open record in.
+ *
+ * These are the parameters the screens already use, so nothing had to
+ * change for the bar to know what is open.
+ */
+const OPEN_RECORD: [string, string][] = [
+  ['contact', 'contacts'],
+  ['stock', 'trailers'],
+  ['event', 'meetings'],
+];
 
 type Candidate = { id: string; label: string; sub?: string; status?: string };
 type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered' | 'confirming';
@@ -337,6 +351,33 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       : null),
     [text, caps, vocabulary]);
 
+  /* WHAT THE SCREEN HAS, SO "THESE" MEANS SOMETHING.
+
+     The record from the page's own URL, which is where every screen in
+     this application already keeps it, and the selection from whichever
+     grid published one. Both go up with the sentence and neither is
+     trusted on the way back: the server reads every id through the
+     caller's own session. */
+  const [selection, setSelection] = useState<ScreenSelection | null>(currentSelection());
+  useEffect(() => onSelectionChange(setSelection), []);
+
+  const context = useMemo<CommandContext>(() => {
+    const out: CommandContext = {};
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const open = OPEN_RECORD.find(([key]) => params.get(key));
+      if (open) {
+        const id = params.get(open[0]);
+        if (id) out.record = { entity: open[1], id };
+      }
+    }
+    if (selection) out.selection = selection;
+    return out;
+    /* Recomputed when the selection changes or the page does. The bar
+       reads the URL directly, so a screen that opens a record without a
+       navigation is picked up on the next keystroke rather than never. */
+  }, [selection, text]);
+
   /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
      The two sides do not know the same things. The live vocabulary is
      what makes a word a make or a customer, and the browser and the
@@ -359,14 +400,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     const timer = setTimeout(() => {
       fetch('/api/command/plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, context }),
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => { if (live) setMeaning(j?.ok && j.understood ? j : null); })
         .catch(() => { if (live) setMeaning(null); });
     }, 180);
     return () => { live = false; clearTimeout(timer); };
-  }, [text, worthAsking]);
+  }, [text, worthAsking, context]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
   /* Words that can only be a read.
@@ -505,7 +546,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     setStage('running');
     const res = await fetch('/api/command/emit', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, hash: m.hash }),
+      body: JSON.stringify({ text, hash: m.hash, context }),
     }).catch(() => null);
 
     if (!res || !res.ok) {
@@ -538,7 +579,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     setStage('running');
     const res = await fetch('/api/command/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, hash: m.hash }),
+      body: JSON.stringify({ text, hash: m.hash, context }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
 
     /* The words mean something else now, because the data moved under
@@ -575,7 +616,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     setStage('running');
     const res = await fetch('/api/command/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, preview: true }),
+      body: JSON.stringify({ text, preview: true, context }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
 
     if (!res?.ok || !res.understood) {
@@ -623,6 +664,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         planHash: meaning.hash,
         programmeHash: editPreview.programmeHash,
         confirm: true,
+        context,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
 

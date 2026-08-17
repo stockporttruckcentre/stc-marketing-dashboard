@@ -3,6 +3,7 @@ import { requireCapability } from '@/lib/api/guard';
 import { applyMutation } from '@/lib/command/server/mutation';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
+import { readContext } from '@/lib/command/server/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
 
   const raw = await req.json().catch(() => ({})) as {
     text?: unknown; planHash?: unknown; programmeHash?: unknown; confirm?: unknown;
+    context?: unknown;
   };
 
   const text = typeof raw.text === 'string' ? raw.text : '';
@@ -67,6 +69,7 @@ export async function POST(req: NextRequest) {
     capabilities: caps,
     vocabulary: vocabularyFor(supabase, user.id),
     store: postgrestStore(supabase),
+    context: readContext(raw.context),
     previewPlanHash: planHash,
     previewProgrammeHash: programmeHash,
   });

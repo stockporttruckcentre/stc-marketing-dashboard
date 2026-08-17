@@ -5,6 +5,7 @@ import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
 import { changedFields } from '@/lib/command/server/mutation';
 import { emitStep } from '@/lib/command/server/emit';
+import { readContext } from '@/lib/command/server/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +49,9 @@ export async function POST(req: NextRequest) {
 
   /* Only the sentence is read. There is no shape a client could send
      that this would treat as a plan. */
-  const raw = await req.json().catch(() => ({})) as { text?: unknown; preview?: unknown };
+  const raw = await req.json().catch(() => ({})) as {
+    text?: unknown; preview?: unknown; context?: unknown;
+  };
   const text = typeof raw.text === 'string' ? raw.text : '';
   if (!text.trim()) return NextResponse.json({ ok: false, error: 'no question' }, { status: 400 });
 
@@ -60,6 +63,11 @@ export async function POST(req: NextRequest) {
     /* Their rows, through their own RLS session. */
     store: postgrestStore(supabase),
     preview: raw.preview === true,
+    /* What the screen had open or selected. Read into a shape this
+       application declares rather than trusted as it arrives, and every
+       id in it is read back through the caller's own session before
+       anything is done with it. */
+    context: readContext(raw.context),
   });
 
   if (!result) {

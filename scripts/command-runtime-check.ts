@@ -86,8 +86,12 @@ ok('the command bar plans through the canonical entry point',
   /from '@\/lib\/command\/plan'/.test(bar) && /planCommand\(/.test(bar));
 ok('the command bar decides from the canonical plan, not a confidence on a QueryPlan',
   /local\.availability\.representable/.test(bar) && /local\.availability\.executable/.test(bar));
+/* The sentence, the agreed reading, and what the screen had open or
+   selected. Never a query the bar built: there is no shape in that body
+   a client could put a plan in. */
 ok('the command bar posts the sentence and the agreed reading, not a query it built itself',
-  /JSON\.stringify\(\{ text, hash: m\.hash \}\)/.test(bar));
+  /JSON\.stringify\(\{ text, hash: m\.hash, context \}\)/.test(bar)
+  && !/filters:/.test(bar));
 
 const route = source('app/api/command/query/route.ts');
 /* The route reaches `planCommand` through the authoritative planner,

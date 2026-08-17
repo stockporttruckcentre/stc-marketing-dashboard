@@ -612,7 +612,8 @@ ok('the file records why there is no shared cache',
 const planSource = source('lib/command/plan.ts');
 ok('planCommand hands the index to the reader rather than installing it',
   /parseQuery\(asked, opts\?\.vocabulary\)/.test(planSource)
-  && /parseEdit\(text, caps, opts\.vocabulary\)/.test(planSource)
+  && planSource.includes('parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary)')
+  && /parseEdit\(\s*text, caps, opts\.vocabulary/.test(planSource)
   && !/installVocabulary/.test(planSource));
 ok('planCommand is synchronous, so nothing can interleave inside it',
   /export function planCommand/.test(planSource)

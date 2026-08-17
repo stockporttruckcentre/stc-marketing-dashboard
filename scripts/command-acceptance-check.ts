@@ -31,6 +31,7 @@
 import { fakeDb, type Row } from './support/fake-postgrest';
 import { postgrestStore } from '../lib/command/store/postgrest';
 import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
+import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { EMPTY_VOCABULARY } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
@@ -759,7 +760,184 @@ test('a described set is never deleted', async () => {
 });
 
 /* =============================================================
-   10. A question is still a question
+   10. Pointing at the screen
+
+   Half of what people type at a bar sitting above a screen is about
+   what is on it. The screen sends what it has, the server plans with
+   it, and every id is read back through the caller's own session before
+   anything is done with it.
+   ============================================================= */
+
+const ID = (n: number) => `0000000${n}-0000-4000-8000-00000000000${n}`;
+
+const SCREEN = () => fakeDb({
+  crm_contacts: [
+    { id: ID(1), company_name: 'Dawson Group', assigned_to: 'Alex', status: 'lead', notes: null },
+    { id: ID(2), company_name: 'Wincanton', assigned_to: 'Alex', status: 'lead', notes: null },
+    { id: ID(3), company_name: 'Culina', assigned_to: 'Alex', status: 'lead', notes: null },
+  ],
+  stock_trailers: [
+    { id: ID(4), stc_no: 'STC143580', status: 'in_stock', location: 'Hyde', category: 'Curtainsider' },
+    { id: ID(5), stc_no: 'STC143581', status: 'in_stock', location: 'Hyde', category: 'Curtainsider' },
+    { id: ID(6), stc_no: 'STC144504', status: 'in_stock', location: 'Hyde', category: 'Curtainsider' },
+  ],
+});
+
+async function withContext(text: string, db: ReturnType<typeof fakeDb>, context: object) {
+  return planAndPreview({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), preview: true,
+    context: context as never,
+  });
+}
+
+test('add a note to this customer', async () => {
+  const db = SCREEN();
+  const text = 'add a note to this customer: chasing tyre quote';
+  const context = { record: { entity: 'contacts', id: ID(1), label: 'Dawson Group' } };
+
+  const planned = await withContext(text, db, context);
+  ok('it is an instruction', planned?.planned.planning.kind === 'mutate',
+    String(planned?.planned.planning.kind));
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  ok('against exactly the open record', preview.count === 1, String(preview.count));
+  ok('and it is the one that was open', preview.rows[0]?.label === 'Dawson Group',
+    preview.rows[0]?.label);
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context: context as never,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('the note is on the open record',
+    db.tables.crm_contacts.find((r) => r.id === ID(1))?.notes === 'chasing tyre quote',
+    String(db.tables.crm_contacts.find((r) => r.id === ID(1))?.notes));
+  ok('and on nothing else',
+    db.tables.crm_contacts.filter((r) => r.notes != null).length === 1);
+});
+
+test('move these trailers to Bredbury', async () => {
+  const db = SCREEN();
+  const text = 'move these trailers to Bredbury';
+  const context = { selection: { entity: 'trailers', ids: [ID(4), ID(5)] } };
+
+  const planned = await withContext(text, db, context);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+  ok('exactly the two that were ticked', preview.count === 2, String(preview.count));
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context: context as never,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('both move', done.ok && done.changed === 2, done.ok ? String(done.changed) : done.why);
+  ok('and the third is where it was',
+    db.tables.stock_trailers.find((r) => r.id === ID(6))?.location === 'Hyde');
+});
+
+test('export these to Excel', async () => {
+  const db = SCREEN();
+  /* The sentence names no entity at all. The screen named it when
+     somebody ticked the rows. */
+  const planned = await withContext('export these to Excel', db, {
+    selection: { entity: 'contacts', ids: [ID(1), ID(3)] },
+  });
+  ok('it is understood', !!planned);
+  ok('as a read that produces a file',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(',') === 'select,emit',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+
+  const out = await runEmit(planned!.planned.planning, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  ok('holding the two that were ticked', out.rows === 2, String(out.rows));
+  const body = new TextDecoder().decode(out.artefact.bytes);
+  void body;
+});
+
+test('a context the server never received means nothing', async () => {
+  const db = SCREEN();
+  /* The same sentence, with nothing sent. It must not fall back to
+     every trailer, and it must not act on whatever was open last. */
+  const planned = await withContext('move these trailers to Bredbury', db, {});
+  const isMutation = planned?.planned.planning.kind === 'mutate';
+  ok('it is not an instruction about anything', !isMutation,
+    String(planned?.planned.planning.kind));
+
+  const done = await applyMutation({
+    text: 'move these trailers to Bredbury', ...actor('admin'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned?.planned.meaning.hash ?? 'x',
+    previewProgrammeHash: 'x',
+  });
+  ok('and nothing is written', !done.ok && db.writes.length === 0, done.ok ? 'it wrote' : '');
+});
+
+test('a selection of one kind does not answer a sentence about another', async () => {
+  const db = SCREEN();
+  /* Customers ticked, a sentence about trailers. Somebody has changed
+     screen since they ticked, and acting on either set would be wrong. */
+  const planned = await withContext('move these trailers to Bredbury', db, {
+    selection: { entity: 'contacts', ids: [ID(1)] },
+  });
+  ok('it is not an instruction', planned?.planned.planning.kind !== 'mutate',
+    String(planned?.planned.planning.kind));
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('the ids the screen sends are read through the actor\'s own session', async () => {
+  const db = SCREEN();
+  const text = 'move these trailers to Bredbury';
+  /* One real id and one the browser made up. The made up one is not a
+     row this session can see, so it narrows to nothing rather than
+     widening to anything. */
+  const context = { selection: { entity: 'trailers', ids: [ID(4), ID(9)] } };
+
+  const planned = await withContext(text, db, context);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+  ok('against the one row that is really there', preview.count === 1, String(preview.count));
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context: context as never,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('and one row moves', done.ok && done.changed === 1, done.ok ? String(done.changed) : done.why);
+});
+
+test('the context is part of the meaning, so changing it changes the hash', async () => {
+  const db = SCREEN();
+  const text = 'move these trailers to Bredbury';
+  const two = await withContext(text, db, { selection: { entity: 'trailers', ids: [ID(4), ID(5)] } });
+  const three = await withContext(text, db, { selection: { entity: 'trailers', ids: [ID(4), ID(5), ID(6)] } });
+
+  ok('two selected and three selected are different commands',
+    two?.planned.meaning.hash !== three?.planned.meaning.hash,
+    `${two?.planned.meaning.hash} vs ${three?.planned.meaning.hash}`);
+
+  /* And a hash agreed against two cannot be used to write three. */
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    context: { selection: { entity: 'trailers', ids: [ID(4), ID(5), ID(6)] } } as never,
+    previewPlanHash: two!.planned.meaning.hash,
+    previewProgrammeHash: (two!.preview as { programmeHash: string }).programmeHash,
+  });
+  ok('so a reading agreed for two does not carry three', !done.ok,
+    done.ok ? `it moved ${done.changed}` : '');
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+/* =============================================================
+   11. A question is still a question
    ============================================================= */
 
 test('a question does not become an instruction', async () => {

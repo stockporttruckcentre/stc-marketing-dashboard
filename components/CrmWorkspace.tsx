@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { publishSelection } from '@/lib/command/selection';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent, RowClickedEvent } from 'ag-grid-community';
@@ -572,7 +573,12 @@ export function CrmWorkspace({
   }, []);
 
   function onSelectionChanged() {
-    setSelectedCount(gridRef.current?.api.getSelectedRows().length ?? 0);
+    const rows = gridRef.current?.api.getSelectedRows() ?? [];
+    setSelectedCount(rows.length);
+    /* Told to the command bar, so "export these to Excel" and "assign
+       these to Dave" mean the rows ticked here. Ids only, and the server
+       reads every one of them back through the caller's own session. */
+    publishSelection({ entity: 'contacts', ids: rows.map((r: any) => String(r.id)) });
   }
 
   // ---- counts ----

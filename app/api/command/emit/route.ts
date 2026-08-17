@@ -4,6 +4,7 @@ import { planForExecution } from '@/lib/command/server/planner';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
 import { runEmit } from '@/lib/command/server/emit';
+import { readContext } from '@/lib/command/server/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,9 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return gate.response;
   const { supabase, user, caps, fullName } = gate;
 
-  const raw = await req.json().catch(() => ({})) as { text?: unknown; hash?: unknown };
+  const raw = await req.json().catch(() => ({})) as {
+    text?: unknown; hash?: unknown; context?: unknown;
+  };
   const text = typeof raw.text === 'string' ? raw.text : '';
   const previewHash = typeof raw.hash === 'string' ? raw.hash : '';
   if (!text.trim()) return NextResponse.json({ error: 'no request' }, { status: 400 });
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest) {
     previewHash,
     capabilities: caps,
     vocabulary: vocabularyFor(supabase, user.id),
+    context: readContext(raw.context),
   });
 
   if (!agreement.agreed && agreement.reason === 'not understood') {
