@@ -728,6 +728,57 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
+-- -------------------------------------------------------------
+-- Moving records onto a list that already exists
+-- -------------------------------------------------------------
+INSERT INTO crm_lists (id, name, is_global)
+VALUES ('e1111111-0000-0000-0000-000000000001', 'TEST second list', FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_add_to_list('TEST second list',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID]) INTO out;
+  PERFORM assert('records move onto a list named by its name',
+    (out ->> 'moved')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('records move onto a list named by its name', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and they really are on it',
+  (SELECT COUNT(*) FROM crm_contacts
+   WHERE list_id = 'e1111111-0000-0000-0000-000000000001') = 2);
+
+-- A name that fits two lists is a question, not a choice made here.
+INSERT INTO crm_lists (id, name, is_global)
+VALUES ('e1111111-0000-0000-0000-000000000002', 'TEST second list 2026', FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  PERFORM command_add_to_list('TEST second',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID]);
+  PERFORM assert('a name that fits two lists moves nothing', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a name that fits two lists moves nothing',
+    SQLERRM LIKE '%more than one list%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_add_to_list('TEST no such list',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID]);
+  PERFORM assert('a list that is not there is said so', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list that is not there is said so',
+    SQLERRM LIKE '%no list here is called%', SQLERRM);
+END
+$$;
+
 DELETE FROM crm_list_members WHERE list_id IN (SELECT id FROM crm_lists WHERE name LIKE 'TEST %');
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
 DELETE FROM crm_lists WHERE name LIKE 'TEST %';

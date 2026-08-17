@@ -298,6 +298,48 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId, name: listName, moved: targets.length }, error: null };
     }
 
+    /* Moving records onto a list somebody already has. The list is
+       resolved by name inside the same call that does the move. */
+    if (name === 'command_add_to_list') {
+      const wanted = String(args.p_list_name ?? '').trim();
+      const ids = (args.p_ids ?? []) as string[];
+      if (!wanted) return { data: null, error: { message: 'nothing said which list' } };
+      if (!ids.length) return { data: null, error: { message: 'nothing said which records to move' } };
+
+      const lists = tables.crm_lists ?? [];
+      let target = lists.find((l) => String(l.name).trim().toLowerCase() === wanted.toLowerCase());
+      if (!target) {
+        const near = lists.filter((l) => String(l.name).toLowerCase().includes(wanted.toLowerCase()));
+        if (!near.length) return { data: null, error: { message: `no list here is called ${wanted}` } };
+        if (near.length > 1) {
+          return {
+            data: null,
+            error: {
+              message: `more than one list matches "${wanted}": ${near.map((l) => l.name).join(', ')}`,
+            },
+          };
+        }
+        [target] = near;
+      }
+
+      const targets = (tables.crm_contacts ?? []).filter((r) => ids.includes(String(r.id)));
+      if (targets.length !== ids.length) {
+        return {
+          data: null,
+          error: {
+            message: `expected to move ${ids.length} records onto the list but moved ${targets.length}`,
+          },
+        };
+      }
+      for (const row of targets) row.list_id = target.id;
+      writes.push({ table: 'crm_contacts', set: { list_id: target.id }, ids: ids.map(String) });
+
+      return {
+        data: { listId: target.id, name: wanted, moved: targets.length },
+        error: null,
+      };
+    }
+
     /* Granting colleagues access, which in this CRM is list membership.
        Modelled here for the same reason the sale is: a fake that cannot
        perform an operation cannot show that the operation reached it. */

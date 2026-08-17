@@ -1546,6 +1546,97 @@ test('emailing says exactly what is missing, not "not yet"', async () => {
     /mail client in package\.json/.test(why) && /credentials/.test(why), why);
 });
 
+/* =============================================================
+   18. Onto a list that already exists
+
+   Making a new list and moving records onto one somebody already has
+   are two halves of the same job. The second was reachable by ticking
+   rows and using a menu, and by no sentence at all.
+   ============================================================= */
+
+const selected = (ids: string[]) => ({
+  selection: { entity: 'contacts', ids, label: `the ${ids.length} you have selected` },
+});
+
+test('records go onto a list that already exists, by its name', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', list_id: 'G1' },
+      { id: 'c2', company_name: 'Pollock Haulage', status: 'lead', list_id: 'G1' },
+    ],
+    crm_lists: [
+      { id: 'G1', name: 'Global CRM', is_global: true },
+      { id: 'L1', name: 'Fleet Prospects', is_global: false },
+    ],
+  });
+  const text = 'add these to the Fleet Prospects list';
+
+  const planned = await planAndPreview({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), preview: true,
+    context: selected(['c1', 'c2']) as never,
+  });
+  ok('it plans', !!planned);
+  if (!planned) return;
+  /* Moving onto a list is not making one, and both sentences contain
+     the word "add". */
+  ok('as the move and not as a create',
+    planned.planned.planning.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'list.add'),
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+  ok('and something performs it', planned.planned.planning.availability.executable,
+    JSON.stringify(planned.planned.planning.availability.unavailable));
+
+  const preview = planned.preview;
+  ok('it previews over both', preview?.ok === true && preview.count === 2,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    context: selected(['c1', 'c2']) as never,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('and both records really moved',
+    db.tables.crm_contacts.every((r) => r.list_id === 'L1'),
+    JSON.stringify(db.tables.crm_contacts.map((r) => r.list_id)));
+});
+
+test('a list name that fits two lists moves nothing', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead', list_id: 'G1' }],
+    crm_lists: [
+      { id: 'G1', name: 'Global CRM', is_global: true },
+      { id: 'L1', name: 'Fleet Prospects', is_global: false },
+      { id: 'L2', name: 'Fleet Prospects 2026', is_global: false },
+    ],
+  });
+  const text = 'add these to the Fleet list';
+
+  const planned = await planAndPreview({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), preview: true,
+    context: selected(['c1']) as never,
+  });
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) {
+    ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+    return;
+  }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    context: selected(['c1']) as never,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it refuses', !done.ok, 'it moved them');
+  if (done.ok) return;
+  ok('naming both lists it found', /Fleet Prospects.*Fleet Prospects 2026/.test(done.why), done.why);
+  ok('and the record stayed where it was',
+    db.tables.crm_contacts[0].list_id === 'G1', String(db.tables.crm_contacts[0].list_id));
+});
+
 test('a clause nobody understood refuses the whole programme', async () => {
   /* Half a programme is not a programme. If the last clause is not
      understood, creating the list and not exporting it, then reporting

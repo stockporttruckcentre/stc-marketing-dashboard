@@ -169,6 +169,69 @@ function writableFor(entityId: string, title: string) {
    ------------------------------------------------------------- */
 
 /**
+ * "Put these on the Fleet Prospects list."
+ *
+ * The other half of the same job. `list.create` makes a new one; this
+ * moves records onto one somebody already has, which is what the CRM
+ * screen's move-to-list menu does and what no sentence could reach.
+ *
+ * The name goes into the plan as words, and the list is resolved inside
+ * the transaction that does the move. Resolving it here would put a
+ * uuid in the plan, and a list renamed between the preview and the
+ * confirmation could then end up with somebody's customers on it.
+ */
+function readListAdd(
+  raw: string, caps: CrmCapabilities | undefined, context: CommandContext,
+  priorResult?: { entity: string },
+): LifecyclePlan | null {
+  const t = soften(raw);
+  if (!/\blist\b/.test(t)) return null;
+  /* A create wins. "Create a list called X from these" makes a list;
+     "add these to the X list" moves them onto one. Both contain "add". */
+  if (/\b(?:create|make|start|set up|new)\b/.test(t)) return null;
+  if (!/\b(?:add|move|put|stick|file)\b/.test(t)) return null;
+
+  const cap = capability('list.add');
+  if (!cap || !cap.requires) return null;
+  if (caps && !caps.has(cap.requires)) return null;
+
+  const pointed = readContextReference(raw);
+  const from = pointed ? resolveContext(pointed, context, 'contacts') : null;
+  const fromClause = !from && priorResult?.entity === 'contacts';
+  if (!from && !fromClause) return null;
+
+  /* The list's name, said either way round: "onto the Fleet Prospects
+     list" and "onto the list called Fleet Prospects". */
+  const named = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
+    ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1]?.trim();
+
+  return {
+    op: 'create',
+    entity: 'contacts',
+    step: {
+      op: 'invoke',
+      id: 'l1',
+      capability: 'list.add',
+      subject: from
+        ? {
+            op: 'select',
+            from: { entity: 'contacts' },
+            where: from.match,
+            produces: { kind: 'rows', entity: 'contacts' },
+          }
+        : { entity: 'contacts' },
+      ...(named ? { args: { list: { kind: 'literal' as const, value: named } } } : {}),
+      produces: { kind: 'record', entity: 'contacts' },
+    } as unknown as Mutate,
+    summary: named
+      ? `Put ${from?.label ?? 'them'} on the ${named} list`
+      : `Put ${from?.label ?? 'them'} on a list`,
+    requires: cap.requires,
+    confidence: 12,
+  };
+}
+
+/**
  * "Make a list of these, called Tipper prospects."
  *
  * A business operation rather than a create, because it is two writes
@@ -272,7 +335,12 @@ export function parseLifecycle(
   /* Making a list out of what is on the screen, before the plain
      create, because "create a list from these" names an entity noun
      ("list" is not one) and would otherwise fall through. */
-  const list = readListCreate(raw, caps, context, priorResult);
+  /* Moving onto a list somebody has, before making a new one. Both
+     shapes contain "add", and "add these to the Fleet Prospects list"
+     read as a create because the create reader looked at the verb and
+     not at the preposition. */
+  const list = readListAdd(raw, caps, context, priorResult)
+    ?? readListCreate(raw, caps, context, priorResult);
   if (list) return list;
 
   const deleteVerb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))

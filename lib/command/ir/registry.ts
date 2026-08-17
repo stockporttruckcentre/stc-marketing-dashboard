@@ -621,6 +621,22 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'list.add',
+    label: 'Put these records on an existing list',
+    operates: 'invoke',
+    entities: ['contacts'],
+    requires: 'crm.manageLists',
+    confirm: true,
+    produces: 'record',
+    /* Moving records onto the list they are already on leaves them
+       where they are. */
+    idempotent: true,
+    handler: 'supabase/migrations/015_command_add_to_list.sql',
+    inputs: [
+      { key: 'list', label: 'list name', kind: 'text', required: true },
+    ],
+  },
+  {
     id: 'rows.share',
     label: 'Share rows with colleagues',
     operates: 'emit',

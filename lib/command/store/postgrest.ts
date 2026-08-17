@@ -275,6 +275,14 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_owner: c.args.actorId ?? null,
     }),
   },
+  'list.add': {
+    name: 'command_add_to_list',
+    /* The list is named rather than numbered, and it is resolved inside
+       the same transaction that does the move: a list renamed between
+       the preview and the confirmation cannot end up with somebody's
+       customers on it. */
+    args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
+  },
   'rows.share': {
     name: 'command_share_list',
     /* The subject is the list, because a list is what this application
