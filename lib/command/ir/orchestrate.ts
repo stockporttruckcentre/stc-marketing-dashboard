@@ -157,8 +157,10 @@ export type Programme =
   | {
       ok: false;
       reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved'
-        | 'blocked by policy' | 'incomplete';
+        | 'blocked by policy' | 'incomplete' | 'ambiguous';
       why: string;
+      /** Where a sentence naming one record found several. */
+      candidates?: { id: string; label: string }[];
       /** The step that stopped it, when one did. */
       stepId?: string;
       /** The resolution that failed, so the caller can ask the question it raises. */
@@ -289,8 +291,10 @@ export async function resolveProgramme(
       if (!resolved.ok) {
         return {
           ok: false,
-          reason: resolved.reason === 'incomplete' ? 'incomplete' : 'unresolved',
+          reason: resolved.reason === 'incomplete' ? 'incomplete'
+            : resolved.reason === 'ambiguous' ? 'ambiguous' : 'unresolved',
           why: resolved.why,
+          candidates: resolved.candidates,
           stepId: s.id,
         };
       }
@@ -464,7 +468,11 @@ export function programmeHash(units: Unit[]): string {
    ------------------------------------------------------------- */
 
 export type ExecuteResult =
-  | { ok: true; changed: number; changes: Change[]; hash: string }
+  | {
+      ok: true; changed: number; changes: Change[]; hash: string;
+      /** What each step reported, in order, as the database returned it. */
+      results?: unknown[];
+    }
   | { ok: false; reason: 'drift'; why: string; programme: Programme }
   | { ok: false; reason: 'refused' | 'failed'; why: string; programme?: Programme };
 
@@ -565,5 +573,8 @@ export async function executeProgramme(
   const done = await opts.store.perform(steps);
   if (!done.ok) return { ok: false, reason: 'failed', why: done.why, programme: fresh };
 
-  return { ok: true, changed: done.changed, changes: fresh.changes, hash: fresh.hash };
+  return {
+    ok: true, changed: done.changed, changes: fresh.changes,
+    hash: fresh.hash, results: done.results,
+  };
 }

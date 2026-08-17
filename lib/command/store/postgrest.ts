@@ -304,6 +304,10 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
        customers on it. */
     args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
   },
+  'user.setRole': {
+    name: 'command_set_role',
+    args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
+  },
   'rows.share': {
     name: 'command_share_list',
     /* The subjects are the RECORDS being shared, and the list is an

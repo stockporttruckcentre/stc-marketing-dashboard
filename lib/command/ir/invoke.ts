@@ -69,8 +69,11 @@ export type InvokeResolution =
   | { ok: true; plan: InvokePlan }
   | {
       ok: false;
-      reason: 'unknown' | 'nothing matched' | 'unresolved' | 'incomplete' | 'too many';
+      reason: 'unknown' | 'nothing matched' | 'unresolved' | 'incomplete' | 'too many'
+        | 'ambiguous';
       why: string;
+      /** Where a sentence naming one record found several. */
+      candidates?: { id: string; label: string }[];
     };
 
 /**
@@ -126,7 +129,12 @@ export async function resolveInvoke(
   }
 
   const ceiling = opts.limits?.maxSubjects;
-  const read = await runSelect(select, { store: opts.store, ceiling });
+  /* The columns the OPERATION needs, which the projection has no reason
+     to include: it answers what a file of this selection should show. */
+  const wantedColumns = (cap.inputs ?? [])
+    .map((i) => i.from)
+    .filter((c): c is string => !!c);
+  const read = await runSelect(select, { store: opts.store, ceiling, extraColumns: wantedColumns });
   if (!read.ok) return { ok: false, reason: 'unresolved', why: read.why };
 
   /* THE SET THE SENTENCE MEANT, OR NOTHING.
@@ -143,6 +151,24 @@ export async function resolveInvoke(
     };
   }
   if (!read.rows.length) return { ok: false, reason: 'nothing matched', why: 'nothing here matches that' };
+
+  /* ONE MEANS ONE.
+
+     A sentence that named a single record and matched several is a
+     question with several answers, and performing the operation on all
+     of them is the failure this architecture exists to stop. "Elevate
+     Dave to admin" with two Daves promotes neither. */
+  if (step.expect === 'one' && read.rows.length > 1) {
+    const title = entityDef(namedEntity)?.titleField ?? null;
+    return {
+      ok: false,
+      reason: 'ambiguous',
+      why: `${read.rows.length} records match that, so it is not clear which one was meant`,
+      candidates: read.rows.slice(0, 20).map((r) => ({
+        id: String(r.id), label: labelOf(r, title),
+      })),
+    };
+  }
 
   /* Which entity the operation runs on. A capability that names none
      operates on whatever the sentence named. */

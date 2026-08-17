@@ -1126,7 +1126,86 @@ SELECT set_config('request.jwt.claim.sub', '', FALSE);
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST perform%';
 
 -- =============================================================
--- 10. The allowlist matches the registry
+-- 10. Changing what somebody is allowed to do
+-- =============================================================
+\echo '--- role changes ---'
+
+SELECT reset_fixtures();
+
+-- A second admin, so the last-admin guard is not what is being tested.
+INSERT INTO auth.users (id, email) VALUES
+  ('dddddddd-0000-0000-0000-00000000000d', 'd@test.local')
+ON CONFLICT DO NOTHING;
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+UPDATE profiles SET role = 'sales' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
+UPDATE profiles SET role = 'admin' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_set_role('bbbbbbbb-0000-0000-0000-000000000002', 'admin') INTO out;
+  PERFORM assert('an admin can change somebody''s role',
+    (out ->> 'was') = 'sales' AND (out ->> 'now') = 'admin', out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an admin can change somebody''s role', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the profile really holds it',
+  (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002') = 'admin',
+  (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002'));
+
+-- A role nobody has.
+DO $$
+BEGIN
+  PERFORM command_set_role('bbbbbbbb-0000-0000-0000-000000000002', 'superuser');
+  PERFORM assert('a role that does not exist is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a role that does not exist is refused',
+    SQLERRM LIKE '%no role called%', SQLERRM);
+END
+$$;
+
+-- The last administrator.
+UPDATE profiles SET role = 'sales' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
+UPDATE profiles SET role = 'sales' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+
+DO $$
+BEGIN
+  PERFORM command_set_role('aaaaaaaa-0000-0000-0000-000000000001', 'viewer');
+  PERFORM assert('the last administrator cannot stop being one', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the last administrator cannot stop being one',
+    SQLERRM LIKE '%only administrator%', SQLERRM);
+END
+$$;
+
+SELECT assert('and they are still an admin',
+  (SELECT role FROM profiles WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001') = 'admin');
+
+-- A sales rep calling it directly, which is what PostgREST exposes.
+SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_set_role('bbbbbbbb-0000-0000-0000-000000000002', 'admin');
+  PERFORM assert('a sales rep calling it directly is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a sales rep calling it directly is refused',
+    SQLERRM LIKE '%admin.users%', SQLERRM);
+END
+$$;
+
+SELECT assert('and they did not elevate themselves',
+  (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002') = 'sales',
+  (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002'));
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+
+-- =============================================================
+-- 11. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

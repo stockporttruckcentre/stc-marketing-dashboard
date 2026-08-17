@@ -308,6 +308,42 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId, name: listName, moved: targets.length }, error: null };
     }
 
+    /* Changing what somebody is allowed to do. The highest risk write
+       here, so the capability is asked for and the last administrator
+       cannot stop being one. */
+    if (name === 'command_set_role') {
+      if (!may('admin.users')) {
+        return { data: null, error: { message: 'you do not have admin.users' } };
+      }
+      const id = args.p_user == null ? '' : String(args.p_user);
+      const wanted = String(args.p_role ?? '');
+      if (!id) return { data: null, error: { message: 'nothing said whose role to change' } };
+      if (!['admin', 'sales', 'marketer', 'viewer'].includes(wanted)) {
+        return { data: null, error: { message: `there is no role called ${wanted || 'nothing'}` } };
+      }
+      const person = (tables.profiles ?? []).find((r) => String(r.id) === id);
+      if (!person) return { data: null, error: { message: 'nobody here has that id' } };
+      const was = String(person.role);
+      const who = String(person.full_name ?? person.email ?? person.id);
+      if (was === wanted) {
+        return { data: null, error: { message: `${who} is already ${wanted}` } };
+      }
+      if (was === 'admin' && wanted !== 'admin') {
+        const admins = (tables.profiles ?? []).filter((r) => r.role === 'admin').length;
+        if (admins <= 1) {
+          return {
+            data: null,
+            error: {
+              message: `${who} is the only administrator, and nothing in this application could put that back`,
+            },
+          };
+        }
+      }
+      person.role = wanted;
+      writes.push({ table: 'profiles', set: { role: wanted }, ids: [id] });
+      return { data: { userId: id, name: who, was, now: wanted }, error: null };
+    }
+
     /* Moving records onto a list somebody already has. The list is
        resolved by name inside the same call that does the move. */
     if (name === 'command_add_to_list') {
@@ -648,6 +684,10 @@ const PERFORMED: Record<string, {
   'list.add': {
     name: 'command_add_to_list',
     args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
+  },
+  'user.setRole': {
+    name: 'command_set_role',
+    args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
   },
   'rows.share': {
     name: 'command_share_list',

@@ -637,6 +637,26 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'user.setRole',
+    label: 'Change what somebody is allowed to do',
+    operates: 'invoke',
+    entities: ['profiles'],
+    /* The same capability the admin screen gates on, because it is the
+       same operation. */
+    requires: 'admin.users',
+    confirm: true,
+    produces: 'record',
+    /* Setting a role to what it already is raises rather than passing,
+       so this is not repeatable in the sense the unmet gate means. */
+    idempotent: false,
+    handler: 'supabase/migrations/018_command_set_role.sql',
+    inputs: [
+      /* `from` is the column that already answers it, so the preview can
+         say what somebody IS as well as what they are being made. */
+      { key: 'role', label: 'role', kind: 'enum', required: true, from: 'role' },
+    ],
+  },
+  {
     id: 'rows.share',
     label: 'Share rows with colleagues',
     operates: 'emit',

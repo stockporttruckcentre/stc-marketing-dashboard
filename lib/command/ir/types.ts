@@ -315,6 +315,16 @@ export type Invoke = {
   /** A capability id from the registry. */
   capability: string;
   subject?: Source;
+  /**
+   * How many records the SENTENCE says this operates on.
+   *
+   * Same rule as a mutation's: never derived from how many matched.
+   * "Elevate Dave to admin" says one, and two people called Dave is a
+   * question rather than two people to promote. Absent means the
+   * sentence described a set, which is what "mark all the in stock
+   * curtainsiders as sold" does.
+   */
+  expect?: Cardinality;
   args?: Record<string, Expr | ResultRef>;
   produces?: Produces;
 };

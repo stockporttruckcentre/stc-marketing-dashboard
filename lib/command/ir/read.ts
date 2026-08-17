@@ -196,6 +196,15 @@ export type RunSelectOptions = {
    * that gets acted on or written out are the same set.
    */
   ceiling?: number;
+  /**
+   * Columns the caller needs that the projection would not include.
+   *
+   * The projection answers "what should a FILE of this selection show",
+   * which is not the same question as "what does this operation need to
+   * read off each record". A role change wants the role somebody holds
+   * now, and nothing about the selection mentions it.
+   */
+  extraColumns?: string[];
 };
 
 /** Rows per request. Nothing about this number is semantic. */
@@ -228,7 +237,7 @@ export async function runSelect(select: Select, opts: RunSelectOptions): Promise
      applied by narrowing the answer. */
   const asked = select.shape?.limit;
   const pageSize = Math.max(opts.pageSize ?? PAGE_SIZE, 1);
-  const columns = [...new Set(['id', ...projection.columns])];
+  const columns = [...new Set(['id', ...projection.columns, ...(opts.extraColumns ?? [])])];
   const where = select.where ?? { kind: 'and' as const, of: [] };
 
   const rows: Record<string, unknown>[] = [];

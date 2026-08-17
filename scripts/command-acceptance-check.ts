@@ -1934,6 +1934,129 @@ test('a viewer calling the share function directly grants nothing', async () => 
     JSON.stringify(db.tables.crm_list_members));
 });
 
+
+/* =============================================================
+   22. Changing what somebody is allowed to do
+
+   The highest risk write here, and it was left out on the grounds that
+   the admin screen's confirmation is the point. The bar's confirmation
+   IS a confirmation: the person is resolved exactly, the preview names
+   them with the role they hold and the role they are being given, and
+   the database asks for the capability whatever route the call takes.
+   ============================================================= */
+
+const team = (): Row[] => [
+  { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
+  { id: 'p2', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'admin' },
+  { id: 'p3', full_name: 'Rama Patel', email: 'rama@stc.co.uk', role: 'marketer' },
+];
+
+test('an admin can elevate a colleague, and sees what they are now', async () => {
+  const db = fakeDb({ profiles: team() });
+  const text = 'elevate Dave to admin';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as the role operation', planned.planned.planning.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'user.setRole'),
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+  ok('and it has to be confirmed', planned.planned.meaning.confirm === true);
+
+  const preview = planned.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok) return;
+  ok('over exactly one person', preview.count === 1, String(preview.count));
+  ok('naming them', preview.operations[0]?.subjects[0]?.label === 'Dave Smith',
+    JSON.stringify(preview.operations));
+  /* The half the sentence does not say and whoever confirms needs most. */
+  ok('and the role they hold now',
+    preview.operations[0]?.subjects[0]?.values?.role === 'sales',
+    JSON.stringify(preview.operations[0]?.subjects[0]?.values));
+  ok('nothing was written to preview it', db.writes.length === 0);
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('the role really changed',
+    db.tables.profiles.find((r) => r.id === 'p1')?.role === 'admin',
+    String(db.tables.profiles.find((r) => r.id === 'p1')?.role));
+  ok('and it says what it was', /was sales and is admin now/.test(done.message), done.message);
+});
+
+test('a sales rep cannot see the role change at all', async () => {
+  /* Nothing you cannot do is ever offered. An action that appears and
+     then refuses teaches people the tool is unreliable. */
+  const planning = planCommand('elevate Dave to admin', {
+    actorCapabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+  });
+  const reachesIt = planning?.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'user.setRole') ?? false;
+  ok('it is not read as a role change', !reachesIt,
+    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('a name that fits two colleagues changes nobody', async () => {
+  const db = fakeDb({
+    profiles: [
+      { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
+      { id: 'p4', full_name: 'Dave Ashworth', email: 'davea@stc.co.uk', role: 'viewer' },
+      { id: 'p2', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'admin' },
+    ],
+  });
+  const planned = await plan('elevate Dave to admin', 'admin', db);
+  const preview = planned?.preview;
+  ok('it does not preview a change', preview?.ok !== true, 'it previewed');
+  ok('nothing was written', db.writes.length === 0);
+  ok('and both are still what they were',
+    db.tables.profiles.filter((r) => r.role === 'admin').length === 1,
+    JSON.stringify(db.tables.profiles.map((r) => r.role)));
+});
+
+test('the last administrator cannot stop being one', async () => {
+  const db = fakeDb({
+    profiles: [
+      { id: 'p2', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'admin' },
+      { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
+    ],
+  });
+  const text = 'demote Alex to viewer';
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it refuses', !done.ok, 'it demoted them');
+  if (done.ok) return;
+  ok('saying why', /only administrator/.test(done.why), done.why);
+  ok('and they are still an admin',
+    db.tables.profiles.find((r) => r.id === 'p2')?.role === 'admin',
+    String(db.tables.profiles.find((r) => r.id === 'p2')?.role));
+});
+
+test('a viewer calling the role function directly changes nothing', async () => {
+  const db = fakeDb({ profiles: team() });
+  db.as('viewer');
+
+  const out = await postgrestStore(db.supabase).invoke({
+    capability: 'user.setRole', subjects: ['p1'], args: { role: 'admin' },
+  });
+  ok('the call fails', !out.ok, 'it changed the role');
+  if (out.ok) return;
+  ok('naming the capability it wanted', /admin\.users/.test(out.why), out.why);
+  ok('and nobody was elevated',
+    db.tables.profiles.find((r) => r.id === 'p1')?.role === 'sales',
+    String(db.tables.profiles.find((r) => r.id === 'p1')?.role));
+});
+
 /* ============================================================= */
 
 async function main() {

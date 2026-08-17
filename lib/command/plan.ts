@@ -33,6 +33,7 @@ import { parseQuery, type QueryPlan } from './query';
 import { parseEdit, readRecordRefs, type EditPlan } from './mutate';
 import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
+import { parseRoleChange } from './roles';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -359,6 +360,16 @@ function planOneClause(
      ways a row's life changes. Read after a field write, because
      "delete the customer on STC143580" empties a column and the
      instruction reader is the one that knows that. */
+  /* A ROLE CHANGE BEFORE ANYTHING ELSE READS IT AS SOMETHING TAMER.
+
+     "Make Dave an admin" contains a create word, and the lifecycle
+     reader would otherwise read it as making a record called "Dave an
+     admin". It is also the most dangerous write here, so it is decided
+     by the reader that knows what it is rather than by whichever reader
+     happens to match first. */
+  const role = outbound ? null : readRoleChange(text, opts);
+  if (role) return role;
+
   const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
 
@@ -570,6 +581,46 @@ function nounFor(entityId: string): string {
  * The same shape as every other planning result, so nothing downstream
  * knows there are three readers rather than one.
  */
+/**
+ * A role change, if this sentence is one.
+ *
+ * Before the lifecycle reader, because "make Dave an admin" contains a
+ * create word and would otherwise be read as making a record called
+ * "Dave an admin".
+ */
+function readRoleChange(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseRoleChange(text, caps);
+  if (!read) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
 function readLifecycle(
   text: string,
   opts?: PlanOptions,

@@ -76,7 +76,7 @@ Five classifications:
 |---|---|---|
 | Open any screen | sidebar | **navigation**, 149 actions in `actions.ts` |
 | Ask any question about any entity | dashboards and grids | **generic**, the query engine |
-| Change a role | `app/dashboard/admin` | **not yet**: `profiles.role` is not in the writable dictionary, deliberately |
+| Change a role | `app/dashboard/admin` | **operation** `user.setRole`: the person resolved exactly, the old role and the new one in the preview, admin only in the database as well as in the runtime, and the last administrator refused |
 | Seed demo data, diagnose reps | `app/api/admin/*` | **navigation**: maintenance routes, not product operations |
 | Read the news feed | `app/dashboard/news` | **navigation** |
 | Find a company in the finder | `app/dashboard/finder` | **navigation**, and Lusha enrichment is not yet reachable |
@@ -106,21 +106,12 @@ Five classifications:
 4. **A meeting named by when it is.** "Friday's site visit" is a date
    and a description rather than a title, and nothing turns that into a
    record reference. Every other entity is named by its title.
-5. **Changing a role.** `profiles.role` is not in the writable
-   dictionary. The reason given for that was that the admin screen's
-   confirmation is the point, and that reason does not hold: the bar's
-   own confirmation is a confirmation, and requiring somebody to click
-   through to another screen because that screen also confirms is not a
-   security property. It is unbuilt work, and what it needs is an
-   admin-only capability, exact resolution of the person, an old role to
-   new role preview, and one atomic write. Nothing about it is
-   different in kind from marking a deal sold.
-6. **Bulk delete.** A described set is refused today and a refusal is
+5. **Bulk delete.** A described set is refused today and a refusal is
    not the finished functionality. "Delete all 12 selected test leads"
    is a real thing to want, over records already on the screen, with the
    count in the sentence to check against the selection. What it needs
    is a stronger destructive confirmation than an ordinary write, not a
    permanent prohibition.
-7. **Sending a result out of the company.** See the CRM table: the only
+6. **Sending a result out of the company.** See the CRM table: the only
    part that does not exist is the transport, and it does not exist
    anywhere in this repository or its environment.

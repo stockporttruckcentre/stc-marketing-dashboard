@@ -169,6 +169,10 @@ BEGIN
           args ->> 'describedAs');
         changed := changed + 1;
 
+      ELSIF cap = 'user.setRole' THEN
+        outcome := command_set_role(subjects[1], args ->> 'role');
+        changed := changed + 1;
+
       ELSIF cap = 'deal.markSold' THEN
         outcome := command_mark_sold_many(
           subjects,

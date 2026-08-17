@@ -70,8 +70,15 @@ export type RowChange = {
 export type OperationPreview = {
   capability: string;
   label: string;
-  /** The records it will run on, by their own names. */
-  subjects: { label: string; via?: string }[];
+  /**
+   * The records it will run on, by their own names.
+   *
+   * `values` is what the operation read off each one for its declared
+   * inputs. For a role change that is the role the person holds now,
+   * which is the half of "sales to admin" the sentence does not say and
+   * the half somebody confirming needs most.
+   */
+  subjects: { label: string; via?: string; values?: Record<string, unknown> }[];
   /** What the sentence named that it cannot act on, and why. */
   skipped: { label: string; why: string }[];
 };
@@ -272,9 +279,13 @@ export async function previewMutation(
       /* Several matches for a sentence that named one record is a
          question with several answers, and the interface can only ask it
          if the answers come back. The bar never turns them into one. */
-      candidates: res && !res.ok
-        ? res.candidates?.map((c) => ({ id: c.id, label: c.label }))
-        : undefined,
+      /* Several matches for a sentence that named one record is a
+         question with several answers, whether the record was being
+         written to or operated on. */
+      candidates: programme.candidates
+        ?? (res && !res.ok
+          ? res.candidates?.map((c) => ({ id: c.id, label: c.label }))
+          : undefined),
       referenceCandidates: res && !res.ok && res.reference?.state === 'ambiguous'
         ? res.reference.candidates.map((c) => ({ id: c.id, label: c.label }))
         : undefined,
@@ -290,7 +301,9 @@ export async function previewMutation(
       operations.push({
         capability: unit.plan.capability,
         label: unit.plan.label,
-        subjects: unit.plan.subjects.map((s) => ({ label: s.label, via: s.viaLabel })),
+        subjects: unit.plan.subjects.map((s) => ({
+          label: s.label, via: s.viaLabel, values: s.values,
+        })),
         skipped: unit.plan.missing.map((m) => ({ label: m.label, why: m.why })),
       });
       continue;
@@ -508,6 +521,17 @@ export async function applyMutation(
         ? `${what} changed on one record.`
         : `${what} changed on ${changedRecords.toLocaleString('en-GB')} records.`;
 
+  /* WHAT AN OPERATION REPORTS HAVING DONE.
+
+     Generic: any operation whose result carries a before and an after
+     says so. "Change what somebody is allowed to do on 1 record" is
+     true and tells nobody which record or what changed, and for a role
+     change that is the whole point of the sentence. */
+  const said = (done.results ?? [])
+    .map((r) => r as Record<string, unknown> | null)
+    .filter((r): r is Record<string, unknown> => !!r && r.was != null && r.now != null)
+    .map((r) => `${r.name ?? 'It'} was ${r.was} and is ${r.now} now.`);
+
   /* The file the same sentence asked for, handed back with the outcome.
      It was built before the transaction and the transaction committed,
      so there is no half state to describe. */
@@ -516,7 +540,7 @@ export async function applyMutation(
   return {
     ok: true,
     changed: done.changed,
-    message: [message, ...prepared.map((p) => p.describe)].filter(Boolean).join(' '),
+    message: [message, ...said, ...prepared.map((p) => p.describe)].filter(Boolean).join(' '),
     ...(download ? { artefact: download.artefact, artefactRows: download.rows } : {}),
   };
 }
