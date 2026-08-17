@@ -25,7 +25,7 @@ Five classifications:
 | Change a field on the selected rows | grid multi-select | **generic** through context: "assign these to Dave" |
 | Add a note | `CrmWorkspace` note dialog | **generic** append to `notes`, including "add a note to this customer" |
 | Create a lead, prospect or customer | `CrmWorkspace` new row | **lifecycle** "create a new lead for Smith Logistics" |
-| Delete a contact | grid context menu | **lifecycle** one named record only, never a described set |
+| Delete a contact | grid context menu | **lifecycle** one named record, or the records on the screen with the count typed to confirm. Never a described set |
 | Assign an account owner | grid, `assigned_to` | **generic**, gated on `crm.assign` |
 | Make a list from selected rows | `CrmWorkspace` move-to-list | **operation** `list.create`, one transaction |
 | Move a contact into an existing list | move-to-list menu | **operation** `list.add`, the list resolved by name inside the transaction that does the move |
@@ -106,12 +106,6 @@ Five classifications:
 4. **A meeting named by when it is.** "Friday's site visit" is a date
    and a description rather than a title, and nothing turns that into a
    record reference. Every other entity is named by its title.
-5. **Bulk delete.** A described set is refused today and a refusal is
-   not the finished functionality. "Delete all 12 selected test leads"
-   is a real thing to want, over records already on the screen, with the
-   count in the sentence to check against the selection. What it needs
-   is a stronger destructive confirmation than an ordinary write, not a
-   permanent prohibition.
-6. **Sending a result out of the company.** See the CRM table: the only
+5. **Sending a result out of the company.** See the CRM table: the only
    part that does not exist is the transport, and it does not exist
    anywhere in this repository or its environment.

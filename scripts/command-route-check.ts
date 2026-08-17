@@ -263,6 +263,56 @@ test('a plain export comes back as a file body, not as JSON', async () => {
   ok('and nothing was written to produce it', db.writes.length === 0);
 });
 
+/* =============================================================
+   5. A deletion is agreed to by number, at the boundary too
+   ============================================================= */
+
+test('the apply route will not delete a set without the count', async () => {
+  /* Real uuids, because the route validates the shape of every id the
+     browser sends before it will point a command at one. */
+  const one = '11111111-1111-1111-1111-111111111111';
+  const two = '22222222-2222-2222-2222-222222222222';
+  const db = fakeDb({
+    crm_contacts: [
+      { id: one, company_name: 'TEST lead one', status: 'lead' },
+      { id: two, company_name: 'TEST lead two', status: 'lead' },
+    ],
+  });
+  serve(db);
+
+  const context = { selection: { entity: 'contacts', ids: [one, two] } };
+  const text = 'delete all 2 selected test leads';
+
+  const plan = await import('../app/api/command/plan/route');
+  const planned = await (await plan.POST(post('http://x/api/command/plan', {
+    text, preview: true, context,
+  }) as never)).json() as {
+    hash: string; preview: { ok: true; programmeHash: string; severity: string };
+  };
+  ok('the preview says it is destructive', planned.preview.severity === 'destructive',
+    planned.preview.severity);
+
+  const apply = await import('../app/api/command/apply/route');
+  const bare = await (await apply.POST(post('http://x/api/command/apply', {
+    text, planHash: planned.hash, programmeHash: planned.preview.programmeHash,
+    confirm: true, context,
+  }) as never)).json() as { ok: boolean; reason?: string };
+
+  ok('confirming without the number is refused', bare.ok === false, JSON.stringify(bare).slice(0, 160));
+  ok('by name', bare.reason === 'not acknowledged', String(bare.reason));
+  ok('and both records are still there', db.tables.crm_contacts.length === 2,
+    String(db.tables.crm_contacts.length));
+
+  const done = await (await apply.POST(post('http://x/api/command/apply', {
+    text, planHash: planned.hash, programmeHash: planned.preview.programmeHash,
+    confirm: true, acknowledge: 2, context,
+  }) as never)).json() as { ok: boolean; message?: string };
+
+  ok('and with the number it goes through', done.ok === true, JSON.stringify(done).slice(0, 160));
+  ok('with both records gone', db.tables.crm_contacts.length === 0,
+    String(db.tables.crm_contacts.length));
+});
+
 /* ============================================================= */
 
 async function main() {

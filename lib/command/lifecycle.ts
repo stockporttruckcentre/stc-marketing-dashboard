@@ -345,7 +345,12 @@ export function parseLifecycle(
 
   const deleteVerb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))
     .sort((a, b) => b.length - a.length)[0];
-  if (deleteVerb && !namesAField) return readDelete(raw, deleteVerb, caps);
+  if (deleteVerb && !namesAField) {
+    /* One named record first. A set is only ever the records somebody
+       has in front of them. */
+    return readDelete(raw, deleteVerb, caps)
+      ?? readBulkDelete(raw, deleteVerb, caps, context);
+  }
 
   const createVerb = CREATE_WORDS.filter((w) => t.includes(` ${w} `))
     .sort((a, b) => b.length - a.length)[0];
@@ -424,6 +429,75 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
     requires: spec.capability,
     /* A verb, an entity and a name. Anything less does not get here. */
     confidence: 11,
+  };
+}
+
+/**
+ * "Delete all 12 selected test leads."
+ *
+ * A described set is still refused: "delete the sold trailers" is one
+ * wrong word away from the worst thing this application could do, and
+ * the words describe rows nobody has looked at. Records ON THE SCREEN
+ * are different. Somebody ticked them, they can see them, and the
+ * sentence can state how many there are.
+ *
+ * THE COUNT IN THE SENTENCE IS CHECKED AGAINST THE SELECTION.
+ *
+ * "Delete all 12 selected test leads" with nine ticked is somebody
+ * working from a screen that has moved under them, and it is refused
+ * rather than run over the nine. Where the sentence gives no number the
+ * selection still decides, and the preview names every record.
+ *
+ * A refusal is not the finished functionality. What makes this safe is
+ * that the records are the ones in front of the person, the count is
+ * agreed, and the confirmation is a stronger one than an ordinary
+ * write's.
+ */
+function readBulkDelete(
+  raw: string, verb: string, caps: CrmCapabilities | undefined, context: CommandContext,
+): LifecyclePlan | null {
+  const pointed = readContextReference(raw);
+  if (!pointed || pointed.kind !== 'selection') return null;
+
+  const from = resolveContext(pointed, context);
+  if (!from) return null;
+
+  const def = entityDef(from.entity);
+  const title = def?.titleField;
+  if (!def) return null;
+
+  const spec = writableFor(from.entity, title ?? '');
+  const requires = spec?.capability ?? 'crm.delete';
+  if (caps && !caps.has(requires)) return null;
+
+  /* A number in the sentence has to be the number on the screen. */
+  const said = raw.match(/\b(\d{1,5})\b/)?.[1];
+  if (said && Number(said) !== from.ids.length) return null;
+
+  const step: Mutate = {
+    op: 'delete',
+    id: 'd1',
+    expect: 'many',
+    target: { entity: from.entity },
+    match: {
+      op: 'select',
+      from: { entity: from.entity },
+      where: from.match,
+      produces: { kind: 'rows', entity: from.entity },
+    },
+    produces: { kind: 'rows', entity: from.entity },
+  };
+
+  return {
+    op: 'delete',
+    entity: from.entity,
+    step,
+    summary: `Delete ${from.ids.length} ${from.ids.length === 1 ? def.labelOne : def.label}, `
+      + 'and there is no undo',
+    requires,
+    /* Below a plain named delete, so a sentence that names one record
+       is never read as a set. */
+    confidence: 12,
   };
 }
 

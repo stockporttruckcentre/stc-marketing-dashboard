@@ -2057,6 +2057,109 @@ test('a viewer calling the role function directly changes nothing', async () => 
     String(db.tables.profiles.find((r) => r.id === 'p1')?.role));
 });
 
+
+/* =============================================================
+   23. Bulk delete, agreed to by number
+
+   A described set is still refused: "delete the sold trailers" is one
+   wrong word away from the worst thing this application could do.
+   Records on the screen are different. Somebody ticked them, they can
+   see them, and the sentence can state how many there are.
+   ============================================================= */
+
+test('deleting the selected records asks for the number first', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'TEST lead one', status: 'lead' },
+      { id: 'c2', company_name: 'TEST lead two', status: 'lead' },
+      { id: 'c3', company_name: 'Real Customer', status: 'customer' },
+    ],
+  });
+  const text = 'delete all 2 selected test leads';
+  const context = selected(['c1', 'c2']) as never;
+
+  const planned = await planAndPreview({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), preview: true, context,
+  });
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as a deletion of a set', planned.planned.planning.plan.steps
+    .some((s) => s.op === 'delete' && s.expect === 'many'),
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+
+  const preview = planned.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok) return;
+  ok('over both selected records', preview.count === 2, String(preview.count));
+  /* The same keystroke that confirms a price change must not confirm
+     this. */
+  ok('and it is marked destructive', preview.severity === 'destructive', preview.severity);
+
+  const without = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('a confirmation with no number is refused',
+    !without.ok && without.reason === 'not acknowledged',
+    without.ok ? 'it deleted' : without.reason);
+  ok('and nothing was deleted', db.tables.crm_contacts.length === 3,
+    String(db.tables.crm_contacts.length));
+
+  const wrong = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    acknowledge: 3,
+  });
+  ok('and so is the wrong number',
+    !wrong.ok && wrong.reason === 'not acknowledged', wrong.ok ? 'it deleted' : wrong.reason);
+  ok('still nothing deleted', db.tables.crm_contacts.length === 3,
+    String(db.tables.crm_contacts.length));
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    acknowledge: 2,
+  });
+  ok('the right number goes through', done.ok, done.ok ? '' : done.why);
+  ok('both selected records are gone', db.tables.crm_contacts.length === 1,
+    JSON.stringify(db.tables.crm_contacts.map((r) => r.company_name)));
+  ok('and the one nobody selected is still there',
+    db.tables.crm_contacts[0]?.company_name === 'Real Customer',
+    String(db.tables.crm_contacts[0]?.company_name));
+});
+
+test('a count that does not match the screen is not read as a deletion', async () => {
+  /* Somebody working from a screen that has moved under them. */
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'TEST lead one', status: 'lead' },
+      { id: 'c2', company_name: 'TEST lead two', status: 'lead' },
+    ],
+  });
+  const planned = await planAndPreview({
+    text: 'delete all 12 selected test leads', ...actor('admin'),
+    store: postgrestStore(db.supabase), preview: true,
+    context: selected(['c1', 'c2']) as never,
+  });
+  const deletes = planned?.planned.planning.plan.steps.some((s) => s.op === 'delete') ?? false;
+  ok('it is not a deletion', !deletes,
+    JSON.stringify(planned?.planned.planning.plan.steps.map((s) => s.op)));
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('a described set is still refused', async () => {
+  /* The words describe rows nobody has looked at, and there is no undo. */
+  const db = fakeDb({ stock_trailers: trailers() });
+  const planned = await plan('delete all the sold trailers', 'admin', db);
+  const deletes = planned?.planned.planning.plan.steps.some((s) => s.op === 'delete') ?? false;
+  ok('it does not plan as a deletion', !deletes,
+    JSON.stringify(planned?.planned.planning.plan.steps.map((s) => s.op)));
+  ok('and nothing was written', db.writes.length === 0);
+});
+
 /* ============================================================= */
 
 async function main() {

@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
   const raw = await req.json().catch(() => ({})) as {
     text?: unknown; planHash?: unknown; programmeHash?: unknown; confirm?: unknown;
-    context?: unknown;
+    context?: unknown; acknowledge?: unknown;
   };
 
   const text = typeof raw.text === 'string' ? raw.text : '';
@@ -72,6 +72,11 @@ export async function POST(req: NextRequest) {
     context: readContext(raw.context),
     previewPlanHash: planHash,
     previewProgrammeHash: programmeHash,
+    /* How many records the caller is agreeing to remove. Only a
+       destructive plan reads it, and one that needs it and does not get
+       it comes back with a fresh preview rather than a smaller
+       deletion. */
+    acknowledge: typeof raw.acknowledge === 'number' ? raw.acknowledge : undefined,
   });
 
   if (outcome.ok) {

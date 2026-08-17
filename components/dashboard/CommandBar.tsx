@@ -677,7 +677,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * fingerprints only decide whether what it arrives at is what was
    * shown here.
    */
-  async function applyEdit() {
+  async function applyEdit(acknowledge?: number) {
     if (!meaning || !editPreview?.ok) return;
     setStage('running');
     const res = await fetch('/api/command/apply', {
@@ -687,6 +687,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         planHash: meaning.hash,
         programmeHash: editPreview.programmeHash,
         confirm: true,
+        acknowledge,
         context,
       }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
@@ -1506,9 +1507,11 @@ function Answer({ answered, onGo, onReset }: {
 function EditConfirm({ preview, summary, onApply, onCancel }: {
   preview: MutationPreview | null;
   summary: string;
-  onApply: () => void;
+  /** The count, for a deletion. Absent for everything else. */
+  onApply: (acknowledge?: number) => void;
   onCancel: () => void;
 }) {
+  const [typed, setTyped] = useState('');
   if (!preview) return null;
 
   if (!preview.ok) {
@@ -1606,12 +1609,49 @@ function EditConfirm({ preview, summary, onApply, onCancel }: {
             </div>
           ))}
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <Button variant="primary" size="sm" onClick={onApply}>
-              <Check size={12} /> {preview.count > 1 ? `Change all ${preview.count}` : 'Save it'}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-          </div>
+          {/* A DELETION IS AGREED TO BY NUMBER.
+
+              Everything else here can be put back by typing the old
+              value in. Removing records cannot, so the same keystroke
+              that confirms a price change must not confirm this: the
+              number has to be typed, and the server checks it against
+              the set as it stands rather than against this preview. */}
+          {preview.severity === 'destructive' ? (
+            <>
+              <div style={{ fontSize: 12.5, color: 'var(--danger, var(--warning))', marginTop: 10, lineHeight: 1.5 }}>
+                This removes {preview.count} {preview.count === 1 ? 'record' : 'records'} and
+                there is no undo. Type {preview.count} to confirm.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                <input
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  inputMode="numeric"
+                  aria-label={`Type ${preview.count} to confirm`}
+                  style={{
+                    width: 72, padding: '6px 8px', fontSize: 13,
+                    border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                    background: 'var(--surface)', color: 'var(--text)',
+                  }}
+                />
+                <Button
+                  variant="primary" size="sm"
+                  disabled={Number(typed) !== preview.count}
+                  onClick={() => onApply(preview.count)}
+                >
+                  <Check size={12} /> Delete {preview.count}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Button variant="primary" size="sm" onClick={() => onApply()}>
+                <Check size={12} /> {preview.count > 1 ? `Change all ${preview.count}` : 'Save it'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

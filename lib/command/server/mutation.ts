@@ -134,6 +134,16 @@ export type MutationPreview =
        * both halves and has to be shown both.
        */
       deliveries: DeliveryPreview[];
+      /**
+       * How much this needs agreeing to.
+       *
+       * `destructive` is a plan that removes records, which is the one
+       * thing here with no undo. The apply request for one must state
+       * the number of records it is agreeing to, so a preview somebody
+       * skimmed cannot be confirmed by the same keystroke as a price
+       * change.
+       */
+      severity: 'ordinary' | 'destructive';
       programmeHash: string;
     }
   | {
@@ -335,6 +345,7 @@ export async function previewMutation(
     cautions: [...new Set(fields.map((f) => f.caution).filter((c): c is string => !!c))],
     operations,
     deliveries: deliveries(planning.plan),
+    severity: planning.plan.steps.some((s) => s.op === 'delete') ? 'destructive' : 'ordinary',
     programmeHash: programme.hash,
   };
 }
@@ -366,7 +377,7 @@ export type MutationOutcome =
   | {
       ok: false;
       reason: 'not understood' | 'meaning changed' | 'not a mutation' | 'refused'
-        | 'not permitted' | 'incomplete' | 'drift' | 'failed';
+        | 'not permitted' | 'incomplete' | 'drift' | 'failed' | 'not acknowledged';
       why: string;
       /** The reading as it stands now, when that is what changed. */
       restated?: Planned;
@@ -391,6 +402,16 @@ export async function applyMutation(
     policy?: ExecutionPolicy;
     /** Whose name goes on any file the programme produces. */
     actorName?: string;
+    /**
+     * The number of records the caller is agreeing to remove.
+     *
+     * Required for a destructive plan and ignored otherwise. A preview
+     * and an Enter is the right weight for a price change and not for a
+     * deletion, so the request that removes records has to say how many
+     * it means and be right about it. Checked against the freshly
+     * resolved set, not against the preview's copy of it.
+     */
+    acknowledge?: number;
   },
 ): Promise<MutationOutcome> {
   const agreement = await planForExecution({ ...req, previewHash: req.previewPlanHash });
@@ -439,6 +460,39 @@ export async function applyMutation(
   }
   if (!planning.availability.executable) {
     return { ok: false, reason: 'refused', why: meaning.blocked.join('; ') || 'nothing here performs that' };
+  }
+
+  /* A DELETION IS AGREED TO BY NUMBER.
+
+     Everything else here can be put back by typing the old value in.
+     Removing records cannot, so a preview and an Enter is the wrong
+     weight for it: the request has to say how many records it means and
+     be right about it, against the set as it stands NOW rather than
+     against the preview's copy of it. Somebody whose screen moved under
+     them gets a fresh preview rather than a smaller deletion. */
+  if (planning.plan.steps.some((s) => s.op === 'delete' && s.expect === 'many')) {
+    const fresh = await previewMutation(planning, req.store, req.policy);
+    if (!fresh.ok) return { ok: false, reason: 'refused', why: fresh.why };
+
+    if (req.acknowledge == null) {
+      return {
+        ok: false,
+        reason: 'not acknowledged',
+        why: `that removes ${fresh.count.toLocaleString('en-GB')} `
+          + `${fresh.count === 1 ? 'record' : 'records'} and there is no undo. `
+          + 'Confirm the number to go ahead.',
+        preview: fresh,
+      };
+    }
+    if (req.acknowledge !== fresh.count) {
+      return {
+        ok: false,
+        reason: 'not acknowledged',
+        why: `you agreed to ${req.acknowledge.toLocaleString('en-GB')} but that now removes `
+          + `${fresh.count.toLocaleString('en-GB')}. Nothing has been changed.`,
+        preview: fresh,
+      };
+    }
   }
 
   /* EVERY DELIVERY, PREPARED BEFORE ANYTHING IS WRITTEN.
