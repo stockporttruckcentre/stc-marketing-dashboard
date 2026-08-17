@@ -28,9 +28,12 @@ Five classifications:
 | Delete a contact | grid context menu | **lifecycle** one named record only, never a described set |
 | Assign an account owner | grid, `assigned_to` | **generic**, gated on `crm.assign` |
 | Make a list from selected rows | `CrmWorkspace` move-to-list | **operation** `list.create`, one transaction |
-| Move a contact into an existing list | move-to-list menu | **not yet**: no operation names an existing list |
+| Move a contact into an existing list | move-to-list menu | **operation** `list.add`, the list resolved by name inside the transaction that does the move |
 | Export a contact's own record | `ExportView`, docx and xlsx | **navigation**, and **generic** for row exports |
-| Export any selection to CSV, XLSX, PDF or DOCX | not manually possible | **generic**, four formats, every entity |
+| Export any selection to CSV, XLSX, PDF or DOCX | not manually possible | **generic**, four formats, every entity, never truncated |
+| Share a list with colleagues | list membership dialog | **operation** `rows.share`, one transaction, refuses the global list |
+| Attach a file to a record | not manually possible | **operation** `record.attach`, bytes on the row under the record's own policy |
+| Email a result out of the company | not manually possible | **not yet**: read, resolved, gated and confirmed, but there is no mail client in `package.json` and no SMTP or provider credentials anywhere in the environment |
 | Import a CSV of contacts | `app/api/crm/import` | **not yet**: needs a file, and the bar has no upload |
 | Look a company up in Lusha | `app/api/lusha/enrich` | **not yet**: capability declared, handler is a route the runtime does not call |
 | Raise a proposal | `app/api/crm/proposal` | **not yet**: the route builds a document from a template |
@@ -81,22 +84,43 @@ Five classifications:
 ## What is genuinely missing, and why
 
 1. **Anything that needs a file going in.** The CSV import takes an
-   upload. The bar has no way to attach one, so there is nothing to
-   plan.
-2. **Anything that needs a canvas.** Writing a post, drawing a route,
-   choosing a photograph. Navigation is the right answer, not a
-   shortcoming.
+   upload and the bar has no way to attach one. That is a task rather
+   than an exclusion: the bar needs an attachment context, and the raw
+   file is input context, not semantic authority. Nothing about the
+   import's own validation would change.
+2. **Anything that needs a canvas.** Drawing a route, choosing a
+   photograph. Not writing a post: "create a LinkedIn draft saying we
+   have three new curtainsiders at Hyde" already contains everything the
+   draft needs, and calling it a canvas job is how a sentence that could
+   simply run ends up opening a screen instead. A canvas is required
+   where the sentence genuinely cannot carry the content, and nowhere
+   else.
 3. **Operations nobody has declared.** `send-from-stock`,
    `calendar/invite`, `crm/proposal` and `lusha/enrich` are real routes
-   with real logic. Each needs a capability with its inputs and one row
-   in the store's function map to become reachable. None of them needs
-   new machinery.
-4. **Moving records into an existing list.** `list.create` makes a new
-   one. Naming an existing list means resolving it, which is a
-   `reference` expression the IR already has and no reader produces yet.
-5. **A meeting named by when it is.** "Friday's site visit" is a date
+   with real logic, and the logic is in the route rather than in a
+   module. Each needs its body lifted into `lib/` the way
+   `lib/crm/mark-sold.ts` already is, a capability with its inputs, and
+   a dispatch entry in the store. None of them needs new machinery, and
+   none of them may be reimplemented: two implementations of a proposal
+   is how one of them stops carrying the relationship across.
+4. **A meeting named by when it is.** "Friday's site visit" is a date
    and a description rather than a title, and nothing turns that into a
    record reference. Every other entity is named by its title.
-6. **Changing a role.** `profiles.role` is deliberately not writable
-   from the command bar. Elevating somebody is the one change where the
-   admin screen's confirmation is the point.
+5. **Changing a role.** `profiles.role` is not in the writable
+   dictionary. The reason given for that was that the admin screen's
+   confirmation is the point, and that reason does not hold: the bar's
+   own confirmation is a confirmation, and requiring somebody to click
+   through to another screen because that screen also confirms is not a
+   security property. It is unbuilt work, and what it needs is an
+   admin-only capability, exact resolution of the person, an old role to
+   new role preview, and one atomic write. Nothing about it is
+   different in kind from marking a deal sold.
+6. **Bulk delete.** A described set is refused today and a refusal is
+   not the finished functionality. "Delete all 12 selected test leads"
+   is a real thing to want, over records already on the screen, with the
+   count in the sentence to check against the selection. What it needs
+   is a stronger destructive confirmation than an ordinary write, not a
+   permanent prohibition.
+7. **Sending a result out of the company.** See the CRM table: the only
+   part that does not exist is the transport, and it does not exist
+   anywhere in this repository or its environment.
