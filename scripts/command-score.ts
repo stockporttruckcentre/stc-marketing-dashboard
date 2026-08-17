@@ -286,6 +286,8 @@ async function produceFile(sentence: string): Promise<{ rows: number; bytes: num
   });
   if (!out.ok) return { rows: 0, bytes: 0, why: out.why };
   if (db.writes.length) return { rows: 0, bytes: 0, why: 'producing a file wrote to the database' };
+  /* A share grants access and produces nothing to measure. */
+  if (out.kind !== 'artefact') return { rows: out.rows, bytes: 0, why: '' };
   return { rows: out.rows, bytes: out.artefact.bytes.length, why: '' };
 }
 

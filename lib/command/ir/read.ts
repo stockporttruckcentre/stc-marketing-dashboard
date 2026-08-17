@@ -75,6 +75,10 @@ export function selectBehind(plan: Plan, source: Source | undefined): Select | n
     if (step.op === 'select') return step as Select;
     if (step.op === 'invoke') return walk(step.subject);
     if (step.op === 'update' || step.op === 'delete' || step.op === 'create') return walk(step.match);
+    /* An artefact is the rows that went into it. "Export it to Excel
+       and share it with Dave" shares the customers, not a spreadsheet
+       nobody can grant access to. */
+    if (step.op === 'emit') return walk(step.from);
     return null;
   };
 

@@ -30,7 +30,7 @@
    from the plan.
    ============================================================= */
 import { parseQuery, type QueryPlan } from './query';
-import { parseEdit, type EditPlan } from './mutate';
+import { parseEdit, readRecordRefs, type EditPlan } from './mutate';
 import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
 import { ENTITIES } from './schema';
@@ -48,7 +48,7 @@ import {
   type Problem, type Requirement, type Completion,
 } from './ir/validate';
 import { executability, selectToQueryPayload, type QueryPayload, type Unavailable } from './ir/execute';
-import { FILE_EMIT_CAPABILITY } from './ir/registry';
+import { destination, entity as entityDef, FILE_EMIT_CAPABILITY } from './ir/registry';
 import type { Emit, Plan, Select } from './ir/types';
 
 /* =============================================================
@@ -295,10 +295,56 @@ function planProgramme(
   };
 }
 
+/**
+ * The record an attachment goes on, as a selection of one.
+ *
+ * Every entity whose title column the words match, tried in registry
+ * order. Nothing is named here: an entity added to the registry with a
+ * reference-shaped title column can be attached to without this
+ * changing.
+ */
+function attachTarget(words: string[] | string): Select | null {
+  const text = Array.isArray(words) ? words.join(' ') : words;
+  const refs = readRecordRefs(text);
+  const named = [...refs.stc, ...refs.coded][0];
+  if (!named) return null;
+
+  for (const spec of ENTITIES) {
+    const def = entityDef(spec.id);
+    const title = def?.titleField;
+    if (!title) continue;
+    /* A stock reference is a stock reference wherever it appears, and
+       the title column is what carries it. */
+    if (!/^(stc_no|chassis_number|reference)$/.test(title)) continue;
+    return {
+      op: 'select',
+      from: { entity: spec.id },
+      where: {
+        kind: 'cmp', op: 'eq',
+        left: { kind: 'field', of: { entity: spec.id, field: title } },
+        right: { kind: 'literal', value: named },
+      },
+      produces: { kind: 'rows', entity: spec.id },
+    };
+  }
+  return null;
+}
+
 function planOneClause(
   text: string,
   opts?: PlanOptions,
 ): CommandPlanning | null {
+  /* SENDING IS AN INSTRUCTION TOO, AND IT IS THE ONE THAT WAS MEANT.
+
+     "Email the sold trailers to Dave as a PDF" starts with a word that
+     is also a column on a customer, so the field reader took it and
+     wrote Dave's name into an email address. A destination clause with
+     its verb at the front of the sentence is not a field write, and
+     deciding that here rather than teaching the field reader about
+     destinations keeps each reader doing one thing. */
+  const sending = readOutput(text);
+  const outbound = sending && sending.to.kind !== 'download' && sending.to.kind !== 'display';
+
   /* AN INSTRUCTION WINS OVER THE QUESTION ITS WORDS COULD ALSO BE.
 
      "Add £1k refurb to STC143980" is a sentence about trailers, and
@@ -306,14 +352,14 @@ function planOneClause(
      reader goes first, exactly as it did in the bar, and what changes is
      only that the decision now happens here where the server can make
      it too. */
-  const write = readInstruction(text, opts);
+  const write = outbound ? null : readInstruction(text, opts);
   if (write) return write;
 
   /* Making a record and getting rid of one, which are the other two
      ways a row's life changes. Read after a field write, because
      "delete the customer on STC143580" empties a column and the
      instruction reader is the one that knows that. */
-  const lifecycle = readLifecycle(text, opts);
+  const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
 
   /* WHAT COMES OUT IS NOT PART OF THE QUESTION.
@@ -323,8 +369,16 @@ function planOneClause(
      is: it reported "word" and "document" as words it could not match,
      and "to Excel" ended up inside a filter. The clause comes off
      first, and what is left is an ordinary question. */
-  const output = readOutput(text);
+  const output = sending;
   const asked = output ? output.rest : text;
+
+  /* "SHARE IT WITH DAVE" IS ALL DESTINATION AND NO QUESTION.
+
+     Taking the destination clause out leaves nothing, and nothing names
+     no entity. The word that pointed at what is being sent is the only
+     part of that sentence which says what it is about, so it is put
+     back in front of whatever is left before the entity is worked out. */
+  const pointing = output?.pointer ? `${output.pointer} ${asked}`.trim() : asked;
 
   /* "EXPORT THESE TO EXCEL" NAMES NO ENTITY, AND DOES NOT NEED TO.
 
@@ -332,13 +386,13 @@ function planOneClause(
      nothing to work with in the word "these", so the entity comes from
      the context and the sentence is read again with it, which is how
      one word ends up meaning a selection of forty customers. */
-  const pointedFirst = readContextReference(asked);
+  const pointedFirst = readContextReference(pointing);
   const pointedEntity = (pointedFirst
     ? resolveContext(pointedFirst, opts?.context ?? EMPTY_CONTEXT)?.entity
     : undefined)
     /* Or whatever the clause before produced. "Export it to Excel"
        names no entity and does not need to. */
-    ?? (refersBack(asked) ? opts?.priorResult?.entity : undefined);
+    ?? (refersBack(pointing) ? opts?.priorResult?.entity : undefined);
 
   const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary)
     ?? (pointedEntity ? parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary) : null);
@@ -370,14 +424,41 @@ function planOneClause(
      select: the file has to be built from exactly the rows the question
      described, and a second description of them is a second answer. */
   if (output && select.id) {
+    /* WHERE IT GOES DECIDES WHICH PERMISSION NAMES IT.
+
+       The step used to carry `rows.export` whatever the destination was,
+       so "share the customer list with Dave" claimed to be permitted by
+       the export capability. Building the file still requires
+       `rows.export`, and `derivedRequirements` derives that from the
+       output being a file, separately and in addition. */
+    const to = destination(output.to.kind);
+
+    /* Attaching names a record, and until the entity is known the
+       reader cannot say which. It is resolved here, against the same
+       reference reader every instruction uses, so "attach it to
+       STC143580" reaches a real row rather than a blank entity. */
+    let attachTo = output.to;
+    if (output.to.kind === 'attach') {
+      const target = attachTarget(output.recipients?.[0] ?? '');
+      if (target) attachTo = { kind: 'attach', to: target };
+      else {
+        plan.unmet.push({
+          part: 'destination',
+          why: `nothing here matches the record to attach it to`,
+        });
+      }
+    }
+
     const emit: Emit = {
       op: 'emit',
       id: 'e1',
       from: { ref: 'rows', step: select.id },
       output: output.output,
-      to: output.to,
-      capability: FILE_EMIT_CAPABILITY,
-      produces: { kind: 'artefact' },
+      to: attachTo,
+      capability: to?.capability ?? FILE_EMIT_CAPABILITY,
+      /* Only a file is a thing a later step can pick up. A share
+         produces access, which is not an object anybody can hold. */
+      ...(output.output.kind === 'file' ? { produces: { kind: 'artefact' as const } } : {}),
     };
     plan.steps.push(emit);
   }

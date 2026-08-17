@@ -661,6 +661,74 @@ $$;
 SELECT assert('and the list was not created either',
   (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST never made') = 0);
 
+-- -------------------------------------------------------------
+-- Sharing that list with colleagues
+--
+-- Sharing in this CRM is list membership, so this asserts against
+-- `crm_list_members` rather than against anything the command layer
+-- believes about it. The two people are the ones the RLS section above
+-- created, which is also why they have `profiles` rows: the project's
+-- `handle_new_user` trigger copies an auth user into profiles.
+-- -------------------------------------------------------------
+DO $$
+DECLARE list UUID; out JSONB;
+BEGIN
+  SELECT id INTO list FROM crm_lists WHERE name = 'TEST tipper prospects';
+
+  SELECT command_share_list(list,
+    ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID,
+          'bbbbbbbb-0000-0000-0000-000000000002'::UUID], TRUE) INTO out;
+  PERFORM assert('a list is shared with both colleagues', (out ->> 'granted')::INT = 2, out::TEXT);
+
+  -- Sharing twice grants nothing more, which is what `idempotent` in
+  -- the capability registry claims and this is what makes it true.
+  SELECT command_share_list(list,
+    ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE) INTO out;
+  PERFORM assert('sharing again with the same person changes nothing',
+    (out ->> 'granted')::INT = 0 AND (out ->> 'alreadyHad')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list is shared with both colleagues', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the memberships are really there',
+  (SELECT COUNT(*) FROM crm_list_members m JOIN crm_lists l ON l.id = m.list_id
+   WHERE l.name = 'TEST tipper prospects') = 2);
+
+-- One person who is not here takes the whole grant with them.
+DO $$
+DECLARE list UUID;
+BEGIN
+  SELECT id INTO list FROM crm_lists WHERE name = 'TEST tipper prospects';
+  PERFORM command_share_list(list,
+    ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID,
+          '00000000-0000-0000-0000-0000000000ff'::UUID], TRUE);
+  PERFORM assert('a person who is not here fails the whole grant', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a person who is not here fails the whole grant',
+    SQLERRM LIKE '%only%are here%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nobody new was granted access either',
+  (SELECT COUNT(*) FROM crm_list_members m JOIN crm_lists l ON l.id = m.list_id
+   WHERE l.name = 'TEST tipper prospects') = 2);
+
+-- The global list is everybody's already.
+DO $$
+DECLARE glob UUID;
+BEGIN
+  SELECT id INTO glob FROM crm_lists WHERE is_global LIMIT 1;
+  PERFORM command_share_list(glob,
+    ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE);
+  PERFORM assert('the global list refuses to be shared', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the global list refuses to be shared',
+    SQLERRM LIKE '%global list%', SQLERRM);
+END
+$$;
+
+DELETE FROM crm_list_members WHERE list_id IN (SELECT id FROM crm_lists WHERE name LIKE 'TEST %');
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
 DELETE FROM crm_lists WHERE name LIKE 'TEST %';
 

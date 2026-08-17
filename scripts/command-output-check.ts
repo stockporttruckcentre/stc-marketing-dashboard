@@ -96,7 +96,7 @@ async function hardCase() {
     planning?.availability.permitted === true && planning?.availability.executable === true);
 
   ok('a file came back', !!out?.ok, out && !out.ok ? out.why : '');
-  if (!out?.ok) return;
+  if (!out?.ok || out.kind !== 'artefact') return;
 
   ok('it is a Word document', out.artefact.filename.endsWith('.docx'), out.artefact.filename);
   ok('and a real one', out.artefact.bytes.length > 4000 && out.artefact.bytes[0] === 0x50,
@@ -166,7 +166,7 @@ async function formats() {
 
       const { out } = await produce(text);
       ok('a file came back', !!out?.ok, out && !out.ok ? out.why : '');
-      if (!out?.ok) continue;
+      if (!out?.ok || out.kind !== 'artefact') continue;
       ok(`it is genuinely a ${f.format}`, MAGIC[f.format](out.artefact.bytes),
         `${out.artefact.filename}, first bytes ${[...out.artefact.bytes.slice(0, 4)].join(',')}`);
       ok('with the right extension', out.artefact.filename.endsWith(`.${f.format}`),
@@ -213,7 +213,7 @@ async function shaping() {
   current = 'ordering and limit';
   const { out } = await produce('export the three most expensive sold trailers as a CSV');
   ok('a file came back', !!out?.ok, out && !out.ok ? out.why : '');
-  if (!out?.ok) return;
+  if (!out?.ok || out.kind !== 'artefact') return;
   ok('the limit is honoured', out.rows === 3, String(out.rows));
 
   /* The three dearest of the six sold, in descending order, worked out

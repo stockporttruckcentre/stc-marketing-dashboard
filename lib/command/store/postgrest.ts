@@ -275,6 +275,17 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_owner: c.args.actorId ?? null,
     }),
   },
+  'rows.share': {
+    name: 'command_share_list',
+    /* The subject is the list, because a list is what this application
+       shares. Who it goes to is an argument rather than a subject: the
+       operation runs once over one list, not once per person. */
+    args: (c) => ({
+      p_list: c.subjects[0] ?? null,
+      p_users: c.args.users ?? [],
+      p_can_edit: c.args.canEdit ?? true,
+    }),
+  },
   'deal.markSold': {
     name: 'command_mark_sold_many',
     args: (c) => ({

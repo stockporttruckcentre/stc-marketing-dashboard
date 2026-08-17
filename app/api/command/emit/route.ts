@@ -83,7 +83,17 @@ export async function POST(req: NextRequest) {
   });
 
   if (!done.ok) {
-    return NextResponse.json({ error: done.why }, { status: done.reason === 'unsupported' ? 501 : 400 });
+    return NextResponse.json({
+      error: done.why,
+      candidates: done.candidates,
+    }, { status: done.reason === 'unsupported' ? 501 : 400 });
+  }
+
+  /* Sharing grants access. There is no file to hand back, and inventing
+     one would put the records somebody just gave away into a download
+     nobody asked for. */
+  if (done.kind === 'granted') {
+    return NextResponse.json({ message: done.message, rows: done.rows, people: done.people });
   }
 
   /* The file itself, not a link to one. Nothing is stored, so there is

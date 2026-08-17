@@ -28,7 +28,7 @@
    ============================================================= */
 import type { CommandPlanning } from '../plan';
 import type { Store } from '../ir/store';
-import type { Emit, Plan } from '../ir/types';
+import type { Emit, Expr, Plan, Select } from '../ir/types';
 import { entity as entityDef } from '../ir/registry';
 import { runSelect, selectBehind } from '../ir/read';
 import { buildTable, type Artefact, type TableColumn } from '../render/table';
@@ -63,8 +63,24 @@ export const FORMAT_MAXIMUM: Record<FileFormat, number | null> = {
 };
 
 export type EmitOutcome =
-  | { ok: true; artefact: Artefact; rows: number; capped: boolean }
-  | { ok: false; reason: 'not an emit' | 'unsupported' | 'failed' | 'too large'; why: string };
+  /** A file, handed over. */
+  | { ok: true; kind: 'artefact'; artefact: Artefact; rows: number; capped: boolean }
+  /**
+   * Access granted, which is what sharing is here.
+   *
+   * Not a file. Sharing a list with a colleague in this application
+   * means they can open it, and producing a spreadsheet as well would
+   * be doing something nobody asked for with data that just became
+   * somebody else's to read.
+   */
+  | { ok: true; kind: 'granted'; rows: number; message: string; people: string[] }
+  | {
+      ok: false;
+      reason: 'not an emit' | 'unsupported' | 'failed' | 'too large' | 'unresolved';
+      why: string;
+      /** Where a name matched more than one person, so the caller can ask. */
+      candidates?: { id: string; label: string }[];
+    };
 
 /** The emit step of a plan, if it has one. */
 export function emitStep(plan: Plan): Emit | null {
@@ -72,25 +88,164 @@ export function emitStep(plan: Plan): Emit | null {
 }
 
 
+/**
+ * The people a destination names, as rows.
+ *
+ * Each recipient is a `reference` expression in the plan: "the person
+ * called Dave", not a row id. Resolving here rather than at planning
+ * time is what keeps the plan's meaning independent of who happens to
+ * be in the profiles table at the moment it was typed.
+ */
+async function resolvePeople(
+  store: Store, refs: Expr[],
+): Promise<
+  | { ok: true; people: { id: string; label: string }[] }
+  | { ok: false; why: string; candidates?: { id: string; label: string }[] }
+> {
+  const def = entityDef('profiles');
+  if (!def) return { ok: false, why: 'nothing here holds people' };
+  const title = def.titleField ?? 'id';
+
+  const people: { id: string; label: string }[] = [];
+  for (const ref of refs) {
+    if (ref.kind !== 'reference') return { ok: false, why: 'that does not name anybody' };
+    const read = await store.read({
+      table: def.table,
+      columns: [...new Set(['id', title, 'email'])],
+      where: ref.where,
+      limit: 20,
+    });
+    if (!read.ok) return { ok: false, why: read.why };
+    if (!read.rows.length) return { ok: false, why: 'nobody here matches that name' };
+    if (read.rows.length > 1) {
+      /* Two people called Dave is a real possibility, and granting the
+         wrong one access to the CRM is not a thing to guess at. */
+      return {
+        ok: false,
+        why: `${read.rows.length} people match that name, so it is not clear who was meant`,
+        candidates: read.rows.map((r) => ({
+          id: String(r.id), label: String(r[title] ?? r.email ?? r.id),
+        })),
+      };
+    }
+    const row = read.rows[0];
+    people.push({ id: String(row.id), label: String(row[title] ?? row.email ?? row.id) });
+  }
+  return { ok: true, people };
+}
+
+/**
+ * Granting colleagues access to what a sentence selected.
+ *
+ * Sharing in this application is list membership, so the rows have to
+ * be on ONE list and it must not be the global one. That is a real
+ * constraint rather than an implementation shortcut: "share these three
+ * customers with Dave" has no meaning here unless those customers are
+ * somewhere Dave can be given access to, and quietly making a list to
+ * put them in would be inventing a thing nobody asked for.
+ */
+async function runShare(
+  plan: Plan, emit: Emit, select: Select, store: Store,
+): Promise<EmitOutcome> {
+  if (emit.to.kind !== 'share') {
+    return { ok: false, reason: 'unsupported', why: 'that is not a share' };
+  }
+
+  const who = await resolvePeople(store, emit.to.with);
+  if (!who.ok) return { ok: false, reason: 'unresolved', why: who.why, candidates: who.candidates };
+
+  const read = await runSelect(select, { store });
+  if (!read.ok) return { ok: false, reason: 'failed', why: read.why };
+  if (!read.rows.length) return { ok: false, reason: 'failed', why: 'nothing here matches that' };
+  if (read.entity !== 'contacts') {
+    return {
+      ok: false,
+      reason: 'unsupported',
+      why: `sharing works on customer lists, and that is a selection of ${read.entity}`,
+    };
+  }
+
+  /* Which list. Read fresh rather than taken off the projection, since
+     the columns a file wants and the column sharing needs are not the
+     same question. */
+  const def = entityDef('contacts');
+  const withList = await store.read({
+    table: def?.table ?? 'crm_contacts',
+    columns: ['id', 'list_id'],
+    where: select.where ?? { kind: 'and', of: [] },
+    limit: read.rows.length,
+  });
+  if (!withList.ok) return { ok: false, reason: 'failed', why: withList.why };
+
+  const lists = [...new Set(withList.rows.map((r) => r.list_id).filter((v) => v != null))].map(String);
+  if (lists.length !== 1) {
+    return {
+      ok: false,
+      reason: 'unsupported',
+      why: lists.length === 0
+        ? 'those records are not on a list, so there is nothing to give anybody access to. '
+          + 'Make a list from them first.'
+        : `those records are spread across ${lists.length} lists, so it is not clear which one to share`,
+    };
+  }
+
+  const done = await store.invoke({
+    capability: 'rows.share',
+    subjects: lists,
+    args: { users: who.people.map((p) => p.id) },
+  });
+  if (!done.ok) return { ok: false, reason: 'failed', why: done.why };
+
+  const names = who.people.map((p) => p.label);
+  return {
+    ok: true,
+    kind: 'granted',
+    rows: read.rows.length,
+    people: names,
+    message: `${names.join(' and ')} can now see those `
+      + `${read.rows.length.toLocaleString('en-GB')} ${read.rows.length === 1 ? 'record' : 'records'}.`,
+  };
+}
+
+/**
+ * The first emit in a plan, for a caller that has only one.
+ *
+ * A programme can hold several: "export it to Excel and share it with
+ * Dave" is a file AND a grant, and a caller carrying out the whole
+ * programme walks `deliverySteps` and runs each one.
+ */
 export async function runEmit(
   planning: CommandPlanning,
   opts: { store: Store; actorName: string; now: Date },
 ): Promise<EmitOutcome> {
   const emit = emitStep(planning.plan);
   if (!emit) return { ok: false, reason: 'not an emit', why: 'that sentence asks for nothing to be produced' };
+  return runEmitStep(planning, emit, opts);
+}
+
+export async function runEmitStep(
+  planning: CommandPlanning,
+  emit: Emit,
+  opts: { store: Store; actorName: string; now: Date },
+): Promise<EmitOutcome> {
+
+  const select = selectBehind(planning.plan, emit.from);
+  if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
+
+  /* Sharing is not a file. It grants access to records somebody already
+     described, so it goes down its own path and produces no artefact. */
+  if (emit.to.kind === 'share') return runShare(planning.plan, emit, select, opts.store);
 
   if (emit.output.kind !== 'file') {
     return { ok: false, reason: 'unsupported', why: 'only a file can be produced from here yet' };
   }
   if (emit.to.kind !== 'download') {
-    /* Share, email and attach are declared in the registry and have no
-       handler. Saying which one is missing is better than a five
-       hundred from a route that was never written. */
+    /* Email and attach are declared in the registry. `executability`
+       refuses them before anything gets here, off the registry's own
+       record of which capabilities have a handler, so this is the last
+       line rather than the gate. */
     return { ok: false, reason: 'unsupported', why: `nothing here ${emit.to.kind}s a file yet` };
   }
-
-  const select = selectBehind(planning.plan, emit.from);
-  if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
 
   const format = emit.output.format as FileFormat;
   const maximum = FORMAT_MAXIMUM[format] ?? undefined;
@@ -132,5 +287,5 @@ export async function runEmit(
       : format === 'xlsx' ? await renderXlsx(table)
         : await renderDocx(table);
 
-  return { ok: true, artefact, rows: table.count, capped: table.capped };
+  return { ok: true, kind: 'artefact', artefact, rows: table.count, capped: table.capped };
 }

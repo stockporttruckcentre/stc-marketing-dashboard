@@ -44,7 +44,7 @@ import type { Emit, Mutate, Plan } from '../ir/types';
 import { WRITABLE_FIELDS, type WritableField } from '../fields';
 import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
-import { runEmit } from './emit';
+import { runEmit, runEmitStep } from './emit';
 import type { Artefact } from '../render/table';
 
 /* -------------------------------------------------------------
@@ -192,10 +192,15 @@ function deliveries(plan: Plan): DeliveryPreview[] {
   return deliverySteps(plan).map((s) => {
     const emit = s as Emit;
     const dest = destination(emit.to.kind);
-    const format = emit.output.kind === 'file' ? nounFor(emit.output.format as FileFormat) : 'result';
+    const format = emit.output.kind === 'file' ? nounFor(emit.output.format as FileFormat) : null;
     return {
       capability: emit.capability ?? dest?.capability ?? '',
-      label: `${/^[aeiou]/i.test(format) ? 'an' : 'a'} ${format}`,
+      /* A file is a thing. Access is not, and calling it "a result"
+         told somebody they were getting something back when what was
+         happening was that somebody else was getting in. */
+      label: format
+        ? `${/^[aeiou]/i.test(format) ? 'an' : 'a'} ${format}`
+        : 'access to those records',
       destination: dest?.label ?? emit.to.kind,
     };
   });
@@ -425,29 +430,49 @@ export async function applyMutation(
      transaction and pretending otherwise would be the only lie here.
      What that costs is stated rather than hidden: if the change commits
      and the file does not build, the outcome says so. */
-  if (!deliverySteps(planning.plan).length) return { ok: true, changed: done.changed, message };
+  const outgoing = deliverySteps(planning.plan);
+  if (!outgoing.length) return { ok: true, changed: done.changed, message };
 
-  const delivered = await runEmit(planning, {
-    store: req.store,
-    actorName: req.actorName ?? 'the command bar',
-    now: new Date(),
-  });
+  /* EVERY DELIVERY, NOT THE FIRST ONE.
 
-  return delivered.ok
-    ? {
+     "Create a list from them, export it to Excel and share it with
+     Dave" is a file AND a grant, and running only the first would hand
+     over the spreadsheet and tell somebody Dave could see the list. */
+  let out: MutationOutcome = { ok: true, changed: done.changed, message };
+
+  for (const step of outgoing) {
+    const delivered = await runEmitStep(planning, step as Emit, {
+      store: req.store,
+      actorName: req.actorName ?? 'the command bar',
+      now: new Date(),
+    });
+
+    if (!delivered.ok) {
+      return {
         ok: true,
         changed: done.changed,
-        message: `${message} ${delivered.rows.toLocaleString('en-GB')} `
-          + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`,
-        artefact: delivered.artefact,
-        artefactRows: delivered.rows,
-      }
-    : {
-        ok: true,
-        changed: done.changed,
-        message: `${message} The file did not build.`,
+        message: `${out.ok ? out.message : message} What was to happen next did not.`,
         deliveryFailed: delivered.why,
+        ...(out.ok && out.artefact ? { artefact: out.artefact, artefactRows: out.artefactRows } : {}),
       };
+    }
+    if (!out.ok) continue;
+
+    out = delivered.kind === 'granted'
+      /* Sharing grants access rather than producing anything, so there
+         is no file to carry back and the message says what actually
+         happened to whom. */
+      ? { ...out, message: `${out.message} ${delivered.message}` }
+      : {
+          ...out,
+          message: `${out.message} ${delivered.rows.toLocaleString('en-GB')} `
+            + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`,
+          artefact: delivered.artefact,
+          artefactRows: delivered.rows,
+        };
+  }
+
+  return out;
 }
 
 /* -------------------------------------------------------------

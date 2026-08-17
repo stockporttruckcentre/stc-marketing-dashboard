@@ -857,7 +857,7 @@ test('export these to Excel', async () => {
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
   ok('holding the two that were ticked', out.rows === 2, String(out.rows));
   const body = new TextDecoder().decode(out.artefact.bytes);
   void body;
@@ -1100,7 +1100,7 @@ test('an export holds every row the selection describes', async () => {
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
   ok('holding all 6,001 rows', out.rows === 6001, String(out.rows));
 
   const body = new TextDecoder().decode(out.artefact.bytes);
@@ -1125,7 +1125,7 @@ test('a user asked limit is still honoured', async () => {
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
   /* A limit the SENTENCE asked for is part of the answer. A limit the
      implementation imposes is not. */
   ok('holding exactly the hundred that were asked for', out.rows === 100, String(out.rows));
@@ -1160,7 +1160,7 @@ test('sold in the last six months finds the dispatched and the ordered', async (
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
 
   const body = new TextDecoder().decode(out.artefact.bytes);
   ok('the dispatched one is in it', body.includes('STC100001'));
@@ -1186,7 +1186,7 @@ test('naming a date explicitly still means that date', async () => {
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
   ok('only the dispatched one', out.rows === 1, String(out.rows));
 });
 
@@ -1333,7 +1333,7 @@ test('the file holds the customers, not the list record', async () => {
     store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
   });
   ok('a file came back', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
+  if (!out.ok || out.kind !== 'artefact') return;
   ok('holding the two the sentence described', out.rows === 2, String(out.rows));
   ok('and it is a real workbook', out.artefact.bytes.length > 0);
 });
@@ -1351,6 +1351,134 @@ test('a sentence with a period means the same thing a moment later', async () =>
   ok('and they are the same meaning',
     first?.planned.meaning.hash === second?.planned.meaning.hash,
     `${first?.planned.meaning.hash} vs ${second?.planned.meaning.hash}`);
+});
+
+/* =============================================================
+   16. Sharing is access, and access is granted to a person
+
+   Sharing in this CRM is list membership, which is what every read
+   policy on contacts, notes and addresses already consults. So the bar
+   grants the same thing the CRM screen grants, through the same table.
+   ============================================================= */
+
+const people = (): Row[] => [
+  { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
+  { id: 'p2', full_name: 'Tom Jones', email: 'tom@stc.co.uk', role: 'sales' },
+];
+
+const onAList = (): Row[] => [
+  { id: 'c1', company_name: 'Dawson Group', trailers: 40, status: 'lead', location: 'Hyde', list_id: 'L1' },
+  { id: 'c2', company_name: 'Pollock Haulage', trailers: 25, status: 'lead', location: 'Hyde', list_id: 'L1' },
+];
+
+test('sharing a selection with a colleague grants them access to it', async () => {
+  const db = fakeDb({
+    crm_contacts: onAList(),
+    crm_lists: [{ id: 'L1', name: 'Fleet Prospects', is_global: false }],
+    profiles: people(),
+  });
+  const planning = planCommand('share the customers in Hyde with Dave and Tom', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  ok('it plans', !!planning);
+  if (!planning) return;
+
+  ok('as a share and not a download',
+    planning.plan.steps.some((s) => s.op === 'emit' && s.to.kind === 'share'),
+    JSON.stringify(planning.plan.steps.map((s) => s.op)));
+  /* Sharing is not exporting. Requiring the export capability for it
+     would let anybody who can share pull the same rows out as a file. */
+  ok('permitted by managing lists, not by exporting',
+    planning.permissions.includes('crm.manageLists') && !planning.permissions.includes('crm.export'),
+    JSON.stringify(planning.permissions));
+  ok('and something performs it', planning.availability.executable,
+    JSON.stringify(planning.availability.unavailable));
+
+  const out = await runEmit(planning, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('it goes through', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  ok('granting rather than producing', out.kind === 'granted', out.kind);
+  if (out.kind !== 'granted') return;
+  ok('to both of them by name',
+    out.people.join(' and ') === 'Dave Smith and Tom Jones', out.people.join(', '));
+  ok('over both records', out.rows === 2, String(out.rows));
+});
+
+test('a name that fits two people is a question, not a guess', async () => {
+  const db = fakeDb({
+    crm_contacts: onAList(),
+    crm_lists: [{ id: 'L1', name: 'Fleet Prospects', is_global: false }],
+    profiles: [
+      { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
+      { id: 'p3', full_name: 'Dave Ashworth', email: 'davea@stc.co.uk', role: 'sales' },
+    ],
+  });
+  const planning = planCommand('share the customers in Hyde with Dave', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('nobody is given access', !out.ok, 'it shared');
+  if (out.ok) return;
+  ok('and both candidates come back', out.candidates?.length === 2,
+    JSON.stringify(out.candidates));
+  ok('nothing was written', db.writes.length === 0);
+});
+
+test('records on no list cannot be shared, and it says why', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', location: 'Hyde', list_id: null },
+    ],
+    profiles: people(),
+  });
+  const planning = planCommand('share the customers in Hyde with Dave', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('it refuses', !out.ok, 'it shared');
+  if (out.ok) return;
+  ok('saying a list is what gets shared', /list/i.test(out.why), out.why);
+  ok('nothing was written', db.writes.length === 0);
+});
+
+test('the four clause sentence makes the list, the file and the grant', async () => {
+  const db = fakeDb({ crm_contacts: fleets(), profiles: people() });
+  const text = `${FOUND}, create a list called Fleet Prospects from them, `
+    + 'export it to Excel and share it with Dave';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it plans as one programme', planned?.planned.planning.plan.steps.length === 4,
+    JSON.stringify(planned?.planned.planning.plan.steps.map((s) => s.op)));
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok || !planned) return;
+
+  /* Both halves of what happens after the write are shown before it. */
+  ok('the file and the grant are both declared', preview.deliveries.length === 2,
+    JSON.stringify(preview.deliveries));
+  ok('one of them leaves the records with somebody else',
+    preview.deliveries.some((d) => d.capability === 'rows.share'),
+    JSON.stringify(preview.deliveries));
+
+  const done = await applyMutation({
+    text, ...actor('admin'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    actorName: 'Alex Ellis',
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('the list was made over both customers', done.changed === 2, String(done.changed));
+  ok('the file came back', done.artefactRows === 2, String(done.artefactRows));
+  ok('and the message says who can see them now', /Dave Smith/.test(done.message), done.message);
+  ok('nothing was left undone', !done.deliveryFailed, done.deliveryFailed ?? '');
 });
 
 test('a clause nobody understood refuses the whole programme', async () => {

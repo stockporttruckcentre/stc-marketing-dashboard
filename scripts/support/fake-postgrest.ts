@@ -298,6 +298,49 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId, name: listName, moved: targets.length }, error: null };
     }
 
+    /* Granting colleagues access, which in this CRM is list membership.
+       Modelled here for the same reason the sale is: a fake that cannot
+       perform an operation cannot show that the operation reached it. */
+    if (name === 'command_share_list') {
+      const listId = args.p_list == null ? '' : String(args.p_list);
+      const users = (args.p_users ?? []) as string[];
+      if (!listId) return { data: null, error: { message: 'nothing said which list to share' } };
+      if (!users.length) return { data: null, error: { message: 'nothing said who to share it with' } };
+
+      const list = (tables.crm_lists ?? []).find((r) => String(r.id) === listId);
+      if (!list) return { data: null, error: { message: 'that list is not there' } };
+      if (list.is_global === true) {
+        return {
+          data: null,
+          error: { message: 'that is the global list, which the whole team can already see' },
+        };
+      }
+
+      const present = (tables.profiles ?? []).filter((r) => users.includes(String(r.id)));
+      if (present.length !== users.length) {
+        return {
+          data: null,
+          error: {
+            message: `expected to share with ${users.length} people but only ${present.length} of them are here`,
+          },
+        };
+      }
+
+      const members = (tables.crm_list_members ??= []);
+      let granted = 0;
+      for (const u of users) {
+        if (members.some((m) => String(m.list_id) === listId && String(m.user_id) === u)) continue;
+        members.push({ list_id: listId, user_id: u, can_edit: args.p_can_edit !== false });
+        granted += 1;
+      }
+      writes.push({ table: 'crm_list_members', set: { list_id: listId }, ids: users });
+
+      return {
+        data: { listId, asked: users.length, granted, alreadyHad: users.length - granted },
+        error: null,
+      };
+    }
+
     if (name !== 'command_apply') return { data: null, error: { message: `no function ${name}` } };
     const changes = (args.p_changes ?? []) as
       { op?: 'update' | 'insert' | 'delete'; table: string; id?: string; set?: Row }[];

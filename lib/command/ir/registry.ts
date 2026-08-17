@@ -333,6 +333,13 @@ export function entities(): EntityDef[] {
   /* Tables with no query entity. Present so coverage is measured
      against everything the app holds rather than against the subset
      somebody already wired up. */
+  /* What a row of a table nobody wrote a query spec for is CALLED.
+     Without this every such row was previewed by its uuid, so "share it
+     with Dave" asked somebody to confirm granting access to
+     "7f3ac1e2-...". First column present wins, and a table with none of
+     them keeps the id it always had. */
+  const TITLE_BY_CONVENTION = ['full_name', 'name', 'title', 'company_name', 'stc_no', 'label'];
+
   for (const t of TABLES) {
     if (claimed.has(t.table)) continue;
     out.push({
@@ -341,6 +348,7 @@ export function entities(): EntityDef[] {
       label: t.label,
       labelOne: t.label,
       addressable: false,
+      titleField: TITLE_BY_CONVENTION.find((c) => t.columns.some((x) => x.name === c)),
       subtitleFields: [],
       fields: fieldsFor(t.table, t, undefined, writableByEntity.get(t.table) ?? new Map()),
       readRequires: readRequiresFor(t.table),
@@ -612,9 +620,11 @@ export const CAPABILITIES: CapabilityDef[] = [
     /* Granting the same people the same access twice leaves the same
        access. */
     idempotent: true,
-    /* Declared, not built. Nothing in this application shares a result
-       yet, and recording a handler that does not exist is how a
-       registry starts lying about what the product can do. */
+    /* Sharing in this application is list membership, which is what the
+       CRM's own read policies consult. The command bar grants the same
+       thing the CRM screen grants, through the same table. */
+    entities: ['contacts'],
+    handler: 'supabase/migrations/013_command_share_list.sql',
   },
   {
     id: 'rows.email',
