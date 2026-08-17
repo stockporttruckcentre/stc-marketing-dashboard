@@ -55,7 +55,19 @@ import type {
  * guessing.
  */
 function periodFor(range: NonNullable<QueryPlan['range']>): Period {
-  return { kind: 'absolute', from: range.from, to: range.to };
+  /* TO THE DAY, BECAUSE A DAY IS THE UNIT THE SENTENCE USED.
+
+     "This year" resolved to a `to` of the current instant, so a plan
+     built at 09:47:22.683 and the identical plan built a millisecond
+     later were two different plans. The plan hash exists to notice that
+     a sentence has come to mean something else, and at millisecond
+     precision it fired on every single command carrying a period:
+     preview, press Enter, "what that means has changed since you looked
+     at it", every time.
+
+     Everything downstream reads these as dates anyway, so nothing is
+     lost by saying so here. */
+  return { kind: 'absolute', from: range.from.slice(0, 10), to: range.to.slice(0, 10) };
 }
 
 /* -------------------------------------------------------------

@@ -70,8 +70,24 @@ function serialise(c: Cond): string | null {
       return `${c.kind}(${parts.join(',')})`;
     }
     case 'not': {
-      const inner = serialise(c.of);
-      return inner === null ? null : `not.${inner}`;
+      /* Double negation is not negation, and peeling first is what stops
+         `not.not.` reaching PostgREST as a column called "not". */
+      let inner: Cond = c.of;
+      let negate = true;
+      while (inner.kind === 'not') { negate = !negate; inner = inner.of; }
+
+      const s = serialise(inner);
+      if (s === null) return null;
+      if (!negate) return s;
+
+      /* PostgREST negates a nested tree with a `not.` prefix and a
+         single column condition with `not` AFTER the column. Writing the
+         tree form for a column produced `not.status.eq.proposal`, which
+         it reads as a column named "not", and the whole read came back
+         as unsupported. */
+      if (/^(?:and|or)\(/.test(s)) return `not.${s}`;
+      const dot = s.indexOf('.');
+      return dot < 0 ? null : `${s.slice(0, dot)}.not.${s.slice(dot + 1)}`;
     }
     case 'cmp': {
       const column = plainField(c.left);
@@ -136,6 +152,15 @@ export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
         case 'lte': return { q: q.lte(column, value) };
         default: return { q, unsupported: `the ${c.op} comparison` };
       }
+    }
+    case 'not': {
+      /* Negation goes through the same serialiser as an `or` branch,
+         because that is the only place PostgREST accepts a condition
+         written out rather than built up. `or` over a single member is
+         that member. */
+      const s = serialise(c);
+      if (s === null) return { q, unsupported: 'a negation this cannot express' };
+      return { q: q.or(s) };
     }
     case 'in': {
       const column = plainField(c.of);

@@ -1212,6 +1212,164 @@ test('a question does not become an instruction', async () => {
   ok('nothing was written', db.writes.length === 0);
 });
 
+/* =============================================================
+   15. Three clauses, one programme
+
+   The sentence below is three things joined by commas and an "and",
+   and reading it as three commands loses the only part that matters:
+   "them" and "it" are what the clause before produced. Read that way,
+   "export it to Excel" is a question about the word "it" and the file
+   holds every customer in the database.
+   ============================================================= */
+
+const fleets = (): Row[] => [
+  /* Two big fleets with no proposal against them, which is what the
+     sentence describes. A proposal is `quoted` in this CRM. */
+  { id: 'c1', company_name: 'Dawson Group', trailers: 40, status: 'lead',
+    created_at: '2026-02-01', last_contact: '2026-02-01' },
+  { id: 'c2', company_name: 'Pollock Haulage', trailers: 25, status: 'contacted',
+    created_at: '2026-03-01', last_contact: '2026-03-01' },
+  /* A big fleet that HAS had a proposal. */
+  { id: 'c3', company_name: 'Eddie Stobart', trailers: 300, status: 'quoted',
+    created_at: '2026-01-15', last_contact: '2026-01-15' },
+  /* A small fleet with no proposal. */
+  { id: 'c4', company_name: 'Corner Shop Logistics', trailers: 3, status: 'lead',
+    created_at: '2026-04-01', last_contact: '2026-04-01' },
+];
+
+const FOUND = "find customers with more than 20 trailers who haven't had a proposal this year";
+const PROGRAMME = `${FOUND}, create a list from them and export it to Excel`;
+const NAMED = `${FOUND}, create a list called Fleet Prospects from them, export it to Excel`;
+
+test('a three clause sentence becomes one wired programme', async () => {
+  const planning = planCommand(PROGRAMME, {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  ok('it plans', !!planning);
+  if (!planning) return;
+
+  const steps = planning.plan.steps;
+  ok('as three steps and not three commands', steps.length === 3, String(steps.length));
+  ok('a selection first', steps[0]?.op === 'select', String(steps[0]?.op));
+  ok('then the list operation', steps[1]?.op === 'invoke', String(steps[1]?.op));
+  ok('then the file', steps[2]?.op === 'emit', String(steps[2]?.op));
+
+  /* The wiring is the whole point: each step names what the one before
+     produced rather than describing rows of its own. */
+  const invoke = steps[1] as { subject?: { ref?: string; step?: string } };
+  ok('the list is made from the selection', invoke.subject?.ref === 'rows'
+    && invoke.subject?.step === steps[0]?.id, JSON.stringify(invoke.subject));
+  const emit = steps[2] as { from?: { ref?: string; step?: string } };
+  ok('and the file comes from the list', !!emit.from?.ref && emit.from?.step === steps[1]?.id,
+    JSON.stringify(emit.from));
+
+  ok('nothing in it is unrepresentable', planning.availability.representable,
+    JSON.stringify(planning.problems));
+  ok('every part of it can run', planning.availability.executable,
+    JSON.stringify(planning.availability.unavailable));
+  ok('an admin may do all of it', planning.availability.permitted === true,
+    JSON.stringify(planning.availability.missingPermissions));
+});
+
+test('a list nobody named is not created under a name this invented', async () => {
+  /* `list.create` declares its name as a required input. The sentence
+     above never gives one, so the whole programme stops and says which
+     input is missing rather than filing the customers under something
+     nobody will recognise later. */
+  const db = fakeDb({ crm_contacts: fleets() });
+  const planning = planCommand(PROGRAMME, {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const { previewMutation } = await import('../lib/command/server/mutation');
+  const preview = await previewMutation(planning!, postgrestStore(db.supabase));
+  ok('it does not preview', !preview.ok, 'it previewed');
+  if (preview.ok) return;
+  ok('and says the name is what it needs', /list name/i.test(preview.why), preview.why);
+  ok('nothing was written', db.writes.length === 0);
+});
+
+test('the named form previews, runs and produces the file in one go', async () => {
+  const db = fakeDb({ crm_contacts: fleets() });
+  const planned = await plan(NAMED, 'admin', db);
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as one programme', planned.planned.planning.plan.steps.length === 3,
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+
+  const preview = planned.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok) return;
+  ok('over the two big fleets with no proposal against them',
+    preview.count === 2, String(preview.count));
+  ok('and it says a file is coming too', preview.deliveries.length === 1,
+    JSON.stringify(preview.deliveries));
+  ok('nothing was written to build the preview', db.writes.length === 0);
+
+  const done = await applyMutation({
+    text: NAMED, ...actor('admin'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    actorName: 'Alex Ellis',
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('the list was made over both of them', done.changed === 2, String(done.changed));
+  ok('and the file came back with it', !!done.artefact, done.deliveryFailed ?? 'no artefact');
+  ok('holding the two the sentence described', done.artefactRows === 2, String(done.artefactRows));
+  ok('as a spreadsheet', done.artefact?.filename.endsWith('.xlsx') === true,
+    done.artefact?.filename ?? '');
+});
+
+test('the file holds the customers, not the list record', async () => {
+  const db = fakeDb({ crm_contacts: fleets() });
+  const planning = planCommand(NAMED, {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  /* "It" is the list, and the list is a record. A file of that record
+     would be one row holding a name. The rows are the ones the list was
+     made from, which the emit resolves by following the dataflow. */
+  const out = await runEmit(planning!, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+  ok('a file came back', out.ok, out.ok ? '' : out.why);
+  if (!out.ok) return;
+  ok('holding the two the sentence described', out.rows === 2, String(out.rows));
+  ok('and it is a real workbook', out.artefact.bytes.length > 0);
+});
+
+test('a sentence with a period means the same thing a moment later', async () => {
+  /* The plan hash exists to notice that a sentence has come to MEAN
+     something else. A period resolved to the current instant made every
+     such sentence mean something new every millisecond, so previewing
+     one and then confirming it always came back as "what that means has
+     changed since you looked at it". */
+  const db = fakeDb({ crm_contacts: fleets() });
+  const first = await plan(NAMED, 'admin', db, false);
+  const second = await plan(NAMED, 'admin', db, false);
+  ok('both plan', !!first && !!second);
+  ok('and they are the same meaning',
+    first?.planned.meaning.hash === second?.planned.meaning.hash,
+    `${first?.planned.meaning.hash} vs ${second?.planned.meaning.hash}`);
+});
+
+test('a clause nobody understood refuses the whole programme', async () => {
+  /* Half a programme is not a programme. If the last clause is not
+     understood, creating the list and not exporting it, then reporting
+     success, is worse than doing nothing. */
+  const planning = planCommand(
+    'find customers with more than 20 trailers, create a list called Fleet Prospects from them '
+    + 'and export it to the blockchain',
+    { actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)] },
+  );
+  ok('it does not come back as a runnable programme',
+    planning?.availability.representable !== true,
+    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+  ok('and it says which word it could not place',
+    (planning?.plan.unmet ?? []).some((u) => /blockchain/.test(u.why)),
+    JSON.stringify(planning?.plan.unmet));
+});
+
 /* ============================================================= */
 
 async function main() {

@@ -872,6 +872,13 @@ export function parseQuery(
     ].map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean));
 
     const leftover = lower
+      /* A contraction is one word to a reader and two to a tokeniser.
+         Stripping the apostrophe out of "haven't" leaves "haven", which
+         is in no vocabulary anywhere and was reported as a word the
+         customers do not match. The negation itself is read by the
+         grammar, which has its own handling of the contracted forms;
+         this only stops the wreckage of one being named as content. */
+      .replace(/n[’']t\b/g, ' not ')
       .replace(/[^a-z0-9£$€ ]+/g, ' ')
       .split(/\s+/)
       .filter((w) => w.length >= 3)

@@ -66,6 +66,25 @@ export function effectSteps(plan: Plan): Step[] {
   });
 }
 
+/**
+ * Producing something and handing it over, which is not a database
+ * change and cannot be inside the transaction that makes one.
+ *
+ * A programme that both changes records and produces a file is one
+ * thing somebody asked for and two things the machinery does: the
+ * change commits, then the file is built from the rows. Refusing the
+ * whole programme because a transaction cannot hold a spreadsheet is
+ * refusing an ordinary sentence for an implementation reason.
+ */
+export function deliverySteps(plan: Plan): Step[] {
+  return plan.steps.filter((s) => s.op === 'emit' && s.to.kind !== 'display');
+}
+
+/** Effects that go into one transaction. Deliveries are not among them. */
+function transactionalSteps(plan: Plan): Step[] {
+  return effectSteps(plan).filter((s) => s.op !== 'emit');
+}
+
 /** What the executor can carry out today. Everything else refuses. */
 function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
   if (s.op === 'update' || s.op === 'create' || s.op === 'delete') return { ok: true };
@@ -173,7 +192,10 @@ export type OrchestrateOptions = {
 export async function resolveProgramme(
   plan: Plan, opts: OrchestrateOptions,
 ): Promise<Programme> {
-  const effects = effectSteps(plan);
+  /* Everything that goes into the transaction. A file this programme
+     also produces is built afterwards, by the emit executor, from the
+     rows as they stand once the change has committed. */
+  const effects = transactionalSteps(plan);
   if (!effects.length) return { ok: false, reason: 'nothing to do', why: 'this plan changes nothing' };
 
   /* Every step, before any of them. A plan containing one thing this

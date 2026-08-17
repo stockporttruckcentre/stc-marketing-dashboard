@@ -35,7 +35,7 @@
 import type { Invoke, Plan, Select } from './types';
 import { capability, entity as entityDef, RELATIONSHIPS } from './registry';
 import type { Store } from './store';
-import { runSelect } from './read';
+import { runSelect, selectBehind } from './read';
 
 export type InvokeSubject = {
   /** The row the operation will run on. */
@@ -110,12 +110,16 @@ export async function resolveInvoke(
     return { ok: false, reason: 'unknown', why: `nothing performs ${step.capability} yet` };
   }
 
-  const subject = step.subject;
-  if (!subject || !('op' in subject)) {
+  /* The rows, however the step names them: its own selection, or the
+     one a clause before it made. "Create a list from them" carries a
+     reference rather than a filter, and resolving it here is what keeps
+     the records the list is made from the same records the sentence
+     described. */
+  const select = selectBehind(plan, step.subject);
+  if (!select) {
     return { ok: false, reason: 'unresolved', why: 'that operation does not say which records' };
   }
 
-  const select = subject as Select;
   const namedEntity = 'entity' in select.from ? (select.from as { entity: string }).entity : null;
   if (!namedEntity) {
     return { ok: false, reason: 'unresolved', why: 'that operation does not say which records' };

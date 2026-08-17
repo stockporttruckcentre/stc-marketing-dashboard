@@ -27,9 +27,59 @@
    registry exports without anybody touching this file, and a column
    that stops existing stops being exported.
    ============================================================= */
-import type { Cond, Expr, Select } from './types';
+import type { Cond, Expr, Plan, Select, Source } from './types';
 import { entity as entityDef, type FieldDef } from './registry';
 import type { Store } from './store';
+
+/* -------------------------------------------------------------
+   Following the dataflow back to the rows
+   ------------------------------------------------------------- */
+
+/**
+ * The selection behind a source, following references through the plan.
+ *
+ * A `ResultRef` does not have to land on a select. In
+ *
+ *   find customers with more than 20 trailers,
+ *   create a list called Fleet Prospects from them,
+ *   export it to Excel
+ *
+ * "it" is the list, and the list is a record. A file of that record is
+ * one row holding a name and a date, which is not what anybody asking
+ * that sentence wants. The rows are the ones the list was made from, so
+ * a reference to an operation resolves to the operation's SUBJECT.
+ *
+ * That rule is about the shape of the dataflow and not about lists:
+ * "mark them as sold and export it" resolves the same way, through
+ * `deal.markSold`, without either step being named here.
+ *
+ * `null` where the chain does not reach a selection at all, which is a
+ * refusal for every caller rather than a licence to read something else.
+ */
+export function selectBehind(plan: Plan, source: Source | undefined): Select | null {
+  const seen = new Set<string>();
+
+  const walk = (s: Source | undefined): Select | null => {
+    if (!s) return null;
+    if ('op' in s) return s.op === 'select' ? (s as Select) : null;
+    if (!('ref' in s)) {
+      /* A bare entity: everything in it, which is what "export the
+         customers" says when nothing narrowed it. */
+      return { op: 'select', from: s };
+    }
+    if (seen.has(s.step)) return null;
+    seen.add(s.step);
+
+    const step = plan.steps.find((x) => x.id === s.step);
+    if (!step) return null;
+    if (step.op === 'select') return step as Select;
+    if (step.op === 'invoke') return walk(step.subject);
+    if (step.op === 'update' || step.op === 'delete' || step.op === 'create') return walk(step.match);
+    return null;
+  };
+
+  return walk(source);
+}
 
 export type ReadRows = {
   entity: string;

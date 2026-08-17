@@ -28,9 +28,9 @@
    ============================================================= */
 import type { CommandPlanning } from '../plan';
 import type { Store } from '../ir/store';
-import type { Emit, Plan, Select } from '../ir/types';
+import type { Emit, Plan } from '../ir/types';
 import { entity as entityDef } from '../ir/registry';
-import { runSelect } from '../ir/read';
+import { runSelect, selectBehind } from '../ir/read';
 import { buildTable, type Artefact, type TableColumn } from '../render/table';
 import { renderCsv } from '../render/csv';
 import { renderXlsx } from '../render/xlsx';
@@ -71,16 +71,6 @@ export function emitStep(plan: Plan): Emit | null {
   return (plan.steps.find((s) => s.op === 'emit') as Emit | undefined) ?? null;
 }
 
-/** The select an emit reads from. */
-function sourceSelect(plan: Plan, emit: Emit): Select | null {
-  const from = emit.from;
-  if ('ref' in from) {
-    const step = plan.steps.find((s) => s.id === from.step);
-    return step && step.op === 'select' ? (step as Select) : null;
-  }
-  if ('op' in from) return from as Select;
-  return null;
-}
 
 export async function runEmit(
   planning: CommandPlanning,
@@ -99,7 +89,7 @@ export async function runEmit(
     return { ok: false, reason: 'unsupported', why: `nothing here ${emit.to.kind}s a file yet` };
   }
 
-  const select = sourceSelect(planning.plan, emit);
+  const select = selectBehind(planning.plan, emit.from);
   if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
 
   const format = emit.output.format as FileFormat;

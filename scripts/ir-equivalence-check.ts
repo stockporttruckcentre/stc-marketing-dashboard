@@ -133,8 +133,13 @@ function fromQueryPlan(p: QueryPlan): Semantics {
     amount: p.amountColumn ?? null,
     derived: p.derived ? { id: p.derived.id, from: p.derived.from, how: p.derived.how } : null,
     filters: sortFacts(filters),
+    /* To the day, both sides. The reader resolves a period against the
+       clock and the IR carries the day, because a `to` at millisecond
+       precision made an identical sentence a different plan a
+       millisecond later. Comparing the instants here would assert that
+       the two disagree when they say the same thing. */
     period: p.range && periodColumn
-      ? { from: p.range.from, to: p.range.to, column: periodColumn }
+      ? { from: p.range.from.slice(0, 10), to: p.range.to.slice(0, 10), column: periodColumn }
       : null,
     groupBy: p.groupBy?.column ?? null,
     order: p.order ? { column: p.order.column, direction: p.order.direction } : null,

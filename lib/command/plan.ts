@@ -34,6 +34,8 @@ import { parseEdit, type EditPlan } from './mutate';
 import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
 import { ENTITIES } from './schema';
+import { refersBack, splitClauses, type Clause } from './clauses';
+import { composeProgramme } from './programme';
 import {
   EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
 } from './context';
@@ -123,6 +125,16 @@ export type CommandPlanning = {
     groupLabel: string | null;
     orderLabel: string | null;
     derivedLabel: string | null;
+    /**
+     * What kind of file this clause asked for, when it asked for one.
+     *
+     * Carried separately from the summary so a clause that consumes an
+     * earlier result can be described without the selection it no longer
+     * makes. "Export it to Excel" plans a select and an emit; the
+     * composer throws the select away, and a summary still saying "list
+     * of customers" would tell somebody the file holds every customer.
+     */
+    outputLabel?: string | null;
   };
 };
 
@@ -184,9 +196,106 @@ export type PlanOptions = {
    * cannot point at anything, which is a refusal rather than a licence.
    */
   context?: CommandContext;
+  /**
+   * What the clause before this one produced.
+   *
+   * Only the ENTITY, never the rows: which rows is decided at execution
+   * by the `ResultRef` the composer wires in. This is what lets "export
+   * it to Excel" know it is about customers without the words saying
+   * so, in exactly the way the screen's selection does for "export
+   * these".
+   */
+  priorResult?: { entity: string };
 };
 
 export function planCommand(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  /* SEVERAL CLAUSES ARE ONE PROGRAMME, NOT SEVERAL COMMANDS.
+
+     "Find the customers ..., create a list from them and export it to
+     Excel" is one thing somebody wants, and reading it as three
+     commands loses the only part that matters: "them" and "it" are the
+     result of the clause before. Split first, plan each clause with the
+     readers that were already there, and wire the pointing back with a
+     `ResultRef`. A sentence with one clause, which is nearly all of
+     them, goes straight past this. */
+  const clauses = splitClauses(text);
+  if (clauses.length > 1) {
+    const programme = planProgramme(clauses, opts);
+    if (programme) return programme;
+  }
+
+  return planOneClause(text, opts);
+}
+
+/**
+ * Every clause, planned and wired together.
+ *
+ * `null` when any clause is not understood, because half a programme is
+ * not a programme: running the clauses that parsed would create a list
+ * and not export it, and say it had done both.
+ */
+function planProgramme(
+  clauses: Clause[],
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  const planned: { planning: CommandPlanning; refersBack: boolean }[] = [];
+
+  let prior: { entity: string } | undefined;
+
+  for (const clause of clauses) {
+    const one = planOneClause(clause.text, {
+      ...opts,
+      /* Only where the clause actually points back. A clause that names
+         its own subject is planned as though it stood alone. */
+      priorResult: clause.refersBack ? prior : undefined,
+    });
+    if (!one) return null;
+    planned.push({ planning: one, refersBack: clause.refersBack });
+
+    /* What this clause leaves behind, for the next one. */
+    const last = one.plan.steps[one.plan.steps.length - 1];
+    const entity = last && 'target' in last ? (last as { target: { entity: string } }).target.entity
+      : last && last.op === 'select' && 'entity' in last.from ? last.from.entity
+        : one.select && 'entity' in one.select.from ? one.select.from.entity
+          : prior?.entity;
+    if (entity) prior = { entity };
+  }
+
+  const composed = composeProgramme(planned);
+  if (!composed) return null;
+
+  const plan = composed.plan;
+  const writes = plan.steps.some((s) => s.op !== 'select');
+
+  return {
+    text: clauses.map((c) => c.text).join(', '),
+    kind: writes ? 'mutate' : 'read',
+    plan,
+    /* A programme's rows come from its own first step, not from one
+       select somebody can point a compatibility layer at. */
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts?.actorCapabilities),
+    presentation: {
+      summary: composed.summary,
+      /* The least confident clause decides. A programme is only as well
+         understood as its worst part. */
+      confidence: Math.min(...planned.map((p) => p.planning.presentation.confidence)),
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+function planOneClause(
   text: string,
   opts?: PlanOptions,
 ): CommandPlanning | null {
@@ -224,9 +333,12 @@ export function planCommand(
      the context and the sentence is read again with it, which is how
      one word ends up meaning a selection of forty customers. */
   const pointedFirst = readContextReference(asked);
-  const pointedEntity = pointedFirst
+  const pointedEntity = (pointedFirst
     ? resolveContext(pointedFirst, opts?.context ?? EMPTY_CONTEXT)?.entity
-    : undefined;
+    : undefined)
+    /* Or whatever the clause before produced. "Export it to Excel"
+       names no entity and does not need to. */
+    ?? (refersBack(asked) ? opts?.priorResult?.entity : undefined);
 
   const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary)
     ?? (pointedEntity ? parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary) : null);
@@ -293,6 +405,7 @@ export function planCommand(
       groupLabel: read.groupBy?.label ?? null,
       orderLabel: read.order?.label ?? null,
       derivedLabel: read.derived?.label ?? null,
+      outputLabel: output?.label ?? null,
     },
   };
 }
@@ -372,7 +485,7 @@ function readLifecycle(
   if (!opts?.actorCapabilities) return null;
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
-  const read = parseLifecycle(text, caps, opts.context ?? EMPTY_CONTEXT);
+  const read = parseLifecycle(text, caps, opts.context ?? EMPTY_CONTEXT, opts.priorResult);
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };

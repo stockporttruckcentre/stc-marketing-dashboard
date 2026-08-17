@@ -106,7 +106,17 @@ function filterMatches(row: Row, clause: string): boolean {
     return !parts.every((p) => filterMatches(row, p));
   }
 
+  /* A negated tree: `not.and(...)`, `not.or(...)`. */
+  if (/^not\./.test(trimmed)) return !filterMatches(row, trimmed.slice(4));
+
   const [column, verb, ...rest] = trimmed.split('.');
+
+  /* A negated column condition: `status.not.eq.proposal`. PostgREST puts
+     the `not` after the column here and before the tree above, and a
+     fake that only understood one of the two would pass a read the real
+     thing refuses. */
+  if (verb === 'not') return !filterMatches(row, `${column}.${rest.join('.')}`);
+
   const value = rest.join('.');
   const left = row[column];
 

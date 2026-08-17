@@ -37,12 +37,15 @@
    ============================================================= */
 import type { CommandPlanning } from '../plan';
 import { planAuthoritatively, planForExecution, planHash, type Planned, type PlanRequest } from './planner';
-import { resolveProgramme, executeProgramme, type Programme } from '../ir/orchestrate';
+import { resolveProgramme, executeProgramme, deliverySteps, type Programme } from '../ir/orchestrate';
 import type { ExecutionPolicy } from '../ir/orchestrate';
 import type { Store } from '../ir/store';
-import type { Mutate, Plan } from '../ir/types';
+import type { Emit, Mutate, Plan } from '../ir/types';
 import { WRITABLE_FIELDS, type WritableField } from '../fields';
-import { capability } from '../ir/registry';
+import { capability, destination } from '../ir/registry';
+import { nounFor, type FileFormat } from '../output';
+import { runEmit } from './emit';
+import type { Artefact } from '../render/table';
 
 /* -------------------------------------------------------------
    What a person is shown
@@ -73,6 +76,16 @@ export type OperationPreview = {
   skipped: { label: string; why: string }[];
 };
 
+/** Something the programme produces and hands over. */
+export type DeliveryPreview = {
+  /** The capability that permits it, from the registry. */
+  capability: string;
+  /** In words: "an Excel workbook, downloaded". */
+  label: string;
+  /** Where it goes, so leaving the company is never silent. */
+  destination: string;
+};
+
 export type MutationPreview =
   | {
       ok: true;
@@ -95,6 +108,15 @@ export type MutationPreview =
       cautions: string[];
       /** Operations, when the sentence asked for one rather than a write. */
       operations: OperationPreview[];
+      /**
+       * What the programme hands over once the change has committed.
+       *
+       * A file is not a database change and cannot be inside the
+       * transaction that makes one, but somebody confirming
+       * "create a list from them and export it to Excel" is confirming
+       * both halves and has to be shown both.
+       */
+      deliveries: DeliveryPreview[];
       programmeHash: string;
     }
   | {
@@ -163,6 +185,20 @@ function invokeArgs(plan: Plan): Record<string, unknown> {
     if (value.kind === 'literal') out[key] = value.value;
   }
   return out;
+}
+
+/** What a programme hands over once its change has committed. */
+function deliveries(plan: Plan): DeliveryPreview[] {
+  return deliverySteps(plan).map((s) => {
+    const emit = s as Emit;
+    const dest = destination(emit.to.kind);
+    const format = emit.output.kind === 'file' ? nounFor(emit.output.format as FileFormat) : 'result';
+    return {
+      capability: emit.capability ?? dest?.capability ?? '',
+      label: `${/^[aeiou]/i.test(format) ? 'an' : 'a'} ${format}`,
+      destination: dest?.label ?? emit.to.kind,
+    };
+  });
 }
 
 /** What the operation in a plan calls itself. */
@@ -245,6 +281,7 @@ export async function previewMutation(
     uniform,
     cautions: [...new Set(fields.map((f) => f.caution).filter((c): c is string => !!c))],
     operations,
+    deliveries: deliveries(planning.plan),
     programmeHash: programme.hash,
   };
 }
@@ -254,7 +291,23 @@ export async function previewMutation(
    ------------------------------------------------------------- */
 
 export type MutationOutcome =
-  | { ok: true; changed: number; message: string }
+  | {
+      ok: true;
+      changed: number;
+      message: string;
+      /**
+       * The file the programme also asked for, once the change committed.
+       *
+       * Absent when the sentence asked for no file. Present, with the
+       * row count, when it did: "create a list from them and export it
+       * to Excel" is one thing somebody asked for, and handing back the
+       * list without the spreadsheet is doing half of it.
+       */
+      artefact?: Artefact;
+      artefactRows?: number;
+      /** Said out loud when the change committed and the file did not. */
+      deliveryFailed?: string;
+    }
   | {
       ok: false;
       reason: 'not understood' | 'meaning changed' | 'not a mutation' | 'refused'
@@ -281,6 +334,8 @@ export async function applyMutation(
     previewProgrammeHash: string;
     store: Store;
     policy?: ExecutionPolicy;
+    /** Whose name goes on any file the programme produces. */
+    actorName?: string;
   },
 ): Promise<MutationOutcome> {
   const agreement = await planForExecution({ ...req, previewHash: req.previewPlanHash });
@@ -357,15 +412,42 @@ export async function applyMutation(
     ? (capabilityLabel(planning.plan) ?? 'That')
     : fields.map((f) => f.label).join(' and ');
 
-  return {
-    ok: true,
-    changed: done.changed,
-    message: operation
-      ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
-      : done.changed === 1
-        ? `${what} changed on one record.`
-        : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`,
-  };
+  const message = operation
+    ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
+    : done.changed === 1
+      ? `${what} changed on one record.`
+      : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`;
+
+  /* THE FILE THE SAME SENTENCE ASKED FOR.
+
+     Built after the transaction, from the rows as they stand once it has
+     committed, because a spreadsheet cannot be inside a database
+     transaction and pretending otherwise would be the only lie here.
+     What that costs is stated rather than hidden: if the change commits
+     and the file does not build, the outcome says so. */
+  if (!deliverySteps(planning.plan).length) return { ok: true, changed: done.changed, message };
+
+  const delivered = await runEmit(planning, {
+    store: req.store,
+    actorName: req.actorName ?? 'the command bar',
+    now: new Date(),
+  });
+
+  return delivered.ok
+    ? {
+        ok: true,
+        changed: done.changed,
+        message: `${message} ${delivered.rows.toLocaleString('en-GB')} `
+          + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`,
+        artefact: delivered.artefact,
+        artefactRows: delivered.rows,
+      }
+    : {
+        ok: true,
+        changed: done.changed,
+        message: `${message} The file did not build.`,
+        deliveryFailed: delivered.why,
+      };
 }
 
 /* -------------------------------------------------------------

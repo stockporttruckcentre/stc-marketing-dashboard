@@ -122,6 +122,13 @@ function nameFrom(text: string, noun: string, verb: string): string | null {
   while (words.length && FILLER.includes(words[0].toLowerCase())) words.shift();
   while (words.length && FILLER.includes(words[words.length - 1].toLowerCase())) words.pop();
 
+  /* A name, not a sentence. "Find customers with more than 20 trailers
+     who haven't had a proposal this year" was read as creating a
+     customer called all of that, because nothing bounded it. Six words
+     is longer than any real company name in this database and shorter
+     than any clause. */
+  if (words.length > 6) return null;
+
   const name = words.join(' ').replace(/[.,:;]+$/, '').trim();
   return name.length >= 2 ? name : null;
 }
@@ -177,6 +184,7 @@ function writableFor(entityId: string, title: string) {
  */
 function readListCreate(
   raw: string, caps: CrmCapabilities | undefined, context: CommandContext,
+  priorResult?: { entity: string },
 ): LifecyclePlan | null {
   const t = soften(raw);
   if (!/\b(list|group|set)\b/.test(t)) return null;
@@ -186,14 +194,25 @@ function readListCreate(
   if (!cap || !cap.requires) return null;
   if (caps && !caps.has(cap.requires)) return null;
 
+  /* The records come from the screen, or from the clause before.
+     "Make a list of these" points at a selection; "create a list from
+     them" points at what the sentence just found, and which rows that
+     is gets decided at execution rather than here. */
   const pointed = readContextReference(raw);
   const from = pointed ? resolveContext(pointed, context, 'contacts') : null;
-  if (!from) return null;
+  const fromClause = !from && priorResult?.entity === 'contacts';
+  if (!from && !fromClause) return null;
 
   /* The name, from the words after "called" or "named". Not guessed
      from the rest of the sentence: a list nobody named is a list nobody
      will find again, and the runtime says so rather than inventing one. */
-  const named = raw.match(/\b(?:called|named|titled)\s+(.{2,60}?)\s*$/i)?.[1]?.trim();
+  /* The name stops where the sentence starts saying WHERE the records
+     come from. Without that, "create a list called Fleet Prospects from
+     them" named the list "Fleet Prospects from them", and the preview
+     read "Make a list called Fleet Prospects from them from them". */
+  const named = raw
+    .match(/\b(?:called|named|titled)\s+(.{2,60}?)(?:\s+(?:from|out of|using|containing|with)\s.*)?$/i)
+    ?.[1]?.trim();
 
   return {
     op: 'create',
@@ -204,18 +223,22 @@ function readListCreate(
       op: 'invoke',
       id: 'l1',
       capability: 'list.create',
-      subject: {
-        op: 'select',
-        from: { entity: 'contacts' },
-        where: from.match,
-        produces: { kind: 'rows', entity: 'contacts' },
-      },
+      /* A placeholder the composer replaces with a reference to the
+         clause before, when there is one. */
+      subject: from
+        ? {
+            op: 'select',
+            from: { entity: 'contacts' },
+            where: from.match,
+            produces: { kind: 'rows', entity: 'contacts' },
+          }
+        : { entity: 'contacts' },
       ...(named ? { args: { name: { kind: 'literal' as const, value: named } } } : {}),
       produces: { kind: 'record', entity: 'contacts' },
     } as unknown as Mutate,
     summary: named
-      ? `Make a list called ${named} from ${from.label}`
-      : `Make a list from ${from.label}`,
+      ? `Make a list called ${named} from ${from?.label ?? 'them'}`
+      : `Make a list from ${from?.label ?? 'them'}`,
     requires: cap.requires,
     confidence: 12,
   };
@@ -223,6 +246,7 @@ function readListCreate(
 
 export function parseLifecycle(
   input: string, caps?: CrmCapabilities, context: CommandContext = EMPTY_CONTEXT,
+  priorResult?: { entity: string },
 ): LifecyclePlan | null {
   const raw = input.trim();
   if (raw.length < 5) return null;
@@ -248,7 +272,7 @@ export function parseLifecycle(
   /* Making a list out of what is on the screen, before the plain
      create, because "create a list from these" names an entity noun
      ("list" is not one) and would otherwise fall through. */
-  const list = readListCreate(raw, caps, context);
+  const list = readListCreate(raw, caps, context, priorResult);
   if (list) return list;
 
   const deleteVerb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))
