@@ -42,6 +42,7 @@ import type { ExecutionPolicy } from '../ir/orchestrate';
 import type { Store } from '../ir/store';
 import type { Mutate, Plan } from '../ir/types';
 import { WRITABLE_FIELDS, type WritableField } from '../fields';
+import { capability } from '../ir/registry';
 
 /* -------------------------------------------------------------
    What a person is shown
@@ -60,6 +61,16 @@ export type RowChange = {
   label: string;
   before: string;
   after: string;
+};
+
+/** A business operation, as the preview describes it. */
+export type OperationPreview = {
+  capability: string;
+  label: string;
+  /** The records it will run on, by their own names. */
+  subjects: { label: string; via?: string }[];
+  /** What the sentence named that it cannot act on, and why. */
+  skipped: { label: string; why: string }[];
 };
 
 export type MutationPreview =
@@ -82,6 +93,8 @@ export type MutationPreview =
       /** True when every row starts and ends the same, so one line says it. */
       uniform: boolean;
       cautions: string[];
+      /** Operations, when the sentence asked for one rather than a write. */
+      operations: OperationPreview[];
       programmeHash: string;
     }
   | {
@@ -135,6 +148,29 @@ export function changedFields(plan: Plan): ChangedField[] {
   return out;
 }
 
+/**
+ * The values an invoke step carries, as plain values.
+ *
+ * The plan holds them as literal expressions, because everything in a
+ * plan is an expression. The operation wants numbers.
+ */
+function invokeArgs(plan: Plan): Record<string, unknown> {
+  const step = plan.steps.find((s) => s.op === 'invoke');
+  if (!step || step.op !== 'invoke') return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(step.args ?? {})) {
+    if (!('kind' in value)) continue;
+    if (value.kind === 'literal') out[key] = value.value;
+  }
+  return out;
+}
+
+/** What the operation in a plan calls itself. */
+function capabilityLabel(plan: Plan): string | null {
+  const step = plan.steps.find((s) => s.op === 'invoke');
+  return step && step.op === 'invoke' ? capability(step.capability)?.label ?? null : null;
+}
+
 /* -------------------------------------------------------------
    The preview pass. Nothing is written.
    ------------------------------------------------------------- */
@@ -148,7 +184,9 @@ export async function previewMutation(
     return { ok: false, reason: 'not a mutation', why: 'that sentence is not an instruction' };
   }
 
-  const programme = await resolveProgramme(planning.plan, { store, policy });
+  const programme = await resolveProgramme(planning.plan, {
+    store, policy, args: invokeArgs(planning.plan),
+  });
   if (!programme.ok) {
     const res = programme.resolution;
     return {
@@ -169,7 +207,18 @@ export async function previewMutation(
 
   const fields = changedFields(planning.plan);
   const rows: RowChange[] = [];
+  const operations: OperationPreview[] = [];
+
   for (const unit of programme.units) {
+    if (unit.kind === 'invoke') {
+      operations.push({
+        capability: unit.plan.capability,
+        label: unit.plan.label,
+        subjects: unit.plan.subjects.map((s) => ({ label: s.label, via: s.viaLabel })),
+        skipped: unit.plan.missing.map((m) => ({ label: m.label, why: m.why })),
+      });
+      continue;
+    }
     for (const p of unit.preview) {
       /* Only the columns this step writes, read off the change itself
          rather than off the row, so the preview and the write cannot
@@ -186,13 +235,16 @@ export async function previewMutation(
   const uniform = rows.length > 0
     && rows.every((r) => r.before === rows[0].before && r.after === rows[0].after);
 
+  const operated = operations.reduce((n, o) => n + o.subjects.length, 0);
+
   return {
     ok: true,
     fields,
-    count: programme.changes.length,
+    count: programme.changes.length + operated,
     rows: rows.slice(0, SAMPLE_SIZE),
     uniform,
     cautions: [...new Set(fields.map((f) => f.caution).filter((c): c is string => !!c))],
+    operations,
     programmeHash: programme.hash,
   };
 }
@@ -282,6 +334,7 @@ export async function applyMutation(
   const done = await executeProgramme(planning.plan, {
     store: req.store,
     policy: req.policy,
+    args: invokeArgs(planning.plan),
     agreedHash: req.previewProgrammeHash,
   });
 
@@ -299,13 +352,19 @@ export async function applyMutation(
   }
 
   const fields = changedFields(planning.plan);
-  const what = fields.map((f) => f.label).join(' and ');
+  const operation = planning.plan.steps.find((s) => s.op === 'invoke');
+  const what = operation
+    ? (capabilityLabel(planning.plan) ?? 'That')
+    : fields.map((f) => f.label).join(' and ');
+
   return {
     ok: true,
     changed: done.changed,
-    message: done.changed === 1
-      ? `${what} changed on one record.`
-      : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`,
+    message: operation
+      ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
+      : done.changed === 1
+        ? `${what} changed on one record.`
+        : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`,
   };
 }
 

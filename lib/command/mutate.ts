@@ -33,7 +33,7 @@
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from './fields';
 import { parseQuery } from './query';
 import { condForFilters } from './ir/conditions';
-import { entity as entityDef } from './ir/registry';
+import { capability, entity as entityDef } from './ir/registry';
 import type { Cardinality, Cond } from './ir/types';
 import { EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
 import { DEPOTS, isReservedWord } from './lexicon';
@@ -80,6 +80,15 @@ export type EditPlan = {
    * named rather than writing a status column behind its back.
    */
   handoff?: 'markSold';
+  /**
+   * Values a business operation needs, read out of the sentence.
+   *
+   * Filled from the capability's own declared `inputs` rather than from
+   * anything written down here, so "mark STC143580 as sold for £24,995"
+   * carries the price without this file knowing what a sale is. See
+   * `CapabilityDef.inputs`.
+   */
+  args?: Record<string, string | number | null>;
   /** What still has to be supplied before this can run. */
   missing: ('target' | 'value')[];
   /** Plain English, shown before anything happens. */
@@ -392,9 +401,25 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
      names its column and keeps it. */
   if (best) {
     const alias = best.alias;
+    /* Two ways an alias can be describing the rows or the price rather
+       than naming the column being written.
+
+       It is also one of its own field's VALUES. "Curtainsiders" is an
+       alias of the category field and also a category, so "mark all the
+       in stock curtainsiders as sold" set the category to Curtainsider
+       on every trailer in stock.
+
+       It is inside the half that says what the rows BECOME. "Mark
+       STC143580 as sold for £24,995" is a sale at a price, and the
+       price words are in the destination alongside the state, so the
+       sentence came out as a change to the sale price with the sale
+       itself dropped. "Set paid in full on STC143980 to yes" keeps its
+       column, because that alias is in the half describing the record. */
     const namesAValue = !!best.field.vocabulary
       && Object.keys(best.field.vocabulary).some((w) => w === alias || w.startsWith(alias));
-    if (namesAValue) {
+    const aliasIsInDestination = destination.includes(` ${alias} `);
+
+    if (namesAValue || aliasIsInDestination) {
       const destinationField = destinationState();
       if (destinationField && destinationField.field.key !== best.field.key) return destinationField;
     }
@@ -757,6 +782,18 @@ export function parseEdit(
     ? ('markSold' as const) : undefined;
   if (handoff && !match) return null;
 
+  /* WHAT THE OPERATION NEEDS, IF THE SENTENCE SAID IT.
+
+     The capability declares its inputs and this looks for each one in
+     the words, using the readers that were already here for field
+     values. Nothing about a sale is written here: "mark STC143580 as
+     sold for £24,995" carries a price because the capability says a
+     sale takes one, and an operation added later is read the same way
+     without this file changing. */
+  const args = handoff
+    ? readCapabilityInputs(withoutReferences(raw, named), HANDOFF_CAPABILITY[handoff])
+    : undefined;
+
   const missing: ('target' | 'value')[] = [];
   if (!match) missing.push('target');
   if (op !== 'clear' && value == null) missing.push('value');
@@ -778,6 +815,7 @@ export function parseEdit(
     matchLabel,
     named,
     handoff,
+    ...(args && Object.keys(args).length ? { args } : {}),
     missing,
     summary: handoff
       ? `Mark ${matchLabel} sold`
@@ -785,9 +823,58 @@ export function parseEdit(
     confidence: confidenceOf(
       spec, op, value,
       { named: named.length, stock: refs.stc.length > 0, described: !named.length && !!match },
-      opWord,
+      /* The verb that made this an instruction, whichever list it came
+         from. "Approve all the outstanding social posts" has no set,
+         add, subtract or clear word in it, so it scored as though
+         nobody had said what to do, came one point under the threshold
+         that decides instruction from question, and was answered with a
+         list of posts. */
+      opWord || (MARK_WORDS.find((w) => fuzzyContains(soften(raw), w)) ?? ''),
     ),
   };
+}
+
+/**
+ * The sentence with the records it names taken out.
+ *
+ * A stock number is six digits, and reading a business operation's price
+ * out of the whole sentence turned "mark STC143580 as sold" into a sale
+ * at one hundred and forty three thousand five hundred and eighty
+ * pounds. The reference is not a value, whatever it looks like.
+ */
+function withoutReferences(raw: string, named: string[]): string {
+  let out = raw.replace(/\bSTC\s?\d+\b/gi, ' ');
+  for (const n of named) out = out.split(n).join(' ');
+  return out.replace(/\s+/g, ' ');
+}
+
+/** Which capability each handoff hands off to. */
+const HANDOFF_CAPABILITY: Record<'markSold', string> = { markSold: 'deal.markSold' };
+
+/**
+ * Values a business operation declares it needs, found in the sentence.
+ *
+ * One loop over `CapabilityDef.inputs`, using the same readers a field
+ * value goes through. A capability that declares a money input gets the
+ * amount out of "for £24,995"; one that declares a date gets the date.
+ * Neither this function nor the capability knows about the other beyond
+ * the declaration.
+ */
+function readCapabilityInputs(
+  raw: string, capabilityId: string,
+): Record<string, string | number | null> {
+  const cap = capability(capabilityId);
+  const out: Record<string, string | number | null> = {};
+  for (const input of cap?.inputs ?? []) {
+    if (input.kind === 'money' || input.kind === 'number') {
+      const a = readAmount(soften(raw));
+      if (a) out[input.key] = a.value;
+    } else if (input.kind === 'date') {
+      const d = readDate(soften(raw));
+      if (d) out[input.key] = d.value;
+    }
+  }
+  return out;
 }
 
 /**

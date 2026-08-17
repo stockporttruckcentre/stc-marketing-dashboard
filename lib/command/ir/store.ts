@@ -68,8 +68,33 @@ export type ApplyOutcome =
   | { ok: true; changed: number }
   | { ok: false; why: string };
 
+/**
+ * A business operation, run over several subjects at once.
+ *
+ * Not a field write. Marking a deal sold raises a commission line,
+ * flips the stock unit and tells every other rep chasing that unit it
+ * is gone, and those three things are one operation rather than three
+ * changes that happen to be issued together.
+ *
+ * `subjects` is a list because a sentence can name a set, and the whole
+ * list is one transaction for the same reason a set of changes is: a
+ * command that sells six of eleven units and reports failure leaves
+ * somebody to work out which six.
+ */
+export type Invocation = {
+  capability: string;
+  subjects: string[];
+  args: Record<string, unknown>;
+};
+
+export type InvokeOutcome =
+  | { ok: true; performed: number; results: unknown[] }
+  | { ok: false; why: string };
+
 export type Store = {
   read(req: ReadRequest): Promise<ReadOutcome>;
   /** Every change, in one transaction. All of them, or none of them. */
   apply(changes: Change[]): Promise<ApplyOutcome>;
+  /** One business operation over every subject, in one transaction. */
+  invoke(call: Invocation): Promise<InvokeOutcome>;
 };

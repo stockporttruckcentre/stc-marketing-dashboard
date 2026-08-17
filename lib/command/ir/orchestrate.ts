@@ -44,6 +44,7 @@ import { entity as entityDef, capability } from './registry';
 import { evaluate, type EvalContext } from './evaluate';
 import { resolveMutation, resolutionHash, type Resolution, type ResolvedReference } from './resolve';
 import type { Change, Store } from './store';
+import { resolveInvoke, type InvokePlan } from './invoke';
 import { dependencesAmong, overlappingRows } from './dependence';
 
 /* -------------------------------------------------------------
@@ -74,10 +75,7 @@ function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
   if (s.op === 'invoke') {
     const cap = capability(s.capability);
     if (!cap?.handler) return { ok: false, why: `nothing performs ${s.capability} yet` };
-    /* A handler exists, and this orchestrator does not yet know how to
-       call one inside the same transaction as a table write. Saying so
-       is better than running the writes and then the handler. */
-    return { ok: false, why: `${s.capability} cannot yet run in the same transaction as a write` };
+    return { ok: true };
   }
   return { ok: false, why: `nothing here performs an ${s.op} yet` };
 }
@@ -88,7 +86,7 @@ function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
 
 export type { Change } from './store';
 
-export type Unit = {
+export type UpdateUnit = {
   stepId: string;
   kind: 'update';
   entity: string;
@@ -100,11 +98,28 @@ export type Unit = {
   preview: { id: string; label: string; before: Record<string, unknown>; after: Record<string, unknown> }[];
 };
 
+/**
+ * A business operation, resolved to the records it will run on.
+ *
+ * Separate from an update because it is not one. Nothing about it is a
+ * column and a value: it is a job the database performs, and the only
+ * things this layer decides are which records and whether the operation
+ * has what it needs.
+ */
+export type InvokeUnit = {
+  stepId: string;
+  kind: 'invoke';
+  plan: InvokePlan;
+};
+
+export type Unit = UpdateUnit | InvokeUnit;
+
 export type Programme =
   | { ok: true; units: Unit[]; changes: Change[]; hash: string }
   | {
       ok: false;
-      reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved' | 'blocked by policy';
+      reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved'
+        | 'blocked by policy' | 'incomplete';
       why: string;
       /** The step that stopped it, when one did. */
       stepId?: string;
@@ -133,6 +148,13 @@ export type ExecutionPolicy = {
 
 export type OrchestrateOptions = {
   store: Store;
+  /**
+   * Values a business operation needs that the records do not hold.
+   *
+   * Read out of the sentence by the reader and passed through, so this
+   * layer never invents one. See `CapabilityDef.inputs`.
+   */
+  args?: Record<string, unknown>;
   policy?: ExecutionPolicy;
   now?: string;
   readCap?: number;
@@ -180,10 +202,47 @@ export async function resolveProgramme(
     };
   }
 
+  /* ONE TRANSACTION IS ONE KIND OF THING.
+
+     A set of column writes goes to one database function and a business
+     operation goes to another, and there is no way to put both inside
+     one transaction from here. A plan holding both is refused rather
+     than run as two, because two transactions is exactly the promise
+     the preview does not make.
+
+     Asked of the plan, before anything is read. Finding this out after
+     resolving half of it would report whichever half failed first
+     rather than the thing that is actually wrong. */
+  const shapes = new Set(effects.map((s) => (s.op === 'invoke' ? 'operation' : 'write')));
+  if (shapes.size > 1) {
+    return {
+      ok: false,
+      reason: 'cannot execute',
+      why: 'that mixes changing fields with performing an operation, and the two cannot be done in one go. Ask for them one at a time.',
+    };
+  }
+
   const now = opts.now ?? new Date().toISOString().slice(0, 10);
   const units: Unit[] = [];
 
   for (const s of effects) {
+    /* A business operation, resolved to the records it will run on.
+       Nothing about it is a column and a value, so it does not go
+       through the mutation resolver at all. */
+    if (s.op === 'invoke') {
+      const resolved = await resolveInvoke(plan, s, { store: opts.store, args: opts.args });
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          reason: resolved.reason === 'incomplete' ? 'incomplete' : 'unresolved',
+          why: resolved.why,
+          stepId: s.id,
+        };
+      }
+      units.push({ stepId: s.id ?? '?', kind: 'invoke', plan: resolved.plan });
+      continue;
+    }
+
     const step = s as Mutate & { id: string };
     const resolution = await resolveMutation(plan, {
       store: opts.store, stepId: step.id, readCap: opts.readCap,
@@ -202,7 +261,7 @@ export async function resolveProgramme(
     );
 
     const changes: Change[] = [];
-    const preview: Unit['preview'] = [];
+    const preview: UpdateUnit['preview'] = [];
 
     for (const row of resolution.rows) {
       const set: Record<string, unknown> = {};
@@ -240,7 +299,7 @@ export async function resolveProgramme(
      plan. Two updates over the same entity usually pick out different
      rows and are independent; it is only when the conditions actually
      overlap that one row would receive two changes in one call. */
-  const overlap = overlappingRows(units);
+  const overlap = overlappingRows(units.filter((u): u is UpdateUnit => u.kind === 'update'));
   if (overlap) {
     return {
       ok: false,
@@ -250,14 +309,16 @@ export async function resolveProgramme(
     };
   }
 
-  const changes = units.flatMap((u) => u.changes);
+  const changes = units.flatMap((u) => (u.kind === 'update' ? u.changes : []));
+
+  const operated = units.reduce((n, u) => n + (u.kind === 'invoke' ? u.plan.subjects.length : 0), 0);
 
   const max = opts.policy?.maxRows;
-  if (max != null && changes.length > max) {
+  if (max != null && changes.length + operated > max) {
     return {
       ok: false,
       reason: 'blocked by policy',
-      why: `that would change ${changes.length.toLocaleString('en-GB')} records, and this is configured to stop above ${max.toLocaleString('en-GB')}`,
+      why: `that would change ${(changes.length + operated).toLocaleString('en-GB')} records, and this is configured to stop above ${max.toLocaleString('en-GB')}`,
     };
   }
 
@@ -271,10 +332,31 @@ export async function resolveProgramme(
  * mutation drifts is refused as surely as one whose first does.
  */
 export function programmeHash(units: Unit[]): string {
+  const updates = units.filter((u): u is UpdateUnit => u.kind === 'update');
+  const invokes = units.filter((u): u is InvokeUnit => u.kind === 'invoke');
+
   return resolutionHash(
-    units.flatMap((u) => u.resolution.rows.map((r) => ({ ...r, id: `${u.stepId}:${r.id}` }))),
-    units.flatMap((u) => u.resolution.references.map((r) => ({ ...r, at: `${u.stepId}:${r.at}` }))),
-    units.flatMap((u) => u.resolution.fields.map((f) => `${u.stepId}:${f}`)),
+    [
+      ...updates.flatMap((u) => u.resolution.rows.map((r) => ({ ...r, id: `${u.stepId}:${r.id}` }))),
+      /* An operation's subjects go in as rows, with the values it read
+         off them. A deal whose price changed between the preview and
+         the confirmation is drift for the same reason a trailer whose
+         price changed is: the number that would be written is not the
+         number somebody was shown. */
+      ...invokes.flatMap((u) => u.plan.subjects.map((sub) => ({
+        id: `${u.stepId}:${sub.id}`,
+        label: sub.label,
+        before: sub.values,
+      }))),
+    ],
+    updates.flatMap((u) => u.resolution.references.map((r) => ({ ...r, at: `${u.stepId}:${r.at}` }))),
+    [
+      ...updates.flatMap((u) => u.resolution.fields.map((f) => `${u.stepId}:${f}`)),
+      ...invokes.flatMap((u) => [
+        `${u.stepId}:${u.plan.capability}`,
+        ...Object.entries(u.plan.args).map(([k, v]) => `${u.stepId}:arg:${k}=${String(v)}`),
+      ]),
+    ],
   );
 }
 
@@ -320,7 +402,27 @@ export async function executeProgramme(
      it keeps that promise is its business. Handing it the changes one at
      a time is what made a failed third change leave the first two
      written, and it is not something this layer can put right
-     afterwards: a compensating update can fail too. */
+     afterwards: a compensating update can fail too.
+
+     A programme is all field writes or all operations, which
+     `resolveProgramme` has already established, so there is exactly one
+     call either way. */
+  const operations = fresh.units.filter((u): u is InvokeUnit => u.kind === 'invoke');
+
+  if (operations.length) {
+    let performed = 0;
+    for (const unit of operations) {
+      const done = await opts.store.invoke({
+        capability: unit.plan.capability,
+        subjects: unit.plan.subjects.map((s) => s.id),
+        args: unit.plan.args,
+      });
+      if (!done.ok) return { ok: false, reason: 'failed', why: done.why, programme: fresh };
+      performed += done.performed;
+    }
+    return { ok: true, changed: performed, changes: [], hash: fresh.hash };
+  }
+
   const applied = await opts.store.apply(fresh.changes);
   if (!applied.ok) {
     return { ok: false, reason: 'failed', why: applied.why, programme: fresh };

@@ -58,7 +58,11 @@ function matches(row: Row, op: Op): boolean {
     case 'lt': return compare(row[op.column], op.value) < 0;
     case 'lte': return compare(row[op.column], op.value) <= 0;
     case 'ilike': return like(row[op.column], op.pattern);
-    case 'in': return op.values.map(String).includes(String(row.id));
+    /* On whichever column was named. This read `row.id` whatever column
+       the query asked for, which is right for a write by primary key
+       and wrong for everything else: an operation looking up deals by
+       `stock_trailer_id` matched nothing. */
+    case 'in': return op.values.map(String).includes(String(row[op.column]));
     /* Ordering narrows nothing. It is applied when the rows come back. */
     case 'order': return true;
     case 'or':
@@ -147,6 +151,56 @@ export function fakeDb(tables: Record<string, Row[]>) {
      Postgres, but that the executor sends one call whose failure leaves
      nothing behind. */
   const rpc = async (name: string, args: Record<string, unknown>) => {
+    /* The sale, as the database performs it.
+       Three writes that have to happen together: the tracker row, the
+       stock unit, and every other rep chasing the same unit. Modelled
+       here rather than skipped, because a fake that cannot perform an
+       operation cannot show that the operation reached it. */
+    if (name === 'command_mark_sold_many') {
+      const ids = (args.p_tracker_ids ?? []) as string[];
+      const price = args.p_sale_price as number | null;
+      const rep = String(args.p_rep_initials ?? 'Unknown');
+      const results: Row[] = [];
+
+      for (const id of ids) {
+        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+        if (!deal) return { data: null, error: { message: `that deal is not there` } };
+
+        const salePrice = price ?? (deal.sale_price as number | null);
+        const rate = (deal.commission_rate as number | null) ?? 0.1;
+        const profit = deal.profit as number | null;
+        const commission = profit == null ? null : Math.round(profit * rate * 100) / 100;
+
+        writes.push({ table: 'crm_contacts', set: { status: 'customer' }, ids: [id] });
+        Object.assign(deal, {
+          status: 'customer', sale_price: salePrice, commission,
+        });
+
+        let stockUpdated = false;
+        let cascaded = 0;
+        const unitId = deal.stock_trailer_id as string | null;
+        if (unitId) {
+          const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === unitId);
+          if (!unit) return { data: null, error: { message: 'the stock unit could not be updated' } };
+          writes.push({ table: 'stock_trailers', set: { status: 'sold' }, ids: [unitId] });
+          Object.assign(unit, {
+            status: 'sold', customer: deal.company_name, sales_rep: rep, sales_price: salePrice,
+          });
+          stockUpdated = true;
+
+          for (const other of tables.crm_contacts ?? []) {
+            if (String(other.id) === id) continue;
+            if (String(other.stock_trailer_id) !== unitId) continue;
+            if (other.status === 'customer') continue;
+            other.status = 'customer';
+            cascaded += 1;
+          }
+        }
+        results.push({ trackerId: id, commission, stockUpdated, cascadedOthers: cascaded });
+      }
+      return { data: results, error: null };
+    }
+
     if (name !== 'command_apply') return { data: null, error: { message: `no function ${name}` } };
     const changes = (args.p_changes ?? []) as { table: string; id: string; set: Row }[];
 

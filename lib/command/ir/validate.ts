@@ -41,7 +41,7 @@ import type {
 } from './types';
 import { isResultRef, isSelect, isEntityRef } from './types';
 import {
-  entity, field, relationship, capability, destination, FILE_EMIT_CAPABILITY,
+  entity, field, relationship, capability, destination, FILE_EMIT_CAPABILITY, RELATIONSHIPS,
 } from './registry';
 
 export type Problem = {
@@ -167,7 +167,14 @@ export function validate(plan: Plan): Problem[] {
            cannot be chained from. */
         if (!cap?.produces) return undefined;
         if (cap.produces === 'rows' || cap.produces === 'record') {
-          const ent = v.subject ? entityOfSource(v.subject) : cap.entities?.[0];
+          /* WHAT IT PRODUCES IS WHAT IT OPERATES ON.
+
+             Not what the sentence named. "Mark the in stock
+             curtainsiders as sold" has a subject of trailers and
+             produces the deals it sold, which is what a later step
+             would be chaining from. Deriving the entity from the
+             subject said a sale produces trailers. */
+          const ent = cap.entities?.[0] ?? (v.subject ? entityOfSource(v.subject) : undefined);
           return ent ? { kind: cap.produces, entity: ent } : undefined;
         }
         if (cap.produces === 'series') return { kind: 'series' };
@@ -488,9 +495,21 @@ export function validate(plan: Plan): Problem[] {
           } else if (!subjectEntity) {
             add(`${at}.subject`,
               `capability "${v.capability}" applies to ${cap.entities.join(' or ')}, and the subject's entity cannot be established`);
-          } else if (!cap.entities.includes(subjectEntity)) {
+          } else if (!cap.entities.includes(subjectEntity) && !reachable(subjectEntity, cap.entities)) {
+            /* THE SENTENCE NAMES ONE THING AND THE OPERATION RUNS ON
+               ANOTHER, AND THAT IS ORDINARY.
+
+               "Mark all the in stock curtainsiders as sold" names units.
+               Selling happens on the deal each unit is being sold on,
+               which the registry declares as a key relationship. A
+               subject that can reach the capability's entity down a
+               declared key is a subject the operation can run from; one
+               that can only reach it by matching names is not, because
+               performing a sale on the strength of a guessed company
+               name is not a thing to do. */
             add(`${at}.subject`,
-              `capability "${v.capability}" does not apply to ${subjectEntity}`);
+              `capability "${v.capability}" does not apply to ${subjectEntity}, `
+              + `and nothing declares a key from ${subjectEntity} to ${cap.entities.join(' or ')}`);
           }
         }
         if (v.subject) walkSource(v.subject, `${at}.subject`, { index });
@@ -682,6 +701,19 @@ export type Requirement = {
   id: string;
   because: string;
 };
+
+/**
+ * Can an operation on `wanted` run from a subject of `from`?
+ *
+ * Only down a declared foreign key. A relationship joined by matching
+ * text is a guess, and this is the check that decides whether a business
+ * operation may follow it.
+ */
+function reachable(from: string, wanted: string[]): boolean {
+  return RELATIONSHIPS.some(
+    (r) => r.from === from && wanted.includes(r.to) && r.join.via === 'key',
+  );
+}
 
 export function derivedRequirements(plan: Plan): Requirement[] {
   const out: Requirement[] = [];

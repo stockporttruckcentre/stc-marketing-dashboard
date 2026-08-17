@@ -142,9 +142,21 @@ export function adaptEditPlan(p: EditPlan): AdaptedEdit {
       op: 'invoke',
       id: 's1',
       capability: 'deal.markSold',
-      /* The tracker row is a deal. The reader found it on whichever
-         entity its field lived on, and the operation is about the deal. */
-      subject: match ? { ...match, from: { entity: 'deals' } } : { entity: 'deals' },
+      /* THE SUBJECT IS WHAT THE SENTENCE NAMED.
+
+         This used to retarget the select at `deals` while keeping
+         conditions about trailer columns, which is a query for a status
+         and a body type against the CRM table: it could only ever match
+         nothing. The sentence names units, the operation runs on the
+         deal each unit is being sold on, and getting from one to the
+         other is the declared `trailer.deal` relationship rather than a
+         rewritten `from`. */
+      ...(match ? { subject: match } : { subject: { entity } }),
+      ...(p.args && Object.keys(p.args).length
+        ? { args: Object.fromEntries(
+            Object.entries(p.args).map(([k, v]) => [k, { kind: 'literal' as const, value: v }]),
+          ) }
+        : {}),
       produces: { kind: 'record', entity: 'deals' },
     };
     return { plan: { steps: [invoke], unmet }, mutate: null, lost };

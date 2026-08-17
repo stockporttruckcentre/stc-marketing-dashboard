@@ -21,7 +21,9 @@
    boundaries, and this file is on the near side of the first.
    ============================================================= */
 import type { Cond, Expr } from '../ir/types';
-import type { ApplyOutcome, Change, ReadOutcome, ReadRequest, Store } from '../ir/store';
+import type {
+  ApplyOutcome, Change, Invocation, InvokeOutcome, ReadOutcome, ReadRequest, Store,
+} from '../ir/store';
 
 /** The slice of the client this needs, so nothing here imports one. */
 export type Queryable = {
@@ -88,6 +90,15 @@ export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
         default: return { q, unsupported: `the ${c.op} comparison` };
       }
     }
+    case 'in': {
+      const column = plainField(c.of);
+      if (column === null || !Array.isArray(c.values)) {
+        return { q, unsupported: 'an unreadable set membership' };
+      }
+      const values = c.values.map(literalOf);
+      if (values.some((v) => v === undefined)) return { q, unsupported: 'a set with a computed member' };
+      return { q: q.in(column, values) };
+    }
     case 'empty': {
       const column = plainField(c.of);
       if (column === null) return { q, unsupported: 'an unreadable emptiness test' };
@@ -147,5 +158,46 @@ export function postgrestStore(supabase: Queryable): Store {
           : (data as { changed?: number } | null)?.changed ?? changes.length;
       return { ok: true, changed };
     },
+
+    /**
+     * A business operation, as the database function that performs it.
+     *
+     * One entry per capability, and the mapping is here rather than in
+     * the command layer because which function performs a sale is a
+     * property of this database and not of the language. A capability
+     * with no function is refused by name rather than by silence.
+     */
+    async invoke(call: Invocation): Promise<InvokeOutcome> {
+      if (!supabase.rpc) return { ok: false, why: 'this client cannot perform operations' };
+
+      const fn = FUNCTIONS[call.capability];
+      if (!fn) return { ok: false, why: `nothing in this database performs ${call.capability}` };
+
+      const { data, error } = await supabase.rpc(fn.name, fn.args(call));
+      if (error) return { ok: false, why: String((error as { message?: string }).message ?? error) };
+
+      const results = Array.isArray(data) ? data : data == null ? [] : [data];
+      return { ok: true, performed: call.subjects.length, results };
+    },
   };
 }
+
+/**
+ * Which database function performs which capability.
+ *
+ * Every one of these takes the whole set of subjects, because one
+ * function is one transaction and calling a single subject function in a
+ * loop from here would be several.
+ */
+const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
+  'deal.markSold': {
+    name: 'command_mark_sold_many',
+    args: (c) => ({
+      p_tracker_ids: c.subjects,
+      p_rep_initials: c.args.repInitials ?? 'Unknown',
+      p_sale_price: c.args.salePrice ?? null,
+      p_dispatch_date: c.args.dispatchDate ?? null,
+      p_today: c.args.today ?? null,
+    }),
+  },
+};

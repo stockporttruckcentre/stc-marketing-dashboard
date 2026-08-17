@@ -145,9 +145,12 @@ test('one record, named', async () => {
     preview.ok ? '' : preview.why);
   if (!preview.ok) return;
 
-  ok('the preview names the record', preview.units[0].preview[0].label === 'STC143580');
-  ok('and shows what it holds now', preview.units[0].preview[0].before.retail_price === 20000);
-  ok('and what it will hold', preview.units[0].preview[0].after.retail_price === 24995);
+  const unit = preview.units[0];
+  ok('the unit is a field write', unit.kind === 'update', unit.kind);
+  if (unit.kind !== 'update') return;
+  ok('the preview names the record', unit.preview[0].label === 'STC143580');
+  ok('and shows what it holds now', unit.preview[0].before.retail_price === 20000);
+  ok('and what it will hold', unit.preview[0].after.retail_price === 24995);
 
   const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the write goes through', done.ok, done.ok ? '' : done.why);
@@ -304,7 +307,7 @@ test('a column the expression reads changing is drift', async () => {
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
   ok('the fingerprint covers the column being READ',
-    preview.units[0].resolution.fields.includes('nbv'));
+    preview.units[0].kind === 'update' && preview.units[0].resolution.fields.includes('nbv'));
 
   db.tables.stock_trailers.find((r) => r.id === 't1')!.nbv = 30000;
 
@@ -417,7 +420,7 @@ test('a reference that names one row', async () => {
   ok('it resolves at resolution time', preview.ok, preview.ok ? '' : preview.why);
   if (!preview.ok) return;
   ok('and records which row it landed on',
-    preview.units[0].resolution.references[0]?.id === 'p3');
+    preview.units[0].kind === 'update' && preview.units[0].resolution.references[0]?.id === 'p3');
 
   const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the resolved value is written',
@@ -522,18 +525,25 @@ test('a step this cannot execute refuses the whole plan', async () => {
   ok('and nothing was written', db.writes.length === 0);
 });
 
-test('an invoke nothing can run inside a transaction refuses the plan', async () => {
+test('field writes and an operation in one plan are refused', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
   plan.steps.push({
     op: 'invoke', id: 's3', capability: 'deal.markSold',
-    subject: { entity: 'deals' }, produces: { kind: 'record', entity: 'deals' },
+    subject: selectTrailers(byStc('STC143580')),
+    produces: { kind: 'record', entity: 'deals' },
   });
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  /* A set of column writes goes to one database function and a business
+     operation goes to another, and there is no way to put both inside
+     one transaction. Two transactions is exactly the promise the
+     preview does not make, so the plan is refused whole. */
   ok('the plan is refused whole',
-    !preview.ok && preview.reason === 'cannot execute', preview.ok ? 'it resolved' : preview.why);
-  ok('and says why rather than skipping it',
-    !preview.ok && /same transaction/.test(preview.why), preview.ok ? '' : preview.why);
+    !preview.ok && preview.reason === 'cannot execute',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('saying which two things cannot be done together',
+    !preview.ok && /one at a time/.test(preview.why), preview.ok ? '' : preview.why);
+  ok('and nothing was written', db.writes.length === 0);
 });
 
 /* =============================================================

@@ -440,6 +440,99 @@ ALTER TABLE crm_list_members NO FORCE ROW LEVEL SECURITY;
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %';
 DELETE FROM crm_lists    WHERE name LIKE 'TEST %';
 
+-- -------------------------------------------------------------
+-- A set of deals, sold in one call
+--
+-- `command_mark_sold` sells one deal. A sentence names a set, and six
+-- calls from application code is six transactions, any of which can
+-- fail after the ones before it have committed. `command_mark_sold_many`
+-- is the same operation over a list, in one transaction.
+-- -------------------------------------------------------------
+SELECT reset_fixtures();
+
+INSERT INTO crm_contacts (id, company_name, status, source, stock_trailer_id, sale_price, profit, commission_rate)
+VALUES
+  ('a1111111-0000-0000-0000-000000000001', 'TEST buyer one', 'quoted', 'manual',
+   '11111111-1111-1111-1111-111111111111', 24995, 3000, 0.10),
+  ('a1111111-0000-0000-0000-000000000002', 'TEST buyer two', 'quoted', 'manual',
+   '22222222-2222-2222-2222-222222222222', 31000, 4000, 0.10)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_mark_sold_many(
+    ARRAY['a1111111-0000-0000-0000-000000000001'::UUID,
+          'a1111111-0000-0000-0000-000000000002'::UUID],
+    'AE', NULL, NULL, DATE '2026-08-17'
+  ) INTO out;
+  PERFORM assert('two deals sell in one call', jsonb_array_length(out) = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('two deals sell in one call', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('both deals are won',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND status = 'customer') = 2,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND status = 'customer'));
+
+SELECT assert('both stock units are sold',
+  (SELECT COUNT(*) FROM stock_trailers WHERE stc_no IN ('TESTSTC1','TESTSTC2') AND status = 'sold') = 2,
+  (SELECT string_agg(stc_no || '=' || status, ', ') FROM stock_trailers WHERE stc_no LIKE 'TESTSTC%'));
+
+SELECT assert('commission was raised on each',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND commission IS NOT NULL) = 2);
+
+SELECT assert('and the rep is on the units',
+  (SELECT COUNT(*) FROM stock_trailers WHERE stc_no IN ('TESTSTC1','TESTSTC2') AND sales_rep = 'AE') = 2);
+
+-- One bad deal in the list takes the whole call with it.
+SELECT reset_fixtures();
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST buyer%';
+INSERT INTO crm_contacts (id, company_name, status, source, stock_trailer_id, sale_price, profit, commission_rate)
+VALUES ('a1111111-0000-0000-0000-000000000003', 'TEST buyer three', 'quoted', 'manual',
+        '11111111-1111-1111-1111-111111111111', 24995, 3000, 0.10)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  PERFORM command_mark_sold_many(
+    ARRAY['a1111111-0000-0000-0000-000000000003'::UUID,
+          'a1111111-0000-0000-0000-000000000099'::UUID],
+    'AE', NULL, NULL, DATE '2026-08-17'
+  );
+  PERFORM assert('a deal that is not there fails the whole call', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a deal that is not there fails the whole call',
+    SQLERRM LIKE '%not there%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the good deal in the same call was rolled back',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST buyer three') <> 'customer',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST buyer three'));
+
+SELECT assert('so its stock unit is untouched too',
+  (SELECT status FROM stock_trailers WHERE stc_no = 'TESTSTC1') <> 'sold',
+  (SELECT status FROM stock_trailers WHERE stc_no = 'TESTSTC1'));
+
+-- The same deal twice in one call is two commission lines on one sale.
+DO $$
+BEGIN
+  PERFORM command_mark_sold_many(
+    ARRAY['a1111111-0000-0000-0000-000000000003'::UUID,
+          'a1111111-0000-0000-0000-000000000003'::UUID],
+    'AE', NULL, NULL, DATE '2026-08-17'
+  );
+  PERFORM assert('the same deal named twice is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the same deal named twice is refused',
+    SQLERRM LIKE '%more than once%', SQLERRM);
+END
+$$;
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST buyer%';
+
 -- =============================================================
 -- 6. command_mark_sold
 -- =============================================================

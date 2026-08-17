@@ -470,7 +470,157 @@ test('a dependent plan is refused by the runtime, not just by the checker', asyn
 });
 
 /* =============================================================
-   8. A question is still a question
+   8. A business operation, not a status column
+
+   Selling is three writes that have to happen together, and the
+   sentence names units while the operation runs on the deal each unit
+   is being sold on. Nothing in these cases names a column.
+   ============================================================= */
+
+const YARD_WITH_DEALS = () => fakeDb({
+  stock_trailers: [
+    { id: 'u1', stc_no: 'STC143580', status: 'in_stock', category: 'Curtainsider', location: 'Hyde', sales_price: null, customer: null, sales_rep: null },
+    { id: 'u2', stc_no: 'STC143581', status: 'in_stock', category: 'Curtainsider', location: 'Hyde', sales_price: null, customer: null, sales_rep: null },
+    { id: 'u3', stc_no: 'STC155555', status: 'in_stock', category: 'Fridge', location: 'Hyde', sales_price: null, customer: null, sales_rep: null },
+    { id: 'u4', stc_no: 'STC166666', status: 'in_stock', category: 'Curtainsider', location: 'Hyde', sales_price: null, customer: null, sales_rep: null },
+  ],
+  crm_contacts: [
+    { id: 'd1', company_name: 'Dawson Group', stock_trailer_id: 'u1', sale_price: 24995, profit: 3000, commission_rate: 0.1, status: 'quoted' },
+    { id: 'd2', company_name: 'Wincanton', stock_trailer_id: 'u2', sale_price: 31000, profit: 4000, commission_rate: 0.1, status: 'quoted' },
+    { id: 'd3', company_name: 'Culina', stock_trailer_id: 'u3', sale_price: null, profit: null, commission_rate: 0.1, status: 'quoted' },
+  ],
+});
+
+test('mark all the in stock curtainsiders as sold', async () => {
+  const db = YARD_WITH_DEALS();
+  const text = 'mark all the in stock curtainsiders as sold';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it is an instruction', planned?.planned.planning.kind === 'mutate',
+    String(planned?.planned.planning.kind));
+  ok('and it is an operation rather than a field write',
+    planned?.planned.planning.plan.steps[0]?.op === 'invoke',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+
+  const preview = planned?.preview;
+  ok('a preview came back', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  /* Three curtainsiders are in stock. Two are being sold to somebody
+     and one is not, so the operation runs on two deals and says why the
+     third is not in the list. */
+  ok('it names the deals rather than the units',
+    preview.operations[0]?.subjects.map((s) => s.label).sort().join(',') === 'Dawson Group,Wincanton',
+    JSON.stringify(preview.operations[0]?.subjects));
+  ok('showing which unit each one is for',
+    preview.operations[0]?.subjects.every((s) => !!s.via),
+    JSON.stringify(preview.operations[0]?.subjects));
+  ok('and the unit with no deal is reported rather than dropped',
+    preview.operations[0]?.skipped.some((m) => m.label === 'STC166666'),
+    JSON.stringify(preview.operations[0]?.skipped));
+  ok('nothing was written by the preview', db.writes.length === 0, JSON.stringify(db.writes));
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+
+  ok('confirming performs the sale', done.ok, done.ok ? '' : done.why);
+  ok('on both deals', done.ok && done.changed === 2, done.ok ? String(done.changed) : '');
+
+  /* All three parts of the operation, which is why it is an operation. */
+  ok('the deals are won',
+    db.tables.crm_contacts.filter((r) => r.status === 'customer').length === 2,
+    JSON.stringify(db.tables.crm_contacts.map((r) => [r.company_name, r.status])));
+  ok('the units are sold',
+    ['u1', 'u2'].every((id) => db.tables.stock_trailers.find((r) => r.id === id)?.status === 'sold'));
+  ok('with the buyer on them',
+    db.tables.stock_trailers.find((r) => r.id === 'u1')?.customer === 'Dawson Group');
+  ok('and a commission line was raised',
+    db.tables.crm_contacts.find((r) => r.id === 'd1')?.commission === 300,
+    String(db.tables.crm_contacts.find((r) => r.id === 'd1')?.commission));
+  ok('the fridge was not sold',
+    db.tables.stock_trailers.find((r) => r.id === 'u3')?.status === 'in_stock');
+  ok('nor the curtainsider nobody is buying',
+    db.tables.stock_trailers.find((r) => r.id === 'u4')?.status === 'in_stock');
+});
+
+test('a sale with no price anywhere says which deals and stops', async () => {
+  const db = YARD_WITH_DEALS();
+  /* The Culina deal has no price on it. The sentence gives none either,
+     and a sale recorded at nothing is worse than a sale not recorded. */
+  db.tables.crm_contacts.find((r) => r.id === 'd1')!.sale_price = null;
+
+  const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db);
+  const preview = planned?.preview;
+  ok('the preview refuses', !!preview && !preview.ok, 'it previewed a sale');
+  if (!preview || preview.ok) return;
+
+  ok('naming what is missing', /sale price/.test(preview.why), preview.why);
+  ok('and which deal it is missing on', /Dawson Group/.test(preview.why), preview.why);
+  ok('nothing was written', db.writes.length === 0);
+});
+
+test('the same sale with a price in the sentence goes through', async () => {
+  const db = YARD_WITH_DEALS();
+  db.tables.crm_contacts.find((r) => r.id === 'd1')!.sale_price = null;
+  const text = 'mark all the in stock curtainsiders as sold for £30,000';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('the sale goes through', done.ok, done.ok ? '' : done.why);
+  ok('at the price the sentence gave',
+    db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price === 30000,
+    String(db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price));
+});
+
+test('a stock number is not a price', async () => {
+  const db = YARD_WITH_DEALS();
+  /* Six digits after STC is a reference, not an amount. Reading it as
+     one sold a trailer for one hundred and forty three thousand pounds. */
+  const planned = await plan('mark STC143580 as sold', 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text: 'mark STC143580 as sold', ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it sells', done.ok, done.ok ? '' : done.why);
+  ok('at the price on the deal, not the stock number',
+    db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price === 24995,
+    String(db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price));
+});
+
+test('somebody without stock.edit cannot sell', async () => {
+  const db = YARD_WITH_DEALS();
+  const text = 'mark STC143580 as sold';
+  const planned = await plan(text, 'viewer', db);
+  const runnable = planned?.planned.planning.kind === 'mutate' && planned.planned.meaning.runnable;
+  ok('it is not offered', !runnable, 'it was offered');
+
+  const done = await applyMutation({
+    text, ...actor('viewer'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned?.planned.meaning.hash ?? 'x',
+    previewProgrammeHash: 'x',
+  });
+  ok('and confirming it does nothing', !done.ok, done.ok ? 'it sold' : '');
+  ok('nothing was written', db.writes.length === 0);
+});
+
+/* =============================================================
+   9. A question is still a question
    ============================================================= */
 
 test('a question does not become an instruction', async () => {

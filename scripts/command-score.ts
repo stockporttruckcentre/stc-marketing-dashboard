@@ -56,6 +56,8 @@ import { parse } from '../lib/command/intents';
 import { readsOnlyText, INSTRUCTION } from '../lib/command/arbitrate';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { loadSampleVocabulary, sampleSize } from './sample-vocabulary';
+import { planCommand } from '../lib/command/plan';
+import { runEmit } from '../lib/command/server/emit';
 import { fakeDb, type Row as DbRow } from './support/fake-postgrest';
 import { postgrestStore } from '../lib/command/store/postgrest';
 import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
@@ -76,6 +78,9 @@ const QUERY_ROUTE = read('app/api/command/query/route.ts');
 const MUTATION_PATH = !!read('app/api/command/plan/route.ts')
   && !!read('app/api/command/apply/route.ts')
   && !!read('lib/command/server/mutation.ts');
+/* The canonical output runtime: what plans an emit and what renders it. */
+const EMIT_PATH = !!read('app/api/command/emit/route.ts')
+  && !!read('lib/command/server/emit.ts');
 
 /** Intent ids the execute route branches on. */
 const HANDLED = new Set<string>();
@@ -205,9 +210,15 @@ const YARD = (): Record<string, DbRow[]> => ({
     { id: 'z1', content: 'One', platform: ['linkedin'], scheduled_date: '2026-09-01', status: 'pending_review', created_by: 'tester', hashtags: [] },
     { id: 'z2', content: 'Two', platform: ['linkedin'], scheduled_date: '2026-09-02', status: 'draft', created_by: 'tester', hashtags: [] },
   ],
+  /* Two of the four units are being sold to somebody, which is what a
+     sales tracker looks like. Without a deal on a unit there is nothing
+     to sell, and a fixture with none of them cannot observe a sale at
+     all. */
   crm_contacts: [
-    { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null, next_action: null },
-    { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co', next_action: null },
+    { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null, next_action: null, stock_trailer_id: null, sale_price: null, profit: null },
+    { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co', next_action: null, stock_trailer_id: null, sale_price: null, profit: null },
+    { id: 'c3', company_name: 'Dawson Group', assigned_to: 'Alex', status: 'quoted', email: 'd@d.co', next_action: null, stock_trailer_id: 'y1', sale_price: 22000, profit: 3000, commission_rate: 0.1 },
+    { id: 'c4', company_name: 'Culina', assigned_to: 'Lucy', status: 'quoted', email: 'c@c.co', next_action: null, stock_trailer_id: 'y2', sale_price: 26000, profit: 4000, commission_rate: 0.1 },
   ],
 });
 
@@ -251,10 +262,35 @@ async function carryOut(sentence: string): Promise<Executed> {
   return { resolved: true, changed: done.changed, why: '' };
 }
 
+/** Operations the canonical mutation runtime performs. */
+const MUTATING = new Set(['update', 'bulk', 'approve', 'assign', 'cancel']);
+
+/**
+ * Type the sentence, and get the file it asked for.
+ *
+ * The same call the emit route makes. Nothing here names a format.
+ */
+async function produceFile(sentence: string): Promise<{ rows: number; bytes: number; why: string }> {
+  const db = fakeDb(YARD());
+  const planning = planCommand(sentence, { actorCapabilities: [...caps], vocabulary: VOCABULARY });
+  if (!planning) return { rows: 0, bytes: 0, why: 'not understood' };
+  const out = await runEmit(planning, {
+    store: postgrestStore(db.supabase),
+    actorName: 'Alex Ellis',
+    now: new Date('2026-08-17'),
+  });
+  if (!out.ok) return { rows: 0, bytes: 0, why: out.why };
+  if (db.writes.length) return { rows: 0, bytes: 0, why: 'producing a file wrote to the database' };
+  return { rows: out.rows, bytes: out.artefact.bytes.length, why: '' };
+}
+
 function score(c: Case): Row {
   const e = c.expect;
   const plan = parseQuery(c.sentence);
   const edit = parseEdit(c.sentence, caps);
+  /* The production entry point, which is what every axis below should
+     be asking. */
+  const canonical = planCommand(c.sentence, { actorCapabilities: [...caps], vocabulary: VOCABULARY });
   const hits = suggestActions(c.sentence, caps, 5);
   const intent = parse(c.sentence);
 
@@ -266,12 +302,22 @@ function score(c: Case): Row {
   };
 
   /* --- 1 operation ---
-     Did the engine resolve the verb the sentence asked for? */
+     Did the engine resolve the verb the sentence asked for?
+
+     Asked of the canonical plan rather than of the action registry,
+     because the question is whether the runtime can perform the thing,
+     not whether somebody wrote a label for it. Export, approve, assign
+     and bulk are all the same two answers now: a plan that emits, or a
+     plan that mutates. */
   if (e.operation === 'query') {
     row.operation = plan ? 'PASS' : 'FAIL';
-  } else if (e.operation === 'update') {
-    row.operation = edit && edit.missing.length === 0 ? 'PASS' : 'FAIL';
-    if (edit && edit.missing.length) row.note = `write incomplete: needs ${edit.missing.join(', ')}`;
+  } else if (e.operation === 'export') {
+    row.operation = canonical?.plan.steps.some((s) => s.op === 'emit') ? 'PASS' : 'FAIL';
+  } else if (MUTATING.has(e.operation)) {
+    row.operation = canonical?.kind === 'mutate' ? 'PASS' : 'FAIL';
+    if (canonical?.kind !== 'mutate' && edit?.missing.length) {
+      row.note = `write incomplete: needs ${edit.missing.join(', ')}`;
+    }
   } else if (e.operation === 'navigate') {
     row.operation = hits.some((h) => h.action.path) ? 'PASS' : 'FAIL';
   } else {
@@ -291,8 +337,12 @@ function score(c: Case): Row {
      not questions, so "set the MOT on STC143580 to 30 September 2026"
      was scored against whatever the question reader made of it. */
   if (e.entity) {
-    const fromInstruction = (e.operation === 'update' || e.operation === 'bulk')
-      && edit && edit.missing.length === 0 ? edit.entity : null;
+    const fromInstruction = MUTATING.has(e.operation) && canonical?.kind === 'mutate'
+      ? (canonical.plan.steps[0] as { target?: { entity?: string }; subject?: { from?: { entity?: string } } })
+        .target?.entity
+        ?? (canonical.plan.steps[0] as { subject?: { from?: { entity?: string } } }).subject?.from?.entity
+        ?? null
+      : null;
     row.entity = (fromInstruction ?? plan?.entity.id) === e.entity ? 'PASS' : 'FAIL';
   }
 
@@ -344,12 +394,17 @@ function score(c: Case): Row {
      A wired route that performs the operation. */
   if (e.operation === 'query') {
     row.path = QUERY_ROUTE ? 'PASS' : 'FAIL';
-  } else if (e.operation === 'update' || e.operation === 'bulk') {
+  } else if (e.operation === 'export') {
+    /* One emit step and four renderers, for every entity and every
+       format. This used to look for an `export.` action to perform it. */
+    row.path = EMIT_PATH && canonical?.plan.steps.some((s) => s.op === 'emit') ? 'PASS' : 'FAIL';
+  } else if (MUTATING.has(e.operation)) {
     /* One canonical path for every instruction, named or described.
-       Bulk used to be scored against the action registry, looking for a
-       `stock.bulk` entry to perform it, because the mutation runtime
-       could only reach a record somebody had named. */
-    row.path = MUTATION_PATH && edit && edit.missing.length === 0 ? 'PASS' : 'FAIL';
+       Bulk, approve and assign used to be scored against the action
+       registry, looking for a `stock.bulk` or `social.approve` entry to
+       perform them. */
+    row.path = MUTATION_PATH && canonical?.kind === 'mutate'
+      && canonical.availability.executable ? 'PASS' : 'FAIL';
   } else if (e.operation === 'navigate') {
     row.path = hits.some((h) => h.action.path) ? 'PASS' : 'FAIL';
   } else {
@@ -376,11 +431,21 @@ async function scoreWithEffect(c: Case): Promise<Row> {
   const row = score(c);
   const e = c.expect;
 
-  /* Only the operations this harness can carry out. A query is not run,
-     a file is not produced, and saying otherwise would be the exact
-     thing this file exists to stop. */
-  const carriedOut = e.operation === 'update' || e.operation === 'bulk';
-  if (!carriedOut) return row;
+  /* An export produces a file and the file is read back. A question is
+     still not run: nothing here executes the query route. */
+  if (e.operation === 'export') {
+    /* The output is observed when a file comes back and nothing was
+       written producing it. A selection that matches nothing is a true
+       answer and still a file: how many rows it holds is reported
+       rather than being the pass mark, because otherwise the fixture
+       decides whether the export works. */
+    const made = await produceFile(c.sentence);
+    row.effect = made.bytes > 0 ? 'PASS' : 'FAIL';
+    row.note += `${row.note ? '; ' : ''}${made.why || `${made.rows} rows, ${made.bytes} bytes`}`;
+    return row;
+  }
+
+  if (!MUTATING.has(e.operation)) return row;
 
   const done = await carryOut(c.sentence);
 

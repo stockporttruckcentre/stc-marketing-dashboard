@@ -167,9 +167,30 @@ export type RelationshipDef = {
    Capabilities
    ============================================================= */
 
+/**
+ * A value a business operation needs that the records do not hold.
+ *
+ * Declared rather than read out of a handler, so the reader can look
+ * for it in the sentence, the preview can say what is still missing,
+ * and neither has to know what a sale is. `from` names a column on the
+ * subject that already answers it, which is what makes most sales need
+ * nothing typed: the price is on the deal.
+ */
+export type CapabilityInput = {
+  key: string;
+  label: string;
+  kind: ColumnKind;
+  /** Refuse rather than run without it. */
+  required: boolean;
+  /** A column on the operated entity that supplies it when it is there. */
+  from?: string;
+};
+
 export type CapabilityDef = {
   id: string;
   label: string;
+  /** Values it needs beyond the records themselves. */
+  inputs?: CapabilityInput[];
   /**
    * Which step operation may name it.
    *
@@ -380,6 +401,30 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     },
   },
   {
+    /* The one link between a unit and its deal that is a real foreign
+       key rather than a name match. `crm_contacts.stock_trailer_id`
+       points at `stock_trailers.id`, and the sales tracker has used it
+       since the tracker existed. It was missing from here, so a command
+       about a trailer had no declared way to reach the deal that sells
+       it, which is why marking a set of units sold had nothing to
+       operate on. */
+    id: 'trailer.deal',
+    from: 'trailers', to: 'deals', cardinality: 'one',
+    label: 'the deal it is being sold on',
+    inverse: 'deal.trailer',
+    approximate: false,
+    requires: ['crm.view'],
+    join: { via: 'key', localField: 'id', remoteField: 'stock_trailer_id' },
+  },
+  {
+    id: 'deal.trailer',
+    from: 'deals', to: 'trailers', cardinality: 'one',
+    label: 'the unit it is for',
+    inverse: 'trailer.deal',
+    approximate: false,
+    join: { via: 'key', localField: 'stock_trailer_id', remoteField: 'id' },
+  },
+  {
     id: 'trailer.rep',
     from: 'trailers', to: 'profiles', cardinality: 'one',
     label: 'the rep who sold it',
@@ -508,6 +553,15 @@ export const CAPABILITIES: CapabilityDef[] = [
        twice is not the same as running it once. */
     idempotent: false,
     handler: 'lib/crm/mark-sold.ts',
+    /* A sale needs a price. Almost always the deal already carries one,
+       which is why `from` is here: the operation reads it off the record
+       and asks for nothing. A deal with no price anywhere is the one
+       case that genuinely cannot proceed, and the preview says which
+       deals those are rather than writing a sale worth nothing. */
+    inputs: [
+      { key: 'salePrice', label: 'sale price', kind: 'money', required: true, from: 'sale_price' },
+      { key: 'dispatchDate', label: 'dispatch date', kind: 'date', required: false, from: 'dispatch_date' },
+    ],
   },
   {
     id: 'rows.share',
