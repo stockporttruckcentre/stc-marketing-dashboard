@@ -548,6 +548,29 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * file itself rather than a link to one, so nothing is stored and
    * there is no bucket with somebody's customer list sitting in it.
    */
+  /**
+   * Put a file in front of the person who asked for it.
+   *
+   * One place, because a command that writes AND produces a file now
+   * comes back through the apply route, and a second copy of this would
+   * be the one that stopped working.
+   */
+  function save(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  /** Base64 out of a JSON body, as the bytes it stands for. */
+  function bytesOf(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const out = new Uint8Array(new ArrayBuffer(binary.length));
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out.buffer;
+  }
+
   async function downloadArtefact(m: ServerMeaning) {
     setStage('running');
     const res = await fetch('/api/command/emit', {
@@ -565,11 +588,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     const blob = await res.blob();
     const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1]
       ?? 'export';
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    save(blob, name);
 
     const rows = Number(res.headers.get('X-Command-Rows') ?? 0);
     setOutcome({
@@ -686,6 +705,18 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
       setStage('idle');
       return;
+    }
+
+    /* A CONFIRMED COMMAND CAN PRODUCE A FILE TOO.
+
+       "Create a list from them and export it to Excel" is one thing
+       somebody confirmed. The apply route carries the bytes back with
+       the outcome, so the file reaches the browser from the same
+       request that made the change rather than from a second one asking
+       the question again. */
+    if (res.ok && res.artefact?.base64) {
+      const file = res.artefact as { filename: string; mime: string; base64: string };
+      save(new Blob([bytesOf(file.base64)], { type: file.mime }), file.filename);
     }
 
     setEditPreview(null);

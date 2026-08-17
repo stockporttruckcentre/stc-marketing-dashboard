@@ -39,7 +39,7 @@ export type FinderPlan = {
 };
 
 /** Words that mean "go and find companies", as opposed to search our own. */
-const FIND_VERBS = [
+export const FIND_VERBS = [
   'find', 'search', 'look for', 'look up', 'prospect', 'hunt', 'show me', 'show',
   'bring up', 'get me', 'give me', 'list', 'pull up', 'who is', 'who are', 'any',
 ];

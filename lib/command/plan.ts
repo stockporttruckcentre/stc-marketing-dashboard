@@ -463,9 +463,20 @@ function planOneClause(
     plan.steps.push(emit);
   }
 
+  /* A SENTENCE THAT SENDS SOMETHING IS AN INSTRUCTION.
+
+     "Share the Fleet Prospects list with Dave" is a selection and a
+     grant, and the grant is a write. Read as a question it went to the
+     query route, which never previews and never confirms, so the whole
+     sentence did nothing at all. A download changes nothing and stays a
+     read. */
+  const sends = plan.steps.some(
+    (s) => s.op === 'emit' && s.to.kind !== 'display' && s.to.kind !== 'download',
+  );
+
   return {
     text,
-    kind: 'read',
+    kind: sends ? 'mutate' : 'read',
     plan,
     select,
     problems: validate(plan),

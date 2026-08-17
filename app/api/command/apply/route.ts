@@ -75,7 +75,31 @@ export async function POST(req: NextRequest) {
   });
 
   if (outcome.ok) {
-    return NextResponse.json({ ok: true, changed: outcome.changed, message: outcome.message });
+    /* THE FILE THE SAME SENTENCE ASKED FOR.
+       "Create a list from them and export it to Excel" is one thing
+       somebody confirmed, and this used to return the list and drop the
+       spreadsheet on the floor. The bytes come back with the outcome
+       rather than through a second request, because a second request
+       would re-plan the sentence against a database the first one had
+       already changed and could answer a different question.
+
+       Base64 in JSON rather than a binary body, so the outcome and the
+       artefact arrive together. An export is a few hundred kilobytes;
+       a selection too large for its format was refused before any of
+       this ran. */
+    return NextResponse.json({
+      ok: true,
+      changed: outcome.changed,
+      message: outcome.message,
+      artefact: outcome.artefact
+        ? {
+            filename: outcome.artefact.filename,
+            mime: outcome.artefact.mime,
+            rows: outcome.artefactRows ?? 0,
+            base64: Buffer.from(outcome.artefact.bytes).toString('base64'),
+          }
+        : null,
+    });
   }
 
   return NextResponse.json({

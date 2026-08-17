@@ -1315,7 +1315,7 @@ test('the named form previews, runs and produces the file in one go', async () =
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
   ok('the list was made over both of them', done.changed === 2, String(done.changed));
-  ok('and the file came back with it', !!done.artefact, done.deliveryFailed ?? 'no artefact');
+  ok('and the file came back with it', !!done.artefact, 'no artefact');
   ok('holding the two the sentence described', done.artefactRows === 2, String(done.artefactRows));
   ok('as a spreadsheet', done.artefact?.filename.endsWith('.xlsx') === true,
     done.artefact?.filename ?? '');
@@ -1394,16 +1394,23 @@ test('sharing a selection with a colleague grants them access to it', async () =
   ok('and something performs it', planning.availability.executable,
     JSON.stringify(planning.availability.unavailable));
 
-  const out = await runEmit(planning, {
-    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  const text = 'share the customers in Hyde with Dave and Tom';
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
   });
-  ok('it goes through', out.ok, out.ok ? '' : out.why);
-  if (!out.ok) return;
-  ok('granting rather than producing', out.kind === 'granted', out.kind);
-  if (out.kind !== 'granted') return;
-  ok('to both of them by name',
-    out.people.join(' and ') === 'Dave Smith and Tom Jones', out.people.join(', '));
-  ok('over both records', out.rows === 2, String(out.rows));
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+  ok('naming both of them', /Dave Smith and Tom Jones/.test(done.message), done.message);
+  ok('and both memberships were written',
+    (db.tables.crm_list_members ?? []).length === 2,
+    JSON.stringify(db.tables.crm_list_members));
 });
 
 test('a name that fits two people is a question, not a guess', async () => {
@@ -1415,16 +1422,19 @@ test('a name that fits two people is a question, not a guess', async () => {
       { id: 'p3', full_name: 'Dave Ashworth', email: 'davea@stc.co.uk', role: 'sales' },
     ],
   });
-  const planning = planCommand('share the customers in Hyde with Dave', {
-    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  const text = 'share the customers in Hyde with Dave';
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
   });
-  const out = await runEmit(planning!, {
-    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
-  });
-  ok('nobody is given access', !out.ok, 'it shared');
-  if (out.ok) return;
-  ok('and both candidates come back', out.candidates?.length === 2,
-    JSON.stringify(out.candidates));
+  ok('nobody is given access', !done.ok, 'it shared');
+  if (done.ok) return;
+  ok('and it says the name fits two people', /2 people match/.test(done.why), done.why);
   ok('nothing was written', db.writes.length === 0);
 });
 
@@ -1435,15 +1445,19 @@ test('records on no list cannot be shared, and it says why', async () => {
     ],
     profiles: people(),
   });
-  const planning = planCommand('share the customers in Hyde with Dave', {
-    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  const text = 'share the customers in Hyde with Dave';
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
   });
-  const out = await runEmit(planning!, {
-    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
-  });
-  ok('it refuses', !out.ok, 'it shared');
-  if (out.ok) return;
-  ok('saying a list is what gets shared', /list/i.test(out.why), out.why);
+  ok('it refuses', !done.ok, 'it shared');
+  if (done.ok) return;
+  ok('saying a list is what gets shared', /list/i.test(done.why), done.why);
   ok('nothing was written', db.writes.length === 0);
 });
 
@@ -1475,10 +1489,14 @@ test('the four clause sentence makes the list, the file and the grant', async ()
   });
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
-  ok('the list was made over both customers', done.changed === 2, String(done.changed));
+  ok('the list was made over both customers',
+    db.tables.crm_contacts.filter((r) => r.list_id === 'list1').length === 2,
+    JSON.stringify(db.tables.crm_contacts.map((r) => r.list_id)));
   ok('the file came back', done.artefactRows === 2, String(done.artefactRows));
   ok('and the message says who can see them now', /Dave Smith/.test(done.message), done.message);
-  ok('nothing was left undone', !done.deliveryFailed, done.deliveryFailed ?? '');
+  ok('and the grant really landed',
+    (db.tables.crm_list_members ?? []).length === 1,
+    JSON.stringify(db.tables.crm_list_members));
 });
 
 /* =============================================================
@@ -1652,6 +1670,268 @@ test('a clause nobody understood refuses the whole programme', async () => {
   ok('and it says which word it could not place',
     (planning?.plan.unmet ?? []).some((u) => /blockchain/.test(u.why)),
     JSON.stringify(planning?.plan.unmet));
+});
+
+
+/* =============================================================
+   19. One confirmed programme is one transaction
+
+   A share and an attachment are database writes. They used to run after
+   the transaction had already committed, so a share that failed left a
+   list nobody asked for and reported success with a sentence saying the
+   rest did not happen. Somebody who confirmed one thing got half of it
+   and a note.
+   ============================================================= */
+
+/** Plan, preview and confirm, the way the apply route does. */
+async function confirm(text: string, role: UserRole, db: ReturnType<typeof fakeDb>) {
+  const planned = await plan(text, role, db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) {
+    return { planned, preview, done: null as Awaited<ReturnType<typeof applyMutation>> | null };
+  }
+  const done = await applyMutation({
+    text, ...actor(role), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    actorName: 'Alex Ellis',
+  });
+  return { planned, preview, done };
+}
+
+test('a share that fails takes the list it was made from with it', async () => {
+  const db = fakeDb({ crm_contacts: fleets(), profiles: people() });
+  const text = `${FOUND}, create a list called Fleet Prospects from them and share it with Dave`;
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  /* The grant fails at the last step, after the list has been made
+     inside the same transaction. */
+  db.as('viewer');
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+
+  ok('the whole thing fails', !done.ok, 'it succeeded');
+  ok('no list was left behind', (db.tables.crm_lists ?? []).length === 0,
+    JSON.stringify(db.tables.crm_lists));
+  ok('and no customer was moved onto one',
+    db.tables.crm_contacts.every((r) => r.list_id == null),
+    JSON.stringify(db.tables.crm_contacts.map((r) => r.list_id)));
+  ok('nothing was granted', (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('an attachment that fails takes the field write with it', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  const text = 'move all the trailers at Carrington to Hyde';
+
+  /* A programme that writes and then attaches. Built by hand only
+     because no single sentence says both today; everything else about
+     it is the production path. */
+  const planned = await plan(text, 'admin', db);
+  ok('the write plans', !!planned);
+  if (!planned?.preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const withAttach = {
+    ...planned.planned.planning,
+    plan: {
+      ...planned.planned.planning.plan,
+      steps: [
+        ...planned.planned.planning.plan.steps,
+        {
+          op: 'emit' as const,
+          id: 'a1',
+          from: { entity: 'trailers' },
+          output: { kind: 'file' as const, format: 'csv' as const },
+          to: {
+            kind: 'attach' as const,
+            to: {
+              op: 'select' as const,
+              from: { entity: 'trailers' },
+              where: {
+                kind: 'cmp' as const, op: 'eq' as const,
+                left: { kind: 'field' as const, of: { entity: 'trailers', field: 'stc_no' } },
+                right: { kind: 'literal' as const, value: 'STC000000' },
+              },
+            },
+          },
+          capability: 'record.attach',
+        },
+      ],
+    },
+  };
+
+  const { previewMutation } = await import('../lib/command/server/mutation');
+  const fresh = await previewMutation(withAttach, postgrestStore(db.supabase));
+  if (!fresh.ok) { ok('it previews', false, fresh.why); return; }
+
+  const { executeProgramme } = await import('../lib/command/ir/orchestrate');
+  const { prepareDelivery } = await import('../lib/command/server/emit');
+  const ready = await prepareDelivery(withAttach, withAttach.plan.steps[1] as never, {
+    store: postgrestStore(db.supabase), actorName: 'Alex Ellis', now: new Date('2026-08-17'),
+  });
+
+  /* The record it names is not there, so nothing can be prepared and
+     nothing may be written. */
+  ok('the delivery cannot be prepared', !ready.ok, 'it prepared');
+  ok('and no trailer moved', db.writes.length === 0, JSON.stringify(db.writes));
+
+  /* And when the delivery IS prepared but the database refuses it, the
+     write goes back too. */
+  const done = await executeProgramme(withAttach.plan, {
+    store: postgrestStore(db.supabase),
+    agreedHash: fresh.programmeHash,
+    deliveries: () => [{
+      op: 'invoke',
+      capability: 'record.attach',
+      subjects: ['00000000-0000-0000-0000-000000000000'],
+      args: { table: 'stock_trailers', filename: 'x.csv', mime: 'text/csv', base64: 'eA==' },
+    }],
+  });
+  ok('the programme fails', !done.ok, 'it succeeded');
+  ok('and the trailers are still at Carrington',
+    db.tables.stock_trailers.filter((r) => r.location === 'Carrington').length === 1,
+    JSON.stringify(db.tables.stock_trailers.map((r) => r.location)));
+  ok('with nothing attached', (db.tables.record_attachments ?? []).length === 0,
+    JSON.stringify(db.tables.record_attachments));
+});
+
+test('a file that cannot be produced leaves the database alone', async () => {
+  const db = fakeDb({ crm_contacts: fleets(), profiles: people() });
+  const text = `${FOUND}, create a list called Fleet Prospects from them and export it to Excel`;
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  /* The renderer throws. The file is built before the transaction opens
+     precisely so this is a refusal rather than a note attached to a
+     change that has already committed. */
+  const { RENDERERS } = await import('../lib/command/server/emit');
+  const real = RENDERERS.xlsx;
+  RENDERERS.xlsx = () => { throw new Error('TEST renderer down'); };
+
+  try {
+    const done = await applyMutation({
+      text, ...actor('admin'), store: postgrestStore(db.supabase),
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    });
+    ok('the whole thing is refused', !done.ok, 'it succeeded');
+    if (!done.ok) ok('saying the file could not be produced', /could not be produced/.test(done.why), done.why);
+  } finally {
+    RENDERERS.xlsx = real;
+  }
+
+  ok('no list was made', (db.tables.crm_lists ?? []).length === 0,
+    JSON.stringify(db.tables.crm_lists));
+  ok('and nothing was written at all', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+/* =============================================================
+   20. Sharing two of a hundred shares two, or nothing
+   ============================================================= */
+
+test('a selection smaller than the list it is on shares nothing', async () => {
+  /* A hundred customers on one list, two of them at Hyde. Granting the
+     list would give Dave the other ninety eight. */
+  const many: Row[] = [];
+  for (let i = 0; i < 100; i++) {
+    many.push({
+      id: `c${i}`, company_name: `Customer ${i}`, status: 'lead', list_id: 'L1',
+      location: i < 2 ? 'Hyde' : 'Carrington',
+    });
+  }
+  const db = fakeDb({
+    crm_contacts: many,
+    crm_lists: [{ id: 'L1', name: 'Everything', is_global: false }],
+    profiles: people(),
+  });
+
+  const { done, preview } = await confirm('share the customers in Hyde with Dave', 'admin', db);
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : 'no preview');
+  ok('and then refuses', done !== null && !done.ok, 'it shared');
+  if (!done || done.ok) return;
+  ok('saying two of a hundred', /2 of the 100/.test(done.why), done.why);
+  ok('nobody was granted anything', (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('the database refuses the same overgrant on its own', async () => {
+  /* The check is in the function as well as in the caller, because a
+     caller that validates its own payload validates nothing. */
+  const many: Row[] = [];
+  for (let i = 0; i < 100; i++) {
+    many.push({ id: `c${i}`, company_name: `Customer ${i}`, status: 'lead', list_id: 'L1' });
+  }
+  const db = fakeDb({
+    crm_contacts: many,
+    crm_lists: [{ id: 'L1', name: 'Everything', is_global: false }],
+    profiles: people(),
+  });
+
+  const out = await postgrestStore(db.supabase).invoke({
+    capability: 'rows.share',
+    subjects: ['c0', 'c1'],
+    args: { list: 'L1', users: ['p1'] },
+  });
+  ok('the call fails', !out.ok, 'it shared');
+  if (out.ok) return;
+  ok('with the numbers in it', /2 of the 100/.test(out.why), out.why);
+  ok('and nothing was granted', (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+/* =============================================================
+   21. A viewer cannot go round the runtime
+   ============================================================= */
+
+test('a viewer calling the attach function directly attaches nothing', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  db.as('viewer');
+
+  const out = await postgrestStore(db.supabase).invoke({
+    capability: 'record.attach',
+    subjects: ['t1'],
+    args: {
+      table: 'stock_trailers', filename: 'x.csv', mime: 'text/csv', base64: 'eA==',
+    },
+  });
+
+  ok('the call fails', !out.ok, 'it attached');
+  if (out.ok) return;
+  /* The capability is derived from the TARGET. Attaching to a stock
+     unit is editing that unit. */
+  ok('naming the capability it wanted', /stock\.edit/.test(out.why), out.why);
+  ok('and nothing was stored', (db.tables.record_attachments ?? []).length === 0,
+    JSON.stringify(db.tables.record_attachments));
+});
+
+test('a viewer calling the share function directly grants nothing', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead', list_id: 'L1' }],
+    crm_lists: [{ id: 'L1', name: 'Fleet Prospects', is_global: false }],
+    profiles: people(),
+  });
+  db.as('viewer');
+
+  const out = await postgrestStore(db.supabase).invoke({
+    capability: 'rows.share',
+    subjects: ['c1'],
+    args: { list: 'L1', users: ['p1'] },
+  });
+  ok('the call fails', !out.ok, 'it shared');
+  if (out.ok) return;
+  ok('naming the capability it wanted', /crm\.manageLists/.test(out.why), out.why);
+  ok('and nothing was granted', (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
 });
 
 /* ============================================================= */

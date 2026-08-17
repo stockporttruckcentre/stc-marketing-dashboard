@@ -32,6 +32,11 @@
    it is.
    ============================================================= */
 
+import { DESTINATION_VERBS, FILE_VERBS } from './output';
+import { CREATE_WORDS, DELETE_WORDS } from './lifecycle';
+import { CLEAR_WORDS, MOVE_WORDS, SET_WORDS } from './mutate';
+import { FIND_VERBS } from './finder';
+
 /** What joins two clauses. Order matters: longest first. */
 const JOINERS = [
   'and then',
@@ -44,20 +49,51 @@ const JOINERS = [
 /**
  * Verbs that can begin a clause.
  *
- * Taken from what the readers themselves respond to rather than written
- * out for this: a clause starts with an instruction verb, a lifecycle
- * verb or an output verb, and each of those lists already exists.
+ * DERIVED, NOT LISTED. Every word comes from the reader that responds to
+ * it: the output reader's file verbs and destination verbs, the
+ * lifecycle reader's create and delete words, the instruction reader's
+ * set, clear and move words, and the finder's search verbs.
+ *
+ * The first version said it was taken from the readers and was actually
+ * a hand copy of them, which is the same failure as a lookup table of
+ * phrasings: it was already missing words the readers had, and a new
+ * operation would have been unchainable until somebody remembered to
+ * come back here. Now an operation whose verb a reader knows is
+ * chainable the day it lands.
+ *
+ * Only the first word of each entry, because this asks whether a
+ * fragment BEGINS a clause. "Set up" and "get rid of" contribute "set"
+ * and "get".
  */
+
+/**
+ * Words the readers treat as verbs that cannot open a clause.
+ *
+ * Small and explicit, because it is a statement about English rather
+ * than about this application: these are the entries in the derived
+ * lists that are grammar rather than instruction.
+ */
+const NOT_A_CLAUSE_START = new Set([
+  'is', 'are', 'to', 'now', 'should', 'equals', 'any', 'who', 'the',
+]);
+
 const OPENERS = [
-  /* output */
-  'export', 'download', 'save', 'send', 'email', 'share', 'attach', 'print', 'produce',
-  /* lifecycle */
-  'create', 'make', 'add', 'new', 'delete', 'remove', 'cancel',
-  /* instruction */
-  'set', 'change', 'update', 'move', 'mark', 'assign', 'approve', 'clear', 'put',
-  /* read */
-  'find', 'show', 'list', 'count', 'get',
-];
+  ...FILE_VERBS,
+  ...DESTINATION_VERBS.flatMap((d) => d.verbs),
+  ...CREATE_WORDS,
+  ...DELETE_WORDS,
+  ...SET_WORDS,
+  ...CLEAR_WORDS,
+  ...MOVE_WORDS,
+  ...FIND_VERBS,
+]
+  .map((w) => w.trim().split(/\s+/)[0].toLowerCase())
+  /* Words that are verbs to one reader and grammar to a sentence. "To",
+     "is" and "now" are set words because "the price is 20k" is a write,
+     and none of them starts a clause. Splitting on them would cut
+     "trailers at Hyde and now at Bredbury" in half. */
+  .filter((w) => !NOT_A_CLAUSE_START.has(w))
+  .filter((w) => w.length > 2);
 
 /** Words that mean "what the clause before produced". */
 const BACK_REFERENCES = [

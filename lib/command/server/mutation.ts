@@ -44,7 +44,7 @@ import type { Cond, Emit, Mutate, Plan } from '../ir/types';
 import { WRITABLE_FIELDS, type WritableField } from '../fields';
 import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
-import { runEmit, runEmitStep } from './emit';
+import { prepareDelivery, type Prepared } from './emit';
 import type { Artefact } from '../render/table';
 
 /* -------------------------------------------------------------
@@ -336,17 +336,19 @@ export type MutationOutcome =
       changed: number;
       message: string;
       /**
-       * The file the programme also asked for, once the change committed.
+       * The file the programme also asked for.
        *
        * Absent when the sentence asked for no file. Present, with the
        * row count, when it did: "create a list from them and export it
        * to Excel" is one thing somebody asked for, and handing back the
        * list without the spreadsheet is doing half of it.
+       *
+       * Rendered BEFORE the transaction, so an `ok` outcome carrying one
+       * means the change committed and the file exists. There is no
+       * state where one happened and the other did not.
        */
       artefact?: Artefact;
       artefactRows?: number;
-      /** Said out loud when the change committed and the file did not. */
-      deliveryFailed?: string;
     }
   | {
       ok: false;
@@ -426,11 +428,51 @@ export async function applyMutation(
     return { ok: false, reason: 'refused', why: meaning.blocked.join('; ') || 'nothing here performs that' };
   }
 
+  /* EVERY DELIVERY, PREPARED BEFORE ANYTHING IS WRITTEN.
+
+     The file is rendered here, the people a share names are looked up
+     here, and the record an attachment goes on is resolved here. None of
+     it writes. What comes back is a set of steps for the SAME
+     transaction as the field writes and the operations, so a share that
+     fails takes the list with it and a renderer that throws leaves the
+     database exactly as it was. */
+  const outgoing = deliverySteps(planning.plan);
+  const rendered = new Map<string, { artefact: Artefact; rows: number }>();
+  const prepared: Prepared[] = [];
+
+  for (const step of outgoing) {
+    const ready = await prepareDelivery(planning, step as Emit, {
+      store: req.store,
+      actorName: req.actorName ?? 'the command bar',
+      now: new Date(),
+      produced: rendered,
+    });
+    if (!ready.ok) {
+      /* Before the transaction, so there is nothing to undo and nothing
+         to warn about. */
+      return { ok: false, reason: 'refused', why: ready.why };
+    }
+    if (ready.prepared.artefact) {
+      rendered.set(ready.prepared.stepId, {
+        artefact: ready.prepared.artefact, rows: ready.prepared.rows,
+      });
+    }
+    if (ready.prepared.kind === 'download') {
+      rendered.set(ready.prepared.stepId, {
+        artefact: ready.prepared.artefact, rows: ready.prepared.rows,
+      });
+    }
+    prepared.push(ready.prepared);
+  }
+
   const done = await executeProgramme(planning.plan, {
     store: req.store,
     policy: req.policy,
     args: invokeArgs(planning.plan),
     agreedHash: req.previewProgrammeHash,
+    deliveries: (indexOf) => prepared
+      .filter((p): p is Extract<Prepared, { kind: 'effect' }> => p.kind === 'effect')
+      .map((p) => p.step(indexOf)),
   });
 
   if (!done.ok && done.reason === 'drift') {
@@ -455,73 +497,28 @@ export async function applyMutation(
   /* A programme whose only effect is a delivery changed no record, and
      saying " changed on 0 records" in front of what it DID do reads as
      a failure. */
-  const message = !operation && !fields.length && done.changed === 0
+  const changedRecords = operation || fields.length
+    ? done.changed
+    : 0;
+  const message = !operation && !fields.length
     ? ''
     : operation
-      ? `${what} on ${done.changed.toLocaleString('en-GB')} ${done.changed === 1 ? 'record' : 'records'}.`
-      : done.changed === 1
+      ? `${what} on ${changedRecords.toLocaleString('en-GB')} ${changedRecords === 1 ? 'record' : 'records'}.`
+      : changedRecords === 1
         ? `${what} changed on one record.`
-        : `${what} changed on ${done.changed.toLocaleString('en-GB')} records.`;
+        : `${what} changed on ${changedRecords.toLocaleString('en-GB')} records.`;
 
-  /* THE FILE THE SAME SENTENCE ASKED FOR.
+  /* The file the same sentence asked for, handed back with the outcome.
+     It was built before the transaction and the transaction committed,
+     so there is no half state to describe. */
+  const download = prepared.find((p): p is Extract<Prepared, { kind: 'download' }> => p.kind === 'download');
 
-     Built after the transaction, from the rows as they stand once it has
-     committed, because a spreadsheet cannot be inside a database
-     transaction and pretending otherwise would be the only lie here.
-     What that costs is stated rather than hidden: if the change commits
-     and the file does not build, the outcome says so. */
-  const outgoing = deliverySteps(planning.plan);
-  if (!outgoing.length) return { ok: true, changed: done.changed, message };
-
-  /* EVERY DELIVERY, NOT THE FIRST ONE.
-
-     "Create a list from them, export it to Excel and share it with
-     Dave" is a file AND a grant, and running only the first would hand
-     over the spreadsheet and tell somebody Dave could see the list. */
-  let out: MutationOutcome = { ok: true, changed: done.changed, message };
-
-  /* One file, produced once. A later step that attaches what an earlier
-     one built takes that file rather than rendering a second one in
-     whatever format it happens to default to. */
-  const produced = new Map<string, { artefact: Artefact; rows: number }>();
-
-  for (const step of outgoing) {
-    const delivered = await runEmitStep(planning, step as Emit, {
-      store: req.store,
-      actorName: req.actorName ?? 'the command bar',
-      now: new Date(),
-      produced,
-    });
-
-    if (!delivered.ok) {
-      return {
-        ok: true,
-        changed: done.changed,
-        message: `${out.ok ? out.message : message} What was to happen next did not.`,
-        deliveryFailed: delivered.why,
-        ...(out.ok && out.artefact ? { artefact: out.artefact, artefactRows: out.artefactRows } : {}),
-      };
-    }
-    if (!out.ok) continue;
-    if (delivered.kind !== 'granted' && step.id) {
-      produced.set(step.id, { artefact: delivered.artefact, rows: delivered.rows });
-    }
-
-    out = delivered.kind === 'granted' || delivered.kind === 'attached'
-      /* Sharing grants access and attaching leaves the file on a
-         record. Neither hands anything back, so the message says what
-         actually happened and to what. */
-      ? { ...out, message: `${out.message} ${delivered.message}`.trim() }
-      : {
-          ...out,
-          message: (`${out.message} ${delivered.rows.toLocaleString('en-GB')} `
-            + `${delivered.rows === 1 ? 'row' : 'rows'} in ${delivered.artefact.filename}.`).trim(),
-          artefact: delivered.artefact,
-          artefactRows: delivered.rows,
-        };
-  }
-
-  return out;
+  return {
+    ok: true,
+    changed: done.changed,
+    message: [message, ...prepared.map((p) => p.describe)].filter(Boolean).join(' '),
+    ...(download ? { artefact: download.artefact, artefactRows: download.rows } : {}),
+  };
 }
 
 /* -------------------------------------------------------------

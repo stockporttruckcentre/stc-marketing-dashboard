@@ -62,11 +62,11 @@ export type LifecyclePlan = {
    Words
    ------------------------------------------------------------- */
 
-const CREATE_WORDS = [
+export const CREATE_WORDS = [
   'create', 'add', 'new', 'make', 'open', 'raise', 'start', 'set up', 'register', 'log',
 ];
 
-const DELETE_WORDS = [
+export const DELETE_WORDS = [
   'delete', 'remove', 'get rid of', 'bin', 'bin off', 'drop', 'cancel', 'call off',
 ];
 

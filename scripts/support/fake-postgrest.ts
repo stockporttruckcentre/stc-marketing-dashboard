@@ -12,7 +12,11 @@
    Whether the SQL works is a different question, answered against a real
    server by `scripts/sql/validate-007.sql`.
    ============================================================= */
-import { writableColumns } from '../generate-writable-columns';
+import { capabilityRoles, writableColumns } from '../generate-writable-columns';
+import type { UserRole } from '../../lib/types';
+
+/** The same grants the database is seeded with, from the same source. */
+const CAPABILITY_ROLES = capabilityRoles();
 
 
 /* =============================================================
@@ -158,6 +162,12 @@ function sortedRows(table: string, ops: Op[], tables: Record<string, Row[]>): Ro
 export function fakeDb(tables: Record<string, Row[]>) {
   const writes: Recorded[] = [];
   let failOn: ((c: { table: string; id: string }) => boolean) | null = null;
+  /* Who the database thinks is calling. The real functions ask
+     `command_may`, which reads the seeded capability table; here the
+     same question is answered from the same source. */
+  let role: UserRole = 'admin';
+  const may = (capability: string) =>
+    CAPABILITY_ROLES.some((r) => r.capability === capability && r.role === role);
 
   const builder = (table: string, ops: Op[], columns: string[] | null, update: Row | null): any => {
     const self: any = {
@@ -344,10 +354,32 @@ export function fakeDb(tables: Record<string, Row[]>) {
        Modelled here for the same reason the sale is: a fake that cannot
        perform an operation cannot show that the operation reached it. */
     if (name === 'command_share_list') {
+      if (!may('crm.manageLists')) {
+        return { data: null, error: { message: 'you do not have crm.manageLists' } };
+      }
       const listId = args.p_list == null ? '' : String(args.p_list);
       const users = (args.p_users ?? []) as string[];
+      const ids = (args.p_ids ?? []) as string[];
       if (!listId) return { data: null, error: { message: 'nothing said which list to share' } };
       if (!users.length) return { data: null, error: { message: 'nothing said who to share it with' } };
+      if (!ids.length) {
+        return { data: null, error: { message: 'nothing said which records were being shared' } };
+      }
+
+      /* The selected set has to BE the list. Sharing grants the whole
+         list, so a narrower selection would hand over everything else
+         on it. */
+      const onList = (tables.crm_contacts ?? []).filter((r) => String(r.list_id) === listId);
+      const covered = onList.filter((r) => ids.includes(String(r.id)));
+      if (onList.length !== ids.length || covered.length !== ids.length) {
+        return {
+          data: null,
+          error: {
+            message: `that is ${covered.length} of the ${onList.length} records on the list, `
+              + 'and sharing here grants the whole list; nothing has been changed',
+          },
+        };
+      }
 
       const list = (tables.crm_lists ?? []).find((r) => String(r.id) === listId);
       if (!list) return { data: null, error: { message: 'that list is not there' } };
@@ -387,6 +419,13 @@ export function fakeDb(tables: Record<string, Row[]>) {
        row's own policy. */
     if (name === 'command_attach_file') {
       const table = String(args.p_entity ?? '');
+      /* Seeing a record is not permission to write to it. The capability
+         is derived from the target, exactly as the function does. */
+      const needed = table === 'crm_contacts' ? 'crm.edit'
+        : table === 'stock_trailers' ? 'stock.edit' : null;
+      if (needed && !may(needed)) {
+        return { data: null, error: { message: `you do not have ${needed}` } };
+      }
       const record = args.p_record == null ? '' : String(args.p_record);
       const base64 = String(args.p_base64 ?? '');
       if (!['stock_trailers', 'crm_contacts'].includes(table)) {
@@ -478,11 +517,166 @@ export function fakeDb(tables: Record<string, Row[]>) {
     return { data: touched, error: null };
   };
 
+  /* =============================================================
+     The transaction, as the database provides it.
+
+     `command_perform` is one plpgsql function and therefore one
+     transaction: every step or none. Modelled here by taking a copy of
+     every table before the first step and putting it back if any step
+     raises, because the property under test is that a programme whose
+     third step fails leaves nothing behind from the first two, and a
+     fake that committed each step as it went could not show that.
+     ============================================================= */
+  const perform = async (steps: unknown) => {
+    if (!Array.isArray(steps) || !steps.length) {
+      return { data: null, error: { message: 'command_perform was given nothing to do' } };
+    }
+
+    const before = JSON.parse(JSON.stringify(tables)) as Record<string, Row[]>;
+    const writesBefore = writes.length;
+    const results: unknown[] = [];
+    let changed = 0;
+
+    const roll = () => {
+      for (const key of Object.keys(tables)) delete (tables as Record<string, Row[]>)[key];
+      for (const [key, rows] of Object.entries(before)) (tables as Record<string, Row[]>)[key] = rows;
+      writes.length = writesBefore;
+    };
+
+    /* A value one step takes from an earlier step's result. */
+    const resolve = (v: unknown): unknown => {
+      if (Array.isArray(v)) return v.map(resolve);
+      if (v && typeof v === 'object') {
+        const ref = (v as Record<string, unknown>).$from as { step: number; key: string } | undefined;
+        if (ref) {
+          const from = results[ref.step] as Record<string, unknown> | undefined;
+          if (!from || from[ref.key] == null) {
+            throw new Error(`step ${ref.step} produced nothing called ${ref.key}`);
+          }
+          return from[ref.key];
+        }
+        return Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, resolve(x)]),
+        );
+      }
+      return v;
+    };
+
+    for (const raw of steps) {
+      const step = raw as Record<string, unknown>;
+      let out: { data: unknown; error: { message: string } | null };
+
+      try {
+        if (step.op === 'changes') {
+          out = await rpc('command_apply', { p_changes: step.changes });
+          if (!out.error) {
+            changed += typeof out.data === 'number' ? out.data : 0;
+            out = { data: { changed: out.data }, error: null };
+          }
+        } else if (step.op === 'invoke') {
+          const cap = String(step.capability);
+          const fn = PERFORMED[cap];
+          if (!fn) {
+            roll();
+            return { data: null, error: { message: `nothing in this database performs ${cap}` } };
+          }
+          const subjects = (resolve(step.subjects ?? []) as string[]).map(String);
+          out = await rpc(fn.name, fn.args({
+            subjects,
+            args: (resolve(step.args ?? {}) ?? {}) as Record<string, unknown>,
+          }));
+          if (!out.error) {
+            /* The same accounting `command_perform` does: what an
+               operation reports having done, or the subjects it ran
+               over when it reports nothing countable. */
+            const body = (out.data ?? {}) as Record<string, unknown>;
+            const n = ['moved', 'granted'].map((k) => body[k]).find((v) => typeof v === 'number');
+            changed += typeof n === 'number' ? n
+              : cap === 'record.attach' ? 1
+                : subjects.length;
+          }
+        } else {
+          roll();
+          return { data: null, error: { message: `a step must be a change set or an operation` } };
+        }
+      } catch (e) {
+        roll();
+        return { data: null, error: { message: (e as Error).message } };
+      }
+
+      if (out.error) {
+        roll();
+        return { data: null, error: out.error };
+      }
+      results.push(out.data ?? {});
+    }
+
+    return { data: { changed, results }, error: null };
+  };
+
+  const rpcWithPerform = async (name: string, args: Record<string, unknown>) =>
+    (name === 'command_perform' ? perform(args.p_steps) : rpc(name, args));
+
   return {
-    supabase: { from: (table: string) => builder(table, [], null, null), rpc },
+    supabase: { from: (table: string) => builder(table, [], null, null), rpc: rpcWithPerform },
     writes,
     tables,
     /** Make one change fail, to prove the others do not land. */
     refuse: (predicate: (c: { table: string; id: string }) => boolean) => { failOn = predicate; },
+    /** Who the database thinks is calling, for the capability checks. */
+    as: (r: UserRole) => { role = r; },
   };
 }
+
+/**
+ * Which database function performs which capability, as the real
+ * `command_perform` dispatches them.
+ *
+ * The same mapping `lib/command/store/postgrest.ts` holds, restated here
+ * because this fake stands in for the database rather than for the
+ * store: if the two disagree the difference is a real one and shows up
+ * as a failing check.
+ */
+const PERFORMED: Record<string, {
+  name: string;
+  args: (c: { subjects: string[]; args: Record<string, unknown> }) => Record<string, unknown>;
+}> = {
+  'list.create': {
+    name: 'command_create_list',
+    args: (c) => ({ p_name: c.args.name ?? null, p_ids: c.subjects, p_owner: null }),
+  },
+  'list.add': {
+    name: 'command_add_to_list',
+    args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
+  },
+  'rows.share': {
+    name: 'command_share_list',
+    args: (c) => ({
+      p_list: c.args.list ?? null,
+      p_ids: c.subjects,
+      p_users: c.args.users ?? [],
+      p_can_edit: c.args.canEdit ?? true,
+    }),
+  },
+  'record.attach': {
+    name: 'command_attach_file',
+    args: (c) => ({
+      p_entity: c.args.table ?? null,
+      p_record: c.subjects[0] ?? null,
+      p_filename: c.args.filename ?? 'attachment',
+      p_mime: c.args.mime ?? 'application/octet-stream',
+      p_base64: c.args.base64 ?? '',
+      p_described: c.args.describedAs ?? null,
+    }),
+  },
+  'deal.markSold': {
+    name: 'command_mark_sold_many',
+    args: (c) => ({
+      p_tracker_ids: c.subjects,
+      p_rep_initials: c.args.repInitials ?? 'Unknown',
+      p_sale_price: c.args.salePrice ?? null,
+      p_dispatch_date: c.args.dispatchDate ?? null,
+      p_today: c.args.today ?? null,
+    }),
+  },
+};

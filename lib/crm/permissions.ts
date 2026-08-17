@@ -90,6 +90,9 @@ export type CrmCapabilities = Set<CrmCapability>;
  * version the meeting asked for needs the admin panel, because it is
  * scoped to stock rather than to a verb.
  */
+/** Every role there is, in one place, so a sweep cannot miss one. */
+export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
+
 const BY_ROLE: Record<UserRole, CrmCapability[]> = {
   admin: [
     'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.create',

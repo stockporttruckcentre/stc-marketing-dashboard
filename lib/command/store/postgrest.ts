@@ -22,7 +22,8 @@
    ============================================================= */
 import type { Cond, Expr } from '../ir/types';
 import type {
-  ApplyOutcome, Change, Invocation, InvokeOutcome, ReadOutcome, ReadRequest, Store,
+  ApplyOutcome, Change, Invocation, InvokeOutcome, PerformOutcome, ReadOutcome, ReadRequest,
+  Store, TransactionStep,
 } from '../ir/store';
 
 /** The slice of the client this needs, so nothing here imports one. */
@@ -256,6 +257,26 @@ export function postgrestStore(supabase: Queryable): Store {
       const results = Array.isArray(data) ? data : data == null ? [] : [data];
       return { ok: true, performed: call.subjects.length, results };
     },
+
+    /**
+     * Every database effect of one programme, in one call.
+     *
+     * `command_perform` dispatches to the same functions `invoke` reaches
+     * one at a time, in order, inside one plpgsql function and therefore
+     * one transaction. Nothing about which function performs what moves:
+     * this hands over the capability name and the database decides, for
+     * the same reason `invoke` does.
+     */
+    async perform(steps: TransactionStep[]): Promise<PerformOutcome> {
+      if (!supabase.rpc) return { ok: false, why: 'this client cannot run a programme atomically' };
+      if (!steps.length) return { ok: true, changed: 0, results: [] };
+
+      const { data, error } = await supabase.rpc('command_perform', { p_steps: steps });
+      if (error) return { ok: false, why: String((error as { message?: string }).message ?? error) };
+
+      const body = (data ?? {}) as { changed?: number; results?: unknown[] };
+      return { ok: true, changed: body.changed ?? 0, results: body.results ?? [] };
+    },
   };
 }
 
@@ -285,11 +306,14 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
   },
   'rows.share': {
     name: 'command_share_list',
-    /* The subject is the list, because a list is what this application
-       shares. Who it goes to is an argument rather than a subject: the
-       operation runs once over one list, not once per person. */
+    /* The subjects are the RECORDS being shared, and the list is an
+       argument. That way round because the database checks that the
+       records are the whole list before it grants anything: sharing two
+       Hyde customers off a list of a hundred would hand over the other
+       ninety eight. */
     args: (c) => ({
-      p_list: c.subjects[0] ?? null,
+      p_list: c.args.list ?? null,
+      p_ids: c.subjects,
       p_users: c.args.users ?? [],
       p_can_edit: c.args.canEdit ?? true,
     }),

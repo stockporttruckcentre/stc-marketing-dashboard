@@ -664,18 +664,26 @@ SELECT assert('and the list was not created either',
 -- -------------------------------------------------------------
 -- Sharing that list with colleagues
 --
+-- The functions ask `command_may`, which reads the caller's role, so
+-- the harness has to say who it is. Without this every capability check
+-- answers "nobody", which is correct and useless.
+--
 -- Sharing in this CRM is list membership, so this asserts against
 -- `crm_list_members` rather than against anything the command layer
 -- believes about it. The two people are the ones the RLS section above
 -- created, which is also why they have `profiles` rows: the project's
 -- `handle_new_user` trigger copies an auth user into profiles.
 -- -------------------------------------------------------------
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
 DO $$
 DECLARE list UUID; out JSONB;
 BEGIN
   SELECT id INTO list FROM crm_lists WHERE name = 'TEST tipper prospects';
 
   SELECT command_share_list(list,
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID],
     ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID,
           'bbbbbbbb-0000-0000-0000-000000000002'::UUID], TRUE) INTO out;
   PERFORM assert('a list is shared with both colleagues', (out ->> 'granted')::INT = 2, out::TEXT);
@@ -683,6 +691,8 @@ BEGIN
   -- Sharing twice grants nothing more, which is what `idempotent` in
   -- the capability registry claims and this is what makes it true.
   SELECT command_share_list(list,
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID],
     ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE) INTO out;
   PERFORM assert('sharing again with the same person changes nothing',
     (out ->> 'granted')::INT = 0 AND (out ->> 'alreadyHad')::INT = 1, out::TEXT);
@@ -701,12 +711,30 @@ DECLARE list UUID;
 BEGIN
   SELECT id INTO list FROM crm_lists WHERE name = 'TEST tipper prospects';
   PERFORM command_share_list(list,
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID],
     ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID,
           '00000000-0000-0000-0000-0000000000ff'::UUID], TRUE);
   PERFORM assert('a person who is not here fails the whole grant', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
   PERFORM assert('a person who is not here fails the whole grant',
     SQLERRM LIKE '%only%are here%', SQLERRM);
+END
+$$;
+
+-- Two of the records on a list is not the list, and sharing grants the
+-- whole list. See the header of migration 013.
+DO $$
+DECLARE list UUID;
+BEGIN
+  SELECT id INTO list FROM crm_lists WHERE name = 'TEST tipper prospects';
+  PERFORM command_share_list(list,
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID],
+    ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE);
+  PERFORM assert('sharing part of a list is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('sharing part of a list is refused',
+    SQLERRM LIKE '%1 of the 2 records%', SQLERRM);
 END
 $$;
 
@@ -720,6 +748,7 @@ DECLARE glob UUID;
 BEGIN
   SELECT id INTO glob FROM crm_lists WHERE is_global LIMIT 1;
   PERFORM command_share_list(glob,
+    ARRAY(SELECT id FROM crm_contacts WHERE list_id = glob),
     ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE);
   PERFORM assert('the global list refuses to be shared', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
@@ -778,6 +807,8 @@ EXCEPTION WHEN OTHERS THEN
     SQLERRM LIKE '%no list here is called%', SQLERRM);
 END
 $$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
 
 DELETE FROM crm_list_members WHERE list_id IN (SELECT id FROM crm_lists WHERE name LIKE 'TEST %');
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
@@ -921,6 +952,7 @@ $$;
 \echo '--- attaching a file ---'
 
 SELECT reset_fixtures();
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
 
 DO $$
 DECLARE unit UUID; out JSONB;
@@ -967,10 +999,134 @@ $$;
 SELECT assert('and nothing was stored for either of those',
   (SELECT COUNT(*) FROM record_attachments WHERE filename = 'TEST no.pdf') = 0);
 
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+
 DELETE FROM record_attachments WHERE filename LIKE 'TEST %';
 
 -- =============================================================
--- 8. The allowlist matches the registry
+-- 8. Seeing a record is not permission to write to it
+-- =============================================================
+\echo '--- attaching as a viewer ---'
+
+SELECT reset_fixtures();
+
+-- The runtime's gate is irrelevant here: this is the function called
+-- directly, which is what PostgREST exposes.
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE unit UUID;
+BEGIN
+  SELECT id INTO unit FROM stock_trailers LIMIT 1;
+  PERFORM command_attach_file('stock_trailers', unit, 'TEST viewer.pdf', 'application/pdf',
+    encode('x'::BYTEA, 'base64'), NULL);
+  PERFORM assert('a viewer calling the attach function directly is refused', FALSE, 'it attached');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer calling the attach function directly is refused',
+    SQLERRM LIKE '%stock.edit%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+SELECT assert('and nothing was attached',
+  (SELECT COUNT(*) FROM record_attachments WHERE filename = 'TEST viewer.pdf') = 0);
+
+-- =============================================================
+-- 9. One programme, one transaction
+-- =============================================================
+\echo '--- command_perform ---'
+
+SELECT reset_fixtures();
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+INSERT INTO crm_contacts (id, company_name, status, source) VALUES
+  ('c1111111-0000-0000-0000-000000000001', 'TEST perform one', 'lead', 'manual'),
+  ('c1111111-0000-0000-0000-000000000002', 'TEST perform two', 'lead', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+-- Make a list and share it, in one call, with the share naming the list
+-- by the position of the step that creates it.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(('[' ||
+    '{"op":"invoke","capability":"list.create",' ||
+    ' "subjects":["c1111111-0000-0000-0000-000000000001","c1111111-0000-0000-0000-000000000002"],' ||
+    ' "args":{"name":"TEST performed list"}},' ||
+    '{"op":"invoke","capability":"rows.share",' ||
+    ' "subjects":["c1111111-0000-0000-0000-000000000001","c1111111-0000-0000-0000-000000000002"],' ||
+    ' "args":{"list":{"$from":{"step":0,"key":"listId"}},' ||
+    '          "users":["aaaaaaaa-0000-0000-0000-000000000001"]}}' ||
+    ']')::JSONB) INTO out;
+  PERFORM assert('a list is made and shared in one call', (out ->> 'changed')::INT = 3, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list is made and shared in one call', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('the list is there',
+  (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST performed list') = 1);
+SELECT assert('and it is shared',
+  (SELECT COUNT(*) FROM crm_list_members m JOIN crm_lists l ON l.id = m.list_id
+   WHERE l.name = 'TEST performed list') = 1);
+
+DELETE FROM crm_list_members WHERE list_id IN (SELECT id FROM crm_lists WHERE name LIKE 'TEST %');
+DELETE FROM crm_lists WHERE name LIKE 'TEST %';
+UPDATE crm_contacts SET list_id = NULL WHERE company_name LIKE 'TEST perform%';
+
+-- The share fails. The list must not survive it.
+DO $$
+BEGIN
+  PERFORM command_perform(('[' ||
+    '{"op":"invoke","capability":"list.create",' ||
+    ' "subjects":["c1111111-0000-0000-0000-000000000001","c1111111-0000-0000-0000-000000000002"],' ||
+    ' "args":{"name":"TEST rolled back list"}},' ||
+    '{"op":"invoke","capability":"rows.share",' ||
+    ' "subjects":["c1111111-0000-0000-0000-000000000001"],' ||
+    ' "args":{"list":{"$from":{"step":0,"key":"listId"}},' ||
+    '          "users":["aaaaaaaa-0000-0000-0000-000000000001"]}}' ||
+    ']')::JSONB);
+  PERFORM assert('a share that fails fails the whole programme', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a share that fails fails the whole programme',
+    SQLERRM LIKE '%records on the list%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the list it would have shared was never created',
+  (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST rolled back list') = 0);
+SELECT assert('nor were the records moved onto one',
+  (SELECT COUNT(*) FROM crm_contacts
+   WHERE company_name LIKE 'TEST perform%' AND list_id IS NOT NULL) = 0);
+
+-- A field write and an operation in one call, with the operation failing.
+DO $$
+BEGIN
+  PERFORM command_perform(('[' ||
+    '{"op":"changes","changes":[{"table":"stock_trailers",' ||
+    ' "id":"11111111-1111-1111-1111-111111111111","set":{"location":"TEST moved"}}]},' ||
+    '{"op":"invoke","capability":"list.create","subjects":[],"args":{"name":"TEST empty list"}}' ||
+    ']')::JSONB);
+  PERFORM assert('an operation that fails takes the field write with it', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an operation that fails takes the field write with it',
+    SQLERRM LIKE '%needs something in it%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the trailer did not move',
+  (SELECT location FROM stock_trailers WHERE stc_no = 'TESTSTC1') <> 'TEST moved',
+  (SELECT location FROM stock_trailers WHERE stc_no = 'TESTSTC1'));
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST perform%';
+
+-- =============================================================
+-- 10. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

@@ -107,10 +107,55 @@ export type InvokeOutcome =
   | { ok: true; performed: number; results: unknown[] }
   | { ok: false; why: string };
 
+/**
+ * A value one step takes from an earlier step's result.
+ *
+ * Sharing the list a previous step created needs that list's id, and
+ * that id does not exist until the step runs. This is the same idea as
+ * the plan's `ResultRef` and it is separate from it on purpose: the
+ * plan's version is semantic and this one is a position in a
+ * transaction, which is the only place the ordering can be honoured.
+ */
+export type ValueRef = { $from: { step: number; key: string } };
+
+export const isValueRef = (v: unknown): v is ValueRef =>
+  typeof v === 'object' && v !== null && '$from' in (v as Record<string, unknown>);
+
+/**
+ * One database effect of a programme.
+ *
+ * A set of column writes, or one business operation. Both go into the
+ * same ordered list, because a programme that changes a field and then
+ * performs an operation is one thing somebody confirmed.
+ */
+export type TransactionStep =
+  | { op: 'changes'; changes: Change[] }
+  | {
+      op: 'invoke';
+      capability: string;
+      subjects: (string | ValueRef)[];
+      args: Record<string, unknown>;
+    };
+
+export type PerformOutcome =
+  | { ok: true; changed: number; results: unknown[] }
+  | { ok: false; why: string };
+
 export type Store = {
   read(req: ReadRequest): Promise<ReadOutcome>;
   /** Every change, in one transaction. All of them, or none of them. */
   apply(changes: Change[]): Promise<ApplyOutcome>;
   /** One business operation over every subject, in one transaction. */
   invoke(call: Invocation): Promise<InvokeOutcome>;
+  /**
+   * EVERY database effect of one programme, in one transaction.
+   *
+   * The one a confirmed command goes through. `apply` and `invoke` are
+   * each one kind of effect and a programme can hold both, plus effects
+   * that used to run after the transaction had already committed: a
+   * share that failed left a list nobody asked for and reported success
+   * with a sentence about the rest not happening. Somebody who confirmed
+   * one thing got half of it and a note.
+   */
+  perform(steps: TransactionStep[]): Promise<PerformOutcome>;
 };

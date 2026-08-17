@@ -124,13 +124,13 @@ const SPLIT_SUB = /\b(take|knock|shave|chop|cut|trim)\b[^.]{0,20}?\b(off|away|ou
 const SPLIT_ADD = /\b(put|stick|add|chuck|whack|bung)\b[^.]{0,20}?\b(on|onto|to)\b/i;
 
 /** Replace it outright. */
-const SET_WORDS = [
+export const SET_WORDS = [
   'set', 'change', 'update', 'amend', 'correct', 'make', 'switch', 'move', 'put', 'mark',
   'record', 'enter', 'assign', 'give', 'is', 'are', 'to', 'should be', 'equals', 'now',
 ];
 
 /** Empty it. */
-const CLEAR_WORDS = [
+export const CLEAR_WORDS = [
   'clear', 'blank', 'wipe', 'empty', 'unset', 'reset', 'remove the', 'delete the', 'take out',
 ];
 
@@ -341,7 +341,7 @@ export function readRecordRefs(text: string): { stc: string[]; coded: string[]; 
    ------------------------------------------------------------- */
 
 /** Verbs that mean "put it somewhere", which name the location field without saying it. */
-const MOVE_WORDS = ['move', 'relocate', 'shift', 'transfer', 'park', 'parked', 'store',
+export const MOVE_WORDS = ['move', 'relocate', 'shift', 'transfer', 'park', 'parked', 'store',
                     'stored', 'send', 'put', 'stick', 'place', 'drop', 'bring'];
 
 /** The field being written, longest alias first so "refurb at sale" beats "refurb". */

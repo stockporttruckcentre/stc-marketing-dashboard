@@ -27,11 +27,11 @@
    capabilities in the registry rather than by anything here.
    ============================================================= */
 import type { CommandPlanning } from '../plan';
-import type { Store } from '../ir/store';
+import type { Store, TransactionStep } from '../ir/store';
 import type { Emit, Expr, Plan, Select } from '../ir/types';
 import { entity as entityDef } from '../ir/registry';
 import { runSelect, selectBehind } from '../ir/read';
-import { buildTable, type Artefact, type TableColumn } from '../render/table';
+import { buildTable, type Artefact, type Table, type TableColumn } from '../render/table';
 import { renderCsv } from '../render/csv';
 import { renderXlsx } from '../render/xlsx';
 import { renderDocx } from '../render/docx';
@@ -53,6 +53,19 @@ import { nounFor, type FileFormat } from '../output';
  * worst artefact this application could produce, so where a real
  * maximum bites the export REFUSES and says so rather than trimming.
  */
+/**
+ * Which renderer produces which format.
+ *
+ * A lookup rather than a chain of ternaries, so a format added to
+ * `output.ts` fails to compile here until something renders it.
+ */
+export const RENDERERS: Record<FileFormat, (t: Table) => Artefact | Promise<Artefact>> = {
+  csv: renderCsv,
+  xlsx: renderXlsx,
+  pdf: renderPdf,
+  docx: renderDocx,
+};
+
 export const FORMAT_MAXIMUM: Record<FileFormat, number | null> = {
   csv: null,
   pdf: null,
@@ -63,23 +76,8 @@ export const FORMAT_MAXIMUM: Record<FileFormat, number | null> = {
 };
 
 export type EmitOutcome =
-  /** A file, handed over. */
+  /** A file, handed over. Nothing was written to produce it. */
   | { ok: true; kind: 'artefact'; artefact: Artefact; rows: number; capped: boolean }
-  /** A file, left on a record rather than handed over. */
-  | {
-      ok: true; kind: 'attached'; artefact: Artefact; rows: number;
-      /** The record it went on, by its own name. */
-      onto: string; message: string;
-    }
-  /**
-   * Access granted, which is what sharing is here.
-   *
-   * Not a file. Sharing a list with a colleague in this application
-   * means they can open it, and producing a spreadsheet as well would
-   * be doing something nobody asked for with data that just became
-   * somebody else's to read.
-   */
-  | { ok: true; kind: 'granted'; rows: number; message: string; people: string[] }
   | {
       ok: false;
       reason: 'not an emit' | 'unsupported' | 'failed' | 'too large' | 'unresolved';
@@ -140,19 +138,92 @@ async function resolvePeople(
   return { ok: true, people };
 }
 
+/* =============================================================
+   Preparing a delivery, which is not the same as performing one
+
+   A share is a row in `crm_list_members` and an attachment is a row in
+   `record_attachments`. Both are database writes and both used to run
+   after the programme's transaction had already committed, so a share
+   that failed left a list nobody asked for and reported success with a
+   sentence about the rest not happening.
+
+   So nothing here writes. Each delivery is prepared: the people are
+   resolved, the record is resolved, the FILE IS RENDERED, and what comes
+   back is a step for the programme's one transaction. A renderer that
+   throws therefore stops the command before any of it has committed,
+   which is the order somebody confirming it would assume.
+   ============================================================= */
+
+export type Prepared =
+  /** Handed to the browser afterwards. Not a database effect at all. */
+  | { kind: 'download'; stepId: string; artefact: Artefact; rows: number; describe: string }
+  /** A database effect, for the programme's transaction. */
+  | {
+      kind: 'effect';
+      stepId: string;
+      /** Built late, because a step may refer to one earlier in the same transaction. */
+      step: (indexOf: (planStepId: string) => number | null) => TransactionStep;
+      describe: string;
+      rows: number;
+      /** The file this effect carries, when it carries one. */
+      artefact?: Artefact;
+    };
+
+export type PrepareOutcome =
+  | { ok: true; prepared: Prepared }
+  | {
+      ok: false;
+      reason: 'unsupported' | 'failed' | 'too large' | 'unresolved';
+      why: string;
+      candidates?: { id: string; label: string }[];
+    };
+
+/**
+ * The step in this programme that puts the rows on a list.
+ *
+ * Sharing what a clause just created cannot name the list, because the
+ * list does not exist until the transaction runs. Finding the step that
+ * makes it lets the share refer to its result by position instead.
+ */
+function listStepBehind(plan: Plan, from: Emit['from']): string | null {
+  const seen = new Set<string>();
+  const walk = (source: Emit['from'] | undefined): string | null => {
+    if (!source || !('ref' in source)) return null;
+    if (seen.has(source.step)) return null;
+    seen.add(source.step);
+    const step = plan.steps.find((x) => x.id === source.step);
+    if (!step) return null;
+    if (step.op === 'invoke') {
+      if (step.capability === 'list.create' || step.capability === 'list.add') return step.id ?? null;
+      return walk(step.subject as Emit['from']);
+    }
+    if (step.op === 'emit') return walk(step.from);
+    if (step.op === 'update' || step.op === 'delete' || step.op === 'create') {
+      return walk(step.match as Emit['from']);
+    }
+    return null;
+  };
+  return walk(from);
+}
+
 /**
  * Granting colleagues access to what a sentence selected.
  *
- * Sharing in this application is list membership, so the rows have to
- * be on ONE list and it must not be the global one. That is a real
- * constraint rather than an implementation shortcut: "share these three
- * customers with Dave" has no meaning here unless those customers are
- * somewhere Dave can be given access to, and quietly making a list to
- * put them in would be inventing a thing nobody asked for.
+ * SHARING THE LIST IS NOT SHARING A HANDFUL OF ROWS ON IT.
+ *
+ * The unit of sharing in this schema is the whole list, so "share the
+ * customers in Hyde with Dave" over a list of a hundred, two of which
+ * are in Hyde, would hand Dave the other ninety eight. There is no
+ * record level grant to do the narrow thing with, so the narrow thing is
+ * refused: the selection has to BE the list, or be the list this
+ * programme is about to make out of exactly those records.
+ *
+ * The database checks it again, because a caller that validates its own
+ * payload validates nothing.
  */
-async function runShare(
-  plan: Plan, emit: Emit, select: Select, store: Store,
-): Promise<EmitOutcome> {
+async function prepareShare(
+  planning: CommandPlanning, emit: Emit, select: Select, store: Store,
+): Promise<PrepareOutcome> {
   if (emit.to.kind !== 'share') {
     return { ok: false, reason: 'unsupported', why: 'that is not a share' };
   }
@@ -171,105 +242,174 @@ async function runShare(
     };
   }
 
-  /* Which list. Read fresh rather than taken off the projection, since
-     the columns a file wants and the column sharing needs are not the
-     same question. */
-  const def = entityDef('contacts');
-  const withList = await store.read({
-    table: def?.table ?? 'crm_contacts',
-    columns: ['id', 'list_id'],
-    where: select.where ?? { kind: 'and', of: [] },
-    limit: read.rows.length,
-  });
-  if (!withList.ok) return { ok: false, reason: 'failed', why: withList.why };
+  const ids = read.rows.map((r) => String(r.id));
+  const names = who.people.map((p) => p.label);
+  const users = who.people.map((p) => p.id);
 
-  const lists = [...new Set(withList.rows.map((r) => r.list_id).filter((v) => v != null))].map(String);
-  if (lists.length !== 1) {
+  /* The list this programme is about to make, when there is one. Its id
+     does not exist yet, so the step refers to the position of the step
+     that makes it. */
+  const madeBy = listStepBehind(planning.plan, emit.from);
+
+  if (!madeBy) {
+    /* An existing list. Which one, and is this every record on it. */
+    const def = entityDef('contacts');
+    const mine = await store.read({
+      table: def?.table ?? 'crm_contacts',
+      columns: ['id', 'list_id'],
+      where: select.where ?? { kind: 'and', of: [] },
+      limit: read.rows.length,
+    });
+    if (!mine.ok) return { ok: false, reason: 'failed', why: mine.why };
+
+    const lists = [...new Set(mine.rows.map((r) => r.list_id).filter((v) => v != null))].map(String);
+    if (lists.length !== 1) {
+      return {
+        ok: false,
+        reason: 'unsupported',
+        why: lists.length === 0
+          ? 'those records are not on a list, so there is nothing to give anybody access to. '
+            + 'Make a list from them first.'
+          : `those records are spread across ${lists.length} lists, so it is not clear which one to share`,
+      };
+    }
+
+    /* Every record on that list, so a narrower selection can be refused
+       here with a number in it rather than only by the database. */
+    const whole = await store.read({
+      table: def?.table ?? 'crm_contacts',
+      columns: ['id'],
+      where: {
+        kind: 'cmp', op: 'eq',
+        left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
+        right: { kind: 'literal', value: lists[0] },
+      },
+      limit: 100_000,
+    });
+    if (!whole.ok) return { ok: false, reason: 'failed', why: whole.why };
+
+    if (whole.rows.length !== ids.length) {
+      return {
+        ok: false,
+        reason: 'unsupported',
+        why: `sharing here grants a whole list, and that is ${ids.length} of the `
+          + `${whole.rows.length} records on it. Everybody it is shared with would get all `
+          + `${whole.rows.length}. Make a list of just these first, then share that.`,
+      };
+    }
+
+    const list = lists[0];
     return {
-      ok: false,
-      reason: 'unsupported',
-      why: lists.length === 0
-        ? 'those records are not on a list, so there is nothing to give anybody access to. '
-          + 'Make a list from them first.'
-        : `those records are spread across ${lists.length} lists, so it is not clear which one to share`,
+      ok: true,
+      prepared: {
+        kind: 'effect',
+        stepId: emit.id ?? 'e',
+        rows: ids.length,
+        describe: `${names.join(' and ')} can now see those `
+          + `${ids.length.toLocaleString('en-GB')} ${ids.length === 1 ? 'record' : 'records'}.`,
+        step: () => ({
+          op: 'invoke', capability: 'rows.share', subjects: ids, args: { list, users },
+        }),
+      },
     };
   }
 
-  const done = await store.invoke({
-    capability: 'rows.share',
-    subjects: lists,
-    args: { users: who.people.map((p) => p.id) },
-  });
-  if (!done.ok) return { ok: false, reason: 'failed', why: done.why };
-
-  const names = who.people.map((p) => p.label);
   return {
     ok: true,
-    kind: 'granted',
-    rows: read.rows.length,
-    people: names,
-    message: `${names.join(' and ')} can now see those `
-      + `${read.rows.length.toLocaleString('en-GB')} ${read.rows.length === 1 ? 'record' : 'records'}.`,
+    prepared: {
+      kind: 'effect',
+      stepId: emit.id ?? 'e',
+      rows: ids.length,
+      describe: `${names.join(' and ')} can now see those `
+        + `${ids.length.toLocaleString('en-GB')} ${ids.length === 1 ? 'record' : 'records'}.`,
+      step: (indexOf) => {
+        const at = indexOf(madeBy);
+        if (at === null) throw new Error('the list this shares was not made in this programme');
+        return {
+          op: 'invoke',
+          capability: 'rows.share',
+          subjects: ids,
+          args: { list: { $from: { step: at, key: 'listId' } }, users },
+        };
+      },
+    },
   };
 }
 
 /**
- * The first emit in a plan, for a caller that has only one.
+ * Leaving a file on a record instead of handing it over.
  *
- * A programme can hold several: "export it to Excel and share it with
- * Dave" is a file AND a grant, and a caller carrying out the whole
- * programme walks `deliverySteps` and runs each one.
+ * The record is a selection of one, resolved through the same store
+ * everything else reads through. Several matches is a question rather
+ * than a choice made here: "attach it to Dawson" where the CRM holds two
+ * Dawsons must not put a customer list on whichever came back first.
  */
-export async function runEmit(
-  planning: CommandPlanning,
-  opts: { store: Store; actorName: string; now: Date },
-): Promise<EmitOutcome> {
-  const emit = emitStep(planning.plan);
-  if (!emit) return { ok: false, reason: 'not an emit', why: 'that sentence asks for nothing to be produced' };
-  return runEmitStep(planning, emit, opts);
+async function prepareAttach(
+  planning: CommandPlanning, emit: Emit, artefact: Artefact, rows: number, store: Store,
+): Promise<PrepareOutcome> {
+  if (emit.to.kind !== 'attach') {
+    return { ok: false, reason: 'unsupported', why: 'that is not an attachment' };
+  }
+
+  const target = selectBehind(planning.plan, emit.to.to);
+  if (!target) {
+    return { ok: false, reason: 'unresolved', why: 'nothing said which record to attach it to' };
+  }
+
+  const found = await runSelect(target, { store });
+  if (!found.ok) return { ok: false, reason: 'failed', why: found.why };
+
+  const def = entityDef(found.entity);
+  const title = def?.titleField ?? 'id';
+  if (!found.rows.length) {
+    return { ok: false, reason: 'unresolved', why: 'that record is not here' };
+  }
+  if (found.rows.length > 1) {
+    return {
+      ok: false,
+      reason: 'unresolved',
+      why: `${found.rows.length} records match that, so it is not clear which one to attach it to`,
+      candidates: found.rows.slice(0, 20).map((r) => ({
+        id: String(r.id), label: String(r[title] ?? r.id),
+      })),
+    };
+  }
+
+  const row = found.rows[0];
+  const onto = String(row[title] ?? row.id);
+
+  return {
+    ok: true,
+    prepared: {
+      kind: 'effect',
+      stepId: emit.id ?? 'e',
+      rows,
+      artefact,
+      describe: `${artefact.filename} is on ${onto}, holding `
+        + `${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
+      step: () => ({
+        op: 'invoke',
+        capability: 'record.attach',
+        subjects: [String(row.id)],
+        args: {
+          table: def?.table,
+          filename: artefact.filename,
+          mime: artefact.mime,
+          base64: Buffer.from(artefact.bytes).toString('base64'),
+          describedAs: planning.presentation.summary,
+        },
+      }),
+    },
+  };
 }
 
-export async function runEmitStep(
-  planning: CommandPlanning,
-  emit: Emit,
-  opts: {
-    store: Store; actorName: string; now: Date;
-    /**
-     * Files earlier steps in this programme already built, by step id.
-     *
-     * "Export the sold curtainsiders as a PDF and attach it to
-     * STC143580" is one file, produced once and then put somewhere.
-     * Without this the attaching clause rendered a second file of its
-     * own, in whatever format it defaulted to, so the PDF was
-     * downloaded and a spreadsheet was attached.
-     */
-    produced?: Map<string, { artefact: Artefact; rows: number }>;
-  },
-): Promise<EmitOutcome> {
-  /* The very file the step points at, when a step in this programme
-     already made it. */
-  const from = emit.from;
-  if (emit.to.kind === 'attach' && 'ref' in from && from.ref === 'artefact') {
-    const already = opts.produced?.get(from.step);
-    if (already) return attachArtefact(planning, emit, already.artefact, already.rows, opts.store);
-  }
-
-  const select = selectBehind(planning.plan, emit.from);
-  if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
-
-  /* Sharing is not a file. It grants access to records somebody already
-     described, so it goes down its own path and produces no artefact. */
-  if (emit.to.kind === 'share') return runShare(planning.plan, emit, select, opts.store);
-
+/** The file a selection describes, rendered. Nothing is written. */
+async function render(
+  planning: CommandPlanning, emit: Emit, select: Select,
+  opts: { store: Store; actorName: string; now: Date },
+): Promise<{ ok: true; artefact: Artefact; rows: number; capped: boolean } | Extract<PrepareOutcome, { ok: false }>> {
   if (emit.output.kind !== 'file') {
     return { ok: false, reason: 'unsupported', why: 'only a file can be produced from here yet' };
-  }
-  if (emit.to.kind !== 'download' && emit.to.kind !== 'attach') {
-    /* Email is declared in the registry with no handler and with the
-       exact reason why. `executability` refuses it before anything gets
-       here, off the registry's own record, so this is the last line
-       rather than the gate. */
-    return { ok: false, reason: 'unsupported', why: `nothing here ${emit.to.kind}s a file yet` };
   }
 
   const format = emit.output.format as FileFormat;
@@ -307,83 +447,112 @@ export async function runEmitStep(
     capped: read.capped,
   });
 
-  const artefact = format === 'csv' ? renderCsv(table)
-    : format === 'pdf' ? renderPdf(table)
-      : format === 'xlsx' ? await renderXlsx(table)
-        : await renderDocx(table);
-
-  if (emit.to.kind === 'attach') {
-    return attachArtefact(planning, emit, artefact, table.count, opts.store);
+  try {
+    const artefact = await RENDERERS[format](table);
+    return { ok: true, artefact, rows: table.count, capped: table.capped };
+  } catch (e) {
+    /* Rendering happens before the transaction opens precisely so this
+       can be a refusal rather than a note attached to a change that has
+       already committed. */
+    return {
+      ok: false,
+      reason: 'failed',
+      why: `the ${nounFor(format)} could not be produced: ${(e as Error).message}`,
+    };
   }
-
-  return { ok: true, kind: 'artefact', artefact, rows: table.count, capped: table.capped };
 }
 
 /**
- * Leaving the file on a record instead of handing it over.
+ * One delivery, resolved and rendered, ready for the transaction.
  *
- * The record is a selection of one, resolved through the same store
- * everything else reads through. Several matches is a question rather
- * than a choice made here: "attach it to Dawson" where the CRM holds two
- * Dawsons must not put a customer list on whichever came back first.
+ * Nothing here writes. See the banner above.
  */
-async function attachArtefact(
+export async function prepareDelivery(
   planning: CommandPlanning,
   emit: Emit,
-  artefact: Artefact,
-  rows: number,
-  store: Store,
-): Promise<EmitOutcome> {
-  if (emit.to.kind !== 'attach') {
-    return { ok: false, reason: 'unsupported', why: 'that is not an attachment' };
+  opts: {
+    store: Store; actorName: string; now: Date;
+    /**
+     * Files earlier steps in this programme already rendered, by step id.
+     *
+     * "Export the sold curtainsiders as a PDF and attach it to
+     * STC143580" is one file, produced once and then put somewhere.
+     * Without this the attaching clause rendered a second file of its
+     * own, in whatever format it defaulted to, so the PDF was
+     * downloaded and a spreadsheet was attached.
+     */
+    produced?: Map<string, { artefact: Artefact; rows: number }>;
+  },
+): Promise<PrepareOutcome> {
+  const from = emit.from;
+  if (emit.to.kind === 'attach' && 'ref' in from && from.ref === 'artefact') {
+    const already = opts.produced?.get(from.step);
+    if (already) return prepareAttach(planning, emit, already.artefact, already.rows, opts.store);
   }
 
-  const target = selectBehind(planning.plan, emit.to.to);
-  if (!target) {
-    return { ok: false, reason: 'unresolved', why: 'nothing said which record to attach it to' };
+  const select = selectBehind(planning.plan, emit.from);
+  if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
+
+  /* Sharing produces nothing. It grants access to records somebody
+     already described, so no file is rendered for it. */
+  if (emit.to.kind === 'share') return prepareShare(planning, emit, select, opts.store);
+
+  if (emit.to.kind !== 'download' && emit.to.kind !== 'attach') {
+    /* Email is declared in the registry with no handler and with the
+       exact reason why. `executability` refuses it before anything gets
+       here, off the registry's own record, so this is the last line
+       rather than the gate. */
+    return { ok: false, reason: 'unsupported', why: `nothing here ${emit.to.kind}s a file yet` };
   }
 
-  const found = await runSelect(target, { store });
-  if (!found.ok) return { ok: false, reason: 'failed', why: found.why };
+  const built = await render(planning, emit, select, opts);
+  if (!built.ok) return built;
 
-  const def = entityDef(found.entity);
-  const title = def?.titleField ?? 'id';
-  if (!found.rows.length) {
-    return { ok: false, reason: 'unresolved', why: 'that record is not here' };
-  }
-  if (found.rows.length > 1) {
-    return {
-      ok: false,
-      reason: 'unresolved',
-      why: `${found.rows.length} records match that, so it is not clear which one to attach it to`,
-      candidates: found.rows.slice(0, 20).map((r) => ({
-        id: String(r.id), label: String(r[title] ?? r.id),
-      })),
-    };
+  if (emit.to.kind === 'attach') {
+    return prepareAttach(planning, emit, built.artefact, built.rows, opts.store);
   }
 
-  const row = found.rows[0];
-  const done = await store.invoke({
-    capability: 'record.attach',
-    subjects: [String(row.id)],
-    args: {
-      table: def?.table,
-      filename: artefact.filename,
-      mime: artefact.mime,
-      base64: Buffer.from(artefact.bytes).toString('base64'),
-      describedAs: planning.presentation.summary,
-    },
-  });
-  if (!done.ok) return { ok: false, reason: 'failed', why: done.why };
-
-  const onto = String(row[title] ?? row.id);
   return {
     ok: true,
-    kind: 'attached',
-    artefact,
-    rows,
-    onto,
-    message: `${artefact.filename} is on ${onto}, holding `
-      + `${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
+    prepared: {
+      kind: 'download',
+      stepId: emit.id ?? 'e',
+      artefact: built.artefact,
+      rows: built.rows,
+      describe: `${built.rows.toLocaleString('en-GB')} `
+        + `${built.rows === 1 ? 'row' : 'rows'} in ${built.artefact.filename}.`,
+    },
+  };
+}
+
+/**
+ * The file a read-only sentence asks for.
+ *
+ * The download path and nothing else: no database effect, so no
+ * transaction to be part of. A sentence whose delivery writes goes
+ * through `applyMutation`, which puts it in the programme's transaction.
+ */
+export async function runEmit(
+  planning: CommandPlanning,
+  opts: { store: Store; actorName: string; now: Date },
+): Promise<EmitOutcome> {
+  const emit = emitStep(planning.plan);
+  if (!emit) return { ok: false, reason: 'not an emit', why: 'that sentence asks for nothing to be produced' };
+
+  const ready = await prepareDelivery(planning, emit, opts);
+  if (!ready.ok) return ready;
+  if (ready.prepared.kind !== 'download') {
+    return {
+      ok: false,
+      reason: 'unsupported',
+      why: 'that changes records as well as producing something, so it has to be confirmed first',
+    };
+  }
+  return {
+    ok: true,
+    kind: 'artefact',
+    artefact: ready.prepared.artefact,
+    rows: ready.prepared.rows,
+    capped: false,
   };
 }

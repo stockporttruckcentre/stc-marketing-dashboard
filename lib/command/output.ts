@@ -53,7 +53,7 @@ export const FORMATS: { format: FileFormat; noun: string; words: string[] }[] = 
 ];
 
 /** Verbs that mean "put this in a file", rather than "tell me". */
-const FILE_VERBS = [
+export const FILE_VERBS = [
   'export', 'download', 'save', 'save down', 'pull off', 'get me a file of',
   'produce', 'generate', 'write out', 'print', 'output',
 ];
@@ -78,7 +78,7 @@ const FORMAT_TAIL = ['document', 'doc', 'file', 'sheet', 'workbook', 'format', '
    "send it to" and "give Dave a copy of" are one idea.
    ============================================================= */
 
-const DESTINATION_VERBS: {
+export const DESTINATION_VERBS: {
   kind: 'share' | 'email' | 'attach';
   verbs: string[];
   /** What comes between the verb and who or what it goes to. */

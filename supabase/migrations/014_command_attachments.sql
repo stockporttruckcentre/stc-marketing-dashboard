@@ -30,9 +30,25 @@
 -- polymorphic key that accepts anything is a key that eventually points
 -- at nothing.
 --
--- SECURITY INVOKER. Whether the caller may attach something to a record
--- is whether they can see the record, decided by the same policies that
--- decide everything else about it.
+-- SEEING A RECORD IS NOT PERMISSION TO WRITE TO IT.
+--
+-- The first version of this asked only whether the target row was
+-- visible, and was granted to every authenticated user. A viewer, who
+-- can read the whole CRM and change none of it, could call it straight
+-- through PostgREST with no command runtime in front and leave a file on
+-- any customer. The runtime's own gate is irrelevant to that: it was
+-- never in the path.
+--
+-- So the capability is asked for here, in the database, and it is
+-- derived from the TARGET rather than being one blanket permission:
+-- attaching to a customer is `crm.edit` and attaching to a stock unit is
+-- `stock.edit`, which are the same two capabilities the application
+-- checks before it edits either. `command_may` reads
+-- `command_capability_roles`, which is generated from
+-- `lib/crm/permissions.ts`, so the two cannot drift.
+--
+-- SECURITY INVOKER on top of that, so row level security still decides
+-- which records exist as far as the caller is concerned.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS record_attachments (
@@ -71,8 +87,14 @@ CREATE POLICY "attachments_select" ON record_attachments FOR SELECT USING (
    AND EXISTS (SELECT 1 FROM crm_contacts c WHERE c.id = record_attachments.record_id))
 );
 
+-- The same capability the function asks for, on the table itself, so an
+-- INSERT that goes round the function is refused too.
 CREATE POLICY "attachments_insert" ON record_attachments FOR INSERT WITH CHECK (
   created_by = auth.uid()
+  AND command_may(CASE entity
+        WHEN 'crm_contacts'   THEN 'crm.edit'
+        WHEN 'stock_trailers' THEN 'stock.edit'
+      END)
   AND (
     (entity = 'stock_trailers'
      AND EXISTS (SELECT 1 FROM stock_trailers t WHERE t.id = record_attachments.record_id))
@@ -108,11 +130,24 @@ DECLARE
   raw      BYTEA;
   size     INTEGER;
   new_id   UUID;
+  needed   TEXT;
   -- Eight megabytes. Stated here so the refusal has a number in it.
   ceiling  CONSTANT INTEGER := 8 * 1024 * 1024;
 BEGIN
   IF p_entity NOT IN ('stock_trailers', 'crm_contacts') THEN
     RAISE EXCEPTION 'nothing here attaches things to %', p_entity;
+  END IF;
+
+  -- WHICH capability, decided by what is being written to. Attaching to
+  -- a customer is editing that customer; attaching to a stock unit is
+  -- editing that unit. One blanket permission would let somebody who
+  -- may edit stock leave files on the CRM.
+  needed := CASE p_entity
+    WHEN 'crm_contacts'   THEN 'crm.edit'
+    WHEN 'stock_trailers' THEN 'stock.edit'
+  END;
+  IF NOT command_may(needed) THEN
+    RAISE EXCEPTION 'you do not have %', needed;
   END IF;
   IF p_record IS NULL THEN
     RAISE EXCEPTION 'nothing said which record to attach it to';

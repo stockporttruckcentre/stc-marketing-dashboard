@@ -25,14 +25,21 @@
    table write. What is missing today is the handlers, not the design,
    and each is a `Unit` kind with a `resolve` and an `apply`.
 
-   ATOMICITY IS THE DATABASE'S JOB.
+   ATOMICITY IS THE DATABASE'S JOB, AND IT COVERS THE WHOLE PROGRAMME.
 
-   Several PostgREST updates are several transactions, so a plan whose
+   Several PostgREST calls are several transactions, so a plan whose
    third statement fails has already changed the CRM twice. Undoing that
    from here means writing compensating updates that can themselves
-   fail, which is a worse version of the same problem. So every change
-   goes to one `command_apply` call, which is one function, which is one
-   transaction: it commits entirely or it leaves nothing behind.
+   fail, which is a worse version of the same problem. So every database
+   effect one programme has goes to one `command_perform` call, which is
+   one function, which is one transaction: it commits entirely or it
+   leaves nothing behind.
+
+   That includes the effects that used to run afterwards. Sharing a list
+   and attaching a file are database writes, and running them after the
+   transaction had committed meant a share that failed left a list
+   nobody asked for and reported success with a note about the rest not
+   happening.
 
    That function validates every table and column against an allowlist
    held in the database and generated from this registry, so a crafted
@@ -43,7 +50,7 @@ import type { Mutate, Plan, Step } from './types';
 import { entity as entityDef, capability } from './registry';
 import { evaluate, type EvalContext } from './evaluate';
 import { resolveMutation, resolutionHash, type Resolution, type ResolvedReference } from './resolve';
-import type { Change, Store } from './store';
+import type { Change, Store, TransactionStep } from './store';
 import { resolveInvoke, type InvokePlan } from './invoke';
 import { dependencesAmong, overlappingRows } from './dependence';
 
@@ -67,20 +74,26 @@ export function effectSteps(plan: Plan): Step[] {
 }
 
 /**
- * Producing something and handing it over, which is not a database
- * change and cannot be inside the transaction that makes one.
+ * The steps that produce something and hand it over.
  *
- * A programme that both changes records and produces a file is one
- * thing somebody asked for and two things the machinery does: the
- * change commits, then the file is built from the rows. Refusing the
- * whole programme because a transaction cannot hold a spreadsheet is
- * refusing an ordinary sentence for an implementation reason.
+ * Some of them are database writes and go into the same transaction as
+ * everything else: a share is a row in `crm_list_members` and an
+ * attachment is a row in `record_attachments`. A download is not a
+ * database effect at all, and the FILE for either is rendered before
+ * the transaction opens, so a renderer that throws leaves nothing
+ * written.
  */
 export function deliverySteps(plan: Plan): Step[] {
   return plan.steps.filter((s) => s.op === 'emit' && s.to.kind !== 'display');
 }
 
-/** Effects that go into one transaction. Deliveries are not among them. */
+/**
+ * The effects this file resolves for itself.
+ *
+ * Deliveries are resolved by the emit layer, which is the only thing
+ * that can render a file, and arrive back through `ExecuteOptions.
+ * deliveries` as steps in the same transaction.
+ */
 function transactionalSteps(plan: Plan): Step[] {
   return effectSteps(plan).filter((s) => s.op !== 'emit');
 }
@@ -458,7 +471,58 @@ export type ExecuteResult =
 export type ExecuteOptions = OrchestrateOptions & {
   /** The fingerprint the preview was built from. */
   agreedHash: string;
+  /**
+   * Everything else this programme does to the database, appended to the
+   * same transaction.
+   *
+   * Sharing a list and attaching a file are database effects and used to
+   * run after the transaction had already committed, so a share that
+   * failed left a list nobody asked for and reported success with a
+   * sentence about the rest not happening. They arrive here instead.
+   *
+   * A callback rather than a list, because a step that shares the list
+   * an earlier step CREATED has to name that step's position, and the
+   * positions are not known until the resolved units are laid out.
+   */
+  deliveries?: (indexOf: (planStepId: string) => number | null) => TransactionStep[];
 };
+
+/**
+ * The resolved programme, as the ordered database effects it is.
+ *
+ * Field writes go in as one `changes` step because `command_apply`
+ * already takes the whole set; operations go in one at a time in plan
+ * order. `indexOf` says where a plan step landed, so a later step can
+ * refer to what it produced.
+ */
+function transactionFor(units: Unit[]): {
+  steps: TransactionStep[];
+  indexOf: (planStepId: string) => number | null;
+} {
+  const steps: TransactionStep[] = [];
+  const at = new Map<string, number>();
+
+  const changes = units
+    .filter((u): u is UpdateUnit => u.kind !== 'invoke')
+    .flatMap((u) => u.changes);
+  if (changes.length) {
+    for (const u of units) if (u.kind !== 'invoke') at.set(u.stepId, steps.length);
+    steps.push({ op: 'changes', changes });
+  }
+
+  for (const u of units) {
+    if (u.kind !== 'invoke') continue;
+    at.set(u.stepId, steps.length);
+    steps.push({
+      op: 'invoke',
+      capability: u.plan.capability,
+      subjects: u.plan.subjects.map((s) => s.id),
+      args: u.plan.args,
+    });
+  }
+
+  return { steps, indexOf: (id) => at.get(id) ?? null };
+}
 
 /**
  * Resolve again, check nothing moved, then write everything at once.
@@ -484,42 +548,22 @@ export async function executeProgramme(
     };
   }
 
-  /* ONE CALL. The store promises all of them or none of them, and how
-     it keeps that promise is its business. Handing it the changes one at
-     a time is what made a failed third change leave the first two
-     written, and it is not something this layer can put right
-     afterwards: a compensating update can fail too.
+  /* ONE CALL, FOR THE WHOLE PROGRAMME.
 
-     A programme is all field writes or all operations, which
-     `resolveProgramme` has already established, so there is exactly one
-     call either way. */
-  const operations = fresh.units.filter((u): u is InvokeUnit => u.kind === 'invoke');
+     Every database effect it has, in order, through `command_perform`,
+     which is one plpgsql function and therefore one transaction. Handing
+     them over a kind at a time is what made a share that failed leave a
+     list behind, and it is not something this layer can put right
+     afterwards: a compensating delete can fail too. */
+  const laid = transactionFor(fresh.units);
+  const steps = [...laid.steps, ...(opts.deliveries?.(laid.indexOf) ?? [])];
 
-  /* Nothing to write. A programme whose only effect is a delivery has
-     no transaction to run, and calling `apply` with no changes would
-     ask the database to do nothing and report a number. */
-  if (!operations.length && !fresh.changes.length) {
+  if (!steps.length) {
     return { ok: true, changed: 0, changes: [], hash: fresh.hash };
   }
 
-  if (operations.length) {
-    let performed = 0;
-    for (const unit of operations) {
-      const done = await opts.store.invoke({
-        capability: unit.plan.capability,
-        subjects: unit.plan.subjects.map((s) => s.id),
-        args: unit.plan.args,
-      });
-      if (!done.ok) return { ok: false, reason: 'failed', why: done.why, programme: fresh };
-      performed += done.performed;
-    }
-    return { ok: true, changed: performed, changes: [], hash: fresh.hash };
-  }
+  const done = await opts.store.perform(steps);
+  if (!done.ok) return { ok: false, reason: 'failed', why: done.why, programme: fresh };
 
-  const applied = await opts.store.apply(fresh.changes);
-  if (!applied.ok) {
-    return { ok: false, reason: 'failed', why: applied.why, programme: fresh };
-  }
-
-  return { ok: true, changed: applied.changed, changes: fresh.changes, hash: fresh.hash };
+  return { ok: true, changed: done.changed, changes: fresh.changes, hash: fresh.hash };
 }

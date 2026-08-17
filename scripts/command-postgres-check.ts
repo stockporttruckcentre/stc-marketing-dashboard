@@ -121,14 +121,25 @@ async function carryOut(text: string): Promise<{
   /* The changes the canonical path produced, sent to the real function.
      `applyMutation` would send them through the same store, which is the
      fake; this takes the payload it produces and gives it to Postgres,
-     which is the half the fake cannot answer for. */
+     which is the half the fake cannot answer for.
+
+     A whole programme now goes to `command_perform` rather than to
+     `command_apply`, so the changes are read out of its `changes` step.
+     Everything else about the path is unchanged. */
   let changes: Change[] = [];
   const recording = postgrestStore({
     from: db.supabase.from,
     rpc: async (name: string, args: Record<string, unknown>) => {
-      if (name !== 'command_apply') return { data: null, error: { message: 'no such function' } };
-      changes = args.p_changes as Change[];
-      return { data: changes.length, error: null };
+      if (name === 'command_apply') {
+        changes = args.p_changes as Change[];
+        return { data: changes.length, error: null };
+      }
+      if (name === 'command_perform') {
+        const steps = (args.p_steps ?? []) as { op: string; changes?: Change[] }[];
+        changes = steps.flatMap((x) => (x.op === 'changes' ? x.changes ?? [] : []));
+        return { data: { changed: changes.length, results: [] }, error: null };
+      }
+      return { data: null, error: { message: 'no such function' } };
     },
   });
 
