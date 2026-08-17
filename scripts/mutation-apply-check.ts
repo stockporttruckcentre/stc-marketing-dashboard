@@ -307,7 +307,7 @@ test('a column the expression reads changing is drift', async () => {
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   if (!preview.ok) { ok('it resolves', false, preview.why); return; }
   ok('the fingerprint covers the column being READ',
-    preview.units[0].kind === 'update' && preview.units[0].resolution.fields.includes('nbv'));
+    preview.units[0].kind === 'update' && !!preview.units[0].resolution?.fields.includes('nbv'));
 
   db.tables.stock_trailers.find((r) => r.id === 't1')!.nbv = 30000;
 
@@ -420,7 +420,7 @@ test('a reference that names one row', async () => {
   ok('it resolves at resolution time', preview.ok, preview.ok ? '' : preview.why);
   if (!preview.ok) return;
   ok('and records which row it landed on',
-    preview.units[0].kind === 'update' && preview.units[0].resolution.references[0]?.id === 'p3');
+    preview.units[0].kind === 'update' && preview.units[0].resolution?.references[0]?.id === 'p3');
 
   const done = await executeProgramme(plan, { store: postgrestStore(db.supabase), agreedHash: preview.hash });
   ok('the resolved value is written',
@@ -514,13 +514,16 @@ test('drift in the SECOND step refuses the whole plan', async () => {
     db.tables.stock_trailers.find((r) => r.id === 't1')?.location === 'Hyde');
 });
 
-test('a step this cannot execute refuses the whole plan', async () => {
+test('a step this cannot carry out refuses the whole plan', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan = twoUpdates();
+  /* A create that says nothing about the record. Creating rows is
+     carried out now, so the step this cannot do is one with no values
+     in it rather than one of a kind nothing performs. */
   plan.steps.push({ op: 'create', id: 's3', target: { entity: 'contacts' } });
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
   ok('it refuses rather than doing the two it can',
-    !preview.ok && preview.reason === 'cannot execute', preview.ok ? 'it resolved' : preview.why);
+    !preview.ok && preview.reason === 'incomplete', preview.ok ? 'it resolved' : preview.reason);
   ok('naming the step that stopped it', !preview.ok && preview.stepId === 's3');
   ok('and nothing was written', db.writes.length === 0);
 });

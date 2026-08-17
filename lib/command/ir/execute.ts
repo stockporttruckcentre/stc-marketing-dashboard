@@ -252,12 +252,10 @@ function capabilitiesForStep(s: Step): { ids: string[]; unregistered: string[] }
   switch (s.op) {
     case 'select': return { ids: ['data.read'], unregistered: [] };
     case 'update': return { ids: ['record.updateField'], unregistered: [] };
-    /* Nothing in the registry declares `operates: 'create'` or
-       `'delete'`, so no canonical executor performs either yet. Saying
-       so is the honest answer while the mutation readers are still
-       unmigrated. */
-    case 'create': return { ids: [], unregistered: ['a create'] };
-    case 'delete': return { ids: [], unregistered: ['a delete'] };
+    /* The other two ways a row's life changes, through the same
+       function and the same allowlist as an update. */
+    case 'create': return { ids: ['record.create'], unregistered: [] };
+    case 'delete': return { ids: ['record.delete'], unregistered: [] };
     case 'invoke': return { ids: [s.capability], unregistered: [] };
     case 'emit': {
       const ids: string[] = [];

@@ -32,6 +32,7 @@
 import { parseQuery, type QueryPlan } from './query';
 import { parseEdit, type EditPlan } from './mutate';
 import { readOutput } from './output';
+import { parseLifecycle } from './lifecycle';
 import type { VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
 import { adaptEditPlan } from './ir/adapt-edit';
@@ -181,6 +182,13 @@ export function planCommand(
   const write = readInstruction(text, opts);
   if (write) return write;
 
+  /* Making a record and getting rid of one, which are the other two
+     ways a row's life changes. Read after a field write, because
+     "delete the customer on STC143580" empties a column and the
+     instruction reader is the one that knows that. */
+  const lifecycle = readLifecycle(text, opts);
+  if (lifecycle) return lifecycle;
+
   /* WHAT COMES OUT IS NOT PART OF THE QUESTION.
 
      "Export the sold trailers as a Word document" is one selection and
@@ -285,6 +293,45 @@ function readInstruction(
       groupLabel: null,
       orderLabel: null,
       derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Creating a record, or deleting one.
+ *
+ * The same shape as every other planning result, so nothing downstream
+ * knows there are three readers rather than one.
+ */
+function readLifecycle(
+  text: string,
+  opts?: { actorCapabilities?: Iterable<string>; vocabulary?: VocabularyIndex },
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseLifecycle(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
     },
   };
 }

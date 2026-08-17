@@ -823,6 +823,8 @@ export function derivedRequirements(plan: Plan): Requirement[] {
         const m = s as Mutate;
         fromEntity(m.target.entity, `writes ${m.target.entity}`);
         if (m.op === 'update') needCapability('record.updateField', `updates ${m.target.entity}`);
+        if (m.op === 'create') needCapability('record.create', `creates a ${m.target.entity} record`);
+        if (m.op === 'delete') needCapability('record.delete', `deletes from ${m.target.entity}`);
         if (m.match) fromSource(m.match);
         for (const w of m.set ?? []) {
           if ('via' in (w.field as PathRef)) continue;

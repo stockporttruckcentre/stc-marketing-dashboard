@@ -513,6 +513,27 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'lib/command/server/mutation.ts',
   },
   {
+    id: 'record.create',
+    label: 'Create a record',
+    operates: 'create',
+    confirm: true,
+    /* Running it twice makes two records. */
+    idempotent: false,
+    produces: 'record',
+    handler: 'lib/command/server/mutation.ts',
+  },
+  {
+    id: 'record.delete',
+    label: 'Delete a record',
+    operates: 'delete',
+    /* The one operation with no undo. Everything else this application
+       does can be typed back in. */
+    requires: 'crm.delete',
+    confirm: true,
+    idempotent: false,
+    handler: 'lib/command/server/mutation.ts',
+  },
+  {
     id: 'contact.enrich',
     label: 'Look up a contact through Lusha',
     operates: 'invoke',

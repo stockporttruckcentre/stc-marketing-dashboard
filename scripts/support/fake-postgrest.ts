@@ -202,21 +202,27 @@ export function fakeDb(tables: Record<string, Row[]>) {
     }
 
     if (name !== 'command_apply') return { data: null, error: { message: `no function ${name}` } };
-    const changes = (args.p_changes ?? []) as { table: string; id: string; set: Row }[];
+    const changes = (args.p_changes ?? []) as
+      { op?: 'update' | 'insert' | 'delete'; table: string; id?: string; set?: Row }[];
 
     for (const c of changes) {
-      if (!c.table || !c.id || !c.set || !Object.keys(c.set).length) {
-        return { data: null, error: { message: 'a change must name a table, an id and the columns to set' } };
+      const op = c.op ?? 'update';
+      if (!c.table) return { data: null, error: { message: 'a change must name a table' } };
+      if (op !== 'delete' && (!c.set || !Object.keys(c.set).length)) {
+        return { data: null, error: { message: `a ${op} of ${c.table} must say what to set` } };
       }
-      for (const col of Object.keys(c.set)) {
+      if (op !== 'insert' && !c.id) {
+        return { data: null, error: { message: `a ${op} of ${c.table} must name a row` } };
+      }
+      for (const col of Object.keys(c.set ?? {})) {
         if (!ALLOWED.has(`${c.table}.${col}`)) {
           return { data: null, error: { message: `the command bar may not write ${c.table}.${col}` } };
         }
       }
-      if (!(tables[c.table] ?? []).some((r) => String(r.id) === c.id)) {
+      if (op !== 'insert' && !(tables[c.table] ?? []).some((r) => String(r.id) === c.id)) {
         return { data: null, error: { message: `no row ${c.id} in ${c.table}` } };
       }
-      if (failOn && failOn(c)) {
+      if (failOn && failOn({ table: c.table, id: String(c.id ?? '') })) {
         /* Raised mid statement. Nothing before it may survive. */
         return { data: null, error: { message: `refused ${c.table}.${c.id}` } };
       }
@@ -224,9 +230,26 @@ export function fakeDb(tables: Record<string, Row[]>) {
 
     let touched = 0;
     for (const c of changes) {
+      if (c.op === 'insert') {
+        const id = `new${(tables[c.table] ?? []).length + 1}`;
+        const row = { id, ...(c.set ?? {}) };
+        (tables[c.table] ??= []).push(row);
+        writes.push({ table: c.table, set: { ...(c.set ?? {}) }, ids: [id] });
+        touched += 1;
+        continue;
+      }
+      if (c.op === 'delete') {
+        const rows = tables[c.table] ?? [];
+        const at = rows.findIndex((r) => String(r.id) === c.id);
+        if (at < 0) continue;
+        rows.splice(at, 1);
+        writes.push({ table: c.table, set: {}, ids: [String(c.id)] });
+        touched += 1;
+        continue;
+      }
       const row = (tables[c.table] ?? []).find((r) => String(r.id) === c.id);
       if (!row) continue;
-      writes.push({ table: c.table, set: { ...c.set }, ids: [c.id] });
+      writes.push({ table: c.table, set: { ...c.set }, ids: [String(c.id)] });
       Object.assign(row, c.set);
       touched += 1;
     }

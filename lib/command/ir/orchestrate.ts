@@ -68,10 +68,7 @@ export function effectSteps(plan: Plan): Step[] {
 
 /** What the executor can carry out today. Everything else refuses. */
 function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
-  if (s.op === 'update') return { ok: true };
-  if (s.op === 'create' || s.op === 'delete') {
-    return { ok: false, why: `nothing here performs a ${s.op} yet` };
-  }
+  if (s.op === 'update' || s.op === 'create' || s.op === 'delete') return { ok: true };
   if (s.op === 'invoke') {
     const cap = capability(s.capability);
     if (!cap?.handler) return { ok: false, why: `nothing performs ${s.capability} yet` };
@@ -88,10 +85,19 @@ export type { Change } from './store';
 
 export type UpdateUnit = {
   stepId: string;
-  kind: 'update';
+  /**
+   * Which way a row's life is changing.
+   *
+   * One shape for all three, because the preview, the overlap check and
+   * the transaction are the same for each: a create resolves nothing
+   * because there is no row yet, and a delete resolves rows and sets no
+   * columns, and both of those are properties of the change rather than
+   * reasons for a second code path.
+   */
+  kind: 'update' | 'create' | 'delete';
   entity: string;
   table: string;
-  resolution: Extract<Resolution, { ok: true }>;
+  resolution: Extract<Resolution, { ok: true }> | null;
   /** What the preview shows, and exactly what will be written. */
   changes: Change[];
   /** Row label to before and after, for the preview. */
@@ -243,6 +249,37 @@ export async function resolveProgramme(
       continue;
     }
 
+    /* A row that does not exist yet has nothing to resolve. Everything
+       an insert needs is in the step: the columns and their values. */
+    if (s.op === 'create') {
+      const step = s as Mutate & { id: string };
+      const def = entityDef(step.target.entity);
+      if (!def) {
+        return { ok: false, reason: 'cannot execute', why: `nothing here holds ${step.target.entity}`, stepId: step.id };
+      }
+
+      const set: Record<string, unknown> = {};
+      const ctx: EvalContext = { row: {}, references: new Map(), now };
+      for (const [i, a] of (step.set ?? []).entries()) {
+        const value = evaluate(a.to, ctx, `set[${i}].to`);
+        if (!value.ok) {
+          return { ok: false, reason: 'unresolved', why: value.why, stepId: step.id };
+        }
+        set[a.field.field] = value.value;
+      }
+      if (!Object.keys(set).length) {
+        return { ok: false, reason: 'incomplete', why: 'that says nothing about the record to create', stepId: step.id };
+      }
+
+      units.push({
+        stepId: step.id, kind: 'create', entity: step.target.entity, table: def.table,
+        changes: [{ op: 'insert', table: def.table, set }],
+        preview: [{ id: '', label: 'a new record', before: {}, after: set }],
+        resolution: null,
+      });
+      continue;
+    }
+
     const step = s as Mutate & { id: string };
     const resolution = await resolveMutation(plan, {
       store: opts.store, stepId: step.id, readCap: opts.readCap,
@@ -285,12 +322,15 @@ export async function resolveProgramme(
         }
       }
 
-      changes.push({ table: def.table, id: row.id, set });
+      changes.push(step.op === 'delete'
+        ? { op: 'delete', table: def.table, id: row.id }
+        : { table: def.table, id: row.id, set });
       preview.push({ id: row.id, label: row.label, before: row.before, after: set });
     }
 
     units.push({
-      stepId: step.id, kind: 'update', entity: step.target.entity,
+      stepId: step.id, kind: step.op === 'delete' ? 'delete' : 'update',
+      entity: step.target.entity,
       table: def.table, resolution, changes, preview,
     });
   }
@@ -299,7 +339,7 @@ export async function resolveProgramme(
      plan. Two updates over the same entity usually pick out different
      rows and are independent; it is only when the conditions actually
      overlap that one row would receive two changes in one call. */
-  const overlap = overlappingRows(units.filter((u): u is UpdateUnit => u.kind === 'update'));
+  const overlap = overlappingRows(units.filter((u): u is UpdateUnit => u.kind !== 'invoke'));
   if (overlap) {
     return {
       ok: false,
@@ -309,7 +349,7 @@ export async function resolveProgramme(
     };
   }
 
-  const changes = units.flatMap((u) => (u.kind === 'update' ? u.changes : []));
+  const changes = units.flatMap((u) => (u.kind === 'invoke' ? [] : u.changes));
 
   const operated = units.reduce((n, u) => n + (u.kind === 'invoke' ? u.plan.subjects.length : 0), 0);
 
@@ -332,12 +372,22 @@ export async function resolveProgramme(
  * mutation drifts is refused as surely as one whose first does.
  */
 export function programmeHash(units: Unit[]): string {
-  const updates = units.filter((u): u is UpdateUnit => u.kind === 'update');
+  const updates = units.filter((u): u is UpdateUnit => u.kind !== 'invoke');
   const invokes = units.filter((u): u is InvokeUnit => u.kind === 'invoke');
 
   return resolutionHash(
     [
-      ...updates.flatMap((u) => u.resolution.rows.map((r) => ({ ...r, id: `${u.stepId}:${r.id}` }))),
+      /* A create resolves nothing, so it contributes the values it is
+         about to write instead. Two identical creates in one plan are
+         genuinely identical and hash the same, which is right: nothing
+         about the world decides what a new row will hold. */
+      ...updates.flatMap((u) => (u.resolution
+        ? u.resolution.rows.map((r) => ({ ...r, id: `${u.stepId}:${r.id}` }))
+        : u.changes.map((c, i) => ({
+            id: `${u.stepId}:new:${i}`,
+            label: 'a new record',
+            before: (c.set ?? {}) as Record<string, unknown>,
+          })))),
       /* An operation's subjects go in as rows, with the values it read
          off them. A deal whose price changed between the preview and
          the confirmation is drift for the same reason a trailer whose
@@ -349,9 +399,9 @@ export function programmeHash(units: Unit[]): string {
         before: sub.values,
       }))),
     ],
-    updates.flatMap((u) => u.resolution.references.map((r) => ({ ...r, at: `${u.stepId}:${r.at}` }))),
+    updates.flatMap((u) => (u.resolution?.references ?? []).map((r) => ({ ...r, at: `${u.stepId}:${r.at}` }))),
     [
-      ...updates.flatMap((u) => u.resolution.fields.map((f) => `${u.stepId}:${f}`)),
+      ...updates.flatMap((u) => (u.resolution?.fields ?? []).map((f) => `${u.stepId}:${f}`)),
       ...invokes.flatMap((u) => [
         `${u.stepId}:${u.plan.capability}`,
         ...Object.entries(u.plan.args).map(([k, v]) => `${u.stepId}:arg:${k}=${String(v)}`),

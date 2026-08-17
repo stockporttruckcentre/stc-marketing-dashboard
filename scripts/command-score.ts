@@ -263,7 +263,7 @@ async function carryOut(sentence: string): Promise<Executed> {
 }
 
 /** Operations the canonical mutation runtime performs. */
-const MUTATING = new Set(['update', 'bulk', 'approve', 'assign', 'cancel']);
+const MUTATING = new Set(['update', 'bulk', 'approve', 'assign', 'cancel', 'create', 'delete']);
 
 /**
  * Type the sentence, and get the file it asked for.

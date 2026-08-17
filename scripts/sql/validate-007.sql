@@ -533,6 +533,89 @@ $$;
 
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST buyer%';
 
+-- -------------------------------------------------------------
+-- Creating and deleting, through the same door
+-- -------------------------------------------------------------
+\echo '--- lifecycle ---'
+
+SELECT reset_fixtures();
+
+DO $$
+DECLARE n INTEGER;
+BEGIN
+  SELECT command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST made here","status":"lead"}}]'::JSONB)
+    INTO n;
+  PERFORM assert('an insert creates one row', n = 1, n::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an insert creates one row', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the row is really there',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST made here') = 1);
+
+SELECT assert('with the values it was given',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST made here') = 'lead',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST made here'));
+
+-- The allowlist holds whichever direction a row is moving.
+DO $$
+BEGIN
+  PERFORM command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST blocked","created_at":"2020-01-01"}}]'::JSONB);
+  PERFORM assert('an insert cannot fill in a column outside the allowlist', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an insert cannot fill in a column outside the allowlist',
+    SQLERRM LIKE '%may not write%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nothing was created by the attempt',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST blocked') = 0);
+
+-- A constraint the database holds is still held.
+DO $$
+BEGIN
+  PERFORM command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST bad status","status":"nonsense"}}]'::JSONB);
+  PERFORM assert('an insert outside a CHECK is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an insert outside a CHECK is refused', TRUE);
+END
+$$;
+
+-- Deleting, and the same all-or-nothing promise.
+DO $$
+DECLARE target UUID;
+DECLARE n INTEGER;
+BEGIN
+  SELECT id INTO target FROM crm_contacts WHERE company_name = 'TEST made here';
+  SELECT command_apply(('[{"op":"delete","table":"crm_contacts","id":"' || target || '"}]')::JSONB) INTO n;
+  PERFORM assert('a delete removes one row', n = 1, n::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a delete removes one row', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and it is gone',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST made here') = 0);
+
+DO $$
+BEGIN
+  PERFORM command_apply(('[' ||
+    '{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST rolled back"}},' ||
+    '{"op":"delete","table":"crm_contacts","id":"00000000-0000-0000-0000-000000000000"}' ||
+    ']')::JSONB);
+  PERFORM assert('a delete of a row that is not there fails the call', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a delete of a row that is not there fails the call',
+    SQLERRM LIKE '%exactly one row%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the insert in the same call was rolled back',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST rolled back') = 0);
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %';
+
 -- =============================================================
 -- 6. command_mark_sold
 -- =============================================================

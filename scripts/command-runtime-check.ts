@@ -343,12 +343,24 @@ ok('a handlerless capability is not advertised as executable',
   emailed.executable === false && emailed.missing.some((m) => m.need === 'rows.email'),
   JSON.stringify(emailed));
 
+/* Creating and deleting go through the same function, the same
+   allowlist and the same transaction as changing, so both are
+   executable. What is still not is an emit that leaves the company. */
 const created = executability({
   steps: [{ op: 'create', id: 'c', target: { entity: 'contacts' } }],
   unmet: [],
 });
-ok('a create is not executable, because no canonical executor performs one yet',
-  created.executable === false, JSON.stringify(created));
+ok('a create is executable, through record.create',
+  created.executable === true, JSON.stringify(created));
+
+const deleted = executability({
+  steps: [{
+    op: 'delete', id: 'd', expect: 'one', target: { entity: 'contacts' },
+    match: { op: 'select', from: { entity: 'contacts' }, produces: { kind: 'rows', entity: 'contacts' } },
+  }],
+  unmet: [],
+});
+ok('and so is a delete', deleted.executable === true, JSON.stringify(deleted));
 
 /* ============================================================= */
 

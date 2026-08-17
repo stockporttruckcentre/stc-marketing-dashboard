@@ -382,11 +382,15 @@ export function dependencesAmong(effects: Step[]): Dependence[] {
  * one call, and nothing says which of them wins.
  */
 export function overlappingRows(
-  units: { stepId: string; changes: { table: string; id: string }[] }[],
+  units: { stepId: string; changes: { table: string; id?: string }[] }[],
 ): Dependence | null {
   const seen = new Map<string, string>();
   for (const u of units) {
     for (const c of u.changes) {
+      /* A row being created has no id yet and cannot collide with
+         anything: nothing else in the plan can be touching a row that
+         does not exist. */
+      if (!c.id) continue;
       const key = `${c.table}:${c.id}`;
       const first = seen.get(key);
       if (first && first !== u.stepId) {

@@ -620,7 +620,146 @@ test('somebody without stock.edit cannot sell', async () => {
 });
 
 /* =============================================================
-   9. A question is still a question
+   9. Making a record, and getting rid of one
+
+   The other two ways a row's life changes, through the same allowlist
+   and the same transaction as changing one. Neither has an entity
+   specific handler.
+   ============================================================= */
+
+test('create a new lead for Smith Logistics', async () => {
+  const db = fakeDb({ crm_contacts: [] });
+  const text = 'create a new lead for Smith Logistics';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it is an instruction', planned?.planned.planning.kind === 'mutate',
+    String(planned?.planned.planning.kind));
+  ok('and the step creates a record',
+    planned?.planned.planning.plan.steps[0]?.op === 'create',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+
+  const preview = planned?.preview;
+  ok('a preview came back', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+  ok('nothing was written by the preview', db.writes.length === 0);
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('confirming creates it', done.ok, done.ok ? '' : done.why);
+  ok('there is now one contact', db.tables.crm_contacts.length === 1,
+    String(db.tables.crm_contacts.length));
+  ok('with the name that was typed',
+    db.tables.crm_contacts[0]?.company_name === 'Smith Logistics',
+    String(db.tables.crm_contacts[0]?.company_name));
+  /* The noun said what kind of record it is, from the same vocabulary a
+     question about leads narrows on. */
+  ok('and the status the noun implied',
+    db.tables.crm_contacts[0]?.status === 'lead',
+    String(db.tables.crm_contacts[0]?.status));
+});
+
+test('new trailer STC142345', async () => {
+  const db = fakeDb({ stock_trailers: [] });
+  const text = 'new trailer STC142345';
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it is created', done.ok, done.ok ? '' : done.why);
+  ok('with its stock number', db.tables.stock_trailers[0]?.stc_no === 'STC142345',
+    String(db.tables.stock_trailers[0]?.stc_no));
+});
+
+test('delete STC143580', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  const text = 'delete STC143580';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it is an instruction', planned?.planned.planning.kind === 'mutate');
+  ok('and the step deletes',
+    planned?.planned.planning.plan.steps[0]?.op === 'delete',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+
+  const preview = planned?.preview;
+  ok('a preview came back', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+  ok('naming the record', preview.rows[0]?.label === 'STC143580', preview.rows[0]?.label);
+  ok('nothing was deleted by the preview', db.tables.stock_trailers.length === 5,
+    String(db.tables.stock_trailers.length));
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('confirming deletes it', done.ok, done.ok ? '' : done.why);
+  ok('and it is gone',
+    !db.tables.stock_trailers.some((r) => r.stc_no === 'STC143580'),
+    db.tables.stock_trailers.map((r) => r.stc_no).join(','));
+  ok('and nothing else went with it', db.tables.stock_trailers.length === 4,
+    String(db.tables.stock_trailers.length));
+});
+
+test('a deletion needs crm.delete', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  const text = 'delete STC143580';
+  /* A marketer may edit a trailer and may not delete one, which is what
+     `crm_delete` says in the schema too. */
+  const planned = await plan(text, 'marketer', db);
+  const runnable = planned?.planned.planning.kind === 'mutate' && planned.planned.meaning.runnable;
+  ok('it is not offered', !runnable, 'it was offered');
+
+  const done = await applyMutation({
+    text, ...actor('marketer'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned?.planned.meaning.hash ?? 'x',
+    previewProgrammeHash: 'x',
+  });
+  ok('and confirming does nothing', !done.ok);
+  ok('the trailer is still there', db.tables.stock_trailers.length === 5);
+});
+
+test('deleting a field is not deleting a record', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  /* "Delete the customer on STC143580" empties a column. The record
+     stays, which is the whole difference between the two sentences. */
+  const text = 'delete the customer on STC143580';
+  const planned = await plan(text, 'admin', db);
+  ok('it is an update, not a delete',
+    planned?.planned.planning.plan.steps[0]?.op === 'update',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+  const preview = planned?.preview;
+  if (!preview?.ok) { ok('it previews', false, preview ? preview.why : 'none'); return; }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('and every trailer is still there', db.tables.stock_trailers.length === 5);
+});
+
+test('a described set is never deleted', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  /* There is no undo. A deletion names its record. */
+  const planned = await plan('delete all the sold trailers', 'admin', db);
+  const deletes = planned?.planned.planning.plan.steps.some((s) => s.op === 'delete');
+  ok('it does not become a bulk delete', !deletes,
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+  ok('and nothing was deleted', db.tables.stock_trailers.length === 5);
+});
+
+/* =============================================================
+   10. A question is still a question
    ============================================================= */
 
 test('a question does not become an instruction', async () => {

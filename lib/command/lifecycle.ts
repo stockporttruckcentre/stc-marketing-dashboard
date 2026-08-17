@@ -1,0 +1,324 @@
+/* =============================================================
+   Making a record, and getting rid of one.
+
+   The third and fourth things that happen to a row. Changing one has
+   had a reader since the command bar could write at all; creating and
+   deleting went through hand written intents, one per entity, each with
+   its own slots and its own route branch:
+
+     create_prospect          a contact
+     create_stock_trailer     a trailer
+     create_proposal          a contact with different columns
+
+   Three handlers for one idea, and nothing at all for the entities
+   nobody had got round to.
+
+   THIS IS ONE READER OVER THE REGISTRY.
+
+   An entity's own nouns say which table, its title field says what the
+   name goes in, and the writable dictionary says what else a sentence
+   may fill in. Adding an entity adds both sentences.
+
+     create a lead for Smith Logistics
+     add a new customer called Dawson Group
+     new trailer STC142345
+     delete STC143580
+     cancel Friday's site visit
+
+   WHAT IT WILL NOT DO.
+
+   Delete a set. "Delete the sold trailers" is a sentence this reads and
+   refuses, because a described set is exactly where a wrong word costs
+   the most and there is no undo. A deletion names its record.
+
+   Nor will it delete when a FIELD was named: "delete the customer on
+   STC143580" empties a column and is the clear the instruction reader
+   already handles. The difference is whether a field was named, which
+   is a question the writable dictionary answers.
+   ============================================================= */
+import { entity as entityDef } from './ir/registry';
+import { ENTITIES } from './schema';
+import { WRITABLE_FIELDS } from './fields';
+import type { Cond, Mutate } from './ir/types';
+import type { CrmCapabilities } from '@/lib/crm/permissions';
+
+export type LifecyclePlan = {
+  op: 'create' | 'delete';
+  entity: string;
+  /** The canonical step, ready for the plan. */
+  step: Mutate;
+  /** Plain English, shown before anything happens. */
+  summary: string;
+  /** The capability the whole thing needs. */
+  requires: string;
+  confidence: number;
+};
+
+/* -------------------------------------------------------------
+   Words
+   ------------------------------------------------------------- */
+
+const CREATE_WORDS = [
+  'create', 'add', 'new', 'make', 'open', 'raise', 'start', 'set up', 'register', 'log',
+];
+
+const DELETE_WORDS = [
+  'delete', 'remove', 'get rid of', 'bin', 'bin off', 'drop', 'cancel', 'call off',
+];
+
+/** Words between the verb and the name that are not part of either. */
+const FILLER = [
+  'a', 'an', 'the', 'new', 'record', 'entry', 'row', 'called', 'named', 'for', 'to',
+  'in', 'on', 'up', 'please', 'me', 'us', 'off', 'of',
+];
+
+/** Every word that names a thing rather than one of its columns. */
+const ENTITY_NOUNS = new Set(ENTITIES.flatMap((e) => e.nouns));
+
+const soften = (s: string) =>
+  ` ${s.toLowerCase().replace(/[^a-z0-9£$€.,/:@'\- ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
+
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Which entity a sentence is about, by its own declared nouns.
+ *
+ * The same nouns the question reader uses, so "customer", "lead" and
+ * "proposal" mean here exactly what they mean when somebody asks a
+ * question about them.
+ */
+function entityFrom(text: string): { id: string; noun: string } | null {
+  const t = soften(text);
+  let best: { id: string; noun: string } | null = null;
+  for (const e of ENTITIES) {
+    for (const noun of e.nouns) {
+      if (!t.includes(` ${noun} `)) continue;
+      if (!best || noun.length > best.noun.length) best = { id: e.id, noun };
+    }
+  }
+  return best;
+}
+
+/**
+ * The name a new record is being given.
+ *
+ * Everything after the verb and the entity noun, with the filler taken
+ * out. Deliberately not clever: a company is called whatever somebody
+ * types, and a reader that tries to be selective about it drops the
+ * second half of "Smith Logistics Ltd".
+ */
+function nameFrom(text: string, noun: string, verb: string): string | null {
+  const stripped = text
+    .replace(new RegExp(`\\b${escape(verb)}\\b`, 'i'), ' ')
+    .replace(new RegExp(`\\b${escape(noun)}\\b`, 'i'), ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = stripped.split(/\s+/).filter(Boolean);
+  while (words.length && FILLER.includes(words[0].toLowerCase())) words.shift();
+  while (words.length && FILLER.includes(words[words.length - 1].toLowerCase())) words.pop();
+
+  const name = words.join(' ').replace(/[.,:;]+$/, '').trim();
+  return name.length >= 2 ? name : null;
+}
+
+/** A word that means every match, rather than one record. */
+const COLLECTIVE = /\b(all|every|any|each|everything|the lot)\b/;
+
+/** A record reference, which is what a deletion has to name. */
+function referenceFrom(text: string): string | null {
+  const stc = text.match(/\bSTC\s?\d{3,}\b/i);
+  if (stc) return stc[0].replace(/\s+/g, '').toUpperCase();
+  return null;
+}
+
+/**
+ * The writable dictionary entry for an entity's own title.
+ *
+ * Matched by TABLE, because two entities can be two readings of one
+ * table and only one of them tends to appear in the dictionary.
+ */
+function writableEntityFor(entityId: string): string | null {
+  const table = entityDef(entityId)?.table;
+  if (!table) return null;
+  const owner = WRITABLE_FIELDS.find((f) => entityDef(f.entity)?.table === table);
+  return owner?.entity ?? null;
+}
+
+function writableFor(entityId: string, title: string) {
+  const table = entityDef(entityId)?.table;
+  return WRITABLE_FIELDS.find((f) => f.entity === entityId && f.key === title)
+    ?? WRITABLE_FIELDS.find((f) => entityDef(f.entity)?.table === table && f.key === title)
+    ?? WRITABLE_FIELDS.find((f) => entityDef(f.entity)?.table === table)
+    ?? null;
+}
+
+/* -------------------------------------------------------------
+   The reader
+   ------------------------------------------------------------- */
+
+export function parseLifecycle(input: string, caps?: CrmCapabilities): LifecyclePlan | null {
+  const raw = input.trim();
+  if (raw.length < 5) return null;
+  if (raw.endsWith('?')) return null;
+  if (/^\s*(how|what|which|who|when|where|why|is there|are there|do we|did we)\b/i.test(raw)) return null;
+
+  const t = soften(raw);
+
+  /* A named FIELD means this is a change to a column, whatever verb is
+     in front of it. "Delete the customer on STC143580" empties a
+     column; "delete STC143580" gets rid of the unit.
+
+     An alias that is also an ENTITY noun does not count. "Customer" is
+     a column on a trailer and the word people use for the thing itself,
+     so "add a new customer called Dawson Group" looked like a field
+     write and was refused. Which of the two it is depends on whether
+     the sentence is about that entity, and it is: it named it. */
+  const namesAField = WRITABLE_FIELDS.some((f) => {
+    if (caps && !caps.has(f.capability)) return false;
+    return f.aliases.some((a) => t.includes(` ${a} `) && !ENTITY_NOUNS.has(a));
+  });
+
+  const deleteVerb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))
+    .sort((a, b) => b.length - a.length)[0];
+  if (deleteVerb && !namesAField) return readDelete(raw, deleteVerb, caps);
+
+  const createVerb = CREATE_WORDS.filter((w) => t.includes(` ${w} `))
+    .sort((a, b) => b.length - a.length)[0];
+  if (createVerb && !namesAField) return readCreate(raw, createVerb, caps);
+
+  return null;
+}
+
+function readCreate(raw: string, verb: string, caps?: CrmCapabilities): LifecyclePlan | null {
+  const found = entityFrom(raw);
+  if (!found) return null;
+
+  const def = entityDef(found.id);
+  const title = def?.titleField;
+  if (!def || !title) return null;
+
+  /* THE ENTITY THAT OWNS THE COLUMNS, NOT THE ONE THE WORD NAMED.
+
+     `deals` and `contacts` are two readings of `crm_contacts`, and the
+     writable dictionary holds one of them. A create aimed at the
+     reading rather than at the table produced a step writing a column
+     the registry says is not writable, and the plan was refused as
+     malformed. */
+  const target = writableEntityFor(found.id) ?? found.id;
+
+  /* The capability to create is the capability to write the entity's
+     own title, which the writable dictionary already states. Nothing is
+     declared twice.
+
+     By table, not by entity id. `deals` and `contacts` are two ways of
+     reading `crm_contacts`, and only one of them appears in the
+     writable dictionary, so "create a new lead" found no field to take
+     a permission from and came back as a question. */
+  const spec = writableFor(target, title);
+  if (!spec) return null;
+  if (caps && !caps.has(spec.capability)) return null;
+
+  const name = nameFrom(raw, found.noun, verb);
+  if (!name) return null;
+
+  const set: NonNullable<Mutate['set']> = [{
+    field: { entity: target, field: title },
+    to: { kind: 'literal', value: name },
+  }];
+
+  /* THE NOUN OFTEN SAYS WHAT KIND OF RECORD IT IS.
+
+     "Create a new lead" and "add a customer" both insert a row into
+     crm_contacts, and the word that named the entity is also a value of
+     its status column. Taking it from the same vocabulary the question
+     reader narrows on means the two agree about what a lead is. */
+  const state = WRITABLE_FIELDS.find((f) =>
+    f.entity === target && f.kind === 'enum' && f.vocabulary
+    && Object.keys(f.vocabulary).includes(found.noun)
+    && (!caps || caps.has(f.capability)));
+  if (state?.vocabulary) {
+    set.push({
+      field: { entity: target, field: state.key },
+      to: { kind: 'literal', value: state.vocabulary[found.noun] },
+    });
+  }
+
+  const step: Mutate = {
+    op: 'create',
+    id: 'c1',
+    target: { entity: target },
+    set,
+    produces: { kind: 'record', entity: target },
+  };
+
+  return {
+    op: 'create',
+    entity: target,
+    step,
+    summary: `Create ${def.labelOne} ${name}`,
+    requires: spec.capability,
+    /* A verb, an entity and a name. Anything less does not get here. */
+    confidence: 11,
+  };
+}
+
+function readDelete(raw: string, verb: string, caps?: CrmCapabilities): LifecyclePlan | null {
+  const found = entityFrom(raw);
+  const reference = referenceFrom(raw);
+
+  /* A WORD THAT MEANS EVERY MATCH IS NOT A RECORD NAME.
+
+     "Delete all the sold trailers" came back as a deletion of a record
+     called "all the sold", which matches nothing and is harmless
+     exactly once. There is no undo here, so a deletion names one record
+     and a sentence that describes a set is refused rather than read as
+     well as it can be. */
+  if (!reference && COLLECTIVE.test(soften(raw))) return null;
+
+  /* One record, named. A described set is refused: there is no undo,
+     and "delete the sold trailers" is one wrong word away from the
+     worst thing this application could do. */
+  const entityId = reference ? 'trailers' : found?.id;
+  if (!entityId) return null;
+
+  const def = entityDef(entityId);
+  const title = def?.titleField;
+  if (!def || !title) return null;
+
+  const spec = writableFor(entityId, title);
+  const requires = spec?.capability ?? 'crm.delete';
+  if (caps && !caps.has(requires)) return null;
+
+  const name = reference ?? (found ? nameFrom(raw, found.noun, verb) : null);
+  if (!name) return null;
+
+  const match: Cond = {
+    kind: 'cmp', op: 'contains',
+    left: { kind: 'field', of: { entity: entityId, field: title } },
+    right: { kind: 'literal', value: name },
+  };
+
+  const step: Mutate = {
+    op: 'delete',
+    id: 'd1',
+    expect: 'one',
+    target: { entity: entityId },
+    match: {
+      op: 'select',
+      from: { entity: entityId },
+      where: match,
+      produces: { kind: 'rows', entity: entityId },
+    },
+    produces: { kind: 'rows', entity: entityId },
+  };
+
+  return {
+    op: 'delete',
+    entity: entityId,
+    step,
+    summary: `Delete ${def.labelOne} ${name}`,
+    requires,
+    confidence: reference ? 13 : 11,
+  };
+}

@@ -464,8 +464,14 @@ ok('a plan claiming to need nothing still has its requirements derived',
 for (const c of CAPABILITIES) {
   ok(`${c.id} says whether it is repeatable`, typeof c.idempotent === 'boolean');
   if (c.produces) {
+    /* An output is only meaningful where a later step can consume it.
+       A create makes a record and a `ResultRef` can name it, which is
+       what "find these customers and make a list of them" needs. A
+       select's output is derived from the select itself and a delete
+       leaves nothing behind, so neither declares one. */
     ok(`${c.id} only declares an output because something can name it`,
-      c.operates === 'invoke' || c.operates === 'emit', c.operates);
+      c.operates === 'invoke' || c.operates === 'emit' || c.operates === 'create',
+      c.operates);
   }
 }
 

@@ -27,8 +27,20 @@
    ============================================================= */
 import type { Cond } from './types';
 
-/** One change to one row. */
-export type Change = { table: string; id: string; set: Record<string, unknown> };
+/**
+ * One change to one row.
+ *
+ * `op` absent means update, which is what every caller sent before rows
+ * could be created and deleted through here. An insert names no id
+ * because it has not got one yet; a delete names no columns because it
+ * is not setting any.
+ */
+export type Change = {
+  op?: 'update' | 'insert' | 'delete';
+  table: string;
+  id?: string;
+  set?: Record<string, unknown>;
+};
 
 export type ReadRequest = {
   table: string;
