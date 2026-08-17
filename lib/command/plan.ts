@@ -372,7 +372,7 @@ function readLifecycle(
   if (!opts?.actorCapabilities) return null;
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
-  const read = parseLifecycle(text, caps);
+  const read = parseLifecycle(text, caps, opts.context ?? EMPTY_CONTEXT);
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };

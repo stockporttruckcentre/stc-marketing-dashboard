@@ -190,6 +190,14 @@ export function postgrestStore(supabase: Queryable): Store {
  * loop from here would be several.
  */
 const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
+  'list.create': {
+    name: 'command_create_list',
+    args: (c) => ({
+      p_name: c.args.name ?? null,
+      p_ids: c.subjects,
+      p_owner: c.args.actorId ?? null,
+    }),
+  },
   'deal.markSold': {
     name: 'command_mark_sold_many',
     args: (c) => ({

@@ -40,6 +40,10 @@ import { entity as entityDef } from './ir/registry';
 import { ENTITIES } from './schema';
 import { WRITABLE_FIELDS } from './fields';
 import type { Cond, Mutate } from './ir/types';
+import { capability } from './ir/registry';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
 
 export type LifecyclePlan = {
@@ -157,7 +161,69 @@ function writableFor(entityId: string, title: string) {
    The reader
    ------------------------------------------------------------- */
 
-export function parseLifecycle(input: string, caps?: CrmCapabilities): LifecyclePlan | null {
+/**
+ * "Make a list of these, called Tipper prospects."
+ *
+ * A business operation rather than a create, because it is two writes
+ * where the second needs the first: the list has to exist before
+ * anything can go in it. The orchestrator refuses that shape by design,
+ * and the answer is to put the ordered pair somewhere that can order
+ * it, which is `command_create_list`.
+ *
+ * The records come from the screen, which is where a list is made from
+ * in practice: you tick some rows and you want them together. The name
+ * is a declared input on the capability, read here and reported as
+ * missing by the runtime if the sentence did not give one.
+ */
+function readListCreate(
+  raw: string, caps: CrmCapabilities | undefined, context: CommandContext,
+): LifecyclePlan | null {
+  const t = soften(raw);
+  if (!/\b(list|group|set)\b/.test(t)) return null;
+  if (!CREATE_WORDS.some((w) => t.includes(` ${w} `))) return null;
+
+  const cap = capability('list.create');
+  if (!cap || !cap.requires) return null;
+  if (caps && !caps.has(cap.requires)) return null;
+
+  const pointed = readContextReference(raw);
+  const from = pointed ? resolveContext(pointed, context, 'contacts') : null;
+  if (!from) return null;
+
+  /* The name, from the words after "called" or "named". Not guessed
+     from the rest of the sentence: a list nobody named is a list nobody
+     will find again, and the runtime says so rather than inventing one. */
+  const named = raw.match(/\b(?:called|named|titled)\s+(.{2,60}?)\s*$/i)?.[1]?.trim();
+
+  return {
+    op: 'create',
+    entity: 'contacts',
+    step: {
+      /* An invoke wearing the lifecycle reader's return type, because
+         what it produces is a plan step either way. */
+      op: 'invoke',
+      id: 'l1',
+      capability: 'list.create',
+      subject: {
+        op: 'select',
+        from: { entity: 'contacts' },
+        where: from.match,
+        produces: { kind: 'rows', entity: 'contacts' },
+      },
+      ...(named ? { args: { name: { kind: 'literal' as const, value: named } } } : {}),
+      produces: { kind: 'record', entity: 'contacts' },
+    } as unknown as Mutate,
+    summary: named
+      ? `Make a list called ${named} from ${from.label}`
+      : `Make a list from ${from.label}`,
+    requires: cap.requires,
+    confidence: 12,
+  };
+}
+
+export function parseLifecycle(
+  input: string, caps?: CrmCapabilities, context: CommandContext = EMPTY_CONTEXT,
+): LifecyclePlan | null {
   const raw = input.trim();
   if (raw.length < 5) return null;
   if (raw.endsWith('?')) return null;
@@ -178,6 +244,12 @@ export function parseLifecycle(input: string, caps?: CrmCapabilities): Lifecycle
     if (caps && !caps.has(f.capability)) return false;
     return f.aliases.some((a) => t.includes(` ${a} `) && !ENTITY_NOUNS.has(a));
   });
+
+  /* Making a list out of what is on the screen, before the plain
+     create, because "create a list from these" names an entity noun
+     ("list" is not one) and would otherwise fall through. */
+  const list = readListCreate(raw, caps, context);
+  if (list) return list;
 
   const deleteVerb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))
     .sort((a, b) => b.length - a.length)[0];

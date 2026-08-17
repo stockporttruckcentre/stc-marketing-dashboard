@@ -201,6 +201,31 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: results, error: null };
     }
 
+    /* Two writes where the second needs the first, in order, in one
+       transaction: the list, then the memberships. */
+    if (name === 'command_create_list') {
+      const listName = String(args.p_name ?? '').trim();
+      const ids = (args.p_ids ?? []) as string[];
+      if (!listName) return { data: null, error: { message: 'a list needs a name' } };
+      if (!ids.length) return { data: null, error: { message: 'a list needs something in it' } };
+
+      const listId = `list${((tables.crm_lists ?? []).length) + 1}`;
+      const targets = (tables.crm_contacts ?? []).filter((r) => ids.includes(String(r.id)));
+      if (targets.length !== ids.length) {
+        return {
+          data: null,
+          error: { message: `expected to put ${ids.length} records in the list but moved ${targets.length}` },
+        };
+      }
+
+      (tables.crm_lists ??= []).push({ id: listId, name: listName, is_global: false });
+      for (const row of targets) row.list_id = listId;
+      writes.push({ table: 'crm_lists', set: { name: listName }, ids: [listId] });
+      writes.push({ table: 'crm_contacts', set: { list_id: listId }, ids: ids.map(String) });
+
+      return { data: { listId, name: listName, moved: targets.length }, error: null };
+    }
+
     if (name !== 'command_apply') return { data: null, error: { message: `no function ${name}` } };
     const changes = (args.p_changes ?? []) as
       { op?: 'update' | 'insert' | 'delete'; table: string; id?: string; set?: Row }[];

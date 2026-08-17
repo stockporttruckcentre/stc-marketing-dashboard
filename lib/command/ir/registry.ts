@@ -585,6 +585,23 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'list.create',
+    label: 'Make a list out of these records',
+    operates: 'invoke',
+    entities: ['contacts'],
+    /* "Make and share working lists" is what crm.manageLists means in
+       permissions.ts, which is where the meeting put it. */
+    requires: 'crm.manageLists',
+    confirm: true,
+    produces: 'record',
+    /* A second run makes a second list with the same name. */
+    idempotent: false,
+    handler: 'supabase/migrations/012_command_create_list.sql',
+    inputs: [
+      { key: 'name', label: 'list name', kind: 'text', required: true },
+    ],
+  },
+  {
     id: 'rows.share',
     label: 'Share rows with colleagues',
     operates: 'emit',

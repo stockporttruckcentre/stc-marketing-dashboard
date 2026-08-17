@@ -616,6 +616,54 @@ SELECT assert('and the insert in the same call was rolled back',
 
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %';
 
+-- -------------------------------------------------------------
+-- A list, and the records in it, in that order
+-- -------------------------------------------------------------
+SELECT reset_fixtures();
+
+INSERT INTO crm_contacts (id, company_name, status, source) VALUES
+  ('b1111111-0000-0000-0000-000000000001', 'TEST listed one', 'lead', 'manual'),
+  ('b1111111-0000-0000-0000-000000000002', 'TEST listed two', 'lead', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_create_list('TEST tipper prospects',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID], NULL) INTO out;
+  PERFORM assert('a list is created with its records in it', (out ->> 'moved')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list is created with its records in it', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('the list is really there',
+  (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST tipper prospects') = 1);
+
+SELECT assert('and both records point at it',
+  (SELECT COUNT(*) FROM crm_contacts c JOIN crm_lists l ON l.id = c.list_id
+   WHERE l.name = 'TEST tipper prospects') = 2);
+
+-- One record that cannot be moved takes the list with it.
+DO $$
+BEGIN
+  PERFORM command_create_list('TEST never made',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          '00000000-0000-0000-0000-000000000000'::UUID], NULL);
+  PERFORM assert('a record that is not there fails the whole thing', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a record that is not there fails the whole thing',
+    SQLERRM LIKE '%expected to put%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the list was not created either',
+  (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST never made') = 0);
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
+DELETE FROM crm_lists WHERE name LIKE 'TEST %';
+
 -- =============================================================
 -- 6. command_mark_sold
 -- =============================================================

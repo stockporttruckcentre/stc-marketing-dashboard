@@ -814,7 +814,35 @@ export const ACTIONS: CommandActionSpec[] = [
 const fold = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export type ActionHit = { action: CommandActionSpec; score: number; matched: string };
+export type ActionHit = {
+  action: CommandActionSpec;
+  score: number;
+  matched: string;
+  /**
+   * Does anything in this application carry it out?
+   *
+   * An action with a `path` opens a screen and the screen does the
+   * work, so it is carried out by definition. An action with neither a
+   * path nor a seed is a label with nothing behind it, and offering it
+   * as something to press Enter on teaches people the tool is
+   * unreliable. This is the difference between a registry entry and a
+   * capability, and the bar shows it rather than hiding it: a suggestion
+   * that only seeds the bar says so.
+   */
+  runnable: boolean;
+};
+
+/**
+ * Is there anything behind this action, or only a label?
+ *
+ * A screen counts: navigation is a real outcome and the screen does the
+ * work. A seed counts as far as it goes, which is putting a sentence in
+ * the bar for somebody to finish, and the caller is told which of the
+ * two it is rather than being left to find out by pressing Enter.
+ */
+export function actionRunnable(a: CommandActionSpec): boolean {
+  return !!a.path;
+}
 
 /**
  * Actions matching what has been typed, best first, with anything the
@@ -865,7 +893,14 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
       if (prefix) take(35, prefix);
     }
 
-    if (best) hits.push({ action: a, score: (best as { score: number }).score, matched: (best as { matched: string }).matched });
+    if (best) {
+      hits.push({
+        action: a,
+        score: (best as { score: number }).score,
+        matched: (best as { matched: string }).matched,
+        runnable: actionRunnable(a),
+      });
+    }
   }
 
   return hits

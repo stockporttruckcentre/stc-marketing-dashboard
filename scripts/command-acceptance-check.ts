@@ -937,7 +937,76 @@ test('the context is part of the meaning, so changing it changes the hash', asyn
 });
 
 /* =============================================================
-   11. A question is still a question
+   11. Two writes where the second needs the first
+
+   The orchestrator refuses a plan whose steps depend on each other,
+   because it computes every change from the rows as they stand and
+   applies them together. Making a list out of records is exactly that
+   shape: the list has to exist before anything can go in it. The answer
+   is not to relax the rule but to put the ordered pair somewhere that
+   can order it, which is one database function.
+   ============================================================= */
+
+test('make a list of these called Tipper prospects', async () => {
+  const db = SCREEN();
+  const text = 'make a list of these called Tipper prospects';
+  const context = { selection: { entity: 'contacts', ids: [ID(1), ID(2)] } };
+
+  const planned = await withContext(text, db, context);
+  ok('it is an instruction', planned?.planned.planning.kind === 'mutate',
+    String(planned?.planned.planning.kind));
+  ok('and it is an operation, not two writes',
+    planned?.planned.planning.plan.steps[0]?.op === 'invoke',
+    planned?.planned.planning.plan.steps.map((s) => s.op).join(','));
+
+  const preview = planned?.preview;
+  ok('it previews', !!preview?.ok, preview && !preview.ok ? preview.why : '');
+  if (!preview?.ok) return;
+  ok('naming the records that would go in it', preview.count === 2, String(preview.count));
+  ok('nothing was written by the preview', db.writes.length === 0);
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase), context: context as never,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('the list exists', db.tables.crm_lists?.length === 1,
+    JSON.stringify(db.tables.crm_lists));
+  ok('with the name that was typed',
+    db.tables.crm_lists?.[0]?.name === 'Tipper prospects',
+    String(db.tables.crm_lists?.[0]?.name));
+  ok('and both records are in it',
+    db.tables.crm_contacts.filter((r) => r.list_id === db.tables.crm_lists?.[0]?.id).length === 2);
+  ok('the third one is not', db.tables.crm_contacts.find((r) => r.id === ID(3))?.list_id == null);
+});
+
+test('a list with no name is refused rather than named for you', async () => {
+  const db = SCREEN();
+  const planned = await withContext('create a list from these', db, {
+    selection: { entity: 'contacts', ids: [ID(1)] },
+  });
+  const preview = planned?.preview;
+  ok('the preview refuses', !!preview && !preview.ok, 'it previewed');
+  if (!preview || preview.ok) return;
+  ok('saying what is missing', /list name/.test(preview.why), preview.why);
+  ok('and nothing was written', db.writes.length === 0);
+});
+
+test('somebody without crm.manageLists cannot make one', async () => {
+  const db = SCREEN();
+  const text = 'make a list of these called Tipper prospects';
+  const planned = await planAndPreview({
+    text, ...actor('marketer'), store: postgrestStore(db.supabase), preview: true,
+    context: { selection: { entity: 'contacts', ids: [ID(1)] } } as never,
+  });
+  const runnable = planned?.planned.planning.kind === 'mutate' && planned.planned.meaning.runnable;
+  ok('it is not offered', !runnable, 'it was offered');
+  ok('and no list was made', !db.tables.crm_lists?.length);
+});
+
+/* =============================================================
+   12. A question is still a question
    ============================================================= */
 
 test('a question does not become an instruction', async () => {

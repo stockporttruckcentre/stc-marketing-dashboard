@@ -227,7 +227,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       .map((h) => ({
       kind: 'action' as const,
       label: h.action.label,
-      sub: h.action.blurb,
+      /* WHAT IT WILL ACTUALLY DO, SAID IN THE SUGGESTION.
+
+         An action that opens a screen opens a screen; one that seeds
+         the bar puts a sentence in it for you to finish. Both were shown
+         identically, so half the list looked like things that would
+         happen on Enter and did not. */
+      sub: h.runnable ? h.action.blurb : `${h.action.blurb}. Fills the bar in for you`,
       path: h.action.seed ? undefined : h.action.path,
       phrase: h.action.seed,
       score: h.score,

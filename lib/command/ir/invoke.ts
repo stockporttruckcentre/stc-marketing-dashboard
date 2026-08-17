@@ -211,6 +211,15 @@ export async function resolveInvoke(
   for (const input of inputs) {
     if (args[input.key] != null) continue;
     if (!input.required) continue;
+
+    /* An input with no column behind it can only come from the words.
+       A list's name is not on any record, so there is nothing to report
+       per record: the sentence did not say it. */
+    if (!input.from) {
+      needs.push({ key: input.key, label: input.label });
+      continue;
+    }
+
     const supplied = subjects.filter((s) => s.values[input.key] != null);
     if (supplied.length === subjects.length) continue;
     const without = subjects.filter((s) => s.values[input.key] == null);
@@ -222,14 +231,20 @@ export async function resolveInvoke(
   }
 
   if (needs.length) {
+    const what = needs.map((n) => n.label).join(' and ');
+    /* Named, and said in terms of the thing that is missing rather than
+       in terms of a sale. A capability declares its inputs and this
+       reports whichever of them nobody supplied. */
+    const where = missing.length
+      ? `on ${missing.length} ${missing.length === 1 ? 'record' : 'records'}: `
+        + `${missing.slice(0, 5).map((m) => m.label).join(', ')}`
+        + `${missing.length > 5 ? ` and ${missing.length - 5} more` : ''}`
+      : 'and nothing supplied it';
     return {
       ok: false,
       reason: 'incomplete',
-      why: `${needs.map((n) => n.label).join(' and ')} missing on `
-        + `${missing.length} ${missing.length === 1 ? 'record' : 'records'}: `
-        + `${missing.slice(0, 5).map((m) => m.label).join(', ')}`
-        + `${missing.length > 5 ? ` and ${missing.length - 5} more` : ''}. `
-        + 'Say the price in the instruction, or set it on the deal first.',
+      why: `${what} missing ${where}. Say the ${needs[0].label} in the instruction, `
+        + 'or set it on the records first.',
     };
   }
 
