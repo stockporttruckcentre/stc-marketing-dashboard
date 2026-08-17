@@ -4,6 +4,7 @@ import { planAndPreview } from '@/lib/command/server/mutation';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
 import { changedFields } from '@/lib/command/server/mutation';
+import { emitStep } from '@/lib/command/server/emit';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +78,15 @@ export async function POST(req: NextRequest) {
     mutation: planned.planning.kind === 'mutate'
       ? { fields: changedFields(planned.planning.plan) }
       : null,
+    /* What it would produce, when the sentence asked for a file. The bar
+       needs this to know whether Enter answers on screen or downloads,
+       and it is a property of the plan rather than of the words. */
+    emit: (() => {
+      const step = emitStep(planned.planning.plan);
+      return step && step.output.kind === 'file'
+        ? { format: step.output.format, to: step.to.kind }
+        : null;
+    })(),
     preview: preview ?? null,
   });
 }

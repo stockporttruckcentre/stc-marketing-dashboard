@@ -53,6 +53,8 @@ type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'an
  */
 type ServerMeaning = PlannedMeaning & {
   kind?: 'read' | 'mutate';
+  /** A file, when the sentence asked for one. */
+  emit?: { format: string; to: string } | null;
   mutation?: { fields: { label: string; requires: string }[] } | null;
   preview?: MutationPreview | null;
 };
@@ -385,7 +387,10 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   /** The server read it as an instruction and will carry it out. */
   const instructionReady = meaning?.kind === 'mutate' && meaning.runnable;
 
-  const useQuery = !instructionReady && meaning?.kind !== 'mutate' && !!meaning?.runnable
+  /** It asked for a file rather than an answer on screen. */
+  const wantsFile = !!meaning?.emit && meaning.runnable;
+
+  const useQuery = !instructionReady && !wantsFile && meaning?.kind !== 'mutate' && !!meaning?.runnable
     && (readsOnly || !preview?.intent?.writes);
 
   /* Said out loud rather than left for the answer to imply. */
@@ -489,6 +494,46 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * is the one somebody agreed to. A client cannot send a plan, so
    * there is nothing here to hand craft.
    */
+  /**
+   * The file the sentence asked for.
+   *
+   * The same sentence and the same hash go up. What comes back is the
+   * file itself rather than a link to one, so nothing is stored and
+   * there is no bucket with somebody's customer list sitting in it.
+   */
+  async function downloadArtefact(m: ServerMeaning) {
+    setStage('running');
+    const res = await fetch('/api/command/emit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, hash: m.hash }),
+    }).catch(() => null);
+
+    if (!res || !res.ok) {
+      const why = await res?.json().catch(() => null);
+      setOutcome({ ok: false, message: why?.error ?? 'That file did not come back.' });
+      setStage('done');
+      return;
+    }
+
+    const blob = await res.blob();
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1]
+      ?? 'export';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+
+    const rows = Number(res.headers.get('X-Command-Rows') ?? 0);
+    const capped = res.headers.get('X-Command-Capped') === '1';
+    setOutcome({
+      ok: true,
+      message: `${name} downloaded, ${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
+      detail: capped ? 'That is as many rows as one file carries. Narrow the request to get the rest.' : undefined,
+    });
+    setStage('done');
+  }
+
   async function runQuery(m: ServerMeaning) {
     setStage('running');
     const res = await fetch('/api/command/query', {
@@ -607,6 +652,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
        question about trailers, however much it reads like one. Which it
        is was decided by the server, not here. */
     if (instructionReady) return previewInstruction();
+    if (wantsFile && meaning) return downloadArtefact(meaning);
     if (useQuery && meaning) return runQuery(meaning);
     const parsed = parse(text);
     if (!parsed.intent) {

@@ -25,7 +25,18 @@ type Op =
   | { kind: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; column: string; value: unknown }
   | { kind: 'ilike'; column: string; pattern: string }
   | { kind: 'or'; clauses: string[] }
-  | { kind: 'in'; column: string; values: unknown[] };
+  | { kind: 'in'; column: string; values: unknown[] }
+  | { kind: 'order'; column: string; ascending: boolean };
+
+/** Numbers as numbers, dates as dates, anything else as text. */
+function compare(left: unknown, right: unknown): number {
+  if (left == null) return -1;
+  const ln = Number(left), rn = Number(right);
+  if (Number.isFinite(ln) && Number.isFinite(rn)) return ln - rn;
+  const ld = Date.parse(String(left)), rd = Date.parse(String(right));
+  if (Number.isFinite(ld) && Number.isFinite(rd)) return ld - rd;
+  return String(left).localeCompare(String(right));
+}
 
 function matches(row: Row, op: Op): boolean {
   const like = (v: unknown, pattern: string) => {
@@ -38,12 +49,18 @@ function matches(row: Row, op: Op): boolean {
   switch (op.kind) {
     case 'eq': return String(row[op.column] ?? '') === String(op.value);
     case 'neq': return String(row[op.column] ?? '') !== String(op.value);
-    case 'gt': return Number(row[op.column]) > Number(op.value);
-    case 'gte': return Number(row[op.column]) >= Number(op.value);
-    case 'lt': return Number(row[op.column]) < Number(op.value);
-    case 'lte': return Number(row[op.column]) <= Number(op.value);
+    /* Dates compare as dates. Comparing them as numbers gives NaN on
+       both sides, and `NaN >= NaN` is false, so every period filter
+       matched nothing and an export of "sold in the last six months"
+       came back empty while looking like it had worked. */
+    case 'gt': return compare(row[op.column], op.value) > 0;
+    case 'gte': return compare(row[op.column], op.value) >= 0;
+    case 'lt': return compare(row[op.column], op.value) < 0;
+    case 'lte': return compare(row[op.column], op.value) <= 0;
     case 'ilike': return like(row[op.column], op.pattern);
     case 'in': return op.values.map(String).includes(String(row.id));
+    /* Ordering narrows nothing. It is applied when the rows come back. */
+    case 'order': return true;
     case 'or':
       /* `col.ilike.%x%`, `col.eq.x` and `col.is.null`, which is what the
          resolver emits and nothing more. */
@@ -80,9 +97,21 @@ export function fakeDb(tables: Record<string, Row[]>) {
       ilike: (column: string, pattern: string) => builder(table, [...ops, { kind: 'ilike', column, pattern }], columns, update),
       or: (expr: string) => builder(table, [...ops, { kind: 'or', clauses: expr.split(',') }], columns, update),
       in: (column: string, values: unknown[]) => builder(table, [...ops, { kind: 'in', column, values }], columns, update),
+      order: (column: string, o?: { ascending?: boolean }) =>
+        builder(table, [...ops, { kind: 'order', column, ascending: o?.ascending !== false }], columns, update),
       update: (set: Row) => builder(table, ops, columns, set),
       limit: async (n: number) => {
         const rows = (tables[table] ?? []).filter((r) => ops.every((o) => matches(r, o)));
+        for (const o of ops) {
+          if (o.kind !== 'order') continue;
+          rows.sort((a, b) => {
+            const x = a[o.column], y = b[o.column];
+            const c = x == null ? 1 : y == null ? -1
+              : typeof x === 'number' && typeof y === 'number' ? x - y
+                : String(x).localeCompare(String(y));
+            return o.ascending ? c : -c;
+          });
+        }
         const projected = columns
           ? rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])))
           : rows;

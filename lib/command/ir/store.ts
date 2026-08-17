@@ -35,6 +35,15 @@ export type ReadRequest = {
   columns: string[];
   where: Cond;
   /**
+   * How to order the rows, when the sentence said.
+   *
+   * Part of the contract because "the five cheapest" is a question
+   * whose answer depends on it, and ordering after the ceiling has been
+   * applied returns the five that came back first rather than the five
+   * that are cheapest.
+   */
+  orderBy?: { column: string; direction: 'asc' | 'desc' }[];
+  /**
    * The most rows to return.
    *
    * Always given. A read with no ceiling is how a command that names

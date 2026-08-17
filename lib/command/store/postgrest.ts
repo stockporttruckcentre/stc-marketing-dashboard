@@ -123,7 +123,12 @@ export function postgrestStore(supabase: Queryable): Store {
       );
       if (narrowed.unsupported) return { ok: false, reason: 'unsupported', why: narrowed.unsupported };
 
-      const { data, error } = await narrowed.q.limit(req.limit);
+      let q = narrowed.q;
+      for (const o of req.orderBy ?? []) {
+        q = q.order(o.column, { ascending: o.direction === 'asc', nullsFirst: false });
+      }
+
+      const { data, error } = await q.limit(req.limit);
       if (error) {
         return { ok: false, reason: 'failed', why: String((error as { message?: string }).message ?? error) };
       }

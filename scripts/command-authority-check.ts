@@ -253,7 +253,12 @@ ok('the command bar does not offer what the actor is not permitted',
 ok('the command bar shows the meaning the server planned, not one it worked out',
   /\{meaning\.summary\}/.test(bar) && !/planning\.presentation\.summary/.test(bar));
 ok('the command bar offers a command only when the server calls it runnable',
-  /const useQuery = !instructionReady && meaning\?\.kind !== 'mutate' && !!meaning\?\.runnable/.test(bar));
+  /const useQuery = !instructionReady && !wantsFile && meaning\?\.kind !== 'mutate' && !!meaning\?\.runnable/.test(bar));
+/* A file is offered on the same terms, and the bar does not decide what
+   format a sentence asked for either. */
+ok('a download is offered only when the server planned one',
+  /const wantsFile = !!meaning\?\.emit && meaning\.runnable/.test(bar)
+  && !/readOutput\(/.test(bar));
 /* And an instruction is offered on the same terms. The bar used to read
    the sentence itself with `parseEdit` and act on what it decided, which
    made the browser the semantic authority for every write. */
@@ -606,7 +611,8 @@ ok('the file records why there is no shared cache',
 
 const planSource = source('lib/command/plan.ts');
 ok('planCommand hands the index to the reader rather than installing it',
-  /parseQuery\(text, opts\?\.vocabulary\)/.test(planSource)
+  /parseQuery\(asked, opts\?\.vocabulary\)/.test(planSource)
+  && /parseEdit\(text, caps, opts\.vocabulary\)/.test(planSource)
   && !/installVocabulary/.test(planSource));
 ok('planCommand is synchronous, so nothing can interleave inside it',
   /export function planCommand/.test(planSource)

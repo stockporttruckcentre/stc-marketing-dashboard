@@ -31,6 +31,7 @@
    ============================================================= */
 import { parseQuery, type QueryPlan } from './query';
 import { parseEdit, type EditPlan } from './mutate';
+import { readOutput } from './output';
 import type { VocabularyIndex } from './vocab';
 import { adaptQueryPlan } from './ir/adapt';
 import { adaptEditPlan } from './ir/adapt-edit';
@@ -40,7 +41,8 @@ import {
   type Problem, type Requirement, type Completion,
 } from './ir/validate';
 import { executability, selectToQueryPayload, type QueryPayload, type Unavailable } from './ir/execute';
-import type { Plan, Select } from './ir/types';
+import { FILE_EMIT_CAPABILITY } from './ir/registry';
+import type { Emit, Plan, Select } from './ir/types';
 
 /* =============================================================
    Availability
@@ -179,10 +181,36 @@ export function planCommand(
   const write = readInstruction(text, opts);
   if (write) return write;
 
-  const read: QueryPlan | null = parseQuery(text, opts?.vocabulary);
+  /* WHAT COMES OUT IS NOT PART OF THE QUESTION.
+
+     "Export the sold trailers as a Word document" is one selection and
+     one output, and the reader below has no idea what a Word document
+     is: it reported "word" and "document" as words it could not match,
+     and "to Excel" ended up inside a filter. The clause comes off
+     first, and what is left is an ordinary question. */
+  const output = readOutput(text);
+  const asked = output ? output.rest : text;
+
+  const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary);
   if (!read) return null;
 
   const { plan, select } = adaptQueryPlan(read);
+
+  /* One emit step, over the result of the select. Not a copy of the
+     select: the file has to be built from exactly the rows the question
+     described, and a second description of them is a second answer. */
+  if (output && select.id) {
+    const emit: Emit = {
+      op: 'emit',
+      id: 'e1',
+      from: { ref: 'rows', step: select.id },
+      output: output.output,
+      to: output.to,
+      capability: FILE_EMIT_CAPABILITY,
+      produces: { kind: 'artefact' },
+    };
+    plan.steps.push(emit);
+  }
 
   return {
     text,
@@ -198,7 +226,7 @@ export function planCommand(
     confirm: needsConfirmation(plan),
     availability: availabilityOf(plan, opts?.actorCapabilities),
     presentation: {
-      summary: read.summary,
+      summary: output ? `${read.summary}, as a ${output.label}` : read.summary,
       confidence: read.confidence,
       amountLabel: read.amountLabel ?? null,
       groupLabel: read.groupBy?.label ?? null,
