@@ -1,23 +1,32 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { requireCapability } from '@/lib/api/guard';
+import { commitStockImport } from '@/lib/import/stock';
 import rows from './rows.json';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
- * One-off import: 110 Sold-list rows from Tom's stock workbook
- * where dispatch_date >= 2026-01-01.
- * Dedupes by stc_no — only inserts rows that don't already exist as 'sold'.
- * Admin role required.
+ * DEVELOPER MAINTENANCE, AND IT SAYS SO.
+ *
+ * A one-off import of 110 rows from Tom's stock workbook, bundled as
+ * `rows.json` beside this file. It is not a product operation: nothing
+ * in the application links to it, the data it loads is fixed at the
+ * moment it was written, and loading a supplier's file is now
+ * `stock.import`, which reads whatever file somebody attaches.
+ *
+ * It stays because it has not been run against every environment yet,
+ * and it goes through the same atomic write as everything else. It used
+ * to insert in chunks of a hundred and report how many landed before a
+ * chunk failed, which leaves a half loaded stock list nobody can undo.
+ *
+ * Gated on `stock.edit` through the shared guard rather than by reading
+ * `profiles.role` here, which is the check every other route makes.
  */
 export async function POST() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if ((profile as any)?.role !== 'admin') return NextResponse.json({ error: 'admin only' }, { status: 403 });
+  const gate = await requireCapability('stock.edit');
+  if (!gate.ok) return gate.response;
+  const { supabase } = gate;
 
   // 1. Get existing sold stc_no values to dedupe
   const { data: existing } = await supabase
@@ -32,25 +41,18 @@ export async function POST() {
     return NextResponse.json({ ok: true, inserted: 0, skipped, totalIncoming: incoming.length, msg: 'all rows already exist' });
   }
 
-  // 2. Bulk insert in chunks of 100
-  const CHUNK = 100;
-  let inserted = 0;
-  const errors: string[] = [];
-  for (let i = 0; i < toInsert.length; i += CHUNK) {
-    const slice = toInsert.slice(i, i + CHUNK);
-    const { error, count } = await supabase.from('stock_trailers').insert(slice, { count: 'exact' });
-    if (error) {
-      errors.push(`chunk ${i}: ${error.message}`);
-    } else {
-      inserted += count ?? slice.length;
-    }
+  // 2. Every row or none, through the operation the stock screen uses.
+  const done = await commitStockImport(supabase, toInsert as Record<string, unknown>[]);
+  if (!done.ok) {
+    return NextResponse.json({
+      ok: false, inserted: 0, skipped, totalIncoming: incoming.length, error: done.why,
+    }, { status: 500 });
   }
 
   return NextResponse.json({
-    ok: errors.length === 0,
-    inserted,
+    ok: true,
+    inserted: done.inserted,
     skipped,
     totalIncoming: incoming.length,
-    errors: errors.length ? errors : undefined,
   });
 }
