@@ -1511,6 +1511,44 @@ SELECT assert('and nothing moved',
     = '2026-09-04 14:00+00',
   (SELECT start_at::TEXT FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001'));
 
+-- A clock time with no day. "Move it to 4:30" keeps the day the meeting
+-- is already on, which planning cannot know because it has not read the
+-- record.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID], NULL, '16:30') INTO out;
+  PERFORM assert('a clock time moves it within its own day',
+    jsonb_array_length(out) = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a clock time moves it within its own day', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('on the same date it was already on',
+  (SELECT start_at::DATE FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001') = DATE '2026-09-04',
+  (SELECT start_at::TEXT FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+SELECT assert('and still the same length',
+  (SELECT end_at - start_at FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001') = INTERVAL '90 minutes',
+  (SELECT (end_at - start_at)::TEXT FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+DO $$
+BEGIN
+  PERFORM command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID], NULL, NULL);
+  PERFORM assert('saying no time at all is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('saying no time at all is refused',
+    SQLERRM LIKE '%what time to move it to%', SQLERRM);
+END
+$$;
+
 -- Inviting somebody, and the history line that goes with it.
 INSERT INTO auth.users (id, email)
 VALUES ('bbbbbbbb-0000-0000-0000-000000000002', 'invitee@test.local')

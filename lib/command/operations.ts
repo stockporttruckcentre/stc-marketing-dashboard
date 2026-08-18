@@ -76,7 +76,10 @@ const OPERATIONS: {
   {
     capability: 'crm.raiseProposal',
     entity: 'contacts',
-    verbs: ['raise', 'create', 'make', 'start', 'open', 'send', 'do', 'put'],
+    /* "Generate a proposal" is what the CRM's own button is called, and
+       without the verb the sentence was read as generating a FILE. */
+    verbs: ['raise', 'create', 'make', 'start', 'open', 'send', 'do', 'put',
+            'generate', 'produce', 'draw up', 'prepare'],
     objects: ['proposal', 'proposals', 'quote', 'quotes', 'quotation'],
     label: (n, what, kind) => `Raise a ${kind === 'trailer_sales' ? '' : `${kind} `}proposal for ${what}`,
     argument: {

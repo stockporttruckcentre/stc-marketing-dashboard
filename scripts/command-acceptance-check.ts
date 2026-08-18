@@ -2753,6 +2753,40 @@ test('moving a meeting keeps its length and tells the diary', async () => {
   ok('and it is still an hour long', length === 60 * 60 * 1000, String(length));
 });
 
+test('a meeting on the screen is moved by clock time alone', async () => {
+  const db = fakeDb(DIARY());
+  const text = 'move this meeting to 4:30pm';
+  /* The screen has one open. "This meeting" names it exactly, and the
+     sentence says nothing about which day, because it is not moving
+     day. */
+  const context = { record: { entity: 'meetings', id: 'e1' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews the move', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const before = new Date(String((db.tables.calendar_events ?? [])[0].start_at));
+
+  const done = await applyMutation({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const moved = new Date(String((db.tables.calendar_events ?? []).find((r) => r.id === 'e1')?.start_at));
+  ok('the clock moved', moved.getHours() === 16 && moved.getMinutes() === 30,
+    moved.toISOString());
+  ok('and the day did not', moved.toDateString() === before.toDateString(),
+    `${before.toDateString()} to ${moved.toDateString()}`);
+});
+
 test('a marketer cannot cancel a meeting', async () => {
   const marketer = [...capabilitiesFor({ role: 'marketer' } as never)];
   const planning = planCommand("cancel Friday's site visit", {

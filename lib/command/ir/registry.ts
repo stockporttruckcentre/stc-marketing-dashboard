@@ -823,8 +823,15 @@ export const CAPABILITIES: CapabilityDef[] = [
        begins. The function moves the end by the same amount, and this
        is what a chained export sees. */
     effect: { table: 'calendar_events', set: { start_at: { arg: 'start' } } },
+    /* Two ways to say when, and neither is required on its own: the
+       reader supplies exactly one and the operation refuses if it gets
+       neither. "Move it to Friday at 2pm" gives a moment; "move it to
+       4:30" gives a clock time and the meeting keeps its own day, which
+       is not something planning can know because the record has not
+       been read yet. */
     inputs: [
-      { key: 'start', label: 'new time', kind: 'date', required: true, from: 'start_at' },
+      { key: 'start', label: 'new time', kind: 'date', required: false, from: 'start_at' },
+      { key: 'time', label: 'new time', kind: 'text', required: false },
     ],
   },
   {

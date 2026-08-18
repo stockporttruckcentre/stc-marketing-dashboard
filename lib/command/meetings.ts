@@ -41,6 +41,9 @@ import { capability, entity as entityDef } from './ir/registry';
 import { ENTITIES } from './schema';
 import { readDate } from './mutate';
 import { DELETE_WORDS } from './lifecycle';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
 
 export type MeetingPlan = {
@@ -208,9 +211,29 @@ function textCond(term: string): Cond {
  */
 export function readMeetingReference(
   raw: string,
-  opts: { verbs?: string[]; now?: Date } = {},
+  opts: { verbs?: string[]; now?: Date; context?: CommandContext } = {},
 ): MeetingReference | null {
   const now = opts.now ?? new Date();
+
+  /* THE ONE IN FRONT OF YOU.
+
+     "Cancel this meeting" and "invite Dave to this meeting" name a
+     meeting exactly, and they name it with a word rather than a
+     description. The screen sends what it has open, and the reference
+     is the record itself rather than anything read out of the words. */
+  const pointed = readContextReference(raw);
+  const fromScreen = pointed
+    ? resolveContext(pointed, opts.context ?? EMPTY_CONTEXT, ENTITY)
+    : null;
+  if (fromScreen) {
+    return {
+      where: fromScreen.match,
+      label: fromScreen.label,
+      day: null,
+      time: readTime(raw),
+      terms: [],
+    };
+  }
 
   let rest = ` ${raw} `;
   for (const verb of opts.verbs ?? []) {
@@ -324,7 +347,7 @@ function selectOf(where: Cond) {
  * takes to write its title.
  */
 function readCancel(
-  raw: string, caps: CrmCapabilities | undefined, now: Date,
+  raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
 ): MeetingPlan | null {
   const t = soften(raw);
   const verb = DELETE_WORDS.filter((w) => t.includes(` ${w} `))
@@ -336,7 +359,7 @@ function readCancel(
   if (!requires) return null;
   if (caps && !caps.has(requires)) return null;
 
-  const reference = readMeetingReference(raw, { verbs: [verb], now });
+  const reference = readMeetingReference(raw, { verbs: [verb], now, context });
   if (!reference) return null;
 
   const step: Mutate = {
@@ -364,7 +387,7 @@ function readCancel(
  * my site visit on Friday to 2pm" looks for a meeting about two o'clock.
  */
 function readReschedule(
-  raw: string, caps: CrmCapabilities | undefined, now: Date,
+  raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
 ): MeetingPlan | null {
   const t = soften(raw);
   const verb = MOVE_WORDS.filter((w) => t.includes(` ${w} `))
@@ -386,16 +409,21 @@ function readReschedule(
      nine in the morning would move a meeting somebody has to be at. */
   if (!time) return null;
 
-  const reference = readMeetingReference(subject, { verbs: [verb], now });
+  const reference = readMeetingReference(subject, { verbs: [verb], now, context });
   if (!reference) return null;
 
-  /* The new day, if the destination named one, and otherwise the day the
-     meeting is already on. */
-  const day = readDay(destination, now) ?? reference.day;
-  if (!day) return null;
+  /* The new day, if the destination named one, and otherwise the day
+     the meeting is already on.
 
-  const at = new Date(day.from.getTime());
-  at.setHours(time.hour, time.minute, 0, 0);
+     "Move this meeting to 4:30" names a time and no day at all, and the
+     day it is already on is not something planning knows: the record
+     has not been read yet. So the clock time goes down on its own and
+     the operation moves it within its own day, which is what somebody
+     dragging the block up the column means. */
+  const day = readDay(destination, now) ?? reference.day;
+
+  const at = day ? new Date(day.from.getTime()) : null;
+  if (at) at.setHours(time.hour, time.minute, 0, 0);
 
   const step: Invoke = {
     op: 'invoke',
@@ -403,13 +431,17 @@ function readReschedule(
     capability: 'meeting.reschedule',
     expect: 'one',
     subject: selectOf(reference.where),
-    args: { start: { kind: 'literal', value: at.toISOString() } },
+    args: at
+      ? { start: { kind: 'literal', value: at.toISOString() } }
+      : { time: { kind: 'literal', value: time.label } },
     produces: { kind: 'record', entity: ENTITY },
   };
 
   return {
     step,
-    summary: `Move ${reference.label} to ${day.label} at ${time.label}`,
+    summary: day
+      ? `Move ${reference.label} to ${day.label} at ${time.label}`
+      : `Move ${reference.label} to ${time.label}`,
     requires: cap.requires,
     confidence: 13,
   };
@@ -423,7 +455,7 @@ function readReschedule(
  * Daves ask rather than inviting one of them.
  */
 function readInvite(
-  raw: string, caps: CrmCapabilities | undefined, now: Date,
+  raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
 ): MeetingPlan | null {
   const t = soften(raw);
   const verb = INVITE_WORDS.filter((w) => t.includes(` ${w} `))
@@ -440,7 +472,7 @@ function readInvite(
   if (!said) return null;
 
   const who = said[1].trim().replace(/[.,;]+$/, '');
-  const reference = readMeetingReference(said[2], { now });
+  const reference = readMeetingReference(said[2], { now, context });
   if (!reference) return null;
   if (!namesAMeeting(soften(said[2]))) return null;
 
@@ -484,6 +516,7 @@ function readInvite(
 export function parseMeeting(
   raw: string,
   caps?: CrmCapabilities,
+  context: CommandContext = EMPTY_CONTEXT,
   now: Date = new Date(),
 ): MeetingPlan | null {
   const text = raw.trim();
@@ -496,7 +529,7 @@ export function parseMeeting(
      time in it, and "cancel the Dawson proposal" cancels a meeting. */
   if (!namesAMeeting(soften(text))) return null;
 
-  return readCancel(text, caps, now)
-    ?? readReschedule(text, caps, now)
-    ?? readInvite(text, caps, now);
+  return readCancel(text, caps, now, context)
+    ?? readReschedule(text, caps, now, context)
+    ?? readInvite(text, caps, now, context);
 }

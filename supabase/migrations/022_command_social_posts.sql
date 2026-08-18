@@ -148,7 +148,8 @@ BEGIN
     changed := 1;
 
   ELSIF cap = 'meeting.reschedule' THEN
-    outcome := command_reschedule_meeting(p_subjects, (args ->> 'start')::TIMESTAMPTZ);
+    outcome := command_reschedule_meeting(
+      p_subjects, (args ->> 'start')::TIMESTAMPTZ, args ->> 'time');
     changed := COALESCE(array_length(p_subjects, 1), 0);
 
   ELSIF cap = 'meeting.invite' THEN

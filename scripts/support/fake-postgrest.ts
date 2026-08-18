@@ -475,9 +475,11 @@ export function fakeDb(tables: Record<string, Row[]>) {
         return { data: null, error: { message: 'you do not have crm.delegate' } };
       }
       const ids = (args.p_events ?? []) as string[];
-      const start = args.p_start == null ? '' : String(args.p_start);
+      const clock = args.p_time == null ? '' : String(args.p_time);
       if (!ids.length) return { data: null, error: { message: 'nothing said which meeting to move' } };
-      if (!start) return { data: null, error: { message: 'nothing said what time to move it to' } };
+      if (args.p_start == null && !clock) {
+        return { data: null, error: { message: 'nothing said what time to move it to' } };
+      }
 
       const events = (tables.calendar_events ?? []).filter((r) => ids.includes(String(r.id)));
       if (events.length !== ids.length) {
@@ -489,6 +491,15 @@ export function fakeDb(tables: Record<string, Row[]>) {
 
       const moved: Row[] = [];
       for (const ev of events) {
+        /* A clock time with no day moves the meeting within its own
+           day, which is what somebody dragging the block up the column
+           means. */
+        const start = args.p_start != null ? String(args.p_start) : (() => {
+          const at = new Date(String(ev.start_at));
+          const [h, m] = clock.split(':').map(Number);
+          at.setHours(h, m ?? 0, 0, 0);
+          return at.toISOString();
+        })();
         if (String(ev.start_at) === start) {
           return { data: null, error: { message: `${ev.title} is already at that time` } };
         }
@@ -974,7 +985,11 @@ const PERFORMED: Record<string, {
   },
   'meeting.reschedule': {
     name: 'command_reschedule_meeting',
-    args: (c) => ({ p_events: c.subjects, p_start: c.args.start ?? null }),
+    args: (c) => ({
+      p_events: c.subjects,
+      p_start: c.args.start ?? null,
+      p_time: c.args.time ?? null,
+    }),
   },
   'meeting.invite': {
     name: 'command_meeting_invite',

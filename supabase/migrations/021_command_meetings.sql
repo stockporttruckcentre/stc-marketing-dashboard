@@ -335,7 +335,11 @@ GRANT EXECUTE ON FUNCTION command_meeting_answer(UUID, TEXT, TIMESTAMPTZ, TIMEST
 -- diary has changed and nobody asked them.
 CREATE OR REPLACE FUNCTION command_reschedule_meeting(
   p_events UUID[],
-  p_start  TIMESTAMPTZ
+  p_start  TIMESTAMPTZ DEFAULT NULL,
+  -- A clock time with no day. "Move it to 4:30" keeps the day the
+  -- meeting is already on, which planning cannot know because it has not
+  -- read the record.
+  p_time   TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -348,6 +352,7 @@ DECLARE
   wanted  INTEGER;
   results JSONB := '[]'::JSONB;
   length  INTERVAL;
+  going_to TIMESTAMPTZ;
 BEGIN
   IF NOT command_may('crm.delegate') THEN
     RAISE EXCEPTION 'you do not have crm.delegate';
@@ -357,28 +362,32 @@ BEGIN
   IF wanted = 0 THEN
     RAISE EXCEPTION 'nothing said which meeting to move';
   END IF;
-  IF p_start IS NULL THEN
+  IF p_start IS NULL AND COALESCE(btrim(p_time), '') = '' THEN
     RAISE EXCEPTION 'nothing said what time to move it to';
   END IF;
 
   FOR ev IN
     SELECT id, title, start_at, end_at FROM calendar_events WHERE id = ANY(p_events)
   LOOP
-    IF ev.start_at = p_start THEN
-      RAISE EXCEPTION '% is already at %', ev.title, command_meeting_when(p_start);
+    -- Where it is going. A moment, or a clock time on the day it is
+    -- already on.
+    going_to := COALESCE(p_start, date_trunc('day', ev.start_at) + p_time::INTERVAL);
+
+    IF ev.start_at = going_to THEN
+      RAISE EXCEPTION '% is already at %', ev.title, command_meeting_when(going_to);
     END IF;
 
     length := CASE WHEN ev.end_at IS NULL THEN NULL ELSE ev.end_at - ev.start_at END;
 
     UPDATE calendar_events
-       SET start_at = p_start,
-           end_at = CASE WHEN length IS NULL THEN NULL ELSE p_start + length END
+       SET start_at = going_to,
+           end_at = CASE WHEN length IS NULL THEN NULL ELSE going_to + length END
      WHERE id = ev.id;
 
     FOR told IN SELECT user_id FROM calendar_invites WHERE event_id = ev.id LOOP
       PERFORM command_meeting_notify(
         told, 'meeting_moved', ev.title || ' moved',
-        'Now ' || command_meeting_when(p_start) || '.', ev.id);
+        'Now ' || command_meeting_when(going_to) || '.', ev.id);
     END LOOP;
 
     -- What it was and what it is, in the shape every other operation
@@ -387,7 +396,7 @@ BEGIN
     results := results || jsonb_build_object(
       'name', ev.title,
       'was', command_meeting_when(ev.start_at),
-      'now', command_meeting_when(p_start));
+      'now', command_meeting_when(going_to));
 
     moved := moved + 1;
   END LOOP;
@@ -401,8 +410,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION command_reschedule_meeting(UUID[], TIMESTAMPTZ) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION command_reschedule_meeting(UUID[], TIMESTAMPTZ) TO authenticated;
+REVOKE ALL ON FUNCTION command_reschedule_meeting(UUID[], TIMESTAMPTZ, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION command_reschedule_meeting(UUID[], TIMESTAMPTZ, TEXT) TO authenticated;
 
 -- -------------------------------------------------------------
 -- One place that knows which function performs which capability
@@ -471,7 +480,8 @@ BEGIN
     changed := 1;
 
   ELSIF cap = 'meeting.reschedule' THEN
-    outcome := command_reschedule_meeting(p_subjects, (args ->> 'start')::TIMESTAMPTZ);
+    outcome := command_reschedule_meeting(
+      p_subjects, (args ->> 'start')::TIMESTAMPTZ, args ->> 'time');
     changed := COALESCE(array_length(p_subjects, 1), 0);
 
   ELSIF cap = 'meeting.invite' THEN

@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIONS, suggestActions } from '../lib/command/actions';
 import { parseEdit } from '../lib/command/mutate';
+import { planCommand } from '../lib/command/plan';
 import { parseQuery as readQuery } from '../lib/command/query';
 import { parse } from '../lib/command/intents';
 import { capabilitiesFor } from '../lib/crm/permissions';
@@ -187,7 +188,53 @@ type Outcome = {
   detail: string;
 };
 
+/**
+ * The screen the sentences are typed on.
+ *
+ * Half of them say "this customer" or "this meeting", which is a word
+ * about what somebody is looking at rather than a gap in the sentence.
+ * The bar always has this and the audit has to, or it measures a person
+ * typing at a screen with nothing on it. The file is here for the same
+ * reason: "import this spreadsheet" is only ever typed with one
+ * attached.
+ */
+const SCREEN = {
+  record: { entity: 'contacts', id: '11111111-1111-1111-1111-111111111111' },
+  selection: { entity: 'trailers', ids: ['22222222-2222-2222-2222-222222222222'] },
+  file: {
+    name: 'leads.csv', mime: 'text/csv', size: 64,
+    text: 'Company,Email\nDawson Group,sam@dawson.co.uk',
+  },
+};
+
 function audit(s: string): Outcome {
+  /* THE PRODUCTION ENTRY POINT, FIRST.
+
+     This used to ask `parseEdit` and then the action registry, which
+     between them know about field writes and screens and nothing else.
+     Everything the runtime has grown since then, creating, deleting,
+     business operations, role changes, meetings, posts and imports,
+     came back DEAD from a check that had never been told to ask. The
+     planner is what the bar calls, so it is what this asks. */
+  const planned = planCommand(s, {
+    actorCapabilities: caps, vocabulary: VOCABULARY, context: SCREEN,
+  });
+  if (planned
+    && planned.kind === 'mutate'
+    && planned.availability.representable
+    && planned.availability.executable
+    && planned.availability.permitted !== false
+    && planned.presentation.confidence >= 10) {
+    return {
+      parse: `runs: ${planned.presentation.summary}`,
+      parseOk: true,
+      wiring: MUTATION ? 'handler' : 'none',
+      detail: MUTATION
+        ? '/api/command/plan then /api/command/apply, previewed then confirmed'
+        : 'no mutation runtime',
+    };
+  }
+
   /* A field write. This is the one path that previews before it writes,
      and it now reaches a record somebody named or a set they described,
      through the canonical planner. */

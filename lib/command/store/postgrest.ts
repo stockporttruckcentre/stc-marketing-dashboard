@@ -338,7 +338,11 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
   },
   'meeting.reschedule': {
     name: 'command_reschedule_meeting',
-    args: (c) => ({ p_events: c.subjects, p_start: c.args.start ?? null }),
+    args: (c) => ({
+      p_events: c.subjects,
+      p_start: c.args.start ?? null,
+      p_time: c.args.time ?? null,
+    }),
   },
   'meeting.invite': {
     name: 'command_meeting_invite',

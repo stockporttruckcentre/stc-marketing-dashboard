@@ -700,7 +700,7 @@ function readMeeting(
   if (!opts?.actorCapabilities) return null;
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
-  const read = parseMeeting(text, caps);
+  const read = parseMeeting(text, caps, opts.context ?? EMPTY_CONTEXT);
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };
