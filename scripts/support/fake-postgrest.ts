@@ -372,6 +372,64 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId: list, made: units.length, trackerRowId: first }, error: null };
     }
 
+    /* A CRM customer, copied onto the caller's own tracker. Whose
+       tracker is decided from who is asking, never from the payload. */
+    if (name === 'command_tracker_from_crm') {
+      if (!may('crm.create')) {
+        return { data: null, error: { message: 'you do not have crm.create' } };
+      }
+      const owner = String(args.p_owner ?? 'u1');
+      if (owner !== 'u1') {
+        return {
+          data: null,
+          error: {
+            message: 'a customer goes onto your own tracker; there is no operation '
+              + "for putting one on somebody else's",
+          },
+        };
+      }
+      const ids = (args.p_contacts ?? []) as string[];
+      if (!ids.length) {
+        return { data: null, error: { message: 'nothing said which customers to put on the tracker' } };
+      }
+      const side = String(args.p_side ?? 'trailer_sales');
+      if (!['trailer_sales', 'maintenance'].includes(side)) {
+        return { data: null, error: { message: `${side} is not a side of this business` } };
+      }
+
+      const list = (await rpc('command_tracker_list', { p_owner: args.p_owner })).data as string;
+      const rows = (tables.crm_contacts ??= []);
+      const sources = rows.filter((r) => ids.includes(String(r.id)));
+      if (sources.length !== ids.length) {
+        return {
+          data: null,
+          error: {
+            message: `expected to put ${ids.length} customers on the tracker `
+              + `but put ${sources.length}`,
+          },
+        };
+      }
+
+      let first: string | null = null;
+      for (const from of sources) {
+        const id = `deal${rows.length + 1}`;
+        rows.push({
+          id, list_id: list, side,
+          company_name: from.company_name,
+          contact_name: from.contact_name ?? null,
+          email: from.email ?? null,
+          phone: from.phone ?? null,
+          location: from.location ?? null,
+          source: from.source ?? 'Imported from CRM',
+          status: from.status === 'lost' ? 'lost' : from.status === 'customer' ? 'customer' : 'lead',
+          what: side === 'maintenance' ? (args.p_what ?? null) : null,
+        });
+        writes.push({ table: 'crm_contacts', set: { list_id: list }, ids: [id] });
+        first = first ?? id;
+      }
+      return { data: { listId: list, made: sources.length, rowId: first }, error: null };
+    }
+
     /* A proposal, raised against a customer. */
     if (name === 'command_raise_proposal') {
       if (!may('crm.proposal')) {
@@ -1417,6 +1475,15 @@ const PERFORMED: Record<string, {
   'contact.link': {
     name: 'command_link_accounts',
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
+  },
+  'crm.toTracker': {
+    name: 'command_tracker_from_crm',
+    args: (c) => ({
+      p_contacts: c.subjects,
+      p_side: c.args.side ?? 'trailer_sales',
+      p_what: c.args.what ?? null,
+      p_owner: null,
+    }),
   },
   'news.refresh': {
     name: 'command_refresh_news',

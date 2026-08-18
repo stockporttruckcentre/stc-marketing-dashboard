@@ -744,6 +744,25 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'supabase/migrations/020_command_tracker_operations.sql',
   },
   {
+    id: 'crm.toTracker',
+    label: 'Put a customer on your sales tracker',
+    operates: 'invoke',
+    entities: ['contacts'],
+    /* Starting a deal, which is what the tracker screen's own button
+       gates on. */
+    requires: 'crm.create',
+    confirm: true,
+    produces: 'record',
+    /* A second run is a second deal against the same customer, which is
+       a real thing somebody may want and not the same as the first. */
+    idempotent: false,
+    handler: 'supabase/migrations/033_command_tracker_from_crm.sql',
+    inputs: [
+      { key: 'side', label: 'which side', kind: 'enum', required: false },
+      { key: 'what', label: 'what they want', kind: 'text', required: false },
+    ],
+  },
+  {
     id: 'crm.raiseProposal',
     label: 'Raise a proposal against these customers',
     operates: 'invoke',

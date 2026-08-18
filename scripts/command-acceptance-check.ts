@@ -4208,6 +4208,74 @@ test('a bare colour question is still about a trailer', async () => {
     JSON.stringify(planning?.select?.from));
 });
 
+/* =============================================================
+   39. A CRM customer, onto your own tracker
+
+   The tracker screen sent its own list id, so the payload decided whose
+   tracker gained a deal. It is decided from who is asking, and the
+   sentence reaches the same operation the button does.
+   ============================================================= */
+
+test('a customer goes onto the tracker', async () => {
+  const db = fakeDb({
+    crm_contacts: [{
+      id: 'c1', company_name: 'Dawson Group', contact_name: 'Sam Dawson',
+      status: 'lead', source: 'Cold call', list_id: 'l1',
+    }],
+    crm_lists: [
+      { id: 'l1', name: 'Everything', is_global: true },
+      { id: 'l2', name: 'Sales tracker', owner_id: 'u1', is_global: false },
+    ],
+  });
+  const text = 'pull this customer from the CRM onto my tracker';
+  const context = { record: { entity: 'contacts', id: 'c1' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it plans as putting a customer on the tracker',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'crm.toTracker') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map(
+      (s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || preview?.ok !== true) return;
+
+  const done = await applyMutation({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const rows = db.tables.crm_contacts ?? [];
+  ok('a copy arrived', rows.length === 2, String(rows.length));
+  ok('on the tracker rather than the list it came from',
+    String(rows[1]?.list_id) === 'l2', String(rows[1]?.list_id));
+  ok('carrying what belongs to the business',
+    String(rows[1]?.company_name) === 'Dawson Group'
+      && String(rows[1]?.contact_name) === 'Sam Dawson',
+    JSON.stringify(rows[1]));
+  ok('and the original is untouched',
+    String(rows[0]?.list_id) === 'l1', String(rows[0]?.list_id));
+});
+
+test('a viewer cannot put a customer on a tracker', async () => {
+  const planning = planCommand('put this customer on my tracker', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+    context: { record: { entity: 'contacts', id: 'c1' } },
+  });
+  ok('it is not offered',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'crm.toTracker') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
 /* ============================================================= */
 
 async function main() {

@@ -58,6 +58,31 @@ export async function sendFromStock(
 }
 
 /** What a proposal can be about. The four the business runs. */
+/**
+ * A CRM customer, copied onto YOUR tracker.
+ *
+ * The screen sent its own `list.id`. That is right on a screen showing
+ * your own tracker and wrong as an operation: a list id is a value
+ * anybody can type, and row level security lets a person write to any
+ * list shared with them, so the payload decided whose tracker gained a
+ * deal. Migration 033 decides it from who is asking.
+ */
+export async function trackerFromCrm(
+  client: Rpc,
+  input: { contacts: string[]; side?: 'trailer_sales' | 'maintenance'; what?: string | null },
+): Promise<TrackerOutcome<{ listId: string; made: number; rowId: string | null }>> {
+  const { data, error } = await client.rpc('command_tracker_from_crm', {
+    p_contacts: input.contacts,
+    p_side: input.side ?? 'trailer_sales',
+    p_what: input.what ?? null,
+    p_owner: null,
+  });
+  if (error) return { ok: false, why: String((error as { message?: string })?.message ?? error) };
+
+  const body = (data ?? {}) as { listId?: string; made?: number; rowId?: string };
+  return { ok: true, listId: body.listId ?? '', made: body.made ?? 0, rowId: body.rowId ?? null };
+}
+
 export const PROPOSAL_KINDS = ['trailer_sales', 'maintenance', 'rental', 'refurb'] as const;
 export type ProposalKind = (typeof PROPOSAL_KINDS)[number];
 

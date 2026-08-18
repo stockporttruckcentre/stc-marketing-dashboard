@@ -397,6 +397,15 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_can_edit: c.args.canEdit ?? true,
     }),
   },
+  'crm.toTracker': {
+    name: 'command_tracker_from_crm',
+    args: (c) => ({
+      p_contacts: c.subjects,
+      p_side: c.args.side ?? 'trailer_sales',
+      p_what: c.args.what ?? null,
+      p_owner: null,
+    }),
+  },
   'news.refresh': {
     name: 'command_refresh_news',
     args: (c) => ({ p_items: c.args.items ?? [], p_max_age: c.args.maxAge ?? 14 }),

@@ -2107,6 +2107,81 @@ DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
 DELETE FROM crm_lists WHERE name = 'TEST import list';
 
 -- =============================================================
+-- 15e. A CRM customer, onto your own tracker
+--
+-- Migration 033. The screen sent its own list id, so the payload
+-- decided whose tracker gained a deal. It is decided from who is
+-- asking, exactly as sending from stock is.
+-- =============================================================
+\echo '--- a customer onto the tracker ---'
+
+DELETE FROM crm_contacts WHERE company_name = 'TEST Copied Co';
+DELETE FROM crm_contacts WHERE company_name = 'TEST Source Co';
+
+INSERT INTO crm_contacts (id, list_id, company_name, contact_name, status, source, side)
+SELECT 'd3333333-0000-0000-0000-000000000001',
+       (SELECT id FROM crm_lists WHERE is_global = TRUE LIMIT 1),
+       'TEST Source Co', 'Sam Source', 'lead', 'Cold call', 'trailer_sales';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_tracker_from_crm(
+    ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[]) INTO out;
+  PERFORM assert('a customer is copied onto the tracker',
+    (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a customer is copied onto the tracker', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('onto the caller''s own tracker list',
+  (SELECT COUNT(*) FROM crm_contacts c
+     JOIN crm_lists l ON l.id = c.list_id
+    WHERE c.company_name = 'TEST Source Co'
+      AND l.owner_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+      AND l.is_global = FALSE) = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Source Co'));
+
+SELECT assert('and the original is still where it was',
+  (SELECT COUNT(*) FROM crm_contacts c
+     JOIN crm_lists l ON l.id = c.list_id
+    WHERE c.id = 'd3333333-0000-0000-0000-000000000001' AND l.is_global = TRUE) = 1);
+
+-- Somebody else's tracker is not a thing this operation does.
+DO $$
+BEGIN
+  PERFORM command_tracker_from_crm(
+    ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[],
+    'trailer_sales', NULL,
+    'bbbbbbbb-0000-0000-0000-000000000002');
+  PERFORM assert('somebody else''s tracker is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('somebody else''s tracker is refused',
+    SQLERRM LIKE '%your own tracker%', SQLERRM);
+END
+$$;
+
+-- A customer that is not there takes the whole call with it.
+DO $$
+BEGIN
+  PERFORM command_tracker_from_crm(ARRAY[
+    'd3333333-0000-0000-0000-000000000001',
+    'ffffffff-ffff-ffff-ffff-ffffffffffff']::UUID[]);
+  PERFORM assert('a customer that is not there fails the whole call', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a customer that is not there fails the whole call',
+    SQLERRM LIKE '%but put%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the one that was there did not arrive twice',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Source Co') = 2,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Source Co'));
+
+DELETE FROM crm_contacts WHERE company_name = 'TEST Source Co';
+
+-- =============================================================
 -- 15d. Sharing a list somebody named
 --
 -- Migration 032. Sharing is list membership, so a named list needs no

@@ -99,6 +99,25 @@ const OPERATIONS: {
     label: (n, what) => `Put ${what} on your sales tracker`,
   },
   {
+    capability: 'crm.toTracker',
+    entity: 'contacts',
+    /* "Pull this customer onto my tracker" and "put Dawson on my
+       tracker". The object words are the tracker, exactly as they are
+       for sending a unit from stock; what differs is the entity, and a
+       customer and a trailer cannot be confused for one another. */
+    verbs: ['pull', 'put', 'add', 'move', 'copy', 'send', 'bring', 'take'],
+    objects: ['tracker', 'sales tracker', 'my tracker', 'the tracker', 'my deals'],
+    label: (n, what) => `Put ${what} on your sales tracker`,
+    argument: {
+      key: 'side',
+      values: [
+        { value: 'trailer_sales', words: ['trailer', 'trailers', 'sales', 'sale', 'unit'] },
+        { value: 'maintenance', words: ['maintenance', 'service', 'servicing', 'repair', 'workshop'] },
+      ],
+      fallback: 'trailer_sales',
+    },
+  },
+  {
     capability: 'crm.raiseProposal',
     entity: 'contacts',
     /* "Generate a proposal" is what the CRM's own button is called, and
@@ -322,7 +341,19 @@ export function parseOperation(
     if (op.needsFile && !context.file?.text) continue;
 
     const subject = op.subjectless ? null : subjectOf(raw, op.entity, context, priorResult);
-    const named = subject || op.subjectless ? null : companyIn(raw, op.objects);
+
+    /* A SENTENCE THAT POINTS AT THE SCREEN NAMES NOTHING ELSE.
+
+       "Put these on my tracker as a maintenance deal" points at a
+       selection of customers. Read against the operation that sends
+       trailers, the pointing resolved to nothing, and the fallback
+       then read "as a maintenance deal" as a company name and sent a
+       unit called that. Somebody who pointed at the screen pointed at
+       the screen: if it does not hold what this operation is about,
+       this is not the operation. */
+    const points = op.subjectless ? null : readContextReference(raw);
+    const named = subject || op.subjectless || points
+      ? null : companyIn(raw, op.objects);
 
     let where: Cond | null = subject?.where ?? null;
     let label = subject?.label ?? '';

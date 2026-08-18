@@ -303,6 +303,11 @@ ok('the finder adds to the CRM through the shared import',
   /commitImport\(supabase,/.test(finder)
   && !/from\('crm_contacts'\)\.insert\(rows\)/.test(finder));
 
+const tracker = source('components/SalesTracker.tsx');
+ok('the tracker copies a customer through the shared operation',
+  /trackerFromCrm\(supabase,/.test(tracker)
+  && !/list_id: list\.id,\s*\n\s*company_name: sourceContact/.test(tracker));
+
 const planner = source('components/SocialPlanner.tsx');
 ok('the social composer stores an image through the shared operation',
   /storeImage\(bucketStore\(supabase\)/.test(planner)
