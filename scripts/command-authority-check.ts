@@ -280,6 +280,34 @@ ok('and it sends the sentence and the two hashes, never a plan or a row id',
   && /programmeHash: editPreview\.programmeHash/.test(bar)
   && !/recordIds:/.test(bar));
 
+/* =============================================================
+   The screens do not hold more authority than the command bar
+
+   The whole point of moving an operation into a database function is
+   that both callers get the same guards. A screen that still writes the
+   table directly is a second implementation of the operation, and it is
+   always the one without the safeguards.
+   ============================================================= */
+const admin = source('components/AdminPanel.tsx');
+ok('the team screen changes a role through the guarded function',
+  /setRole\(supabase,/.test(admin)
+  && !/from\('profiles'\)[\s\S]{0,40}\.update\(/.test(admin));
+
+const stock = source('components/StockList.tsx');
+ok('the stock screen imports through the shared atomic operation',
+  /writeStock\(supabase,/.test(stock)
+  && !/from\('stock_trailers'\)[\s\S]{0,60}\.insert\(withDefaults/.test(stock));
+
+const finder = source('components/CompanyFinder.tsx');
+ok('the finder adds to the CRM through the shared import',
+  /commitImport\(supabase,/.test(finder)
+  && !/from\('crm_contacts'\)\.insert\(rows\)/.test(finder));
+
+const planner = source('components/SocialPlanner.tsx');
+ok('the social composer stores an image through the shared operation',
+  /storeImage\(bucketStore\(supabase\)/.test(planner)
+  && !/storage\.from\('brand-assets'\)/.test(planner));
+
 const localNobody = planCommand(CRM_QUESTION, { actorCapabilities: [] });
 const localAdmin = planCommand(CRM_QUESTION, { actorCapabilities: EVERYTHING });
 ok('local planning reaches the same verdict the server does',

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { setRole } from '@/lib/crm/roles';
 import type { Profile, UserRole } from '@/lib/types';
 
 const ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
@@ -12,12 +13,17 @@ export function AdminPanel({ team, selfId }: { team: Profile[]; selfId: string }
   const [members, setMembers] = useState<Profile[]>(team);
   const [msg, setMsg] = useState<string | null>(null);
 
+  /* The same operation the command bar performs. This used to update
+     `profiles` straight from the browser, so the most dangerous write in
+     the application went through row level security and nothing else:
+     no capability asked for by name, no guard against removing the last
+     administrator, and no audit line saying who did it. */
   async function changeRole(id: string, role: UserRole) {
     setMsg(null);
-    const { error } = await supabase.from('profiles').update({ role }).eq('id', id);
-    if (error) { setMsg(error.message); return; }
+    const done = await setRole(supabase, id, role);
+    if (!done.ok) { setMsg(done.why); return; }
     setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, role } : m)));
-    setMsg(`Updated ${members.find((m) => m.id === id)?.full_name} to ${role}`);
+    setMsg(`${done.who || members.find((m) => m.id === id)?.full_name} is now ${done.now}`);
   }
 
   return (

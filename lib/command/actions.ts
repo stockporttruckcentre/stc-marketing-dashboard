@@ -248,7 +248,18 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['admin', 'administrator', 'role', 'access', 'permissions', 'sales', 'viewer', 'read only', 'restricted'],
     phrases: ['elevate to admin', 'make them an admin', 'give them access', 'take their access away'] },
 
-  { id: 'admin.addUser', label: 'Add a user', blurb: 'Somebody new on the system', kind: 'admin',
+  /* NOBODY IS ADDED FROM INSIDE THIS APPLICATION.
+
+     People arrive by signing up, which is Supabase auth and not a
+     screen here, and an administrator then promotes them: the team
+     screen says so in its own subtitle. There is no invite control, no
+     admin API call and nothing holding a service role key to make one
+     with, so there is no manual operation for a sentence to match.
+
+     The entry stays, because the question is a real one and the team
+     screen is the honest answer to it. What changed is the label: it
+     said "add a user" and opened a screen that cannot. */
+  { id: 'admin.addUser', label: 'See who has signed up', blurb: 'People join by signing up, then you promote them', kind: 'navigate',
     capability: 'admin.users', path: '/dashboard/admin', verbs: MAKE,
     objects: ['user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
 
