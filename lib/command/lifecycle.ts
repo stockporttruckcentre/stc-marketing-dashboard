@@ -526,6 +526,13 @@ function readDelete(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
   const entityId = reference ? 'trailers' : found?.id;
   if (!entityId) return null;
 
+  /* A MEETING IS NOT NAMED THE WAY EVERY OTHER RECORD IS.
+
+     "Cancel Friday's site visit" gives a day and a description, and
+     reading it here produced a meeting called "Friday's site". Meetings
+     have their own reader, which runs before this one. */
+  if (entityId === 'meetings') return null;
+
   const def = entityDef(entityId);
   const title = def?.titleField;
   if (!def || !title) return null;

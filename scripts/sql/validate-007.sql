@@ -1436,7 +1436,234 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %' OR source IN ('From St
 DELETE FROM crm_lists WHERE name = 'Sales tracker';
 
 -- =============================================================
--- 13. The allowlist matches the registry
+-- 13. Meetings: inviting, answering, and moving one
+--
+-- Migration 021. The route body became SQL so that both callers use one
+-- description of the work, and these are the assertions that say the SQL
+-- does what the route did: the length of a meeting survives being
+-- moved, an invitation records its own history, accepting a counter
+-- proposal moves the meeting, and a role without crm.delegate reaches
+-- none of it.
+-- =============================================================
+\echo '--- meetings ---'
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM calendar_events WHERE title LIKE 'TEST %';
+INSERT INTO calendar_events (id, title, description, start_at, end_at, visibility, created_by)
+VALUES ('e1111111-0000-0000-0000-000000000001', 'TEST site visit', 'Yard walk round',
+        '2026-09-04 09:00+00', '2026-09-04 10:30+00', 'team',
+        'aaaaaaaa-0000-0000-0000-000000000001');
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID],
+    '2026-09-04 14:00+00') INTO out;
+  PERFORM assert('a meeting moves', jsonb_array_length(out) = 1, out::TEXT);
+  PERFORM assert('and reports what it was and what it is',
+    (out -> 0 ->> 'was') IS NOT NULL AND (out -> 0 ->> 'now') IS NOT NULL, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a meeting moves', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('it starts at the new time',
+  (SELECT start_at FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001')
+    = '2026-09-04 14:00+00',
+  (SELECT start_at::TEXT FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+-- Writing the start alone would leave a meeting that finishes before it
+-- begins. An hour and a half is still an hour and a half.
+SELECT assert('and it is the same length',
+  (SELECT end_at - start_at FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001') = INTERVAL '90 minutes',
+  (SELECT (end_at - start_at)::TEXT FROM calendar_events
+    WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+DO $$
+BEGIN
+  PERFORM command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID], '2026-09-04 14:00+00');
+  PERFORM assert('moving it to where it already is is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('moving it to where it already is is refused',
+    SQLERRM LIKE '%already at%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID,
+          'e1111111-0000-0000-0000-0000000000ff'::UUID],
+    '2026-09-05 09:00+00');
+  PERFORM assert('a meeting that is not there fails the whole call', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a meeting that is not there fails the whole call',
+    SQLERRM LIKE '%expected to move%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nothing moved',
+  (SELECT start_at FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001')
+    = '2026-09-04 14:00+00',
+  (SELECT start_at::TEXT FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+-- Inviting somebody, and the history line that goes with it.
+INSERT INTO auth.users (id, email)
+VALUES ('bbbbbbbb-0000-0000-0000-000000000002', 'invitee@test.local')
+ON CONFLICT DO NOTHING;
+UPDATE profiles SET role = 'sales', full_name = 'TEST Invitee'
+ WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_meeting_invite(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID],
+    ARRAY['bbbbbbbb-0000-0000-0000-000000000002'::UUID],
+    'Come along') INTO out;
+  PERFORM assert('an invitation is sent', (out ->> 'sent')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an invitation is sent', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('it is waiting on the person invited',
+  (SELECT awaiting FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001')
+  = 'bbbbbbbb-0000-0000-0000-000000000002',
+  (SELECT awaiting::TEXT FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001'));
+
+SELECT assert('and the exchange has its first line',
+  (SELECT COUNT(*) FROM calendar_invite_messages m
+     JOIN calendar_invites i ON i.id = m.invite_id
+    WHERE i.event_id = 'e1111111-0000-0000-0000-000000000001' AND m.action = 'invited') = 1);
+
+-- Inviting twice is the same invitation, not a second one.
+DO $$
+BEGIN
+  PERFORM command_meeting_invite(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID],
+    ARRAY['bbbbbbbb-0000-0000-0000-000000000002'::UUID], NULL);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('inviting twice is the same invitation', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('inviting twice is the same invitation',
+  (SELECT COUNT(*) FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001') = 1);
+
+-- The invitee counters, the organiser accepts, and the meeting moves to
+-- the time that was countered with. That is the whole conversation.
+SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE);
+
+DO $$
+DECLARE out JSONB; inv UUID;
+BEGIN
+  SELECT id INTO inv FROM calendar_invites
+   WHERE event_id = 'e1111111-0000-0000-0000-000000000001';
+  SELECT command_meeting_answer(inv, 'propose', '2026-09-07 11:00+00', '2026-09-07 12:30+00', NULL)
+    INTO out;
+  PERFORM assert('the invitee can suggest another time', (out ->> 'ok')::BOOLEAN, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the invitee can suggest another time', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the ball is with the organiser',
+  (SELECT awaiting FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001')
+  = 'aaaaaaaa-0000-0000-0000-000000000001',
+  (SELECT awaiting::TEXT FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001'));
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB; inv UUID;
+BEGIN
+  SELECT id INTO inv FROM calendar_invites
+   WHERE event_id = 'e1111111-0000-0000-0000-000000000001';
+  SELECT command_meeting_answer(inv, 'accept', NULL, NULL, NULL) INTO out;
+  PERFORM assert('the organiser accepting moves the meeting',
+    (out ->> 'movedTo') IS NOT NULL, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the organiser accepting moves the meeting', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('the meeting is at the time that was agreed',
+  (SELECT start_at FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001')
+    = '2026-09-07 11:00+00',
+  (SELECT start_at::TEXT FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+SELECT assert('and nobody is being waited on',
+  (SELECT awaiting IS NULL FROM calendar_invites
+    WHERE event_id = 'e1111111-0000-0000-0000-000000000001'));
+
+-- The whole programme path, which is what the command bar uses: the same
+-- operation, dispatched by capability, inside one transaction.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(jsonb_build_object(
+    'op', 'invoke',
+    'capability', 'meeting.reschedule',
+    'subjects', jsonb_build_array('e1111111-0000-0000-0000-000000000001'),
+    'args', jsonb_build_object('start', '2026-09-08 08:30+00')
+  ))) INTO out;
+  PERFORM assert('a programme can move a meeting', (out ->> 'changed')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a programme can move a meeting', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and it moved',
+  (SELECT start_at FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001')
+    = '2026-09-08 08:30+00',
+  (SELECT start_at::TEXT FROM calendar_events WHERE id = 'e1111111-0000-0000-0000-000000000001'));
+
+-- A marketer may edit every field on a customer and touch no meeting.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'marketer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_reschedule_meeting(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID], '2026-09-09 09:00+00');
+  PERFORM assert('a marketer cannot move a meeting', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a marketer cannot move a meeting', SQLERRM LIKE '%crm.delegate%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_meeting_invite(
+    ARRAY['e1111111-0000-0000-0000-000000000001'::UUID],
+    ARRAY['bbbbbbbb-0000-0000-0000-000000000002'::UUID], NULL);
+  PERFORM assert('nor invite anybody to one', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('nor invite anybody to one', SQLERRM LIKE '%crm.delegate%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM calendar_events WHERE title LIKE 'TEST %';
+
+-- =============================================================
+-- 14. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

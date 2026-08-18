@@ -46,6 +46,8 @@ import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
 import { prepareDelivery, type Prepared } from './emit';
 import { postState } from '../ir/overlay';
+import { PREPARERS } from './prepare';
+import type { TransactionStep } from '../ir/store';
 import type { Artefact } from '../render/table';
 
 /* -------------------------------------------------------------
@@ -518,11 +520,56 @@ export async function applyMutation(
   const rendered = new Map<string, { artefact: Artefact; rows: number }>();
   const prepared: Prepared[] = [];
 
-  const resolved = outgoing.length
+  /* Resolving again costs a read, so it happens only where something
+     needs it: a delivery to render through the post-state lens, or an
+     operation whose work is not SQL and has to be done before the
+     transaction opens. Everything else is resolved once, inside
+     `executeProgramme`. */
+  const outsideOperations = planning.plan.steps.some(
+    (s) => s.op === 'invoke' && !!capability(s.capability)?.prepares,
+  );
+  const resolved = outgoing.length || outsideOperations
     ? await resolveProgramme(planning.plan, {
         store: req.store, policy: req.policy, args: invokeArgs(planning.plan),
       })
     : null;
+  if (resolved && !resolved.ok) {
+    return { ok: false, reason: 'refused', why: resolved.why };
+  }
+
+  /* OPERATIONS WHOSE WORK IS NOT SQL.
+
+     Looking a company up in Lusha is an HTTP call to somebody else's
+     service that spends a credit and cannot be rolled back, so it
+     cannot be inside the transaction and must not be after it. It runs
+     here, where a file is rendered, and what it finds becomes changes
+     the transaction writes. */
+  const outsideWork: TransactionStep[] = [];
+  const outsideSaid: string[] = [];
+
+  if (resolved?.ok) {
+    for (const unit of resolved.units) {
+      if (unit.kind !== 'invoke') continue;
+      const named = capability(unit.plan.capability)?.prepares;
+      if (!named) continue;
+
+      const preparer = PREPARERS[named];
+      if (!preparer) {
+        return {
+          ok: false,
+          reason: 'refused',
+          why: `nothing here performs ${unit.plan.capability}`,
+        };
+      }
+
+      const ready = await preparer({ subjects: unit.plan.subjects, args: unit.plan.args });
+      /* Before the transaction, so there is nothing to undo. */
+      if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
+
+      outsideWork.push({ op: 'changes', changes: ready.changes });
+      outsideSaid.push(ready.describe);
+    }
+  }
 
   const asItWillBe = resolved?.ok
     ? postState(req.store, resolved.units.map((u) => (u.kind === 'invoke'
@@ -570,9 +617,12 @@ export async function applyMutation(
     policy: req.policy,
     args: invokeArgs(planning.plan),
     agreedHash: req.previewProgrammeHash,
-    deliveries: (indexOf) => prepared
-      .filter((p): p is Extract<Prepared, { kind: 'effect' }> => p.kind === 'effect')
-      .map((p) => p.step(indexOf)),
+    deliveries: (indexOf) => [
+      ...outsideWork,
+      ...prepared
+        .filter((p): p is Extract<Prepared, { kind: 'effect' }> => p.kind === 'effect')
+        .map((p) => p.step(indexOf)),
+    ],
   });
 
   if (!done.ok && done.reason === 'drift') {
@@ -614,10 +664,10 @@ export async function applyMutation(
      says so. "Change what somebody is allowed to do on 1 record" is
      true and tells nobody which record or what changed, and for a role
      change that is the whole point of the sentence. */
-  const said = (done.results ?? [])
+  const said = [...outsideSaid, ...(done.results ?? [])
     .map((r) => r as Record<string, unknown> | null)
     .filter((r): r is Record<string, unknown> => !!r && r.was != null && r.now != null)
-    .map((r) => `${r.name ?? 'It'} was ${r.was} and is ${r.now} now.`);
+    .map((r) => `${r.name ?? 'It'} was ${r.was} and is ${r.now} now.`)];
 
   /* The file the same sentence asked for, handed back with the outcome.
      It was built before the transaction and the transaction committed,

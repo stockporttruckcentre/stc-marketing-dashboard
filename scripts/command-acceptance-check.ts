@@ -2506,6 +2506,285 @@ test('a viewer cannot raise a proposal, from either direction', async () => {
   if (!out.ok) ok('naming the capability', /crm\.proposal/.test(out.why), out.why);
 });
 
+
+/* =============================================================
+   27. An operation whose work is not SQL
+
+   Looking a company up in Lusha is an HTTP call to somebody else's
+   service that spends a credit and cannot be rolled back. It cannot be
+   inside the transaction and must not be after it, so it runs where a
+   file is rendered and what it finds becomes changes the transaction
+   writes.
+   ============================================================= */
+
+test('enrichment is not offered while Lusha is switched off', async () => {
+  /* LUSHA_LOCKED strips crm.enrich from every role, so the sentence
+     reaches nothing. That is the product's current state and the reason
+     for it is a decision about credits, not a gap in the runtime. */
+  const planning = planCommand('enrich Dawson Group', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+  });
+  const reaches = planning?.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'contact.enrich') ?? false;
+  ok('nobody can reach it today', !reaches,
+    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('with the credit lock lifted, enrichment plans as a real operation', async () => {
+  /* The capabilities are passed in rather than derived, which is how
+     the admin panel will grant this when the lock lifts. Everything
+     downstream is the production path. */
+  const withEnrich = [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'];
+  const planning = planCommand('enrich Dawson Group', { actorCapabilities: withEnrich });
+
+  ok('it plans', !!planning);
+  if (!planning) return;
+  ok('as the enrichment operation',
+    planning.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'contact.enrich'),
+    JSON.stringify(planning.plan.steps.map((s) => s.op)));
+  ok('it is well formed', planning.availability.representable, JSON.stringify(planning.problems));
+  ok('and something performs it', planning.availability.executable,
+    JSON.stringify(planning.availability.unavailable));
+  ok('it has to be confirmed', planning.confirm);
+});
+
+test('the lock refuses the spend before anything is written', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', email: 'sam@dawson.co.uk' },
+    ],
+  });
+  const withEnrich = [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'];
+  const text = 'enrich Dawson Group';
+
+  const planned = await planAndPreview({
+    text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews the record it would look up', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  /* The preparer runs before the transaction opens, so a refusal there
+     leaves nothing to undo. */
+  ok('it refuses', !done.ok, 'it spent a credit');
+  if (!done.ok) ok('because Lusha is off', /switched off/.test(done.why), done.why);
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+/* =============================================================
+   28. A meeting is named by when it is, not by what it is called
+
+   Nobody types a meeting's title. It is referred to by the day, the
+   time, and what it is about, and the reference is composed out of
+   whichever of those the sentence gave. Several matches ask, none says
+   none, and neither picks the first.
+   ============================================================= */
+
+/** The coming occurrence of a weekday, today included. */
+function comingUp(weekday: number, hour: number, minute = 0): string {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  d.setDate(d.getDate() + ((weekday - d.getDay() + 7) % 7));
+  return d.toISOString();
+}
+
+const DIARY = () => ({
+  calendar_events: [
+    { id: 'e1', title: 'Site visit, Ward Bros', description: 'Yard walk round',
+      start_at: comingUp(5, 9), end_at: comingUp(5, 10), visibility: 'team', created_by: 'u1' },
+    { id: 'e2', title: 'Call with Dawson Group', description: null,
+      start_at: comingUp(5, 14), end_at: null, visibility: 'team', created_by: 'u1' },
+    { id: 'e3', title: 'Site visit, Culina', description: null,
+      start_at: comingUp(1, 11), end_at: null, visibility: 'team', created_by: 'u1' },
+  ],
+  profiles: [
+    { id: 'u1', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'admin' },
+    { id: 'u2', full_name: 'Dave Rowan', email: 'dave@stc.co.uk', role: 'sales' },
+  ],
+});
+
+const DELEGATE = [...capabilitiesFor({ role: 'admin' } as never)];
+
+test("cancelling Friday's site visit finds the one on Friday", async () => {
+  const db = fakeDb(DIARY());
+  const text = "cancel Friday's site visit";
+
+  const planned = await planAndPreview({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews one meeting', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  /* Not the Monday site visit, and not the Friday call. Both are in the
+     diary, and a reference built out of one part alone would have taken
+     one of them. */
+  ok('and it is the right one', preview.rows[0]?.label?.includes('Ward Bros'),
+    JSON.stringify(preview.rows.map((r) => r.label)));
+
+  const done = await applyMutation({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('and the meeting is gone',
+    !(db.tables.calendar_events ?? []).some((r) => r.id === 'e1'),
+    JSON.stringify((db.tables.calendar_events ?? []).map((r) => r.id)));
+});
+
+test('a description that fits two meetings asks rather than choosing', async () => {
+  const db = fakeDb(DIARY());
+  /* Two site visits in the diary and no day given. */
+  const planned = await planAndPreview({
+    text: 'cancel the site visit', capabilities: DELEGATE,
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it refuses to pick one', preview?.ok === false,
+    preview?.ok ? String(preview.count) : '');
+  if (preview && !preview.ok) {
+    ok('and says so', /not clear which|more than one|2 records/i.test(preview.why), preview.why);
+  }
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+test('a meeting nothing matches says none rather than nothing', async () => {
+  const db = fakeDb(DIARY());
+  const planned = await planAndPreview({
+    text: "cancel Friday's tyre inspection meeting", capabilities: DELEGATE,
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it finds nothing', preview?.ok === false, preview?.ok ? String(preview.count) : '');
+  if (preview && !preview.ok) {
+    ok('and says nothing matched', /nothing|no /i.test(preview.why), preview.why);
+  }
+});
+
+test('the 10am meeting tomorrow is a day and a time together', async () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const at = (hour: number) => {
+    const d = new Date(tomorrow.getTime());
+    d.setHours(hour, 0, 0, 0);
+    return d.toISOString();
+  };
+  const db = fakeDb({
+    calendar_events: [
+      { id: 'e1', title: 'Call with Dawson Group', description: null,
+        start_at: at(10), end_at: at(11), visibility: 'team', created_by: 'u1' },
+      { id: 'e2', title: 'Call with Dawson Group', description: null,
+        start_at: at(15), end_at: null, visibility: 'team', created_by: 'u1' },
+    ],
+  });
+
+  const text = 'cancel the 10am meeting with Dawson tomorrow';
+  const planned = await planAndPreview({
+    text, capabilities: DELEGATE,
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  /* Two meetings with the same title on the same day. Only the hour
+     tells them apart, so a reference that read the day and threw the
+     time away would be ambiguous here rather than exact. */
+  ok('the hour narrows it to one', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  const left = (db.tables.calendar_events ?? []).map((r) => String(r.id));
+  ok('and it is the ten o clock one that went',
+    left.length === 1 && left[0] === 'e2', JSON.stringify(left));
+});
+
+test('moving a meeting keeps its length and tells the diary', async () => {
+  const db = fakeDb(DIARY());
+  const text = 'move my site visit on Friday to 2pm';
+
+  const planned = await planAndPreview({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews the move', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const moved = (db.tables.calendar_events ?? []).find((r) => r.id === 'e1');
+  ok('the meeting starts at two', new Date(String(moved?.start_at)).getHours() === 14,
+    String(moved?.start_at));
+  /* An hour long meeting is still an hour long. Writing the start alone
+     would have left it finishing before it began. */
+  const length = Date.parse(String(moved?.end_at)) - Date.parse(String(moved?.start_at));
+  ok('and it is still an hour long', length === 60 * 60 * 1000, String(length));
+});
+
+test('a marketer cannot cancel a meeting', async () => {
+  const marketer = [...capabilitiesFor({ role: 'marketer' } as never)];
+  const planning = planCommand("cancel Friday's site visit", {
+    actorCapabilities: marketer,
+  });
+  const cancels = planning?.plan.steps.some((s) => s.op === 'delete') ?? false;
+  /* Cancelling a meeting is crm.delegate, which a marketer does not
+     have. Nothing you cannot do is ever offered. */
+  ok('it is not offered', !cancels, JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('inviting somebody resolves the person and the meeting', async () => {
+  const db = fakeDb(DIARY());
+  const text = 'invite Dave to the site visit on Friday';
+
+  const planned = await planAndPreview({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews the invitation', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: DELEGATE, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  const invites = db.tables.calendar_invites ?? [];
+  ok('and Dave is on the meeting',
+    invites.some((i) => String(i.user_id) === 'u2' && String(i.event_id) === 'e1'),
+    JSON.stringify(invites));
+});
+
 /* ============================================================= */
 
 async function main() {

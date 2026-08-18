@@ -320,6 +320,21 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
   },
+  'meeting.reschedule': {
+    name: 'command_reschedule_meeting',
+    args: (c) => ({ p_events: c.subjects, p_start: c.args.start ?? null }),
+  },
+  'meeting.invite': {
+    name: 'command_meeting_invite',
+    /* `who` arrives as an id, because the plan carried a reference to a
+       person and the resolver turned it into one. The function takes a
+       list, so one invitation and five are the same call. */
+    args: (c) => ({
+      p_events: c.subjects,
+      p_users: Array.isArray(c.args.who) ? c.args.who : [c.args.who].filter(Boolean),
+      p_note: c.args.note ?? null,
+    }),
+  },
   'rows.share': {
     name: 'command_share_list',
     /* The subjects are the RECORDS being shared, and the list is an

@@ -35,6 +35,7 @@ import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
 import { parseRoleChange } from './roles';
 import { parseOperation } from './operations';
+import { parseMeeting } from './meetings';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -398,6 +399,16 @@ function planOneClause(
   const role = outbound ? null : readRoleChange(text, opts);
   if (role) return role;
 
+  /* A MEETING IS NAMED BY WHEN IT IS, NOT BY WHAT IT IS CALLED.
+
+     "Cancel Friday's site visit" has a delete word in it and no record
+     name at all, so the lifecycle reader made a meeting called
+     "Friday's site" and matched nothing. Meetings get their own reader
+     because their reference is compositional: a day, a time and what
+     the meeting is about, in any order and any of them absent. */
+  const meeting = outbound ? null : readMeeting(text, opts);
+  if (meeting) return meeting;
+
   const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
 
@@ -635,6 +646,45 @@ function readOperation(
   if (!read) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Anything a sentence asks of a meeting.
+ *
+ * Cancelling, moving and inviting, all of which name the meeting the way
+ * people name meetings rather than by a title nobody types.
+ */
+function readMeeting(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseMeeting(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
   return {
     text,
     kind: 'mutate',

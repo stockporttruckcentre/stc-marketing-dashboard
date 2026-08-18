@@ -239,6 +239,16 @@ export type CapabilityDef = {
   /** Present when something actually performs it. Absent means declared only. */
   handler?: string;
   /**
+   * Work that happens OUTSIDE the database, before the transaction.
+   *
+   * Names an entry in `server/prepare.ts`. Looking a company up in
+   * Lusha is an HTTP call to somebody else's service that spends a
+   * credit and cannot be rolled back, so it cannot be inside a
+   * transaction and must not be after one: it runs where a file is
+   * rendered, and what it produces are changes the transaction writes.
+   */
+  prepares?: string;
+  /**
    * What it leaves on its subjects, for a step that reads the result.
    *
    * A programme's file is rendered before its transaction opens, so
@@ -596,7 +606,22 @@ export const CAPABILITIES: CapabilityDef[] = [
        anything, so running it on a sentence that was only partly
        understood costs real money for a guess. */
     idempotent: false,
-    handler: 'app/api/lusha/enrich/route.ts',
+    handler: 'lib/crm/enrich.ts',
+    /* NOT SQL, AND NEVER CAN BE.
+       An HTTP call to somebody else's service. It happens before the
+       programme's transaction opens, in the same place a file is
+       rendered and for the same reason, and what it finds becomes
+       changes the transaction writes. See `server/prepare.ts`. */
+    prepares: 'contact.enrich',
+    /* The columns a lookup can fill in, so the resolver reads what is
+       on the record before deciding whether it has anything to work
+       from. */
+    inputs: [
+      { key: 'email', label: 'email address', kind: 'text', required: false, from: 'email' },
+      { key: 'companyName', label: 'company name', kind: 'text', required: false, from: 'company_name' },
+      { key: 'contactName', label: 'contact name', kind: 'text', required: false, from: 'contact_name' },
+      { key: 'website', label: 'website', kind: 'text', required: false, from: 'website' },
+    ],
   },
   {
     id: 'rows.export',
@@ -719,6 +744,44 @@ export const CAPABILITIES: CapabilityDef[] = [
       /* `from` is the column that already answers it, so the preview can
          say what somebody IS as well as what they are being made. */
       { key: 'role', label: 'role', kind: 'enum', required: true, from: 'role' },
+    ],
+  },
+  {
+    id: 'meeting.reschedule',
+    label: 'Move a meeting to another time',
+    operates: 'invoke',
+    entities: ['meetings'],
+    /* The capability the calendar itself gates booking on. */
+    requires: 'crm.delegate',
+    confirm: true,
+    produces: 'record',
+    /* Moving a meeting to the time it is already at is a no-op the
+       function refuses rather than performs, because the people on it
+       would be told twice. */
+    idempotent: false,
+    handler: 'supabase/migrations/021_command_meetings.sql',
+    /* Writing the start alone leaves a meeting that ends before it
+       begins. The function moves the end by the same amount, and this
+       is what a chained export sees. */
+    effect: { table: 'calendar_events', set: { start_at: { arg: 'start' } } },
+    inputs: [
+      { key: 'start', label: 'new time', kind: 'date', required: true, from: 'start_at' },
+    ],
+  },
+  {
+    id: 'meeting.invite',
+    label: 'Ask somebody to a meeting',
+    operates: 'invoke',
+    entities: ['meetings'],
+    requires: 'crm.delegate',
+    confirm: true,
+    produces: 'record',
+    /* Inviting somebody already invited puts the invitation back with
+       them, which is what the calendar's own button does. */
+    idempotent: true,
+    handler: 'supabase/migrations/021_command_meetings.sql',
+    inputs: [
+      { key: 'who', label: 'who to invite', kind: 'text', required: true },
     ],
   },
   {

@@ -129,8 +129,8 @@ INSERT INTO command_capability_roles (capability, role) VALUES
 DELETE FROM command_entity_permissions;
 
 INSERT INTO command_entity_permissions (table_name, operation, capability) VALUES
-  ('calendar_events', 'create', 'crm.edit'),
-  ('calendar_events', 'delete', 'crm.edit'),
+  ('calendar_events', 'create', 'crm.delegate'),
+  ('calendar_events', 'delete', 'crm.delegate'),
   ('contact_addresses', 'create', 'crm.edit'),
   ('contact_addresses', 'delete', 'crm.edit'),
   ('contact_notes', 'create', 'crm.edit'),

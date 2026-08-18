@@ -520,6 +520,11 @@ function transactionFor(units: Unit[]): {
 
   for (const u of units) {
     if (u.kind !== 'invoke') continue;
+    /* An operation whose work happens outside the database contributes
+       CHANGES rather than an invoke, and the caller has already
+       prepared them. Sending its capability to `command_perform` would
+       ask the database to do something it has never heard of. */
+    if (capability(u.plan.capability)?.prepares) continue;
     at.set(u.stepId, steps.length);
     steps.push({
       op: 'invoke',

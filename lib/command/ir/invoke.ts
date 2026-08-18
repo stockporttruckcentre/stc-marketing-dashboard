@@ -36,6 +36,7 @@ import type { Invoke, Plan, Select } from './types';
 import { capability, entity as entityDef, RELATIONSHIPS } from './registry';
 import type { Store } from './store';
 import { runSelect, selectBehind } from './read';
+import { resolveReference } from './resolve';
 
 export type InvokeSubject = {
   /** The row the operation will run on. */
@@ -110,7 +111,7 @@ export async function resolveInvoke(
   const cap = capability(step.capability);
   if (!cap) return { ok: false, reason: 'unknown', why: `nothing here knows ${step.capability}` };
   if (!cap.handler) {
-    return { ok: false, reason: 'unknown', why: `nothing performs ${step.capability} yet` };
+    return { ok: false, reason: 'unknown', why: cap.needs ?? `nothing performs ${step.capability} yet` };
   }
 
   /* The rows, however the step names them: its own selection, or the
@@ -273,6 +274,32 @@ export async function resolveInvoke(
      one that is neither is not a thing to guess at: a sale recorded at
      no price is worse than a sale not recorded. */
   const args = { ...(opts.args ?? {}) };
+
+  /* AN ARGUMENT CAN NAME A ROW WITHOUT SAYING WHICH ROW.
+
+     "Invite Dave to the site visit on Friday" carries "the person whose
+     name contains Dave" as the operation's argument. It is resolved
+     here, through the same lookup a mutation's values go through, so
+     two Daves ask rather than one of them being invited. Literals were
+     already lifted out by the caller; this is the other kind. */
+  for (const [key, value] of Object.entries(step.args ?? {})) {
+    if (args[key] != null) continue;
+    if (!('kind' in value) || value.kind !== 'reference') continue;
+
+    const found = await resolveReference(opts.store, value, `args.${key}`);
+    if (found.state === 'ambiguous') {
+      return {
+        ok: false,
+        reason: 'ambiguous',
+        why: found.why,
+        candidates: found.candidates.map((c) => ({ id: c.id, label: c.label })),
+      };
+    }
+    if (found.state !== 'resolved') {
+      return { ok: false, reason: 'unresolved', why: found.why };
+    }
+    args[key] = found.value;
+  }
   const needs: { key: string; label: string }[] = [];
   for (const input of inputs) {
     if (args[input.key] != null) continue;

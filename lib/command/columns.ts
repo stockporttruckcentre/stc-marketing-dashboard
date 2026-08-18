@@ -208,7 +208,11 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'calendar_events', label: 'meetings',
-    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
+    /* Booking a meeting and cancelling one are both `crm.delegate`,
+       which is what the calendar screen and every writable column on
+       this table already gate on. It was `crm.edit`, so a marketer who
+       may not book a meeting could cancel one. */
+    lifecycle: { create: 'crm.delegate', delete: 'crm.delegate' },
     columns: [
       ...SYSTEM,
       { name: 'title', kind: 'text' },

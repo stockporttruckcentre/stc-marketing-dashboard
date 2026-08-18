@@ -155,48 +155,61 @@ function labelOf(row: Record<string, unknown>, title: string | null): string {
  * the thing that must never be silently narrowed: the policy on the
  * reference decides, and there is no policy that means "pick one".
  */
+/**
+ * One reference, looked up.
+ *
+ * Exported because an OPERATION can take one as an argument. "Invite
+ * Dave to the site visit on Friday" carries "the person whose name
+ * contains Dave", and resolving it a second way inside the invoke
+ * resolver would be a second answer to what "several Daves" means.
+ */
+export async function resolveReference(
+  store: Store, e: Extract<Expr, { kind: 'reference' }>, at: string,
+): Promise<ReferenceOutcome> {
+  const def = entityDef(e.entity);
+  if (!def) return { state: 'unresolvable', at, entity: e.entity, why: `nothing here holds ${e.entity}` };
+
+  const title = def.titleField ?? null;
+  const read = await store.read({
+    table: def.table,
+    columns: [...new Set(['id', e.select, ...(title ? [title] : [])])],
+    where: e.where,
+    limit: 50,
+  });
+  if (!read.ok) {
+    return {
+      state: 'unresolvable', at, entity: e.entity,
+      why: read.reason === 'unsupported'
+        ? `that needs ${read.why}, which cannot be looked up`
+        : read.why,
+    };
+  }
+  const rows = read.rows;
+
+  if (!rows.length) {
+    return { state: 'no match', at, entity: e.entity, why: `no ${def.labelOne} here matches that` };
+  }
+  if (rows.length > 1 && e.onAmbiguity !== 'all') {
+    return {
+      state: 'ambiguous', at, entity: e.entity,
+      why: `${rows.length} ${def.label} match that, so it is not clear which was meant`,
+      candidates: rows.map((r) => ({
+        id: String(r.id),
+        label: labelOf(r, title),
+        value: r[e.select],
+      })),
+    };
+  }
+  return { state: 'resolved', at, entity: e.entity, id: String(rows[0].id), value: rows[0][e.select] };
+}
+
 async function resolveReferences(
   store: Store, m: Mutate,
 ): Promise<{ ok: true; refs: ResolvedReference[] } | { ok: false; outcome: ReferenceOutcome }> {
   const refs: ResolvedReference[] = [];
 
-  const lookup = async (e: Extract<Expr, { kind: 'reference' }>, at: string): Promise<ReferenceOutcome> => {
-    const def = entityDef(e.entity);
-    if (!def) return { state: 'unresolvable', at, entity: e.entity, why: `nothing here holds ${e.entity}` };
-
-    const title = def.titleField ?? null;
-    const read = await store.read({
-      table: def.table,
-      columns: [...new Set(['id', e.select, ...(title ? [title] : [])])],
-      where: e.where,
-      limit: 50,
-    });
-    if (!read.ok) {
-      return {
-        state: 'unresolvable', at, entity: e.entity,
-        why: read.reason === 'unsupported'
-          ? `that needs ${read.why}, which cannot be looked up`
-          : read.why,
-      };
-    }
-    const rows = read.rows;
-
-    if (!rows.length) {
-      return { state: 'no match', at, entity: e.entity, why: `no ${def.labelOne} here matches that` };
-    }
-    if (rows.length > 1 && e.onAmbiguity !== 'all') {
-      return {
-        state: 'ambiguous', at, entity: e.entity,
-        why: `${rows.length} ${def.label} match that, so it is not clear which was meant`,
-        candidates: rows.map((r) => ({
-          id: String(r.id),
-          label: labelOf(r, title),
-          value: r[e.select],
-        })),
-      };
-    }
-    return { state: 'resolved', at, entity: e.entity, id: String(rows[0].id), value: rows[0][e.select] };
-  };
+  const lookup = (e: Extract<Expr, { kind: 'reference' }>, at: string) =>
+    resolveReference(store, e, at);
 
   /** Every reference inside one expression, in the order they appear. */
   const walk = async (e: Expr, at: string): Promise<ReferenceOutcome | null> => {

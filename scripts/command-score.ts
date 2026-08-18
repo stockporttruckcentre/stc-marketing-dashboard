@@ -199,6 +199,34 @@ const OPERATION_ACTIONS: Record<string, RegExp> = {
    instruction below runs against a fresh copy of it, so one sentence
    cannot leave the next one looking at rows it changed.
    ------------------------------------------------------------- */
+/**
+ * The coming occurrence of a weekday, today included.
+ *
+ * The same rule the meeting reader uses, so a fixture built on Wednesday
+ * and one built on Friday both hold a meeting on "Friday".
+ */
+function comingUp(weekday: number, hour: number): string {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  d.setDate(d.getDate() + ((weekday - d.getDay() + 7) % 7));
+  return d.toISOString();
+}
+
+const DIARY = (): DbRow[] => {
+  const friday = comingUp(5, 9);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(10, 0, 0, 0);
+  return [
+    { id: 'm1', title: 'Site visit, Ward Bros', description: 'Yard walk round',
+      start_at: friday, end_at: null, visibility: 'team', created_by: 'u1' },
+    { id: 'm2', title: 'Call with Dawson Group', description: null,
+      start_at: tomorrow.toISOString(), end_at: null, visibility: 'team', created_by: 'u1' },
+    { id: 'm3', title: 'Depot review', description: null,
+      start_at: comingUp(1, 14), end_at: null, visibility: 'team', created_by: 'u1' },
+  ];
+};
+
 const YARD = (): Record<string, DbRow[]> => ({
   stock_trailers: [
     { id: 'y1', stc_no: 'STC143580', status: 'in_stock', location: 'Hyde', category: 'Curtainsider', retail_price: 20000, sales_price: 22000, nbv: 15000, refurb_costs: 500, mot_date: '2027-03-14', notes: null, customer: null, sales_rep: null },
@@ -219,6 +247,11 @@ const YARD = (): Record<string, DbRow[]> => ({
      sales tracker looks like. Without a deal on a unit there is nothing
      to sell, and a fixture with none of them cannot observe a sale at
      all. */
+  /* A diary. Without one, every sentence about a meeting resolves to
+     nothing, which scores as a failure to find a record and tells you
+     nothing about whether the sentence was read correctly. Three
+     meetings, on the days people refer to them by. */
+  calendar_events: DIARY(),
   crm_contacts: [
     { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null, next_action: null, stock_trailer_id: null, sale_price: null, profit: null },
     { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co', next_action: null, stock_trailer_id: null, sale_price: null, profit: null },

@@ -400,6 +400,84 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId: list, made: people.length, kind, rowId: first }, error: null };
     }
 
+    /* Moving a meeting. Both ends move, so the length is kept: writing
+       the start alone leaves a meeting that finishes before it begins. */
+    if (name === 'command_reschedule_meeting') {
+      if (!may('crm.delegate')) {
+        return { data: null, error: { message: 'you do not have crm.delegate' } };
+      }
+      const ids = (args.p_events ?? []) as string[];
+      const start = args.p_start == null ? '' : String(args.p_start);
+      if (!ids.length) return { data: null, error: { message: 'nothing said which meeting to move' } };
+      if (!start) return { data: null, error: { message: 'nothing said what time to move it to' } };
+
+      const events = (tables.calendar_events ?? []).filter((r) => ids.includes(String(r.id)));
+      if (events.length !== ids.length) {
+        return {
+          data: null,
+          error: { message: `expected to move ${ids.length} meetings but moved ${events.length}` },
+        };
+      }
+
+      const moved: Row[] = [];
+      for (const ev of events) {
+        if (String(ev.start_at) === start) {
+          return { data: null, error: { message: `${ev.title} is already at that time` } };
+        }
+        const length = ev.end_at == null
+          ? null
+          : Date.parse(String(ev.end_at)) - Date.parse(String(ev.start_at));
+        const was = String(ev.start_at);
+        ev.start_at = start;
+        if (length != null) ev.end_at = new Date(Date.parse(start) + length).toISOString();
+        writes.push({ table: 'calendar_events', set: { start_at: start }, ids: [String(ev.id)] });
+        moved.push({ name: ev.title, was, now: start });
+      }
+      return { data: moved, error: null };
+    }
+
+    /* Asking somebody to a meeting. Every person or none. */
+    if (name === 'command_meeting_invite') {
+      if (!may('crm.delegate')) {
+        return { data: null, error: { message: 'you do not have crm.delegate' } };
+      }
+      const events = (args.p_events ?? []) as string[];
+      const users = (args.p_users ?? []) as string[];
+      if (!events.length || !users.length) {
+        return { data: null, error: { message: 'nothing said which meeting, or who to invite' } };
+      }
+
+      const found = (tables.calendar_events ?? []).filter((r) => events.includes(String(r.id)));
+      if (found.length !== events.length) {
+        return { data: null, error: { message: 'that meeting is not there' } };
+      }
+
+      const invites = (tables.calendar_invites ??= []);
+      let first: string | null = null;
+      let sent = 0;
+      for (const ev of found) {
+        for (const person of users) {
+          const already = invites.find(
+            (i) => String(i.event_id) === String(ev.id) && String(i.user_id) === String(person),
+          );
+          const id = already ? String(already.id) : `inv${invites.length + 1}`;
+          if (already) {
+            already.status = 'pending';
+            already.awaiting = person;
+          } else {
+            invites.push({
+              id, event_id: ev.id, user_id: person, invited_by: 'u1',
+              status: 'pending', awaiting: person, rounds: 0,
+            });
+          }
+          writes.push({ table: 'calendar_invites', set: { status: 'pending' }, ids: [id] });
+          first = first ?? id;
+          sent += 1;
+        }
+      }
+      return { data: { sent, inviteId: first }, error: null };
+    }
+
     /* Changing what somebody is allowed to do. The highest risk write
        here, so the capability is asked for and the last administrator
        cannot stop being one. */
@@ -735,7 +813,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
                operation reports having done, or the subjects it ran
                over when it reports nothing countable. */
             const body = (out.data ?? {}) as Record<string, unknown>;
-            const n = ['moved', 'granted'].map((k) => body[k]).find((v) => typeof v === 'number');
+            const n = ['moved', 'granted', 'sent'].map((k) => body[k]).find((v) => typeof v === 'number');
             changed += typeof n === 'number' ? n
               : cap === 'record.attach' ? 1
                 : subjects.length;
@@ -809,6 +887,18 @@ const PERFORMED: Record<string, {
   'user.setRole': {
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
+  },
+  'meeting.reschedule': {
+    name: 'command_reschedule_meeting',
+    args: (c) => ({ p_events: c.subjects, p_start: c.args.start ?? null }),
+  },
+  'meeting.invite': {
+    name: 'command_meeting_invite',
+    args: (c) => ({
+      p_events: c.subjects,
+      p_users: Array.isArray(c.args.who) ? c.args.who : [c.args.who].filter(Boolean),
+      p_note: c.args.note ?? null,
+    }),
   },
   'rows.share': {
     name: 'command_share_list',
