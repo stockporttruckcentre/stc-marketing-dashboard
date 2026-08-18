@@ -41,6 +41,7 @@ import { FINDER } from '../lib/crm/finder';
 import { fakeLedger } from './support/fake-ledger';
 import type { FileStore } from '../lib/command/files';
 import { planCommand } from '../lib/command/plan';
+import { completedWith } from '../lib/command/ir/validate';
 import { EMPTY_VOCABULARY, buildIndex } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
 
@@ -3111,14 +3112,29 @@ test('a post with its words in the sentence is written', async () => {
   ok('and waiting for approval', post?.status === 'pending_review', String(post?.status));
 });
 
-test('a post that names only a topic still opens the composer', async () => {
+test('a post that names only a topic is asked about, never written from the topic', async () => {
   const planning = planCommand('create a social post about the Haydock depot', {
     actorCapabilities: MARKETING,
   });
-  const writes = planning?.plan.steps
-    .some((s) => (s.op === 'invoke' && s.capability === 'post.create') || s.op === 'create') ?? false;
-  ok('nothing is written from a topic', !writes,
-    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+  const step = planning?.plan.steps
+    .find((x) => x.op === 'invoke' && x.capability === 'post.create');
+
+  /* IT USED TO DECLINE, AND DECLINING WAS THE WRONG ANSWER.
+
+     A topic is not what the post says, and a draft whose text is the
+     topic is worse than no draft: that part has not moved. What has is
+     that the sentence is now read for what it plainly is, an operation
+     with one value missing, and asked about. */
+  ok('the operation is understood', !!step, JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+  ok('the topic never becomes the words of the post',
+    !(step && step.op === 'invoke' && step.args?.content),
+    JSON.stringify(step && step.op === 'invoke' ? step.args : null));
+  ok('it is incomplete rather than runnable',
+    planning?.completion.kind === 'incomplete', JSON.stringify(planning?.completion));
+  ok('and what it asks for is the content',
+    planning?.completion.kind === 'incomplete'
+      && planning.completion.missing[0].ask === 'What should it say?',
+    JSON.stringify(planning?.completion));
 });
 
 test('a sales rep cannot write a post by typing one', async () => {
@@ -4172,21 +4188,51 @@ test('the finder is invisible while Lusha is locked', async () => {
     JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
 });
 
-test('a sentence with no place never reaches a search', async () => {
+test('a sentence with no place asks where, and reaches no search', async () => {
+  const db = fakeDb({ crm_contacts: [] });
   let calls = 0;
   const was = FINDER.search;
+  const wasLocked = LUSHA_GATE.locked;
   FINDER.search = async () => { calls += 1; return []; };
+  LUSHA_GATE.locked = false;
   try {
     const planning = planCommand('find waste companies', {
       actorCapabilities: PROSPECTOR, context: {},
     });
-    ok('it is not planned as a paid search',
-      !(planning?.plan.steps.some(
-        (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false),
+    const step = planning?.plan.steps
+      .find((x) => x.op === 'invoke' && x.capability === 'crm.findCompanies');
+
+    /* UNDERSTOOD IS NOT THE SAME AS RUN.
+
+       This used to refuse to plan the sentence at all, which told
+       somebody who had said what they wanted that nothing here reads
+       it. The operation is planned; the place is missing; the question
+       is put; and the search happens after the answer and not before,
+       which is the property that actually matters. */
+    ok('the search is understood', !!step,
       JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+    ok('with no place invented for it',
+      !(step && step.op === 'invoke' && (step.args?.place || step.args?.city)),
+      JSON.stringify(step && step.op === 'invoke' ? step.args : null));
+    ok('it is incomplete', planning?.completion.kind === 'incomplete',
+      JSON.stringify(planning?.completion));
+    ok('and asks where to search',
+      planning?.completion.kind === 'incomplete'
+        && planning.completion.missing[0].ask === 'Where should I search?',
+      JSON.stringify(planning?.completion));
+
+    /* And the preview, which is the pass that would have called out. */
+    const planned = await planAndPreview({
+      text: 'find waste companies', capabilities: PROSPECTOR,
+      vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {}, preview: true,
+    });
+    ok('the server will not run it', planned?.planned.meaning.runnable === false,
+      String(planned?.planned.meaning.runnable));
     ok('and nothing was searched for', calls === 0, String(calls));
   } finally {
     FINDER.search = was;
+    LUSHA_GATE.locked = wasLocked;
   }
 });
 
@@ -4589,6 +4635,156 @@ test('with no ledger wired up, no credit can be spent', async () => {
     PROVIDER.lookUp = real;
     LUSHA_GATE.locked = wasLocked;
   }
+});
+
+/* =============================================================
+   41. Understood, and short of one value
+
+   The other half of "correct refusal". A sentence naming an operation,
+   a record and everything except one value is not a sentence nobody can
+   read: it is a question with an answer. What has to hold is that
+   nothing runs until the answer arrives, that the answer goes back into
+   the RAW TEXT rather than into a plan the browser built, and that the
+   completed sentence then goes through exactly the path the first one
+   would have.
+   ============================================================= */
+
+const ONSCREEN = { entity: 'contacts', id: 'c1', label: 'Dawson Group' };
+
+/** Somebody who may edit a customer, which is all any of these need. */
+const DETAILS = [...capabilitiesFor({ role: 'admin' } as never)];
+
+const asks = (planning: ReturnType<typeof planCommand>) =>
+  (planning?.completion.kind === 'incomplete' ? planning.completion.missing : []);
+
+test('a link with no address asks for one, and adds it once given', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead', links: [] }],
+  });
+  const text = 'add their LinkedIn profile to this account';
+  const context = { record: ONSCREEN };
+
+  const planning = planCommand(text, { actorCapabilities: DETAILS, context });
+  ok('it is understood as adding a link',
+    planning?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'contact.addLink') ?? false,
+    JSON.stringify(planning?.plan.steps.map((x) => x.op)));
+  ok('and asks for the address',
+    asks(planning)[0]?.ask === 'What is the web address?', JSON.stringify(asks(planning)));
+
+  /* The bar's own function, so this is the sentence the browser would
+     send and not one this check made up. */
+  const said = completedWith(text, asks(planning)[0], 'linkedin.com/company/dawson-group');
+  const whole = planCommand(said, { actorCapabilities: DETAILS, context });
+  ok('the completed sentence is whole', whole?.completion.kind === 'complete',
+    JSON.stringify(whole?.completion));
+
+  const planned = await planAndPreview({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  ok('and nothing is written by looking', db.writes.length === 0, JSON.stringify(db.writes));
+
+  const done = await applyMutation({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: (planned!.preview as { programmeHash: string }).programmeHash,
+  });
+  ok('confirming adds it', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('to the account it was about',
+    JSON.stringify(db.tables.crm_contacts[0].links).includes('dawson-group'),
+    JSON.stringify(db.tables.crm_contacts[0].links));
+});
+
+test('a site with no address asks for one, and nothing is filed meanwhile', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+    contact_addresses: [],
+  });
+  const text = 'add another site to this customer';
+  const context = { record: ONSCREEN };
+
+  const planning = planCommand(text, { actorCapabilities: DETAILS, context });
+  ok('it is understood as adding a site',
+    planning?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'contact.addAddress') ?? false,
+    JSON.stringify(planning?.plan.steps.map((x) => x.op)));
+  ok('and asks for the address',
+    asks(planning)[0]?.ask === 'What is the address?', JSON.stringify(asks(planning)));
+
+  /* THE WORDS THAT POINTED AT THE RECORD ARE NOT AN ADDRESS.
+
+     "This customer" sat in the address for a while, which made the
+     sentence look complete and would have filed a pointing phrase as a
+     depot. */
+  const step = planning?.plan.steps.find((x) => x.op === 'invoke');
+  ok('and no address was taken from the pointing words',
+    !(step && step.op === 'invoke' && step.args?.address),
+    JSON.stringify(step && step.op === 'invoke' ? step.args : null));
+
+  const said = completedWith(text, asks(planning)[0], '4 Ashton Road, Hyde');
+  const planned = await planAndPreview({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('the completed sentence previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+
+  const done = await applyMutation({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: (planned!.preview as { programmeHash: string }).programmeHash,
+  });
+  ok('confirming files the site', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('with the address they gave',
+    (db.tables.contact_addresses ?? []).some((r) => String(r.address) === '4 Ashton Road, Hyde'),
+    JSON.stringify(db.tables.contact_addresses));
+});
+
+test('making an address the main one asks which, rather than picking', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+    contact_addresses: [
+      { id: 'a1', contact_id: 'c1', address: '4 Ashton Road, Hyde', label: 'Yard', is_primary: true },
+      { id: 'a2', contact_id: 'c1', address: '9 Dock Street, Salford', label: 'Depot', is_primary: false },
+    ],
+  });
+  const text = 'make this address their main address';
+  const context = { record: ONSCREEN };
+
+  const planning = planCommand(text, { actorCapabilities: DETAILS, context });
+  ok('it is understood',
+    planning?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'contact.primaryAddress') ?? false,
+    JSON.stringify(planning?.plan.steps.map((x) => x.op)));
+  ok('the customer came from the screen, through the possessive',
+    planning?.presentation.summary.includes('Dawson Group') ?? false,
+    planning?.presentation.summary);
+  ok('and it asks which address',
+    asks(planning)[0]?.ask === 'Which address should be the main one?', JSON.stringify(asks(planning)));
+
+  const said = completedWith(text, asks(planning)[0], 'Dock Street');
+  const planned = await planAndPreview({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('naming one previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+
+  const done = await applyMutation({
+    text: said, capabilities: DETAILS, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: (planned!.preview as { programmeHash: string }).programmeHash,
+  });
+  ok('and it is carried out', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('on the one they named',
+    (db.tables.contact_addresses ?? []).find((r) => r.id === 'a2')?.is_primary === true,
+    JSON.stringify(db.tables.contact_addresses));
+  ok('and the other is no longer the main one',
+    (db.tables.contact_addresses ?? []).find((r) => r.id === 'a1')?.is_primary === false,
+    JSON.stringify(db.tables.contact_addresses));
 });
 
 /* ============================================================= */

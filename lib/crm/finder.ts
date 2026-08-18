@@ -36,8 +36,13 @@
    "Find waste companies" says what kind and not where. Lusha would
    answer it for the whole of the United Kingdom, against the same
    shared daily quota, and return a page of companies nobody asked
-   about. The reader refuses to plan one, which is right whether the
-   unit of cost is a credit or a call.
+   about.
+
+   That sentence is understood: the operation is this one and the only
+   thing absent is the place. So it is planned without one, comes back
+   asking where to search, and no call is made until somebody says. A
+   guessed place would be a call spent on an answer nobody wanted,
+   which is wrong whether the unit is a credit or a quota.
    ============================================================= */
 import { DEPOTS } from '@/lib/types';
 import { searchCompanies } from '@/lib/lusha';

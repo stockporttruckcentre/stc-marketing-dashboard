@@ -247,9 +247,22 @@ function readListAdd(
   if (!from && !fromClause) return null;
 
   /* The list's name, said either way round: "onto the Fleet Prospects
-     list" and "onto the list called Fleet Prospects". */
-  const named = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
+     list" and "onto the list called Fleet Prospects".
+
+     A NAME CANNOT START WITH A WORD THAT POINTS.
+
+     "Add their LinkedIn profile to this account" ends in the same shape
+     a destination does, and the name it produced was "this account", so
+     the sentence became a customer put on a list called that. Somebody
+     pointing at a record is not naming a list, whatever the grammar
+     underneath the two looks like. */
+  const saidName = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
     ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1]?.trim();
+
+  const points = POINTING_WORDS.has(
+    (saidName ?? '').split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, '') ?? '',
+  );
+  const named = points ? undefined : saidName;
 
   /* A name is required where the word was not said, because "put them
      on" with nothing after it is half a sentence rather than a move

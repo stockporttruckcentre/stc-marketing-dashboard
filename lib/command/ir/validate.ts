@@ -665,15 +665,131 @@ export function isRunnable(plan: Plan): boolean {
    answer. Nowhere else may reach this state at all: the gate above
    refuses a partial plan that would download, share, email or attach.
    ============================================================= */
+/**
+ * A required input the sentence did not carry.
+ *
+ * Deterministic and static: the capability declares its inputs, this
+ * compares them against the step's args, and nothing is guessed. The
+ * `ask` is the question to put to the person, in their words rather
+ * than the registry's.
+ */
+export type MissingInput = {
+  key: string;
+  label: string;
+  ask: string;
+  /** Which operation is waiting on it. */
+  capability: string;
+  /**
+   * How the answer goes back into the sentence.
+   *
+   * `%s` is what they typed. The answer completes the RAW TEXT and the
+   * server plans the whole thing again from it. The browser never sends
+   * a field and a value for the runtime to trust: it sends a longer
+   * sentence, which goes through exactly the path the first one did.
+   */
+  fills: string;
+};
+
 export type Completion =
   | { kind: 'refused'; problems: Problem[] }
+  /**
+   * Understood, and a required value is missing.
+   *
+   * Different from `refused` in the way that matters: the operation is
+   * known, the records are known, and the only thing between here and
+   * carrying it out is a value somebody can supply. "I could not tell
+   * what you wanted there" is the wrong answer to "create a LinkedIn
+   * post": the right one is "what should it say".
+   *
+   * Nothing runs in this state. It is a question, not a plan.
+   */
+  | { kind: 'incomplete'; missing: MissingInput[] }
   | { kind: 'partial'; unresolved: string[] }
   | { kind: 'complete' };
+
+/**
+ * How to ask for each kind of thing.
+ *
+ * By the input's key, so a capability that declares one of these gets
+ * a sensible question without anybody writing one. A capability whose
+ * question is genuinely its own says so on the input itself: "which
+ * address" and "what is the address" are both about an address and
+ * only one of them is the right thing to ask somebody making an
+ * address the main one.
+ */
+const ASK: Record<string, string> = {
+  content: 'What should it say?',
+  place: 'Where should I search?',
+  url: 'What is the address?',
+  address: 'What is the address?',
+  which: 'Which one?',
+  list: 'Which list?',
+  name: 'What should it be called?',
+  role: 'Which role?',
+  parent: 'Which should be the main account?',
+  who: 'Who?',
+  file: 'Attach the file and try again.',
+};
+
+/**
+ * Required inputs no step supplied.
+ *
+ * Read off the registry rather than off any reader, so a capability
+ * that declares an input gets the question for free and a reader
+ * cannot forget to ask. Inputs with a `from` are excluded: those can be
+ * answered by the records, and whether they were is a question for
+ * resolution rather than for the plan.
+ */
+export function missingInputs(plan: Plan): MissingInput[] {
+  const out: MissingInput[] = [];
+  for (const step of plan.steps) {
+    if (step.op !== 'invoke') continue;
+    const cap = capability(step.capability);
+    for (const input of cap?.inputs ?? []) {
+      if (!input.required || input.from || input.derivedFrom) continue;
+      if (step.args?.[input.key] != null) continue;
+      const ask = input.ask ?? ASK[input.key] ?? `What is the ${input.label}?`;
+      /* Two steps short of the same thing are one question. */
+      if (out.some((m) => m.ask === ask)) continue;
+      out.push({
+        key: input.key,
+        label: input.label,
+        ask,
+        capability: step.capability,
+        fills: input.fills ?? '%s',
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The sentence again, with the answer in it.
+ *
+ * One implementation, because the browser and the checks must complete
+ * a sentence the same way or the thing being asserted is not the thing
+ * that ships. The answer goes into the RAW TEXT, in the words the
+ * capability declares, and the server plans the whole thing from
+ * scratch: no field, no value, no second way into the runtime.
+ */
+export function completedWith(text: string, missing: MissingInput, said: string): string {
+  const answer = said.trim();
+  if (!answer) return text;
+  /* A function replacement, so an answer containing $& or $1 is the
+     answer rather than a substitution pattern. */
+  return `${text.trim()} ${missing.fills.replace('%s', () => answer)}`
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export function completion(plan: Plan): Completion {
   const problems = validate(plan);
   const fatal = problems.filter((p) => p.severity === 'fatal');
   if (fatal.length) return { kind: 'refused', problems: fatal };
+  /* Before `partial`, because a missing required value is a question
+     with an answer and an unresolved word is not. */
+  const missing = missingInputs(plan);
+  if (missing.length) return { kind: 'incomplete', missing };
   const unresolved = unresolvedParts(plan, problems);
   if (unresolved.length) return { kind: 'partial', unresolved };
   return { kind: 'complete' };

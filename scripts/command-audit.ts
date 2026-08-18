@@ -234,6 +234,7 @@ const WRITES: { text: string; on?: Screen }[] = [
  */
 type Canonical =
   | 'executable'    // planned, permitted, and something performs it
+  | 'asks'          // planned and permitted, short of a value it asks for
   | 'permitted'     // planned and permitted, nothing performs it yet
   | 'understood'    // planned, and this actor may not run it
   | 'navigation'    // no plan; the action registry opens the screen
@@ -323,6 +324,29 @@ function audit(s: string, on?: Screen): Outcome {
   const planned = planCommand(s, {
     actorCapabilities: caps, vocabulary: VOCABULARY, context: screenFor(on),
   });
+
+  /* UNDERSTOOD AND SHORT OF A VALUE IS ITS OWN ANSWER.
+
+     "Create a LinkedIn post" plans `post.create`, is permitted, and has
+     nothing to say. Counting it executable would claim a sentence runs
+     when what it does is ask a question, and counting it not understood
+     would claim the opposite of what happened. It is neither: the
+     runtime read it, and it is waiting on one value. Nothing is
+     written until that value arrives, and then it is this same
+     sentence, longer. */
+  if (planned && planned.completion.kind === 'incomplete'
+    && planned.availability.representable
+    && planned.availability.permitted !== false
+    && planned.availability.executable) {
+    return {
+      parse: `asks: ${planned.presentation.summary}`,
+      parseOk: true,
+      wiring: MUTATION ? 'handler' : 'none',
+      detail: planned.completion.missing.map((m) => m.ask).join(' '),
+      canonical: 'asks',
+    };
+  }
+
   if (planned && planned.kind === 'mutate'
     && planned.availability.representable
     && planned.presentation.confidence >= 10) {
@@ -432,14 +456,15 @@ function audit(s: string, on?: Screen): Outcome {
 console.log('  FIFTY WRITE COMMANDS, PARSED ONLY. NOTHING HERE RUNS.\n');
 
 const tally: Record<Canonical, number> = {
-  executable: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
+  executable: 0, asks: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
 };
 WRITES.forEach(({ text: s, on }, i) => {
   const o = audit(s, on);
   tally[o.canonical] += 1;
   const flag = o.canonical === 'executable' ? '  ok '
-    : o.canonical === 'navigation' ? ' nav '
-      : o.canonical === 'none' ? 'DEAD ' : 'PART ';
+    : o.canonical === 'asks' ? ' ask '
+      : o.canonical === 'navigation' ? ' nav '
+        : o.canonical === 'none' ? 'DEAD ' : 'PART ';
   console.log(`  ${flag} ${String(i + 1).padStart(2)}. ${s}`);
   console.log(`          ${o.parse}`);
   console.log(`          ${o.detail}`);
@@ -450,8 +475,19 @@ WRITES.forEach(({ text: s, on }, i) => {
    a screen is navigation, and navigation is not execution. */
 console.log(`\n  CANONICAL RUNTIME, ${WRITES.length} write sentences`);
 console.log(`    executable       ${String(tally.executable).padStart(3)}  planned, permitted, and something performs it`);
+console.log(`    asks             ${String(tally.asks).padStart(3)}  planned and permitted, waiting on one value it asks for`);
 console.log(`    permitted        ${String(tally.permitted).padStart(3)}  planned and permitted, nothing performs it yet`);
 console.log(`    understood       ${String(tally.understood).padStart(3)}  planned, and this actor may not run it`);
 console.log(`    navigation only  ${String(tally.navigation).padStart(3)}  opens the screen where a person does it by hand`);
 console.log(`    not understood   ${String(tally.none).padStart(3)}`);
-console.log(`\n  ${tally.executable}/${WRITES.length} carried out by the canonical runtime.\n`);
+console.log(`\n  ${tally.executable}/${WRITES.length} carried out by the canonical runtime.`);
+/* SAID SEPARATELY, ON PURPOSE.
+
+   A sentence that asks a question is not a sentence that ran, and
+   adding the two into one figure is how "executable" started meaning
+   more than it does. `executable` here means: a canonical plan exists,
+   this actor is permitted, and a handler is declared. It does not mean
+   the sentence has been run end to end against a database. What has is
+   in `check:acceptance` and `check:postgres`, with their own
+   denominators. */
+console.log(`  ${tally.executable + tally.asks}/${WRITES.length} read by it, counting the ${tally.asks} it answers with a question.\n`);

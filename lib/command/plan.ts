@@ -380,6 +380,29 @@ function planOneClause(
   text: string,
   opts?: PlanOptions,
 ): CommandPlanning | null {
+  /* A COMPLETE READING BEATS AN INCOMPLETE ONE, WHOEVER PRODUCED IT.
+
+     A reader can now come back with "I know what this is and it is
+     short of a value": "create a LinkedIn post" is `post.create`
+     without its content, "add another site to this customer" is
+     `contact.addAddress` without its address. That is a far better
+     answer than the readers below would give, and it is not better than
+     a reading with nothing missing at all.
+
+     "Add a note to this site" has an operation's verb and an
+     operation's object word in it and is a field write. So an
+     incomplete reading is held rather than returned, the readers under
+     it get their turn, and the held one comes back only if none of them
+     read the whole sentence. Order stays exactly as it was for every
+     sentence that was complete before. */
+  let waiting: CommandPlanning | null = null;
+  const settled = (p: CommandPlanning | null): CommandPlanning | null => {
+    if (!p) return null;
+    if (p.completion.kind !== 'incomplete') return p;
+    waiting ??= p;
+    return null;
+  };
+
   /* A DECLARED OPERATION IS THE MOST SPECIFIC READING THERE IS.
 
      It takes a verb, a word saying WHICH operation, and records it can
@@ -398,7 +421,7 @@ function planOneClause(
      depot is open Saturday"" contains the word depot, and the operation
      reader read it as adding a site to a customer called "is open
      Saturday". Content in quotes belongs to whatever asked for it. */
-  const written = readPost(text, opts);
+  const written = settled(readPost(text, opts));
   if (written) return written;
 
   /* SHARING A LIST SOMEBODY NAMED IS NOT A DESTINATION CLAUSE.
@@ -418,10 +441,10 @@ function planOneClause(
      the only reader here whose sentence reaches somebody else's paid
      service, which is why it insists on a place rather than filling one
      in the way the screen does. */
-  const finding = readFinder(text, opts);
+  const finding = settled(readFinder(text, opts));
   if (finding) return finding;
 
-  const operation = readOperation(text, opts);
+  const operation = settled(readOperation(text, opts));
   if (operation) return operation;
 
   /* SENDING IS AN INSTRUCTION TOO, AND IT IS THE ONE THAT WAS MEANT.
@@ -528,7 +551,7 @@ function planOneClause(
 
   const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary)
     ?? (pointedEntity ? parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary) : null);
-  if (!read) return null;
+  if (!read) return waiting;
 
   const { plan, select } = adaptQueryPlan(read);
 
@@ -660,13 +683,21 @@ function planOneClause(
     if (named) return named;
   }
 
+  /* And the question reader's own answer, unless something above read
+     the sentence better. A held reading is an operation that was
+     understood and is short of a value; this is a set of rows with
+     words in the sentence it could not account for. The question was
+     the fallback all along. */
+  const asQuestion = completion(plan);
+  if (waiting && asQuestion.kind !== 'complete') return waiting;
+
   return {
     text,
     kind: sends ? 'mutate' : 'read',
     plan,
     select,
     problems: validate(plan),
-    completion: completion(plan),
+    completion: asQuestion,
     requirements: derivedRequirements(plan),
     permissions: [...new Set(
       derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
@@ -904,9 +935,13 @@ function readPost(
  * The slot reader is the one the finder screen's own suggestions use,
  * so a sentence means the same thing whether it opens the screen or
  * runs the search. What is different here is the place: the screen
- * fills a missing one in with Hyde so it opens somewhere, and running
- * a paid search on a place nobody named would charge for an answer
- * nobody asked for. A sentence that named none is left to the screen.
+ * fills a missing one in with Hyde so it opens somewhere, and
+ * searching a place nobody named would answer a question nobody
+ * asked against a shared daily quota.
+ *
+ * So a sentence that named none is planned without one and comes back
+ * asking where. It is understood; it is short of a value; nothing runs
+ * and nothing is guessed.
  */
 function readFinder(
   text: string,
@@ -920,18 +955,37 @@ function readFinder(
   if (!caps.has(cap.requires as never)) return null;
 
   const read = parseFinder(text, caps);
-  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
-  /* No place, no search. See above. */
-  if (!read.slots.place) return null;
+  if (!read) return null;
 
-  const place = placeIn(read.slots.place.value);
-  if (!place) return null;
+  const place = read.slots.place ? placeIn(read.slots.place.value) : null;
+
+  /* WHAT THE THRESHOLD IS FOR, AND WHAT IT IS NOT FOR.
+
+     It separates an instruction from a browse, because a browse that
+     ran would search a place nobody named against a shared daily
+     quota. A sentence that named a place is one or the other and still
+     has to clear it.
+
+     A sentence that named none cannot run at all now: the plan comes
+     back short of a required input, which is a question, and a
+     question costs nothing. So what it has to clear instead is that it
+     was addressed to the finder rather than typed at it. A find verb
+     is what says so: "find waste companies" is an instruction missing
+     its where, and "waste companies" on its own is somebody starting
+     to type. */
+  if (place) {
+    if (read.confidence < INSTRUCTION_THRESHOLD) return null;
+  } else if (!read.said) {
+    return null;
+  }
 
   const args: Record<string, Expr> = {
-    place: { kind: 'literal', value: place.said },
-    city: { kind: 'literal', value: place.city },
     count: { kind: 'literal', value: read.limit },
   };
+  if (place) {
+    args.place = { kind: 'literal', value: place.said };
+    args.city = { kind: 'literal', value: place.city };
+  }
   if (read.slots.radius != null) args.radius = { kind: 'literal', value: read.slots.radius };
   if (read.slots.industry) {
     args.industry = { kind: 'literal', value: read.slots.industry.id };
@@ -967,7 +1021,10 @@ function readFinder(
     confirm: needsConfirmation(plan),
     availability: availabilityOf(plan, opts.actorCapabilities),
     presentation: {
-      summary: `${read.summary}${list ? `, onto the ${list} list` : ''}`,
+      summary: place
+        ? `${read.summary}${list ? `, onto the ${list} list` : ''}`
+        : `Find ${read.limit} ${read.slots.industry
+          ? read.slots.industry.label.toLowerCase() : 'companies'}`,
       confidence: read.confidence,
       amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
     },

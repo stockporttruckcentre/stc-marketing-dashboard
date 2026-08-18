@@ -205,8 +205,38 @@ export type CapabilityInput = {
   kind: ColumnKind;
   /** Refuse rather than run without it. */
   required: boolean;
+  /**
+   * The question to put when a sentence did not carry it.
+   *
+   * Only where the generic one would be wrong. "Which address" and
+   * "what is the address" are both about an address, and asking
+   * somebody making one the main address to type it out is not the
+   * question: they are choosing between the ones already there.
+   */
+  ask?: string;
+  /**
+   * How an answer goes back into the sentence.
+   *
+   * `%s` is what they typed. The answer to "what should it say" is not
+   * a field the browser posts: it is added to the raw command text and
+   * the server plans the whole thing again, which is what keeps one
+   * authority over what a sentence means. Absent means the answer is
+   * appended as it stands, which is right for anything the reader finds
+   * by shape rather than by position.
+   */
+  fills?: string;
   /** A column on the operated entity that supplies it when it is there. */
   from?: string;
+  /**
+   * Another input this one is worked out from.
+   *
+   * `city` is what `place` means to Lusha, which the reader derives
+   * from the place somebody named. It is required, and it is never a
+   * question of its own: asking "where should I search" twice, once in
+   * their words and once in Lusha's, would be nonsense. Supplying the
+   * input it is derived from supplies it.
+   */
+  derivedFrom?: string;
 };
 
 export type CapabilityDef = {
@@ -845,7 +875,10 @@ export const CAPABILITIES: CapabilityDef[] = [
     idempotent: false,
     handler: 'supabase/migrations/029_customer_details.sql',
     inputs: [
-      { key: 'address', label: 'the address', kind: 'text', required: true },
+      {
+        key: 'address', label: 'the address', kind: 'text', required: true,
+        fills: 'at %s',
+      },
       { key: 'label', label: 'what the site is called', kind: 'text', required: false },
       { key: 'primary', label: 'whether it is the main one', kind: 'bool', required: false },
     ],
@@ -862,7 +895,10 @@ export const CAPABILITIES: CapabilityDef[] = [
     idempotent: true,
     handler: 'supabase/migrations/029_customer_details.sql',
     inputs: [
-      { key: 'address', label: 'which address', kind: 'text', required: true },
+      {
+        key: 'address', label: 'which address', kind: 'text', required: true,
+        ask: 'Which address should be the main one?',
+      },
     ],
   },
   {
@@ -877,7 +913,10 @@ export const CAPABILITIES: CapabilityDef[] = [
     idempotent: false,
     handler: 'supabase/migrations/029_customer_details.sql',
     inputs: [
-      { key: 'url', label: 'the address', kind: 'text', required: true },
+      {
+        key: 'url', label: 'the address', kind: 'text', required: true,
+        ask: 'What is the web address?',
+      },
       { key: 'label', label: 'what to call it', kind: 'text', required: false },
     ],
   },
@@ -966,8 +1005,11 @@ export const CAPABILITIES: CapabilityDef[] = [
        spreadsheet uses. */
     prepares: 'crm.findCompanies',
     inputs: [
-      { key: 'place', label: 'where to look', kind: 'text', required: true },
-      { key: 'city', label: 'where to look', kind: 'text', required: true },
+      {
+        key: 'place', label: 'where to look', kind: 'text', required: true,
+        fills: 'near %s',
+      },
+      { key: 'city', label: 'where to look', kind: 'text', required: true, derivedFrom: 'place' },
       { key: 'count', label: 'how many', kind: 'number', required: false },
       { key: 'radius', label: 'how far', kind: 'number', required: false },
       { key: 'industry', label: 'what kind', kind: 'number', required: false },
@@ -1038,7 +1080,10 @@ export const CAPABILITIES: CapabilityDef[] = [
     idempotent: false,
     handler: 'supabase/migrations/022_command_social_posts.sql',
     inputs: [
-      { key: 'content', label: 'what the post says', kind: 'longtext', required: true },
+      {
+        key: 'content', label: 'what the post says', kind: 'longtext', required: true,
+        fills: 'saying "%s"',
+      },
       /* Comma separated, because a plan's literals are single values and
          a post goes out on several platforms. The composer's own
          default applies when the sentence names none. */

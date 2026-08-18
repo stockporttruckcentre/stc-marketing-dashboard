@@ -47,15 +47,29 @@ export const BACK_WORDS = [
 ] as const;
 
 /**
+ * Whose. The record the thing belongs to.
+ *
+ * "Their main address", "its owner", "his account". A possessive is the
+ * same act of pointing as "this", in another grammatical position, and
+ * what it points at is the record in front of you: "make this address
+ * their main address" says which customer without naming one.
+ *
+ * One record and never a selection, because a possessive says whose and
+ * a set of forty ticked rows has no single whose. "My" and "our" are
+ * deliberately absent: those point at the person typing, which is a
+ * different fact and one the ownership reader deals with.
+ */
+export const OWNED_WORDS = ['their', 'its', 'his', 'her'] as const;
+
+/**
  * Every single word that points at something rather than naming it.
  *
- * Derived from the three groups plus the possessives, which are the same
- * act of pointing in another grammatical position: "their LinkedIn
- * profile" is about a record that already exists. Used where the
- * question is only "is this a name or a reference", which is what the
- * create reader asks.
+ * Derived from the groups above plus the remaining possessives, which
+ * are the same act of pointing again: "their LinkedIn profile" is about
+ * a record that already exists. Used where the question is only "is
+ * this a name or a reference", which is what the create reader asks.
  */
 export const POINTING_WORDS: ReadonlySet<string> = new Set([
-  ...ONE_WORDS, ...MANY_WORDS, ...BACK_WORDS,
-  'their', 'theirs', 'his', 'hers', 'my', 'mine', 'our', 'ours', 'your', 'yours',
+  ...ONE_WORDS, ...MANY_WORDS, ...BACK_WORDS, ...OWNED_WORDS,
+  'theirs', 'hers', 'my', 'mine', 'our', 'ours', 'your', 'yours',
 ].flatMap((phrase) => phrase.split(/\s+/)));

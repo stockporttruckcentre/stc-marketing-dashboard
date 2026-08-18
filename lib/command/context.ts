@@ -25,7 +25,7 @@
    ============================================================= */
 import type { Cardinality, Cond, Expr } from './ir/types';
 import { ENTITIES } from './schema';
-import { MANY_WORDS, ONE_WORDS } from './pointing';
+import { MANY_WORDS, ONE_WORDS, OWNED_WORDS } from './pointing';
 
 /**
  * What the screen has, sent with the sentence.
@@ -89,6 +89,7 @@ export const EMPTY_CONTEXT: CommandContext = {};
    something. */
 const THIS_WORDS: readonly string[] = ONE_WORDS;
 const THESE_WORDS: readonly string[] = MANY_WORDS;
+const WHOSE_WORDS: readonly string[] = OWNED_WORDS;
 
 const soften = (s: string) =>
   ` ${s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -146,6 +147,22 @@ export function readContextReference(text: string): ContextReference | null {
       }
     }
   }
+
+  /* WHOSE IS POINTING TOO.
+
+     "Make this address their main address" names no customer and is
+     not ambiguous about which one: it is the one open in front of
+     them. A possessive needs no noun after it, because the thing
+     possessed is what the rest of the sentence is about and the
+     possessor is always the record on screen.
+
+     One record. `resolveContext` reads a record reference from the
+     open record and from nothing else, so a screen with only a
+     selection on it resolves this to nothing rather than to forty
+     customers. */
+  const whose = WHOSE_WORDS.find((w) => t.includes(` ${w} `));
+  if (whose) return { kind: 'record', words: whose, expect: 'one' };
+
   return null;
 }
 

@@ -35,6 +35,7 @@ import { planCommand, type CommandPlanning } from '../plan';
 import type { VocabularySource } from './vocabulary';
 import type { CommandContext } from '../context';
 import type { Plan } from '../ir/types';
+import type { MissingInput } from '../ir/validate';
 
 /* -------------------------------------------------------------
    Hashing a meaning
@@ -85,9 +86,18 @@ export type PlannedMeaning = {
   runnable: boolean;
   /** A preview and an explicit yes first. */
   confirm: boolean;
-  completion: 'complete' | 'partial' | 'refused';
+  completion: 'complete' | 'partial' | 'refused' | 'incomplete';
   /** Parts of the request that went unread. Shown, never swallowed. */
   unresolved: string[];
+  /**
+   * Required values the sentence did not carry, as questions.
+   *
+   * Present only when `completion` is `incomplete`. Nothing runs in
+   * that state: the answer completes the raw sentence and the server
+   * plans the whole thing again, so the browser never becomes the
+   * authority on what was meant.
+   */
+  missing: MissingInput[];
   /** Why it is not runnable, when it is not. */
   blocked: string[];
   availability: {
@@ -166,13 +176,24 @@ export async function planAuthoritatively(req: PlanRequest): Promise<Planned | n
       summary: planning.presentation.summary,
       /* Every gate, in one boolean, decided here rather than in each
          caller's own idea of what "can I run this" means. */
+      /* An incomplete command never runs. It is a question. */
       runnable: availability.representable
         && availability.permitted === true
         && availability.executable
-        && completion.kind !== 'refused',
+        && completion.kind !== 'refused'
+        && completion.kind !== 'incomplete',
       confirm: planning.confirm,
       completion: completion.kind,
       unresolved: completion.kind === 'partial' ? completion.unresolved : [],
+      /* WHAT IT STILL NEEDS, AS A QUESTION.
+
+         Understood and short of a value is a different state from not
+         understood, and it has a different answer: "create a LinkedIn
+         post" is not a sentence nobody can read, it is one waiting for
+         its content. Deterministic, from the capability's own declared
+         inputs, so a reader cannot forget to ask and nothing is
+         guessed. */
+      missing: completion.kind === 'incomplete' ? completion.missing : [],
       blocked,
       availability: {
         representable: availability.representable,

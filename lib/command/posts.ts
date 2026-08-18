@@ -111,30 +111,36 @@ export function parsePost(
   if (!cap?.requires || !cap.handler) return null;
   if (caps && !caps.has(cap.requires)) return null;
 
-  /* NO CONTENT MEANS THE COMPOSER, AND THAT IS THE RIGHT ANSWER.
+  /* NO CONTENT IS A QUESTION, NOT A FAILURE TO UNDERSTAND.
 
-     "Create a social post about the Haydock depot" names a topic. A
-     draft whose text is the topic is worse than no draft, so this
-     declines and the action registry opens the composer. */
+     "Create a LinkedIn post" is read perfectly: the operation is
+     `post.create` and the only thing missing is what it should say.
+     This used to decline and let the action registry open the composer,
+     which is a reasonable answer and is not the one somebody typing a
+     sentence asked for.
+
+     So the step is produced without its content. `completion` sees a
+     required input nobody supplied, the meaning comes back as
+     `incomplete` with the question to put, and nothing runs until it is
+     answered. The composer is still there for what the words genuinely
+     cannot carry: an image, a crop, a preview on four platforms. */
   const content = contentIn(text);
-  if (!content) return null;
 
   const platforms = platformsIn(text);
 
   /* A date the sentence gave, read off the part that is not the post.
      Without taking the content out, "saying the yard is open on the
      14th" would schedule the post for the fourteenth. */
-  const outside = text.replace(content, ' ');
+  const outside = content ? text.replace(content, ' ') : text;
   const when = readDate(outside, now);
 
-  const args: Record<string, Expr> = {
-    content: { kind: 'literal', value: content },
-  };
+  const args: Record<string, Expr> = {};
+  if (content) args.content = { kind: 'literal', value: content };
   if (platforms.length) args.platform = { kind: 'literal', value: platforms.join(',') };
   if (when) args.scheduledDate = { kind: 'literal', value: when.value };
 
   const where = platforms.length ? platforms.join(' and ') : 'Facebook and LinkedIn';
-  const shown = content.length > 60 ? `${content.slice(0, 57)}...` : content;
+  const shown = !content ? '' : content.length > 60 ? `${content.slice(0, 57)}...` : content;
 
   return {
     step: {
@@ -144,7 +150,9 @@ export function parsePost(
       args,
       produces: { kind: 'record', entity: 'posts' },
     },
-    summary: `Write a ${where} post saying "${shown}"${when ? ` for ${when.raw}` : ''}`,
+    summary: content
+      ? `Write a ${where} post saying "${shown}"${when ? ` for ${when.raw}` : ''}`
+      : `Write a ${where} post${when ? ` for ${when.raw}` : ''}`,
     requires: cap.requires,
     confidence: 13,
   };

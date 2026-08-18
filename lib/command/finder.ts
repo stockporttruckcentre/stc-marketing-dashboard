@@ -45,6 +45,16 @@ export type FinderPlan = {
    * search on that would spend a credit on a place nobody asked about.
    */
   slots: Slots;
+  /**
+   * Whether the sentence actually carried a find verb.
+   *
+   * "Waste companies" and "find waste companies" read the same slots
+   * and are not the same request: one is somebody browsing, the other
+   * is an instruction short of a place. The verb is what separates
+   * them, and `verb` below cannot: it falls back to "find" so the
+   * summary reads properly.
+   */
+  said: boolean;
   confidence: number;
 };
 
@@ -106,10 +116,12 @@ export function parseFinder(input: string, caps?: CrmCapabilities): FinderPlan |
      not ask to spend. */
   if (!slots.place && !slots.industry && !slots.radius) return null;
 
-  return build(slots, verb ?? 'find', caps);
+  return build(slots, verb ?? 'find', caps, verb != null);
 }
 
-function build(slots: Slots, verb: string, _caps?: CrmCapabilities): FinderPlan {
+function build(
+  slots: Slots, verb: string, _caps?: CrmCapabilities, said = true,
+): FinderPlan {
   const filled: string[] = [];
   const assumed: string[] = [];
 
@@ -156,13 +168,16 @@ function build(slots: Slots, verb: string, _caps?: CrmCapabilities): FinderPlan 
   if (slots.count) confidence += 2;
   if (slots.radius) confidence += 2;
   if (slots.employees) confidence += 2;
-  if (FIND_VERBS.includes(verb)) confidence += 1;
+  /* `verb` falls back to "find" for the summary's sake, so testing it
+     against the list gave this point to every sentence including the
+     ones that named no verb at all. `said` is the honest question. */
+  if (said) confidence += 1;
 
   return {
     location, radiusMiles, industryIds, minEmployees, maxEmployees, limit,
     summary,
     href: `/dashboard/finder?${params.toString()}`,
-    filled, assumed, slots, confidence,
+    filled, assumed, slots, said, confidence,
   };
 }
 

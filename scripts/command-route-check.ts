@@ -362,6 +362,118 @@ test('the apply route will not delete a set without the count', async () => {
     String(db.tables.crm_contacts.length));
 });
 
+/* =============================================================
+   8. A sentence that was understood and left something out
+   ============================================================= */
+
+/**
+ * The clarification loop, over HTTP, exactly as the bar drives it.
+ *
+ * `completedWith` is the bar's own function, not a copy: the answer is
+ * put back into the RAW TEXT and the whole sentence is planned again.
+ * If this ever diverges from what the browser does, it diverges in one
+ * place rather than two.
+ */
+test('a post with nothing to say is a question, and the answer completes the sentence', async () => {
+  const db = fakeDb({ social_posts: [] });
+  serve(db);
+
+  const plan = await import('../app/api/command/plan/route');
+  const { completedWith } = await import('../lib/command/ir/validate');
+
+  const text = 'create a new LinkedIn post';
+  const asked = await (await plan.POST(post('http://x/api/command/plan', {
+    text, preview: true,
+  }) as never)).json() as {
+    ok: boolean; understood: boolean; runnable: boolean; completion: string;
+    missing: { key: string; ask: string; fills: string }[];
+    preview: unknown;
+  };
+
+  ok('it is understood', asked.understood === true, JSON.stringify(asked).slice(0, 200));
+  ok('and reported incomplete rather than refused', asked.completion === 'incomplete', asked.completion);
+  ok('it will not run', asked.runnable === false, String(asked.runnable));
+  ok('it asks what the post should say',
+    asked.missing?.[0]?.ask === 'What should it say?', JSON.stringify(asked.missing));
+  ok('and nothing at all was written', db.writes.length === 0, JSON.stringify(db.writes).slice(0, 160));
+
+  /* What the bar does with the answer. */
+  const said = completedWith(text, asked.missing[0] as never, 'Depot open Saturday');
+  ok('the answer went into the sentence',
+    said === 'create a new LinkedIn post saying "Depot open Saturday"', said);
+
+  const whole = await (await plan.POST(post('http://x/api/command/plan', {
+    text: said, preview: true,
+  }) as never)).json() as {
+    hash: string; runnable: boolean; completion: string;
+    preview: { ok: boolean; programmeHash: string };
+  };
+
+  ok('the completed sentence is whole', whole.completion === 'complete', whole.completion);
+  ok('and runnable', whole.runnable === true, String(whole.runnable));
+  ok('with a preview', whole.preview?.ok === true, JSON.stringify(whole.preview).slice(0, 200));
+  ok('and still nothing written', db.writes.length === 0, JSON.stringify(db.writes).slice(0, 160));
+
+  const apply = await import('../app/api/command/apply/route');
+  const done = await (await apply.POST(post('http://x/api/command/apply', {
+    text: said,
+    planHash: whole.hash,
+    programmeHash: whole.preview.programmeHash,
+    confirm: true,
+  }) as never)).json() as { ok: boolean; message?: string };
+
+  ok('confirming writes the post', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('and the post is there with what they said',
+    (db.tables.social_posts ?? []).some((r) => String(r.content) === 'Depot open Saturday'),
+    JSON.stringify(db.tables.social_posts).slice(0, 200));
+});
+
+test('a search with no place asks where, and reaches no provider', async () => {
+  const db = fakeDb({ crm_contacts: fleets() });
+  serve(db);
+
+  const { FINDER } = await import('../lib/crm/finder');
+  const { LUSHA_GATE } = await import('../lib/crm/permissions');
+  const real = FINDER.search;
+  const wasLocked = LUSHA_GATE.locked;
+  let calls = 0;
+  /* Unlocked deliberately: a refusal because the whole surface is
+     switched off would prove nothing about the sentence. */
+  LUSHA_GATE.locked = false;
+  FINDER.search = async () => { calls += 1; return []; };
+
+  try {
+    /* The gate holds the actor's capabilities, and they are computed
+       once at `serve`. With the lock lifted, this is the role that
+       would hold `crm.enrich`. */
+    gate = {
+      supabase: db.supabase,
+      user: { id: 'u1' },
+      caps: new Set([...(gate?.caps ?? []), 'crm.enrich']) as unknown as Set<string>,
+      fullName: 'Alex Ellis',
+    };
+
+    const plan = await import('../app/api/command/plan/route');
+    const asked = await (await plan.POST(post('http://x/api/command/plan', {
+      text: 'find waste companies', preview: true,
+    }) as never)).json() as {
+      understood: boolean; runnable: boolean; completion: string;
+      missing: { key: string; ask: string }[];
+    };
+
+    ok('it is understood', asked.understood === true, JSON.stringify(asked).slice(0, 200));
+    ok('and incomplete', asked.completion === 'incomplete', asked.completion);
+    ok('it asks where to search',
+      asked.missing?.[0]?.ask === 'Where should I search?', JSON.stringify(asked.missing));
+    ok('it will not run', asked.runnable === false, String(asked.runnable));
+    ok('and no search was made', calls === 0, String(calls));
+    ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes).slice(0, 160));
+  } finally {
+    FINDER.search = real;
+    LUSHA_GATE.locked = wasLocked;
+  }
+});
+
 /* ============================================================= */
 
 async function main() {

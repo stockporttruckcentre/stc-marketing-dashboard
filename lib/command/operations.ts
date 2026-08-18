@@ -296,7 +296,9 @@ function urlIn(raw: string): string | null {
   return url.length >= 4 ? url : null;
 }
 
-function tailOf(raw: string, after: string[], named: string | null): string | null {
+function tailOf(
+  raw: string, after: string[], named: string | null, pointed?: string | null,
+): string | null {
   let best: string | null = null;
   for (const word of after) {
     const at = raw.toLowerCase().lastIndexOf(word);
@@ -309,9 +311,18 @@ function tailOf(raw: string, after: string[], named: string | null): string | nu
   if (!best) return null;
 
   let out = best;
-  if (named) {
-    out = out.replace(new RegExp(named.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');
-  }
+  const drop = (phrase: string) => {
+    out = out.replace(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');
+  };
+  if (named) drop(named);
+  /* AND THE WORDS THAT POINTED AT IT.
+
+     "Add another site to this customer" put "this customer" in the
+     address, so the sentence looked complete and was about to file the
+     words somebody used to point at a record as the address of a new
+     one. A pointing phrase names the record exactly as a company name
+     does, and comes out for the same reason. */
+  if (pointed) drop(pointed);
   out = out.replace(/^\s*(?:for|on|to|of|at|is|as|:|,|and)\s*/i, ' ')
     .replace(/\s+/g, ' ')
     .replace(/[.,;]+$/, '')
@@ -378,12 +389,27 @@ export function parseOperation(
        that named the operation, with the customer's own name removed so
        "add a site to Dawson Group at 4 Ashton Road" does not file the
        company name as part of the address. */
+    /* A VALUE NOBODY TYPED IS A QUESTION, NOT A SENTENCE NOBODY CAN
+       READ.
+
+       "Add their LinkedIn profile to this account" says which
+       operation, which record and which kind of link. The only thing
+       absent is the address itself. This used to give up on the whole
+       sentence, so the bar answered a perfectly clear instruction with
+       "I could not tell what you meant", and the person who typed it
+       had no idea what to add.
+
+       So the step is produced without the input. The capability
+       declares it required, `completion` sees it missing, and the
+       meaning comes back as a question with nothing running behind it.
+       `planOneClause` holds that reading in case a later one reads the
+       whole sentence, which is what keeps "add a note to this site" a
+       field write. */
     if (op.tail) {
       const said = op.tail.kind === 'url'
         ? urlIn(raw)
-        : tailOf(raw, op.tail.after, named);
-      if (!said) continue;
-      args[op.tail.key] = { kind: 'literal', value: said };
+        : tailOf(raw, op.tail.after, named, points?.words ?? null);
+      if (said) args[op.tail.key] = { kind: 'literal', value: said };
     }
     if (op.argument) {
       const said = op.argument.values

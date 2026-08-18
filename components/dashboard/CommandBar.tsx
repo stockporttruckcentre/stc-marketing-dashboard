@@ -11,6 +11,7 @@ import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
+import { completedWith, type MissingInput } from '@/lib/command/ir/validate';
 import type { MutationPreview } from '@/lib/command/server/mutation';
 import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
 import {
@@ -56,7 +57,7 @@ const OPEN_RECORD: [string, string][] = [
   ['event', 'meetings'],
 ];
 
-type Stage = 'idle' | 'running' | 'done' | 'answered' | 'confirming';
+type Stage = 'idle' | 'running' | 'done' | 'answered' | 'confirming' | 'asking';
 
 /**
  * What the server says a write is about to do, before it does it.
@@ -476,6 +477,16 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
   /* Said out loud rather than left for the answer to imply. */
   const partial = meaning?.unresolved ?? [];
+
+  /**
+   * What the sentence still needs, as questions.
+   *
+   * The server's, from the capability's own declared inputs. The bar
+   * neither invents a question nor decides an answer: it puts the
+   * question, and puts the answer back into the sentence.
+   */
+  const asking: MissingInput[] = (meaning?.completion === 'incomplete'
+    ? meaning.missing ?? [] : []);
   const [answered, setAnswered] = useState<any | null>(null);
   const [editPreview, setEditPreview] = useState<MutationPreview | null>(null);
   const [cursor, setCursor] = useState(-1);
@@ -650,11 +661,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * and a bar that queries the database for every letter typed is a bar
    * somebody turns off.
    */
-  async function previewInstruction() {
+  async function previewInstruction(said: string = text) {
     setStage('running');
     const res = await fetch('/api/command/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, preview: true, context }),
+      body: JSON.stringify({ text: said, preview: true, context }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
 
     if (!res?.ok || !res.understood) {
@@ -664,6 +675,17 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     }
 
     setMeaning(res as ServerMeaning);
+
+    /* STILL SHORT OF SOMETHING, SO ASK AGAIN.
+
+       A sentence can be missing two things, and answering one of them
+       leaves the other. The server decides that, from the same
+       capability inputs it decided the first question from, and this
+       loops until it says the sentence is whole. */
+    if (res.completion === 'incomplete' && (res.missing ?? []).length) {
+      setStage('asking');
+      return;
+    }
     const p = res.preview as MutationPreview | null;
 
     if (!p) {
@@ -682,6 +704,23 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
     setEditPreview(p);
     setStage('confirming');
+  }
+
+  /**
+   * The answer to what it asked, put back into the sentence.
+   *
+   * Not posted as a field and a value. The raw text stays the one
+   * authority on what was meant: the answer is added to it in the
+   * words the capability declares, and the server plans the whole
+   * sentence again from scratch. That is the same path the first
+   * press of Enter took, so there is no second way in.
+   */
+  function answerAsked(m: MissingInput, said: string) {
+    const clean = said.trim();
+    if (!clean) return;
+    const completed = completedWith(text, m, clean);
+    setText(completed);
+    previewInstruction(completed);
   }
 
   /**
@@ -761,6 +800,15 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   }
 
   async function submit() {
+    /* UNDERSTOOD AND SHORT OF A VALUE IS A QUESTION, NOT A FAILURE.
+
+       "Create a LinkedIn post" is read perfectly and has no content on
+       it. The server says which value is missing and what to ask, and
+       the answer is added to the sentence rather than posted as a
+       field: what runs is the raw text, planned again from the
+       beginning. Nothing is written on this path. */
+    if (asking.length) { setStage('asking'); return; }
+
     /* An instruction first. "Add £1k refurb to STC143980" is not a
        question about trailers, however much it reads like one. Which it
        is was decided by the server, not here. */
@@ -793,7 +841,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const hasPanel =
     (stage === 'idle' && text.trim().length >= 2) ||
     stage === 'running' || stage === 'done' || stage === 'answered' ||
-    stage === 'confirming';
+    stage === 'confirming' || stage === 'asking';
 
   return (
     <div className="kit" style={{
@@ -1012,6 +1060,16 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           />
         )}
 
+        {/* understood, and short of something only they can supply */}
+        {stage === 'asking' && asking.length > 0 && (
+          <Asking
+            missing={asking[0]}
+            summary={meaning?.summary ?? 'That'}
+            onAnswer={(said) => answerAsked(asking[0], said)}
+            onCancel={reset}
+          />
+        )}
+
         {/* what it is about to change, before it changes it */}
         {stage === 'confirming' && (
           <EditConfirm
@@ -1152,6 +1210,16 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
             answered={answered}
             onGo={(href) => router.push(href)}
             onReset={reset}
+          />
+        )}
+
+        {/* understood, and short of something only they can supply */}
+        {stage === 'asking' && asking.length > 0 && (
+          <Asking
+            missing={asking[0]}
+            summary={meaning?.summary ?? 'That'}
+            onAnswer={(said) => answerAsked(asking[0], said)}
+            onCancel={reset}
           />
         )}
 
@@ -1355,6 +1423,74 @@ function Answer({ answered, onGo, onReset }: {
    whole path exists to keep on the server. What it does instead is show
    what matched, so the next sentence can name one of them.
    ============================================================= */
+/* =============================================================
+   The question, when a sentence was understood and left something out.
+
+   "Create a LinkedIn post" is not a sentence nobody can read. It is
+   `post.create` waiting for its content, and the old answer, "I could
+   not tell what you wanted there", taught somebody the bar could not do
+   a thing it does.
+
+   WHAT THIS DOES NOT DO.
+
+   Send a field and a value. The answer is added to the raw sentence in
+   the words the capability declares, and the server plans the whole
+   thing again from that text. The browser stays a place where a
+   sentence is typed and a reading is shown, which is what stops a
+   second authority on meaning growing here.
+
+   Nothing has been written when this is on screen, and nothing is
+   written by answering: the completed sentence goes through the same
+   preview and the same confirmation as the first one.
+   ============================================================= */
+function Asking({ missing, summary, onAnswer, onCancel }: {
+  missing: MissingInput;
+  summary: string;
+  onAnswer: (said: string) => void;
+  onCancel: () => void;
+}) {
+  const [said, setSaid] = useState('');
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); }, [missing.key]);
+
+  return (
+    <div style={{
+      borderTop: '1px solid var(--border)', padding: 14,
+      borderLeft: '2px solid var(--accent)',
+    }}>
+      <Label>{summary}</Label>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', margin: '6px 0 2px' }}>
+        {missing.ask}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 9 }}>
+        Nothing has been done yet. This is added to what you typed.
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          ref={ref}
+          value={said}
+          onChange={(e) => setSaid(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && said.trim()) { e.preventDefault(); onAnswer(said); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          }}
+          placeholder={missing.label}
+          style={{
+            flex: 1, minWidth: 0, height: 32, padding: '0 10px',
+            border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+            background: 'var(--bg)', color: 'var(--text)',
+            fontSize: 13, fontFamily: 'var(--inter)',
+          }}
+        />
+        <Button variant="primary" size="sm" disabled={!said.trim()} onClick={() => onAnswer(said)}>
+          Carry on <ArrowRight size={12} />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
 function EditConfirm({ preview, summary, onApply, onCancel }: {
   preview: MutationPreview | null;
   summary: string;
