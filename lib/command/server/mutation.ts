@@ -35,6 +35,7 @@
 
    Either one returns a fresh preview and writes nothing.
    ============================================================= */
+import { createHash } from 'crypto';
 import type { CommandPlanning } from '../plan';
 import { planAuthoritatively, planForExecution, planHash, type Planned, type PlanRequest } from './planner';
 import { resolveProgramme, executeProgramme, deliverySteps, type Programme } from '../ir/orchestrate';
@@ -174,6 +175,25 @@ export type MutationPreview =
 
 /** How many rows to describe individually before summarising. */
 export const SAMPLE_SIZE = 8;
+
+/**
+ * The programme hash, plus whatever an operation outside the database
+ * decided.
+ *
+ * A resolved programme covers every row and value the DATABASE part of
+ * the command touches. It cannot cover which rows of a spreadsheet turned
+ * out to be duplicates of records already here, because that is not in
+ * the plan and is not in the resolution either: it is what a preparer
+ * worked out. Folding it in here means the confirmation compares the
+ * whole decision rather than the half of it the plan can see.
+ */
+function withPreparation(hash: string, prepared: string[]): string {
+  if (!prepared.length) return hash;
+  return createHash('sha256')
+    .update([hash, ...prepared].join('\n'))
+    .digest('hex')
+    .slice(0, 32);
+}
 
 /* -------------------------------------------------------------
    Reading the plan back into words
@@ -325,6 +345,9 @@ export async function previewMutation(
   const fields = changedFields(planning.plan);
   const rows: RowChange[] = [];
   const operations: OperationPreview[] = [];
+  /* What each operation outside the database decided, so the programme
+     hash covers it. */
+  const prepared: string[] = [];
 
   for (const unit of programme.units) {
     if (unit.kind === 'invoke') {
@@ -345,13 +368,14 @@ export async function previewMutation(
           };
         }
         const description = await preparer.describe({
-          subjects: unit.plan.subjects, args: unit.plan.args, context,
+          subjects: unit.plan.subjects, args: unit.plan.args, context, store,
         });
         if (!description.ok) {
           return { ok: false, reason: 'cannot execute', why: description.why };
         }
         said = description.says;
         makes = description.count;
+        prepared.push(description.fingerprint);
       }
 
       operations.push({
@@ -398,7 +422,7 @@ export async function previewMutation(
     operations,
     deliveries: deliveries(planning.plan),
     severity: planning.plan.steps.some((s) => s.op === 'delete') ? 'destructive' : 'ordinary',
-    programmeHash: programme.hash,
+    programmeHash: withPreparation(programme.hash, prepared),
   };
 }
 
@@ -595,6 +619,7 @@ export async function applyMutation(
      the transaction writes. */
   const outsideWork: TransactionStep[] = [];
   const outsideSaid: string[] = [];
+  const outsidePrepared: string[] = [];
 
   if (resolved?.ok) {
     for (const unit of resolved.units) {
@@ -611,8 +636,26 @@ export async function applyMutation(
         };
       }
 
+      /* THE PREPARATION IS AGREED TO AS WELL AS THE PROGRAMME.
+
+         An import's answer depends on what is in the CRM right now: a
+         customer that arrived since the preview turns a new record into
+         a duplicate, and a list renamed or replaced sends the rows
+         somewhere else. Neither is in the plan and neither is in the
+         resolution, so the preview folded the preparation's own
+         fingerprint into the hash and this rebuilds it and compares.
+         Previewing a hundred and importing ninety nine is the thing
+         this stops. */
+      const now = await preparer.describe({
+        subjects: unit.plan.subjects, args: unit.plan.args,
+        context: req.context ?? {}, store: req.store,
+      });
+      if (!now.ok) return { ok: false, reason: 'refused', why: now.why };
+      outsidePrepared.push(now.fingerprint);
+
       const ready = await preparer.run({
-        subjects: unit.plan.subjects, args: unit.plan.args, context: req.context ?? {},
+        subjects: unit.plan.subjects, args: unit.plan.args,
+        context: req.context ?? {}, store: req.store,
       });
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
@@ -663,11 +706,31 @@ export async function applyMutation(
     prepared.push(ready.prepared);
   }
 
+  /* What the confirmation agreed to, against what the preparation just
+     decided. The programme's own hash is checked by `executeProgramme`
+     against its own fresh resolution, so only the preparation half is
+     compared here. */
+  if (outsidePrepared.length && resolved?.ok) {
+    const agreed = withPreparation(resolved.hash, outsidePrepared);
+    if (agreed !== req.previewProgrammeHash) {
+      const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
+      return {
+        ok: false,
+        reason: 'drift',
+        why: 'what that would do has changed since you looked at it. '
+          + 'Nothing has been written.',
+        preview: fresh,
+      };
+    }
+  }
+
   const done = await executeProgramme(planning.plan, {
     store: req.store,
     policy: req.policy,
     args: invokeArgs(planning.plan),
-    agreedHash: req.previewProgrammeHash,
+    agreedHash: outsidePrepared.length && resolved?.ok
+      ? resolved.hash
+      : req.previewProgrammeHash,
     deliveries: (indexOf) => [
       ...outsideWork,
       ...prepared

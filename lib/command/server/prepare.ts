@@ -36,11 +36,11 @@ import { lookUpInLusha } from '@/lib/crm/enrich';
 import { LUSHA_LOCKED } from '@/lib/crm/permissions';
 import { readSheet } from '@/lib/import/parse';
 import { matchColumns } from '@/lib/import/match';
-import { buildPlan, countPlan } from '@/lib/import/plan';
+import { buildPlan, countPlan, type ExistingRow } from '@/lib/import/plan';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
 import { fileDigest, type CommandContext } from '../context';
-import type { TransactionStep } from '../ir/store';
+import type { Store, TransactionStep } from '../ir/store';
 
 export type PreparedOperation =
   | { ok: true; steps: TransactionStep[]; describe: string }
@@ -48,7 +48,22 @@ export type PreparedOperation =
 
 /** What the preview says, without doing any of it. */
 export type PreparedDescription =
-  | { ok: true; says: string; count: number }
+  | {
+      ok: true;
+      says: string;
+      count: number;
+      /**
+       * A fingerprint of everything the preparation decided.
+       *
+       * The file is not the whole input. Which rows are duplicates of
+       * records already here, and which list they are going on, are
+       * DATABASE state, and both can move between the preview and the
+       * confirmation. This goes into the programme hash, so a customer
+       * that arrived in between means a fresh preview rather than
+       * previewing a hundred records and importing ninety nine.
+       */
+      fingerprint: string;
+    }
   | { ok: false; why: string };
 
 export type PrepareInput = {
@@ -57,6 +72,15 @@ export type PrepareInput = {
   args: Record<string, unknown>;
   /** What the request carried: a selection, a record, a file. */
   context: CommandContext;
+  /**
+   * The caller's own view of the database.
+   *
+   * An import has to know what is already here before it can say what it
+   * is going to do, and it reads that through the same store every other
+   * read goes through, so row level security decides what counts as a
+   * duplicate for THIS person.
+   */
+  store: Store;
 };
 
 export type Preparer = {
@@ -86,7 +110,9 @@ const enrich: Preparer = {
     return {
       ok: true,
       count: subjects.length,
-      says: `Looks ${subjects.length} up in Lusha, which spends ${subjects.length === 1 ? 'a credit' : `${subjects.length} credits`}.`,
+      says: `Looks ${subjects.length} up in Lusha, which spends at most `
+        + `${subjects.length === 1 ? 'one credit' : `${subjects.length} credits`}, one per record.`,
+      fingerprint: subjects.map((s) => s.id).join(','),
     };
   },
 
@@ -129,14 +155,26 @@ const enrich: Preparer = {
 /**
  * The file, read the way the import screen reads it.
  *
- * Same parser, same column dictionary, same row rules. A second set of
- * them is how one of the two starts inventing records called Unknown
- * again, which is the bug the import screen was built to end.
+ * Same parser, same column dictionary, same row rules, and the same
+ * comparison against what is already here. A second set of them is how
+ * one of the two starts inventing records called Unknown again, which is
+ * the bug the import screen was built to end.
+ *
+ * WHAT IS ALREADY HERE IS PART OF THE ANSWER.
+ *
+ * The dialog passes the rows on the screen so it can say "this one is
+ * already in the CRM" and default it to skip. A sentence has no screen,
+ * which is a reason to read the matching records rather than a reason to
+ * skip the comparison: importing a file twice would otherwise double
+ * every customer in it and report success.
+ *
+ * Only the records the FILE could match are read, by the dictionary's
+ * own duplicate keys, so a file of forty names does not load the CRM.
  *
  * The digest in the plan is checked here rather than trusted. Previewing
  * one file and confirming another is a mismatch, and it says so.
  */
-function read(input: PrepareInput) {
+async function read(input: PrepareInput) {
   const file = input.context.file;
   if (!file?.text) {
     return { ok: false as const, why: 'there is no file on this request to import' };
@@ -159,45 +197,184 @@ function read(input: PrepareInput) {
     };
   }
 
-  /* Nothing is compared against what is already here. The import screen
-     has the rows in front of it and can offer to merge; a sentence has
-     no such screen, so every readable row is a new record and a
-     duplicate is a duplicate. Said out loud in the preview rather than
-     decided quietly. */
   const columns = matchColumns(sheet.headers, sheet.rows, CRM_CONTACTS);
-  const plan = buildPlan(columns, sheet.rows, [], CRM_CONTACTS);
+
+  /* Which list, exactly. A name that fits two lists is a question, not a
+     reason to take whichever the database returned first. */
+  const list = await destination(input.store, input.args.list as string | undefined);
+  if (!list.ok) return list;
+
+  /* The records this file could be a duplicate of, by the dictionary's
+     own keys, read through the caller's own session. */
+  const draft = buildPlan(columns, sheet.rows, [], CRM_CONTACTS);
+  const existing = await matching(input.store, draft);
+  if (!existing.ok) return existing;
+
+  const plan = buildPlan(columns, sheet.rows, existing.rows, CRM_CONTACTS);
   const counts = countPlan(plan);
-  const values = plan.rows.filter((r) => r.decision === 'import').map((r) => r.values);
-  const { records, refused } = prepareImport(values);
+  const wanted = plan.rows.filter((r) => r.decision === 'import');
+  const { records, refused } = prepareImport(wanted.map((r) => r.values));
+
+  const mapped = columns.filter((c) => c.target)
+    .map((c) => `${c.header} to ${c.field?.label ?? c.target}`);
+
+  /* EVERYTHING THE PREPARATION DECIDED, IN ONE STRING.
+
+     The file, how its columns were read, which records here it matched,
+     what it is going to write and where. Any of those moving between the
+     preview and the confirmation is a different import, and the
+     programme hash carries this so it comes back as a fresh preview
+     rather than as ninety nine of a hundred records. */
+  const fingerprint = fileDigest([
+    fileDigest(file.text),
+    mapped.join('|'),
+    plan.rows.filter((r) => r.duplicateOf).map((r) => `${r.index}:${r.duplicateOf?.id}`).join('|'),
+    JSON.stringify(records),
+    list.id ?? 'global',
+  ].join('\n'));
 
   return {
     ok: true as const,
-    file, plan, counts, records,
-    refused: refused + (sheet.rows.length - values.length),
-    mapped: columns.filter((c) => c.target).map((c) => `${c.header} to ${c.field?.label ?? c.target}`),
+    file, plan, counts, records, list,
+    refused: refused + (sheet.rows.length - wanted.length),
+    mapped,
+    fingerprint,
   };
+}
+
+type Destination = { ok: true; id: string | null; label: string } | { ok: false; why: string };
+
+/**
+ * The list the rows are going on, resolved exactly.
+ *
+ * No name means the global list every customer starts on. A name means
+ * that list and no other: none refuses by name, several asks, and there
+ * is deliberately no rule that picks one of them.
+ */
+async function destination(store: Store, named?: string): Promise<Destination> {
+  const wanted = (named ?? '').trim();
+  const found = await store.read({
+    table: 'crm_lists',
+    columns: ['id', 'name', 'is_global'],
+    /* A superset, narrowed exactly below. Nobody types a list's
+       capitalisation from memory, and there is no case insensitive
+       equality in the condition language, so this asks for anything
+       containing the name and then decides here. */
+    where: wanted
+      ? {
+          kind: 'cmp', op: 'contains',
+          left: { kind: 'field', of: { entity: 'lists', field: 'name' } },
+          right: { kind: 'literal', value: wanted },
+        }
+      : {
+          kind: 'cmp', op: 'eq',
+          left: { kind: 'field', of: { entity: 'lists', field: 'is_global' } },
+          right: { kind: 'literal', value: true },
+        },
+    limit: 100,
+  });
+  if (!found.ok) return { ok: false, why: found.why };
+
+  const read = {
+    ok: true as const,
+    rows: wanted
+      ? found.rows.filter((r) => String(r.name ?? '').trim().toLowerCase() === wanted.toLowerCase())
+      : found.rows,
+  };
+
+  if (!read.rows.length) {
+    return {
+      ok: false,
+      why: wanted
+        ? `there is no list called ${wanted}`
+        : 'there is no global list for imported customers to go on',
+    };
+  }
+  if (read.rows.length > 1) {
+    const names = read.rows.slice(0, 5).map((r) => String(r.name)).join(', ');
+    return {
+      ok: false,
+      why: `${read.rows.length} lists match ${wanted || 'that'}, so it is not clear which one: ${names}`,
+    };
+  }
+  return { ok: true, id: String(read.rows[0].id), label: String(read.rows[0].name) };
+}
+
+/** How many keys one lookup carries. A request size, nothing semantic. */
+const KEY_PAGE = 200;
+
+/**
+ * The records already here that this file could be a duplicate of.
+ *
+ * By the dictionary's own duplicate keys and only the values the file
+ * actually holds, so the read is the size of the file rather than the
+ * size of the CRM. Read through the caller's own store, so a customer
+ * somebody cannot see is not a duplicate for them, which is the same
+ * answer the import screen gets.
+ */
+async function matching(
+  store: Store, draft: { rows: { values: Record<string, unknown> }[] },
+): Promise<{ ok: true; rows: ExistingRow[] } | { ok: false; why: string }> {
+  const found = new Map<string, ExistingRow>();
+
+  for (const key of CRM_CONTACTS.duplicateKeys) {
+    const values = [...new Set(
+      draft.rows.map((r) => r.values[key]).filter((v) => v != null && String(v).trim() !== '')
+        .map((v) => String(v)),
+    )];
+    for (let from = 0; from < values.length; from += KEY_PAGE) {
+      const slice = values.slice(from, from + KEY_PAGE);
+      const read = await store.read({
+        table: 'crm_contacts',
+        columns: [...new Set(['id', 'company_name', ...CRM_CONTACTS.duplicateKeys])],
+        where: {
+          kind: 'in',
+          of: { kind: 'field', of: { entity: 'contacts', field: key } },
+          values: slice.map((v) => ({ kind: 'literal' as const, value: v })),
+        },
+        limit: slice.length,
+      });
+      if (!read.ok) return { ok: false, why: read.why };
+      for (const row of read.rows) found.set(String(row.id), row as ExistingRow);
+    }
+  }
+
+  return { ok: true, rows: [...found.values()] };
 }
 
 const importRows: Preparer = {
   async describe(input) {
-    const got = read(input);
+    const got = await read(input);
     if (!got.ok) return got;
     if (!got.records.length) {
       return {
         ok: false,
-        why: 'none of those rows had a company name, so there is nothing to file them under.',
+        why: got.counts.duplicates
+          ? `every readable row in that file is already in the CRM, so there is nothing to import.`
+          : 'none of those rows had a company name, so there is nothing to file them under.',
       };
     }
 
-    /* What it will do, in the order somebody checking it would ask:
-       how many records, what was thrown away, and what the columns were
-       read as. The last one is the part the old import never showed and
-       the part that goes wrong. */
+    /* What it will do, in the order somebody checking it would ask: how
+       many records, what is already here, what was thrown away, and what
+       the columns were read as. The last one is the part the old import
+       never showed and the part that goes wrong. */
+    const already = got.plan.rows.filter((r) => r.duplicateOf).length;
+    const inFile = got.plan.rows.filter((r) => r.duplicateInFile !== undefined).length;
+    const bad = got.refused - already - inFile;
+
     const parts = [
-      `${got.records.length.toLocaleString('en-GB')} `
-        + `${got.records.length === 1 ? 'customer' : 'customers'} from ${got.file.name}.`,
-      got.refused
-        ? `${got.refused} ${got.refused === 1 ? 'row has' : 'rows have'} no company name and will be left out.`
+      `${got.records.length.toLocaleString('en-GB')} new `
+        + `${got.records.length === 1 ? 'customer' : 'customers'} from ${got.file.name} `
+        + `onto ${got.list.label}.`,
+      already
+        ? `${already} ${already === 1 ? 'row is' : 'rows are'} already in the CRM and will be left alone.`
+        : '',
+      inFile
+        ? `${inFile} ${inFile === 1 ? 'row repeats' : 'rows repeat'} another row in the same file.`
+        : '',
+      bad > 0
+        ? `${bad} ${bad === 1 ? 'row has' : 'rows have'} no company name and will be left out.`
         : '',
       got.counts.unknown
         ? `${got.counts.unknown} ${got.counts.unknown === 1 ? 'column' : 'columns'} could not be read.`
@@ -205,35 +382,34 @@ const importRows: Preparer = {
       got.mapped.length ? `Columns read as: ${got.mapped.join(', ')}.` : '',
     ];
 
-    return { ok: true, count: got.records.length, says: parts.filter(Boolean).join(' ') };
+    return {
+      ok: true,
+      count: got.records.length,
+      says: parts.filter(Boolean).join(' '),
+      fingerprint: got.fingerprint,
+    };
   },
 
   async run(input) {
-    const got = read(input);
+    const got = await read(input);
     if (!got.ok) return got;
     if (!got.records.length) {
-      return {
-        ok: false,
-        why: 'none of those rows had a company name, so there is nothing to file them under.',
-      };
+      return { ok: false, why: 'there is nothing left in that file to import.' };
     }
 
-    /* The write is the database's. The list is named rather than
-       numbered and is resolved inside the same transaction that does the
-       inserting, so a list renamed between the preview and the
-       confirmation cannot end up with somebody's customers on it. */
+    /* The write is the database's, into the list this resolved by id, so
+       a list renamed between the preview and the confirmation cannot
+       take the rows somewhere else. */
     return {
       ok: true,
       steps: [{
         op: 'invoke',
         capability: 'rows.import',
         subjects: [],
-        args: {
-          rows: got.records,
-          list: (input.args.list as string | undefined) ?? null,
-        },
+        args: { rows: got.records, listId: got.list.id },
       }],
-      describe: `Imported ${got.records.length.toLocaleString('en-GB')} from ${got.file.name}.`,
+      describe: `Imported ${got.records.length.toLocaleString('en-GB')} from ${got.file.name} `
+        + `onto ${got.list.label}.`,
     };
   },
 };

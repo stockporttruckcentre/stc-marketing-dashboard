@@ -314,6 +314,11 @@ export function fakeDb(tables: Record<string, Row[]>) {
     /* The caller's own tracker list, made on first use. */
     if (name === 'command_tracker_list') {
       const owner = String(args.p_owner ?? 'u1');
+      /* A tracker belongs to whoever is asking. Making one under
+         somebody else's name needs the delegated capability. */
+      if (owner !== 'u1' && !may('crm.proposalForOthers')) {
+        return { data: null, error: { message: 'you do not have crm.proposalForOthers' } };
+      }
       const lists = (tables.crm_lists ??= []);
       let found = lists.find(
         (l) => String(l.owner_id) === owner && l.is_global !== true
@@ -330,6 +335,13 @@ export function fakeDb(tables: Record<string, Row[]>) {
     if (name === 'command_send_from_stock') {
       if (!may('crm.create')) {
         return { data: null, error: { message: 'you do not have crm.create' } };
+      }
+      const owner = String(args.p_owner ?? 'u1');
+      if (owner !== 'u1') {
+        return {
+          data: null,
+          error: { message: 'stock goes on your own tracker; there is no operation for sending it to somebody else\'s' },
+        };
       }
       const ids = (args.p_trailers ?? []) as string[];
       if (!ids.length) return { data: null, error: { message: 'nothing said which units to send' } };
@@ -364,6 +376,10 @@ export function fakeDb(tables: Record<string, Row[]>) {
     if (name === 'command_raise_proposal') {
       if (!may('crm.proposal')) {
         return { data: null, error: { message: 'you do not have crm.proposal' } };
+      }
+      const owner = String(args.p_owner ?? 'u1');
+      if (owner !== 'u1' && !may('crm.proposalForOthers')) {
+        return { data: null, error: { message: 'you do not have crm.proposalForOthers' } };
       }
       const ids = (args.p_contacts ?? []) as string[];
       const kind = String(args.p_kind ?? 'trailer_sales');
@@ -414,11 +430,29 @@ export function fakeDb(tables: Record<string, Row[]>) {
 
       const lists = (tables.crm_lists ??= []);
       const named = args.p_list == null ? '' : String(args.p_list).trim();
-      const list = named
-        ? lists.find((l) => String(l.name ?? '').toLowerCase() === named.toLowerCase())
-        : lists.find((l) => l.is_global === true);
-      if (named && !list) {
-        return { data: null, error: { message: `there is no list called ${named}` } };
+      let list: Row | undefined;
+      if (args.p_list_id != null) {
+        list = lists.find((l) => String(l.id) === String(args.p_list_id));
+        if (!list) return { data: null, error: { message: 'that list is not there' } };
+      } else {
+        /* Exactly, or not at all. No symbolic reference here means
+           whichever row came back first. */
+        const hits = named
+          ? lists.filter((l) => String(l.name ?? '').toLowerCase() === named.toLowerCase())
+          : lists.filter((l) => l.is_global === true);
+        if (!hits.length) {
+          return {
+            data: null,
+            error: { message: named ? `there is no list called ${named}` : 'there is no global list' },
+          };
+        }
+        if (hits.length > 1) {
+          return {
+            data: null,
+            error: { message: `${hits.length} lists match ${named || 'that'}, so it is not clear which one` },
+          };
+        }
+        [list] = hits;
       }
 
       const rows = (tables.crm_contacts ??= []);
@@ -1029,7 +1063,11 @@ const PERFORMED: Record<string, {
   },
   'rows.import': {
     name: 'command_import_contacts',
-    args: (c) => ({ p_rows: c.args.rows ?? [], p_list: c.args.list ?? null }),
+    args: (c) => ({
+      p_rows: c.args.rows ?? [],
+      p_list: c.args.list ?? null,
+      p_list_id: c.args.listId ?? null,
+    }),
   },
   'post.create': {
     name: 'command_create_post',

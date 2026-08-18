@@ -2973,6 +2973,102 @@ test('a spreadsheet on the request is imported', async () => {
     JSON.stringify(rows.map((r) => r.source)));
 });
 
+test('a row already in the CRM is left alone', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', email: 'sam@dawson.co.uk', status: 'lead' },
+    ],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'import this spreadsheet';
+  const context = withSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  /* Three rows: one already here, one new, one with no company name. */
+  ok('only the new one is counted', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const said = preview.operations[0]?.says ?? '';
+  ok('and the duplicate is named as one',
+    /1 row is already in the CRM/.test(said), said);
+
+  const done = await applyMutation({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  const rows = db.tables.crm_contacts ?? [];
+  ok('and Dawson Group is not in there twice',
+    rows.filter((r) => String(r.company_name) === 'Dawson Group').length === 1,
+    JSON.stringify(rows.map((r) => r.company_name)));
+});
+
+test('a customer arriving between the preview and the confirmation refuses', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'import this spreadsheet';
+  const context = withSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('two records are previewed', preview?.ok === true && preview.count === 2,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  /* Somebody else adds one of them while the preview is on screen. */
+  (db.tables.crm_contacts ?? []).push({
+    id: 'c9', company_name: 'Ward Bros', email: 'lisa@wardbros.co.uk', status: 'lead',
+  });
+
+  const done = await applyMutation({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  /* Previewing two and importing one is exactly what must not happen. */
+  ok('it refuses', !done.ok, 'it imported a different set than the one agreed');
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+  if (!done.ok) {
+    ok('with a fresh preview to look at', done.reason === 'drift', done.reason);
+  }
+});
+
+test('a list name that fits two lists asks rather than picking one', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [
+      { id: 'l1', name: 'Everything', is_global: true },
+      { id: 'l2', name: 'Fleet prospects', is_global: false },
+      { id: 'l3', name: 'Fleet Prospects', is_global: false },
+    ],
+  });
+
+  const planned = await planAndPreview({
+    text: 'import this spreadsheet onto the Fleet Prospects list',
+    capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: withSheet(), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it refuses to choose', preview?.ok === false, preview?.ok ? String(preview.count) : '');
+  if (preview && !preview.ok) {
+    ok('and says which ones it could have meant', /2 lists match/.test(preview.why), preview.why);
+  }
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
 test('confirming a different file than the one previewed is refused', async () => {
   const db = fakeDb({
     crm_contacts: [],

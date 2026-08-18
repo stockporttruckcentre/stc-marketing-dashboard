@@ -40,6 +40,44 @@ const SYNTHETIC = new Set(['website']);
 /** The most rows one file may carry. Split it and import it in parts. */
 export const IMPORT_CEILING = 5000;
 
+/** The narrowest slice of the client the write needs. */
+type Rpc = {
+  rpc: (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
+};
+
+export type ImportOutcome =
+  | { ok: true; inserted: number; listId: string | null }
+  | { ok: false; why: string };
+
+/**
+ * Write the records, in one transaction.
+ *
+ * `command_import_contacts` in migration 026, which the command runtime
+ * reaches through its capability registry. Both callers land on one
+ * transaction, so a database error on row 4,501 leaves zero new
+ * customers either way: the route used to insert in chunks of five
+ * hundred and report how many had been saved before it failed, which is
+ * a different operation with the same name.
+ *
+ * The screen knows exactly which list is open and says so by id. A
+ * sentence knows a name and the function resolves it, exactly, inside
+ * the same transaction that does the writing.
+ */
+export async function commitImport(
+  client: Rpc,
+  input: { rows: Record<string, unknown>[]; listId?: string | null; listName?: string | null },
+): Promise<ImportOutcome> {
+  const { data, error } = await client.rpc('command_import_contacts', {
+    p_rows: input.rows,
+    p_list: input.listName ?? null,
+    p_list_id: input.listId ?? null,
+  });
+  if (error) return { ok: false, why: String((error as { message?: string })?.message ?? error) };
+
+  const body = (data ?? {}) as { inserted?: number; listId?: string };
+  return { ok: true, inserted: body.inserted ?? 0, listId: body.listId ?? null };
+}
+
 export type PreparedImport = {
   /** Ready to insert, in file order. */
   records: Record<string, unknown>[];

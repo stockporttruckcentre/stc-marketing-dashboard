@@ -1701,6 +1701,124 @@ SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001
 DELETE FROM calendar_events WHERE title LIKE 'TEST %';
 
 -- =============================================================
+-- 13b. Whose tracker, and who may put something on it
+--
+-- Migration 025. A direct RPC must never be more powerful than the
+-- capability the screen gates on. Both tracker operations took an owner
+-- and let it decide whose tracker the row landed on.
+-- =============================================================
+\echo '--- owner authority ---'
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'sales' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+INSERT INTO auth.users (id, email) VALUES ('cccccccc-0000-0000-0000-00000000000c', 'other@test.local')
+ON CONFLICT DO NOTHING;
+UPDATE profiles SET role = 'sales', full_name = 'TEST Colleague'
+ WHERE id = 'cccccccc-0000-0000-0000-00000000000c';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_contacts WHERE source IN ('From Stock', 'CRM proposal') OR company_name LIKE 'TEST %';
+DELETE FROM crm_lists WHERE name = 'Sales tracker';
+INSERT INTO crm_contacts (id, company_name, status, source, relationship)
+VALUES ('a3333333-0000-0000-0000-000000000001', 'TEST owner target', 'lead', 'manual', 'prospect')
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_raise_proposal(
+    ARRAY['a3333333-0000-0000-0000-000000000001'::UUID], 'trailer_sales',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a rep raises their own proposal', (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a rep raises their own proposal', FALSE, SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_raise_proposal(
+    ARRAY['a3333333-0000-0000-0000-000000000001'::UUID], 'trailer_sales',
+    'cccccccc-0000-0000-0000-00000000000c');
+  PERFORM assert('a rep cannot raise one onto a colleague''s tracker', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a rep cannot raise one onto a colleague''s tracker',
+    SQLERRM LIKE '%crm.proposalForOthers%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_send_from_stock(
+    ARRAY['11111111-1111-1111-1111-111111111111'::UUID],
+    'cccccccc-0000-0000-0000-00000000000c');
+  PERFORM assert('nor send stock to one', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('nor send stock to one', SQLERRM LIKE '%your own tracker%', SQLERRM);
+END
+$$;
+
+-- An administrator holds crm.proposalForOthers, which is what the
+-- capability is for.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_raise_proposal(
+    ARRAY['a3333333-0000-0000-0000-000000000001'::UUID], 'trailer_sales',
+    'cccccccc-0000-0000-0000-00000000000c') INTO out;
+  PERFORM assert('somebody with crm.proposalForOthers can', (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('somebody with crm.proposalForOthers can', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and it lands under the colleague''s name',
+  (SELECT COUNT(*) FROM crm_contacts
+    WHERE source = 'CRM proposal' AND assigned_to = 'TEST Colleague') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE source = 'CRM proposal'));
+
+-- Even an administrator has no delegated form of sending stock.
+DO $$
+BEGIN
+  PERFORM command_send_from_stock(
+    ARRAY['11111111-1111-1111-1111-111111111111'::UUID],
+    'cccccccc-0000-0000-0000-00000000000c');
+  PERFORM assert('sending stock has no delegated form at all', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('sending stock has no delegated form at all',
+    SQLERRM LIKE '%your own tracker%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_raise_proposal(
+    ARRAY['a3333333-0000-0000-0000-000000000001'::UUID], 'trailer_sales', NULL);
+  PERFORM assert('a viewer raises nothing for anybody', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer raises nothing for anybody', SQLERRM LIKE '%crm.proposal%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_contacts WHERE source IN ('From Stock', 'CRM proposal') OR company_name LIKE 'TEST owner%';
+DELETE FROM crm_lists WHERE name = 'Sales tracker';
+
+-- =============================================================
 -- 14. Writing a social post
 --
 -- Migration 022. The composer fills in the author and the status from
@@ -1867,6 +1985,48 @@ EXCEPTION WHEN OTHERS THEN
   PERFORM assert('a list that is not there is refused', SQLERRM LIKE '%no list called%', SQLERRM);
 END
 $$;
+
+-- A name that fits two lists is a question, not a reason to take
+-- whichever one the planner happened to return first.
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c1111111-0000-0000-0000-000000000002', 'test import list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  PERFORM command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Ambiguous', 'source', 'Spreadsheet import')
+  ), 'TEST import list');
+  PERFORM assert('a name that fits two lists is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a name that fits two lists is refused',
+    SQLERRM LIKE '%not clear which one%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nothing was imported into either',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Ambiguous') = 0);
+
+-- By id, which is what the screen has and what the manual route sends.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST By Id', 'source', 'Spreadsheet import')
+  ), NULL, 'c1111111-0000-0000-0000-000000000002') INTO out;
+  PERFORM assert('a list named by id is used', (out ->> 'inserted')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list named by id is used', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('on that exact list',
+  (SELECT list_id FROM crm_contacts WHERE company_name = 'TEST By Id')
+    = 'c1111111-0000-0000-0000-000000000002',
+  (SELECT list_id::TEXT FROM crm_contacts WHERE company_name = 'TEST By Id'));
+
+DELETE FROM crm_lists WHERE id = 'c1111111-0000-0000-0000-000000000002';
 
 -- Every row or none. The second row has no company name, which the
 -- preparer would have dropped; if one reaches here the whole import
