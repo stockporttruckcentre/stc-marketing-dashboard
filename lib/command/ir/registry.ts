@@ -228,6 +228,36 @@ export type CapabilityInput = {
   /** A column on the operated entity that supplies it when it is there. */
   from?: string;
   /**
+   * A column to read so the preview can show it, which does NOT supply
+   * the input.
+   *
+   * The difference matters where the column is the value being
+   * REPLACED. A role change reads the role somebody holds so the
+   * preview can say "sales to admin", and declaring that with `from`
+   * made the current role satisfy the required new one: "change Dave to
+   * admin" and "change Dave" were both complete, and the second one
+   * meant changing him to what he already is.
+   */
+  shows?: string;
+  /**
+   * Which group of inputs this one belongs to.
+   *
+   * A day and a time are one question to a person and two values to the
+   * database. Asking "which day" and then "what time" one after the
+   * other is the form talking rather than somebody being asked when
+   * they want the meeting, so inputs that answer one question say so
+   * and `inputGroups` on the capability carries the question.
+   */
+  group?: string;
+  /**
+   * Required only when another input has a particular value.
+   *
+   * Answering an invitation takes no time unless the answer is a
+   * counter proposal, and then it takes one. Declaring it plainly
+   * required would ask for a time in order to accept.
+   */
+  requiredWhen?: { arg: string; is: string };
+  /**
    * Another input this one is worked out from.
    *
    * `city` is what `place` means to Lusha, which the reader derives
@@ -299,6 +329,18 @@ export type CapabilityDef = {
    * rendered, and what it produces are changes the transaction writes.
    */
   prepares?: string;
+  /**
+   * Questions that several inputs answer between them.
+   *
+   * "When?" is one question and a start is one timestamp, and in
+   * between are a day and a clock time, either of which somebody may
+   * leave out. A group asks once for whatever is still missing.
+   *
+   * `oneOf` is the other shape: the inputs are alternatives rather than
+   * parts, so the question is asked only when NONE of them is there.
+   * Moving a meeting takes a moment or a clock time and never both.
+   */
+  inputGroups?: { id: string; ask: string; fills?: string; oneOf?: boolean }[];
   /**
    * Its result can be worked out exactly, before it happens.
    *
@@ -939,9 +981,13 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'supabase/migrations/018_command_set_role.sql',
     effect: { table: 'profiles', set: { role: { arg: 'role' } } },
     inputs: [
-      /* `from` is the column that already answers it, so the preview can
-         say what somebody IS as well as what they are being made. */
-      { key: 'role', label: 'role', kind: 'enum', required: true, from: 'role' },
+      /* `shows` rather than `from`: the column is read so the preview
+         can say what somebody IS as well as what they are being made,
+         and it does not answer the question of what to make them. */
+      {
+        key: 'role', label: 'role', kind: 'enum', required: true, shows: 'role',
+        ask: 'Which role? Admin, marketer, sales or viewer.',
+      },
     ],
   },
   {
@@ -1203,9 +1249,28 @@ export const CAPABILITIES: CapabilityDef[] = [
     produces: 'record',
     idempotent: false,
     handler: 'supabase/migrations/024_command_calendar.sql',
+    /* WHEN IS ONE QUESTION AND TWO VALUES.
+
+       A person says "next Friday at 10". The database takes one
+       timestamp. The reader composes it once both halves are there, and
+       until then whichever half is missing is what gets asked about:
+       one of them missing asks for that one, both missing asks once. */
+    inputGroups: [
+      { id: 'when', ask: 'When? Say the day and the time.' },
+    ],
     inputs: [
       { key: 'title', label: 'what the meeting is', kind: 'text', required: true },
-      { key: 'start', label: 'when it is', kind: 'date', required: true },
+      {
+        key: 'day', label: 'which day', kind: 'text', required: true,
+        group: 'when', ask: 'Which day?', fills: 'on %s',
+      },
+      {
+        key: 'time', label: 'what time', kind: 'text', required: true,
+        group: 'when', ask: 'What time?', fills: 'at %s',
+      },
+      /* The moment itself, worked out from the two above. Never asked
+         for: nobody types an ISO timestamp. */
+      { key: 'start', label: 'when it is', kind: 'date', required: true, derivedFrom: 'day' },
       { key: 'minutes', label: 'how long', kind: 'number', required: false },
       /* The customer it is with, when the CRM holds one by that name. A
          meeting with somebody who is not a customer is still a meeting,
@@ -1227,7 +1292,14 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'supabase/migrations/024_command_calendar.sql',
     inputs: [
       { key: 'action', label: 'what to say', kind: 'enum', required: true },
-      { key: 'start', label: 'the time being suggested', kind: 'date', required: false },
+      /* Only a counter proposal needs a time. Declaring it plainly
+         required would ask for one in order to accept. */
+      {
+        key: 'start', label: 'the time being suggested', kind: 'date', required: false,
+        requiredWhen: { arg: 'action', is: 'propose' },
+        ask: 'What time do you want to suggest?',
+        fills: '%s',
+      },
     ],
   },
   {
@@ -1263,9 +1335,23 @@ export const CAPABILITIES: CapabilityDef[] = [
        4:30" gives a clock time and the meeting keeps its own day, which
        is not something planning can know because the record has not
        been read yet. */
+    /* ONE OF THE TWO, AND ASKED FOR WHEN NEITHER IS THERE.
+
+       "Move Friday's site visit" is a whole instruction with the
+       destination left off, and the reader used to throw the sentence
+       away for it. The two inputs are alternatives rather than parts,
+       so the question is asked only when neither arrived. */
+    inputGroups: [
+      { id: 'when', ask: 'When should it move to?', oneOf: true },
+    ],
     inputs: [
-      { key: 'start', label: 'new time', kind: 'date', required: false, from: 'start_at' },
-      { key: 'time', label: 'new time', kind: 'text', required: false },
+      {
+        key: 'start', label: 'new time', kind: 'date', required: false,
+        /* Read for the preview, which says where it is moving FROM. It
+           does not answer where it moves to. */
+        shows: 'start_at', group: 'when',
+      },
+      { key: 'time', label: 'new time', kind: 'text', required: false, group: 'when' },
     ],
   },
   {

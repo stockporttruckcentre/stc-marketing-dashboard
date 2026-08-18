@@ -191,7 +191,9 @@ export async function resolveInvoke(
   /* The columns the OPERATION needs, which the projection has no reason
      to include: it answers what a file of this selection should show. */
   const wantedColumns = (cap.inputs ?? [])
-    .map((i) => i.from)
+    /* What a column can do for an input: answer it, or be shown beside
+       the answer. Both are read; only the first satisfies it. */
+    .flatMap((i) => [i.from, i.shows])
     .filter((c): c is string => !!c);
   const read = await runSelect(select, { store: opts.store, ceiling, extraColumns: wantedColumns });
   if (!read.ok) return { ok: false, reason: 'unresolved', why: read.why };
@@ -245,7 +247,10 @@ export async function resolveInvoke(
       subjects.push({
         id: String(row.id),
         label: labelOf(row, namedDef?.titleField ?? null),
-        values: Object.fromEntries(inputs.map((i) => [i.key, i.from ? row[i.from] : null])),
+        /* What the record already says about each input: the value that
+           answers it, or the one shown beside the answer. */
+        values: Object.fromEntries(
+          inputs.map((i) => [i.key, i.from ? row[i.from] : i.shows ? row[i.shows] : null])),
       });
     }
   } else {
@@ -311,7 +316,8 @@ export async function resolveInvoke(
         label: labelOf(target, wantedDef.titleField ?? null),
         viaId: String(row.id),
         viaLabel: label,
-        values: Object.fromEntries(inputs.map((i) => [i.key, i.from ? target[i.from] : null])),
+        values: Object.fromEntries(
+          inputs.map((i) => [i.key, i.from ? target[i.from] : i.shows ? target[i.shows] : null])),
       });
     }
   }
@@ -434,7 +440,9 @@ async function resolveArguments(
 
     /* An input with no column behind it can only come from the words.
        A list's name is not on any record, so there is nothing to report
-       per record: the sentence did not say it. */
+       per record: the sentence did not say it. A column that is merely
+       SHOWN beside the answer is not behind it either: the role
+       somebody holds is what a role change replaces. */
     if (!input.from) {
       needs.push({ key: input.key, label: input.label });
       continue;

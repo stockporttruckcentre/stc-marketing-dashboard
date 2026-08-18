@@ -325,12 +325,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     return () => { cancelled = true; clearTimeout(t); };
   }, [text, stage]);
 
-  const suggestions = useMemo(() => {
+  const candidates = useMemo(() => {
     // Actions first, then screens the action list did not already cover,
     // then matching records. Deduped on where they lead, so "stock" does
     // not offer the stock list twice.
     const seen = new Set<string>();
     const out: Suggestion[] = [];
+
+
     // Composed questions outrank bare actions, because "Export customers
     // at Carrington" is a better answer to "export" than an entry called
     // Export a list that then asks which list.
@@ -487,6 +489,24 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    */
   const asking: MissingInput[] = (meaning?.completion === 'incomplete'
     ? meaning.missing ?? [] : []);
+
+  /* A SYNONYM REWRITE OF A SENTENCE THAT IS ALREADY UNDERSTOOD IS NOT A
+     SUGGESTION.
+
+     "Schedule a call with Dawson next Friday" is understood and short
+     of a time. Offering "book a call with Dawson next Friday" beside it
+     offers the same operation with the same value missing, which reads
+     as the bar not having understood the first one. Anything that plans
+     to the same question is dropped; anything that plans to a complete
+     sentence, or to a different question, is a real next step and
+     stays. */
+  const suggestions = useMemo(() => candidates.filter((s) => {
+    if (!asking.length || !s.phrase) return true;
+    const its = planCommand(s.phrase, { actorCapabilities: caps, vocabulary, context });
+    return !(its?.completion.kind === 'incomplete'
+      && its.completion.missing.some((m) => m.ask === asking[0].ask));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }), [candidates, meaning, caps, vocabulary, context]);
   const [answered, setAnswered] = useState<any | null>(null);
   const [editPreview, setEditPreview] = useState<MutationPreview | null>(null);
   const [cursor, setCursor] = useState(-1);
@@ -962,6 +982,27 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
+            {/* UNDERSTOOD, AND WAITING ON ONE THING.
+
+                Shown in place of the reading, because what somebody
+                needs at this point is the question rather than a list
+                of other sentences they could have typed. */}
+            {asking.length > 0 && meaning && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{asking[0].ask}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
+              </div>
+            )}
             {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -1115,6 +1156,27 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
+            {/* UNDERSTOOD, AND WAITING ON ONE THING.
+
+                Shown in place of the reading, because what somebody
+                needs at this point is the question rather than a list
+                of other sentences they could have typed. */}
+            {asking.length > 0 && meaning && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{asking[0].ask}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
+              </div>
+            )}
             {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',

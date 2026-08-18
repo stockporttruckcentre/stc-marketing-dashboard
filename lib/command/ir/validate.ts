@@ -742,19 +742,82 @@ const ASK: Record<string, string> = {
  */
 export function missingInputs(plan: Plan): MissingInput[] {
   const out: MissingInput[] = [];
+
+  const add = (m: MissingInput) => {
+    /* Two steps short of the same thing are one question. */
+    if (out.some((x) => x.ask === m.ask)) return;
+    out.push(m);
+  };
+
   for (const step of plan.steps) {
     if (step.op !== 'invoke') continue;
     const cap = capability(step.capability);
-    for (const input of cap?.inputs ?? []) {
-      if (!input.required || input.from || input.derivedFrom) continue;
-      if (step.args?.[input.key] != null) continue;
-      const ask = input.ask ?? ASK[input.key] ?? `What is the ${input.label}?`;
-      /* Two steps short of the same thing are one question. */
-      if (out.some((m) => m.ask === ask)) continue;
-      out.push({
+    if (!cap) continue;
+
+    const args = step.args ?? {};
+    const there = (key: string) => args[key] != null;
+
+    /* An input can be required only when another one says so: answering
+       an invitation takes no time unless the answer is a counter
+       proposal. */
+    const wanted = (i: NonNullable<typeof cap.inputs>[number]) => {
+      if (i.requiredWhen) {
+        const on = args[i.requiredWhen.arg];
+        const value = on && typeof on === 'object' && 'kind' in on && on.kind === 'literal'
+          ? String((on as { value: unknown }).value) : null;
+        return value === i.requiredWhen.is;
+      }
+      return i.required;
+    };
+
+    /* QUESTIONS SEVERAL INPUTS ANSWER BETWEEN THEM.
+
+       A day and a time are one question to a person. Asking for them one
+       at a time is the form talking, so a group with more than one part
+       missing asks once, and a group with one part missing asks about
+       that part in its own words. A group whose members are
+       ALTERNATIVES asks only when none of them arrived. */
+    const grouped = new Set<string>();
+    for (const group of cap.inputGroups ?? []) {
+      const members = (cap.inputs ?? []).filter((i) => i.group === group.id);
+      if (!members.length) continue;
+      for (const m of members) grouped.add(m.key);
+
+      const absent = members.filter((i) => !there(i.key) && (group.oneOf || wanted(i)));
+      const asksAsAGroup = group.oneOf
+        ? members.every((i) => !there(i.key))
+        : absent.length > 1;
+
+      if (asksAsAGroup) {
+        add({
+          key: group.id,
+          label: group.ask,
+          ask: group.ask,
+          capability: step.capability,
+          fills: group.fills ?? '%s',
+        });
+        continue;
+      }
+      if (!group.oneOf && absent.length === 1) {
+        const one = absent[0];
+        add({
+          key: one.key,
+          label: one.label,
+          ask: one.ask ?? ASK[one.key] ?? `What is the ${one.label}?`,
+          capability: step.capability,
+          fills: one.fills ?? '%s',
+        });
+      }
+    }
+
+    for (const input of cap.inputs ?? []) {
+      if (grouped.has(input.key)) continue;
+      if (!wanted(input) || input.from || input.derivedFrom) continue;
+      if (there(input.key)) continue;
+      add({
         key: input.key,
         label: input.label,
-        ask,
+        ask: input.ask ?? ASK[input.key] ?? `What is the ${input.label}?`,
         capability: step.capability,
         fills: input.fills ?? '%s',
       });
@@ -763,15 +826,6 @@ export function missingInputs(plan: Plan): MissingInput[] {
   return out;
 }
 
-/**
- * The sentence again, with the answer in it.
- *
- * One implementation, because the browser and the checks must complete
- * a sentence the same way or the thing being asserted is not the thing
- * that ships. The answer goes into the RAW TEXT, in the words the
- * capability declares, and the server plans the whole thing from
- * scratch: no field, no value, no second way into the runtime.
- */
 export function completedWith(text: string, missing: MissingInput, said: string): string {
   const answer = said.trim();
   if (!answer) return text;

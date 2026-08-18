@@ -474,6 +474,54 @@ test('a search with no place asks where, and reaches no provider', async () => {
   }
 });
 
+test('a meeting with no time asks for one over HTTP, then books it', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+    calendar_events: [],
+  });
+  serve(db);
+
+  const plan = await import('../app/api/command/plan/route');
+  const { completedWith } = await import('../lib/command/ir/validate');
+
+  const text = 'schedule a call with Dawson next Friday';
+  const asked = await (await plan.POST(post('http://x/api/command/plan', {
+    text, preview: true,
+  }) as never)).json() as {
+    understood: boolean; runnable: boolean; completion: string;
+    missing: { key: string; ask: string; fills: string }[];
+  };
+
+  ok('it is understood', asked.understood === true, JSON.stringify(asked).slice(0, 200));
+  ok('and incomplete rather than refused', asked.completion === 'incomplete', asked.completion);
+  ok('it asks what time', asked.missing?.[0]?.ask === 'What time?', JSON.stringify(asked.missing));
+  ok('it will not run', asked.runnable === false, String(asked.runnable));
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+
+  const said = completedWith(text, asked.missing[0] as never, '10am');
+  const whole = await (await plan.POST(post('http://x/api/command/plan', {
+    text: said, preview: true,
+  }) as never)).json() as {
+    hash: string; completion: string; preview: { ok: boolean; programmeHash: string };
+  };
+  ok('the completed sentence is whole', whole.completion === 'complete', whole.completion);
+  ok('and previews', whole.preview?.ok === true, JSON.stringify(whole.preview).slice(0, 200));
+
+  const apply = await import('../app/api/command/apply/route');
+  const done = await (await apply.POST(post('http://x/api/command/apply', {
+    text: said,
+    planHash: whole.hash,
+    programmeHash: whole.preview.programmeHash,
+    confirm: true,
+  }) as never)).json() as { ok: boolean };
+
+  ok('confirming books the meeting', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('and it is in the diary at ten',
+    (db.tables.calendar_events ?? []).length === 1
+    && new Date(String(db.tables.calendar_events[0].start_at)).getHours() === 10,
+    JSON.stringify(db.tables.calendar_events));
+});
+
 /* ============================================================= */
 
 async function main() {

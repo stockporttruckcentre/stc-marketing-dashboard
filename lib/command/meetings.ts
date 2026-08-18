@@ -398,19 +398,27 @@ function readReschedule(
   if (!cap?.requires || !cap.handler) return null;
   if (caps && !caps.has(cap.requires)) return null;
 
+  /* WHERE THE SENTENCE SPLITS, IF IT SPLITS AT ALL.
+
+     "Move my 3pm meeting tomorrow to 4:30" says which meeting and then
+     where it goes. "Move Friday's site visit" says only which meeting,
+     and that is a whole instruction with the destination left off
+     rather than a sentence nobody can read. */
   const split = raw.toLowerCase().lastIndexOf(' to ');
-  if (split < 0) return null;
-  const subject = raw.slice(0, split);
-  const destination = raw.slice(split + 4);
+  const subject = split < 0 ? raw : raw.slice(0, split);
+  const destination = split < 0 ? '' : raw.slice(split + 4);
 
-  const time = readTime(destination);
-  /* A destination with no time in it is not a time this can write. "Move
-     it to Monday" keeps a clock time nothing here knows, and inventing
-     nine in the morning would move a meeting somebody has to be at. */
-  if (!time) return null;
+  /* WHICH MEETING IS RECOGNITION. WHERE IT GOES IS AN INPUT.
 
+     A sentence with a move verb and no meeting in it is not this
+     operation and comes back null. A sentence with a meeting and no
+     destination is this operation, missing one value, and the registry
+     asks for it: inventing nine in the morning would move a meeting
+     somebody has to be at. */
   const reference = readMeetingReference(subject, { verbs: [verb], now, context });
   if (!reference) return null;
+
+  const time = readTime(destination);
 
   /* The new day, if the destination named one, and otherwise the day
      the meeting is already on.
@@ -422,8 +430,8 @@ function readReschedule(
      dragging the block up the column means. */
   const day = readDay(destination, now) ?? reference.day;
 
-  const at = day ? new Date(day.from.getTime()) : null;
-  if (at) at.setHours(time.hour, time.minute, 0, 0);
+  const at = day && time ? new Date(day.from.getTime()) : null;
+  if (at && time) at.setHours(time.hour, time.minute, 0, 0);
 
   const step: Invoke = {
     op: 'invoke',
@@ -431,17 +439,23 @@ function readReschedule(
     capability: 'meeting.reschedule',
     expect: 'one',
     subject: selectOf(reference.where),
+    /* A moment, or a clock time on its own, or neither. The capability
+       declares the two as alternatives and asks when neither arrived. */
     args: at
       ? { start: { kind: 'literal', value: at.toISOString() } }
-      : { time: { kind: 'literal', value: time.label } },
+      : time
+        ? { time: { kind: 'literal', value: time.label } }
+        : {},
     produces: { kind: 'record', entity: ENTITY },
   };
 
   return {
     step,
-    summary: day
-      ? `Move ${reference.label} to ${day.label} at ${time.label}`
-      : `Move ${reference.label} to ${time.label}`,
+    summary: time
+      ? (day
+          ? `Move ${reference.label} to ${day.label} at ${time.label}`
+          : `Move ${reference.label} to ${time.label}`)
+      : `Move ${reference.label}`,
     requires: cap.requires,
     confidence: 13,
   };
@@ -528,9 +542,20 @@ const KINDS: { words: string[]; title: string }[] = [
  * the link to the customer record, which is what the calendar screen
  * does when somebody books from a customer.
  *
- * A day and a time are both required. "Book a call with Dawson" is a
- * sentence with no time in it, and a meeting at a time nobody said is a
- * meeting somebody misses.
+ * A DAY AND A TIME ARE STILL BOTH REQUIRED, AND THIS IS NOT WHERE THAT
+ * IS ENFORCED.
+ *
+ * "Schedule a call with Dawson next Friday" names the operation, the
+ * kind, the customer and the day. It is missing a clock time, and a
+ * meeting at a time nobody said is a meeting somebody misses, so it
+ * must not run. It used to return null for that, which threw the whole
+ * sentence away before anything could ask: the bar said it had not
+ * understood a sentence it had understood completely.
+ *
+ * Returning null means THIS READER DOES NOT RECOGNISE THE OPERATION.
+ * A recognised operation with a value missing is a plan without that
+ * value, and `meeting.create` declares which of its inputs are
+ * required. The registry owns that, not this file.
  */
 function readBook(
   raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
@@ -544,27 +569,38 @@ function readBook(
   if (!cap?.requires || !cap.handler) return null;
   if (caps && !caps.has(cap.requires)) return null;
 
-  const day = readDay(raw, now);
-  const time = readTime(day ? raw.replace(new RegExp(escape(day.phrase), 'i'), ' ') : raw);
-  if (!day || !time) return null;
-
+  /* The kind is what makes this a meeting rather than a booking of
+     something else, so it IS recognition and stays a null. */
   const kind = KINDS.find((k) => k.words.some((w) => t.includes(` ${w} `)));
   if (!kind) return null;
+
+  const day = readDay(raw, now);
+  const time = readTime(day ? raw.replace(new RegExp(escape(day.phrase), 'i'), ' ') : raw);
 
   /* Who it is with. The words after "with" or "for", which is where a
      customer sits in every one of these sentences. */
   const withWhom = raw.match(/\b(?:with|for|to see|and)\s+([A-Za-z0-9&'. -]{2,60}?)\s*(?:\bon\b|\bat\b|\bnext\b|\btomorrow\b|\btoday\b|[.,;]|$)/i)?.[1]
     ?.trim().replace(/[.,;]+$/, '');
 
-  const at = new Date(day.from.getTime());
-  at.setHours(time.hour, time.minute, 0, 0);
-
   const title = withWhom ? `${kind.title} with ${withWhom}` : kind.title;
 
   const args: Record<string, Expr> = {
     title: { kind: 'literal', value: title },
-    start: { kind: 'literal', value: at.toISOString() },
   };
+  /* WHAT WAS SAID, IN THE WORDS IT WAS SAID IN, AND THE MOMENT ONLY
+     ONCE BOTH HALVES ARE THERE.
+
+     The day and the time go down as the person's own words so the
+     completion contract can ask for whichever is missing in the same
+     terms. The timestamp the database takes is composed here and only
+     here, and only when there is something to compose it from. */
+  if (day) args.day = { kind: 'literal', value: day.label };
+  if (time) args.time = { kind: 'literal', value: time.label };
+  if (day && time) {
+    const at = new Date(day.from.getTime());
+    at.setHours(time.hour, time.minute, 0, 0);
+    args.start = { kind: 'literal', value: at.toISOString() };
+  }
   /* The customer, when the CRM holds one by that name. Optional, so a
      meeting with somebody who is not a customer is still a meeting. */
   if (withWhom) {
@@ -589,7 +625,7 @@ function readBook(
       args,
       produces: { kind: 'record', entity: ENTITY },
     },
-    summary: `Book ${title} for ${day.label} at ${time.label}`,
+    summary: `Book ${title}${day ? ` for ${day.label}` : ''}${time ? ` at ${time.label}` : ''}`,
     requires: cap.requires,
     confidence: 13,
   };
@@ -643,13 +679,21 @@ function readAnswer(
     action: { kind: 'literal', value: answer.a.action },
   };
 
+  /* THE TIME BEING SUGGESTED, WHERE THE SENTENCE SUGGESTED ONE.
+
+     "Propose another time for Friday's meeting" is the whole request
+     with the time left off, and it used to be thrown away for that. The
+     capability declares the start required only when the answer is a
+     proposal, so this hands over what it has and the question is asked
+     where every other question is asked. */
   if (proposing) {
     const time = readTime(offer);
     const day = readDay(offer, now);
-    if (!time || !day) return null;
-    const at = new Date(day.from.getTime());
-    at.setHours(time.hour, time.minute, 0, 0);
-    args.start = { kind: 'literal', value: at.toISOString() };
+    if (time && day) {
+      const at = new Date(day.from.getTime());
+      at.setHours(time.hour, time.minute, 0, 0);
+      args.start = { kind: 'literal', value: at.toISOString() };
+    }
   }
 
   return {

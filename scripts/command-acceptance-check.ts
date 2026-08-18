@@ -5229,6 +5229,156 @@ test('what the finder found goes onto the list, and nothing else does', async ()
   }
 });
 
+/* =============================================================
+   43. A recognised operation with a value left out
+
+   The rule these assert is one rule: a reader returns null when it does
+   not RECOGNISE the operation, and produces a plan without the value
+   when it recognises the operation and the value is absent. A reader
+   that throws the sentence away instead takes it out of the runtime's
+   hands before anything can ask, which is what "schedule a call with
+   Dawson next Friday" ran into: understood completely, missing a clock
+   time, and answered with "I could not tell what you wanted there".
+   ============================================================= */
+
+const BOOKER = [...capabilitiesFor({ role: 'admin' } as never)];
+
+/** The question a sentence comes back with, or nothing. */
+const asksFor = (text: string, context?: Record<string, unknown>) => {
+  const planned = planCommand(text, {
+    actorCapabilities: BOOKER, context: context as never,
+  });
+  return {
+    planned,
+    missing: planned?.completion.kind === 'incomplete' ? planned.completion.missing : [],
+  };
+};
+
+test('schedule a call with Dawson next Friday', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+    calendar_events: [],
+  });
+  const text = 'schedule a call with Dawson next Friday';
+
+  const { planned, missing } = asksFor(text);
+  ok('it is understood as booking a meeting',
+    planned?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'meeting.create') ?? false,
+    JSON.stringify(planned?.plan.steps.map((x) => x.op)) );
+  ok('the day it named is on the plan',
+    planned?.presentation.summary.includes('Friday') ?? false, planned?.presentation.summary);
+  ok('and the one thing missing is the time',
+    missing.length === 1 && missing[0].ask === 'What time?', JSON.stringify(missing));
+
+  /* NOTHING RUNS, AND NOTHING IS INVENTED. */
+  const server = await planAndPreview({
+    text, capabilities: BOOKER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  ok('the server will not run it', server?.planned.meaning.runnable === false,
+    String(server?.planned.meaning.runnable));
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+  ok('and no meeting exists', (db.tables.calendar_events ?? []).length === 0,
+    JSON.stringify(db.tables.calendar_events));
+
+  /* THE ANSWER COMPLETES THE SENTENCE. */
+  const said = completedWith(text, missing[0], '10am');
+  ok('the answer goes into the sentence in the words it was asked for',
+    said === 'schedule a call with Dawson next Friday at 10am', said);
+
+  const whole = await planAndPreview({
+    text: said, capabilities: BOOKER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  ok('the completed sentence is whole',
+    whole?.planned.meaning.completion === 'complete',
+    String(whole?.planned.meaning.completion));
+  ok('and previews', whole?.preview?.ok === true,
+    whole?.preview && !whole.preview.ok ? whole.preview.why : 'no preview');
+  if (!whole?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text: said, capabilities: BOOKER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: whole.planned.meaning.hash,
+    previewProgrammeHash: whole.preview.programmeHash,
+  });
+  ok('confirming books it', done.ok === true, JSON.stringify(done).slice(0, 200));
+
+  const event = (db.tables.calendar_events ?? [])[0];
+  ok('a meeting exists', !!event, JSON.stringify(db.tables.calendar_events));
+  ok('called what the sentence called it', String(event?.title) === 'Call with Dawson',
+    String(event?.title));
+  ok('at the time they answered with',
+    new Date(String(event?.start_at)).getHours() === 10,
+    String(event?.start_at));
+  ok('on a Friday', new Date(String(event?.start_at)).getDay() === 5,
+    String(event?.start_at));
+});
+
+test('book a call with Dawson asks one question rather than two', async () => {
+  const { planned, missing } = asksFor('book a call with Dawson');
+  ok('it is understood', !!planned, 'nothing');
+  ok('and asks once, for both halves of when',
+    missing.length === 1 && missing[0].ask === 'When? Say the day and the time.',
+    JSON.stringify(missing));
+
+  /* And the answer to that one question completes it. */
+  const said = completedWith('book a call with Dawson', missing[0], 'next Friday at 10am');
+  const whole = planCommand(said, { actorCapabilities: BOOKER });
+  ok('the whole sentence is complete', whole?.completion.kind === 'complete',
+    JSON.stringify(whole?.completion));
+});
+
+test('move Friday\'s site visit', async () => {
+  const { planned, missing } = asksFor("move Friday's site visit");
+  ok('it is understood as moving a meeting',
+    planned?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'meeting.reschedule') ?? false,
+    JSON.stringify(planned?.plan.steps.map((x) => x.op)));
+  ok('and asks where it moves to',
+    missing.length === 1 && missing[0].ask === 'When should it move to?',
+    JSON.stringify(missing));
+
+  const said = completedWith("move Friday's site visit", missing[0], 'to 2pm');
+  const whole = planCommand(said, { actorCapabilities: BOOKER });
+  ok('answering completes it', whole?.completion.kind === 'complete',
+    JSON.stringify(whole?.completion));
+});
+
+test('propose another time for Friday\'s meeting', async () => {
+  const { planned, missing } = asksFor("propose another time for Friday's meeting");
+  ok('it is understood as answering an invitation',
+    planned?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'meeting.answer') ?? false,
+    JSON.stringify(planned?.plan.steps.map((x) => x.op)));
+  ok('and asks for the time being suggested',
+    missing.some((m) => m.ask === 'What time do you want to suggest?'), JSON.stringify(missing));
+});
+
+test('accepting an invitation is not asked for a time', async () => {
+  /* The other half of a conditional requirement: a time is required
+     only when the answer is a counter proposal. */
+  const { planned, missing } = asksFor("accept the invitation to Friday's meeting");
+  ok('it is understood', !!planned, 'nothing');
+  ok('and asks nothing', missing.length === 0, JSON.stringify(missing));
+});
+
+test('promote Dave asks which role rather than inventing one', async () => {
+  const { planned, missing } = asksFor('promote Dave');
+  ok('it is understood as a role change',
+    planned?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'user.setRole') ?? false,
+    JSON.stringify(planned?.plan.steps.map((x) => x.op)));
+  ok('and asks which role',
+    missing.some((m) => m.ask.startsWith('Which role?')), JSON.stringify(missing));
+  ok('with no role on the step',
+    !(planned?.plan.steps[0] as { args?: Record<string, unknown> })?.args?.role,
+    JSON.stringify((planned?.plan.steps[0] as { args?: unknown })?.args));
+
+  /* And a sentence that only LOOKS like one is still not one. */
+  ok('while a coffee is not a role change',
+    !planCommand('make Dave a coffee', { actorCapabilities: BOOKER }),
+    'it read a coffee as a role');
+});
+
 /* ============================================================= */
 
 async function main() {

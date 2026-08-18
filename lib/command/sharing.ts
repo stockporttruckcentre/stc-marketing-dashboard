@@ -208,8 +208,16 @@ export function parseShareList(
 
   /* "access to" is how the second shape reads, and the word is not part
      of anybody's name. */
+  /* WHO IS AN INPUT, NOT RECOGNITION.
+
+     The shape of the sentence, a list and somebody to share it with,
+     is what says this is a share. Whether the words after "with" turn
+     out to be a name this can resolve is a different question: "share
+     the Fleet Prospects list with the team" names no person, and
+     throwing the sentence away for it said the bar had not understood
+     a sentence it had read completely. The capability declares `users`
+     required and the question is asked where every other one is. */
   const people = peopleIn(whoPart.replace(/\b(?:access|permission|sight|rights?)\b/gi, '').trim());
-  if (!people.length) return null;
 
   const step: Invoke = {
     op: 'invoke',
@@ -220,14 +228,16 @@ export function parseShareList(
       /* Always a list, even for one person. The operation takes a set of
          people and an argument whose shape depends on how many were
          named is two operations wearing one name. */
-      users: { kind: 'list', of: people.map(personRef) },
+      ...(people.length ? { users: { kind: 'list' as const, of: people.map(personRef) } } : {}),
     },
     produces: { kind: 'rows', entity: 'contacts' },
   };
 
   return {
     step,
-    summary: `Share the ${listPart} list with ${people.join(' and ')}`,
+    summary: people.length
+      ? `Share the ${listPart} list with ${people.join(' and ')}`
+      : `Share the ${listPart} list`,
     requires: cap.requires,
     confidence: 13,
   };

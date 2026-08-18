@@ -597,6 +597,52 @@ function namesFor(text: string, on?: Screen): string[] {
 
 const ACTION_CAP = (id: string) => capabilityDef(id);
 
+/* =============================================================
+   3. Sentences that are RECOGNISABLE AND INCOMPLETE
+
+   "Not understood: 0" above says nothing about these. It says that none
+   of fifty sentences chosen for being complete came back unrecognised,
+   which is a weaker claim than it looks and was read as a stronger one.
+
+   Every sentence below names an operation this application performs and
+   leaves out a value. Each one must come back `asks`. A reader that
+   returns null for a missing value makes one of these disappear into
+   "not understood", which is the exact failure this list exists to
+   catch, and it fails the run.
+   ============================================================= */
+const INCOMPLETE: { text: string; on?: Screen; expect: string }[] = [
+  { text: 'schedule a call with Dawson next Friday', expect: 'What time?' },
+  { text: 'book a call with Dawson', expect: 'When? Say the day and the time.' },
+  { text: "move Friday's site visit", expect: 'When should it move to?' },
+  { text: "propose another time for Friday's meeting", expect: 'What time do you want to suggest?' },
+  { text: 'create a new LinkedIn post', expect: 'What should it say?' },
+  { text: 'find waste companies', expect: 'Where should I search?' },
+  { text: 'add another site to this customer', on: { open: 'customer' }, expect: 'What is the address?' },
+  { text: 'add their LinkedIn profile to this account', on: { open: 'customer' }, expect: 'What is the web address?' },
+  { text: 'make this address their main address', on: { open: 'customer' }, expect: 'Which address should be the main one?' },
+  { text: 'link these two customer records as the same account', on: { selected: 'customer' }, expect: 'Which should be the main account?' },
+  { text: 'link this deal to a stock unit', on: { open: 'deal' }, expect: 'Which stock unit?' },
+  { text: 'make a list of these', on: { selected: 'customer' }, expect: 'What should it be called?' },
+  { text: 'promote Dave', expect: 'Which role? Admin, marketer, sales or viewer.' },
+];
+
+console.log('  RECOGNISABLE AND INCOMPLETE\n');
+let asked = 0;
+for (const { text: s, on, expect } of INCOMPLETE) {
+  const planned = planCommand(s, {
+    actorCapabilities: new Set([...caps, ...WITHHELD]) as never,
+    vocabulary: VOCABULARY,
+    context: screenFor(on),
+  });
+  const missing = planned?.completion.kind === 'incomplete' ? planned.completion.missing : [];
+  const right = missing.some((m) => m.ask === expect);
+  if (right) asked += 1; else process.exitCode = 1;
+  console.log(`   ${right ? ' ask ' : 'MISS '} ${s}`);
+  console.log(`          ${missing.length ? missing.map((m) => m.ask).join(' / ') : (planned ? `read as: ${planned.presentation.summary}` : 'not understood')}`);
+  if (!right) console.log(`          expected: ${expect}`);
+}
+console.log(`\n  ${asked}/${INCOMPLETE.length} recognised, and asking for what they left out.\n`);
+
 console.log('  THE SAME FIFTY, AGAINST THE CHECKS THAT RUN THEM\n');
 const covered: Record<string, number> = { fake: 0, http: 0, pg: 0, ext: 0 };
 let external = 0;

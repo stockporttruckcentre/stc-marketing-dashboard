@@ -42,7 +42,8 @@ export type RolePlan = {
   confidence: number;
   /** The words that named the person, for the preview. */
   who: string;
-  role: string;
+  /** Null where the sentence named the person and not the role. */
+  role: string | null;
 };
 
 /**
@@ -71,6 +72,20 @@ const VERBS = [
   'make', 'set', 'change', 'elevate', 'promote', 'demote', 'upgrade', 'downgrade',
   'grant', 'give', 'move',
 ];
+
+/**
+ * Verbs that can only be about what somebody is allowed to do.
+ *
+ * "Promote Dave" and "demote Sam" say which operation and leave out
+ * which role. That is a question with an answer, and throwing the
+ * sentence away for it told somebody the bar had not understood a
+ * sentence it had understood.
+ *
+ * The rest of the list is deliberately not here. "Make Dave a coffee"
+ * is not a role change with the role left off, and reading it as one
+ * would ask which role somebody wants their coffee to be.
+ */
+const ONLY_ROLES = ['elevate', 'promote', 'demote', 'upgrade', 'downgrade'];
 
 /** Words that sit between the verb and the name without adding anything. */
 const FILLER = new Set([
@@ -134,8 +149,12 @@ export function parseRoleChange(
   const verb = VERBS.filter((v) => t.includes(` ${v} `)).sort((a, b) => b.length - a.length)[0];
   if (!verb) return null;
 
+  /* The role, where the sentence named one. Without one this is only a
+     role change when the verb can mean nothing else, and then it is a
+     recognised operation with a value missing rather than a sentence
+     nobody can read. */
   const wanted = roleIn(raw);
-  if (!wanted) return null;
+  if (!wanted && !ONLY_ROLES.includes(verb)) return null;
 
   const cap = capability('user.setRole');
   if (!cap || !cap.requires) return null;
@@ -155,7 +174,7 @@ export function parseRoleChange(
   const words = raw
     .replace(/'s\b/gi, ' ')
     .replace(new RegExp(`\\b${verb}\\b`, 'i'), ' ')
-    .replace(new RegExp(`\\b${wanted.said.replace(/\s+/g, '\\s+')}\\b`, 'i'), ' ')
+    .replace(wanted ? new RegExp(`\\b${wanted.said.replace(/\s+/g, '\\s+')}\\b`, 'i') : / $^/, ' ')
     .replace(/[^A-Za-z0-9@.' ]+/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
@@ -192,7 +211,7 @@ export function parseRoleChange(
         produces: { kind: 'rows', entity: 'people' },
       },
       args: {
-        role: { kind: 'literal', value: wanted.role },
+        ...(wanted ? { role: { kind: 'literal' as const, value: wanted.role } } : {}),
         /* Carried so the requirement derivation sees the profiles read
            this performs, rather than only the write. */
         person,
@@ -202,10 +221,10 @@ export function parseRoleChange(
     /* "Change Dave to admin" rather than "make Dave an admin", because
        the same wording has to read properly for all four roles and
        "make Tom a sales" does not. */
-    summary: `Change ${who} to ${wanted.role}`,
+    summary: wanted ? `Change ${who} to ${wanted.role}` : `Change what ${who} may do`,
     requires: cap.requires,
     who,
-    role: wanted.role,
+    role: wanted?.role ?? null,
     confidence: 13,
   };
 }
