@@ -657,6 +657,34 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'stock.sendToTracker',
+    label: 'Put these units on your sales tracker',
+    operates: 'invoke',
+    entities: ['trailers'],
+    /* The same capability the manual route gates on, because it is the
+       same operation: it inserts a lead. */
+    requires: 'crm.create',
+    confirm: true,
+    produces: 'record',
+    /* A second run makes a second lead against the same unit. */
+    idempotent: false,
+    handler: 'supabase/migrations/020_command_tracker_operations.sql',
+  },
+  {
+    id: 'crm.raiseProposal',
+    label: 'Raise a proposal against these customers',
+    operates: 'invoke',
+    entities: ['contacts'],
+    requires: 'crm.proposal',
+    confirm: true,
+    produces: 'record',
+    idempotent: false,
+    handler: 'supabase/migrations/020_command_tracker_operations.sql',
+    inputs: [
+      { key: 'kind', label: 'what the proposal is for', kind: 'enum', required: true },
+    ],
+  },
+  {
     id: 'list.add',
     label: 'Put these records on an existing list',
     operates: 'invoke',

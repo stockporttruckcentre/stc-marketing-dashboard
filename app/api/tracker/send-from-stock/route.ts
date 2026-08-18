@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
+import { sendFromStock } from '@/lib/crm/tracker-operations';
 
 export const dynamic = 'force-dynamic';
 
-/** Send a stock trailer to the calling user's Sales tracker (creates a new lead, linked to the stock row). */
+/**
+ * Send a stock trailer to the caller's own sales tracker.
+ *
+ * The operation itself is `command_send_from_stock`, wrapped by
+ * `lib/crm/tracker-operations.ts`, which is what the command bar
+ * reaches too. This route is the button; it decides nothing the
+ * sentence path decides differently.
+ *
+ * The list is made on first use rather than refused. "You have no sales
+ * tracker yet, open the tracker once to make one" was an error message
+ * about the application's own bookkeeping.
+ */
 export async function POST(req: NextRequest) {
   /* This inserts a lead. A viewer could create one. */
   const gate = await requireCapability('crm.create');
@@ -11,37 +23,15 @@ export async function POST(req: NextRequest) {
   const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({})) as { stock_trailer_id?: string };
-  if (!body.stock_trailer_id) return NextResponse.json({ error: 'stock_trailer_id required' }, { status: 400 });
+  if (!body.stock_trailer_id) {
+    return NextResponse.json({ error: 'stock_trailer_id required' }, { status: 400 });
+  }
 
-  // Caller's tracker list
-  const { data: list } = await supabase.from('crm_lists').select('id, name')
-    .eq('owner_id', user.id).eq('is_global', false)
-    .ilike('name', '%Sales tracker%').limit(1).maybeSingle();
-  if (!list) return NextResponse.json({ error: 'You have no Sales tracker list yet. Open the Sales tracker once to auto-create it.' }, { status: 400 });
+  const done = await sendFromStock(supabase as never, {
+    trailerIds: [body.stock_trailer_id],
+    ownerId: user.id,
+  });
+  if (!done.ok) return NextResponse.json({ error: done.why }, { status: 400 });
 
-  // Pull trailer details
-  const { data: trailer, error: tErr } = await supabase.from('stock_trailers')
-    .select('stc_no, chassis_number, year, make, model, description, location, category, status')
-    .eq('id', body.stock_trailer_id).single();
-  if (tErr || !trailer) return NextResponse.json({ error: tErr?.message || 'trailer not found' }, { status: 404 });
-
-  // Compose a sensible company_name + description for the lead. The lead is a sales opportunity tied to the trailer.
-  const company_name = `Lead — ${trailer.stc_no || trailer.chassis_number || 'Trailer'}`;
-  const description = [trailer.year, trailer.make, trailer.model, trailer.description].filter(Boolean).join(' ');
-
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: row, error: insErr } = await supabase.from('crm_contacts').insert({
-    list_id: list.id,
-    side: 'trailer_sales',
-    status: 'lead',
-    company_name,
-    description,
-    source: 'From Stock',
-    date_of_enquiry: today,
-    location: trailer.location,
-    stock_trailer_id: body.stock_trailer_id,
-  }).select('*').single();
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
-
-  return NextResponse.json({ ok: true, tracker_row_id: row?.id });
+  return NextResponse.json({ ok: true, tracker_row_id: done.trackerRowId });
 }

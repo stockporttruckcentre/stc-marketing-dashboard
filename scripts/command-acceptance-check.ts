@@ -2404,6 +2404,108 @@ test('a renderer that fails leaves the chained change unwritten', async () => {
   ok('with nothing written at all', db.writes.length === 0, JSON.stringify(db.writes));
 });
 
+
+/* =============================================================
+   26. Two operations that were route bodies
+
+   Sending a unit to somebody's tracker and raising a proposal were
+   reachable by clicking and by no sentence at all. The business logic
+   is now one function each, which the route and the command bar both
+   call, so neither can carry the relationship across and the other
+   forget to.
+   ============================================================= */
+
+test('a stock unit goes onto the tracker from a sentence', async () => {
+  const db = fakeDb({
+    stock_trailers: trailers(),
+    crm_lists: [{ id: 'L1', name: 'Sales tracker', owner_id: 'u1', is_global: false }],
+  });
+  const text = 'send STC143580 to my tracker';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as the operation the button performs',
+    planned.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'stock.sendToTracker'),
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+
+  const preview = planned.preview;
+  ok('it previews over the one unit', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+
+  const lead = (db.tables.crm_contacts ?? []).find((r) => r.source === 'From Stock');
+  ok('a lead was made against the unit', !!lead, JSON.stringify(db.tables.crm_contacts));
+  ok('on the trailer sales side', lead?.side === 'trailer_sales', String(lead?.side));
+  ok('linked to the unit it came from', lead?.stock_trailer_id === 't1', String(lead?.stock_trailer_id));
+});
+
+test('a proposal is raised, on the side of the business the words said', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', relationship: 'existing',
+        contact_name: 'Sam Dawson', email: 's@dawson.co.uk', location: 'Hyde' },
+    ],
+    crm_lists: [{ id: 'L1', name: 'Sales tracker', owner_id: 'u1', is_global: false }],
+  });
+  const text = 'raise a maintenance proposal for Dawson Group';
+
+  const planned = await plan(text, 'admin', db);
+  ok('it plans', !!planned);
+  if (!planned) return;
+  ok('as the proposal operation',
+    planned.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'crm.raiseProposal'),
+    JSON.stringify(planned.planned.planning.plan.steps.map((s) => s.op)));
+  ok('and the summary says which kind',
+    /maintenance/.test(planned.planned.meaning.summary), planned.planned.meaning.summary);
+
+  const preview = planned.preview;
+  if (!preview?.ok) { ok('it previews', false, preview?.why ?? 'no preview'); return; }
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok) return;
+
+  const raised = db.tables.crm_contacts.find((r) => r.source === 'CRM proposal');
+  ok('a quoted row was raised', raised?.status === 'quoted', String(raised?.status));
+  ok('on the maintenance side', raised?.side === 'maintenance', String(raised?.side));
+  /* Carried across so the dashboard can split proposals to prospects
+     from proposals to existing customers. */
+  ok('carrying the relationship across', raised?.relationship === 'existing',
+    String(raised?.relationship));
+});
+
+test('a viewer cannot raise a proposal, from either direction', async () => {
+  const reachable = planCommand('raise a proposal for Dawson Group', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+  })?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'crm.raiseProposal') ?? false;
+  ok('the sentence does not reach it', !reachable);
+
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+  });
+  db.as('viewer');
+  const out = await postgrestStore(db.supabase).invoke({
+    capability: 'crm.raiseProposal', subjects: ['c1'], args: { kind: 'trailer_sales' },
+  });
+  ok('and neither does the database call', !out.ok, 'it raised one');
+  if (!out.ok) ok('naming the capability', /crm\.proposal/.test(out.why), out.why);
+});
+
 /* ============================================================= */
 
 async function main() {

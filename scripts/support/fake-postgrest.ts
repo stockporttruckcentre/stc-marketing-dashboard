@@ -311,6 +311,95 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId, name: listName, moved: targets.length }, error: null };
     }
 
+    /* The caller's own tracker list, made on first use. */
+    if (name === 'command_tracker_list') {
+      const owner = String(args.p_owner ?? 'u1');
+      const lists = (tables.crm_lists ??= []);
+      let found = lists.find(
+        (l) => String(l.owner_id) === owner && l.is_global !== true
+          && /sales tracker/i.test(String(l.name ?? '')),
+      );
+      if (!found) {
+        found = { id: `list${lists.length + 1}`, name: 'Sales tracker', owner_id: owner, is_global: false };
+        lists.push(found);
+      }
+      return { data: found.id, error: null };
+    }
+
+    /* A stock unit onto a tracker, as a lead. */
+    if (name === 'command_send_from_stock') {
+      if (!may('crm.create')) {
+        return { data: null, error: { message: 'you do not have crm.create' } };
+      }
+      const ids = (args.p_trailers ?? []) as string[];
+      if (!ids.length) return { data: null, error: { message: 'nothing said which units to send' } };
+
+      const list = (await rpc('command_tracker_list', { p_owner: args.p_owner })).data as string;
+      const units = (tables.stock_trailers ?? []).filter((r) => ids.includes(String(r.id)));
+      if (units.length !== ids.length) {
+        return {
+          data: null,
+          error: {
+            message: `expected to send ${ids.length} units to the tracker but sent ${units.length}`,
+          },
+        };
+      }
+
+      const rows = (tables.crm_contacts ??= []);
+      let first: string | null = null;
+      for (const unit of units) {
+        const id = `lead${rows.length + 1}`;
+        rows.push({
+          id, list_id: list, side: 'trailer_sales', status: 'lead',
+          company_name: `Lead ${unit.stc_no ?? unit.chassis_number ?? 'Trailer'}`,
+          source: 'From Stock', location: unit.location, stock_trailer_id: unit.id,
+        });
+        writes.push({ table: 'crm_contacts', set: { stock_trailer_id: String(unit.id) }, ids: [id] });
+        first = first ?? id;
+      }
+      return { data: { listId: list, made: units.length, trackerRowId: first }, error: null };
+    }
+
+    /* A proposal, raised against a customer. */
+    if (name === 'command_raise_proposal') {
+      if (!may('crm.proposal')) {
+        return { data: null, error: { message: 'you do not have crm.proposal' } };
+      }
+      const ids = (args.p_contacts ?? []) as string[];
+      const kind = String(args.p_kind ?? 'trailer_sales');
+      const side = ['trailer_sales', 'rental'].includes(kind) ? 'trailer_sales'
+        : ['maintenance', 'refurb'].includes(kind) ? 'maintenance' : null;
+      if (!side) return { data: null, error: { message: `there is no proposal type called ${kind}` } };
+      if (!ids.length) {
+        return { data: null, error: { message: 'nothing said who the proposal is for' } };
+      }
+
+      const list = (await rpc('command_tracker_list', { p_owner: args.p_owner })).data as string;
+      const rows = (tables.crm_contacts ??= []);
+      const people = rows.filter((r) => ids.includes(String(r.id)));
+      if (people.length !== ids.length) {
+        return {
+          data: null,
+          error: { message: `expected to raise ${ids.length} proposals but raised ${people.length}` },
+        };
+      }
+
+      let first: string | null = null;
+      for (const person of people) {
+        const id = `prop${rows.length + 1}`;
+        rows.push({
+          id, list_id: list, side, status: 'quoted', source: 'CRM proposal',
+          company_name: person.company_name, contact_name: person.contact_name,
+          email: person.email, phone: person.phone, location: person.location,
+          relationship: person.relationship ?? 'prospect',
+          requirement: kind.replace('_', ' '),
+        });
+        writes.push({ table: 'crm_contacts', set: { status: 'quoted' }, ids: [id] });
+        first = first ?? id;
+      }
+      return { data: { listId: list, made: people.length, kind, rowId: first }, error: null };
+    }
+
     /* Changing what somebody is allowed to do. The highest risk write
        here, so the capability is asked for and the last administrator
        cannot stop being one. */
@@ -704,6 +793,18 @@ const PERFORMED: Record<string, {
   'list.add': {
     name: 'command_add_to_list',
     args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
+  },
+  'stock.sendToTracker': {
+    name: 'command_send_from_stock',
+    args: (c) => ({ p_trailers: c.subjects, p_owner: c.args.actorId ?? null }),
+  },
+  'crm.raiseProposal': {
+    name: 'command_raise_proposal',
+    args: (c) => ({
+      p_contacts: c.subjects,
+      p_kind: c.args.kind ?? 'trailer_sales',
+      p_owner: c.args.actorId ?? null,
+    }),
   },
   'user.setRole': {
     name: 'command_set_role',

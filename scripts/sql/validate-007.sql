@@ -1338,7 +1338,105 @@ SELECT keep_an_admin();
 UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
 
 -- =============================================================
--- 12. The allowlist matches the registry
+-- 12. Operations that were route bodies
+-- =============================================================
+\echo '--- tracker operations ---'
+
+SELECT reset_fixtures();
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE unit UUID; out JSONB;
+BEGIN
+  SELECT id INTO unit FROM stock_trailers WHERE stc_no = 'TESTSTC1';
+  SELECT command_send_from_stock(ARRAY[unit], 'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a unit goes onto the tracker', (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a unit goes onto the tracker', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('as a lead on the trailer sales side',
+  (SELECT COUNT(*) FROM crm_contacts
+    WHERE source = 'From Stock' AND side = 'trailer_sales' AND status = 'lead') = 1);
+SELECT assert('linked to the unit it came from',
+  (SELECT COUNT(*) FROM crm_contacts c JOIN stock_trailers t ON t.id = c.stock_trailer_id
+    WHERE c.source = 'From Stock' AND t.stc_no = 'TESTSTC1') = 1);
+
+-- A unit that is not there takes the whole call with it.
+DO $$
+BEGIN
+  PERFORM command_send_from_stock(
+    ARRAY['00000000-0000-0000-0000-0000000000ff'::UUID],
+    'aaaaaaaa-0000-0000-0000-000000000001');
+  PERFORM assert('a unit that is not there is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a unit that is not there is refused',
+    SQLERRM LIKE '%expected to send%', SQLERRM);
+END
+$$;
+
+-- A proposal, carrying the relationship across.
+INSERT INTO crm_contacts (id, company_name, status, source, relationship, contact_name)
+VALUES ('a2222222-0000-0000-0000-000000000001', 'TEST proposal target', 'lead', 'manual',
+        'existing', 'Sam Dawson')
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_raise_proposal(
+    ARRAY['a2222222-0000-0000-0000-000000000001'::UUID], 'maintenance',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a proposal is raised', (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a proposal is raised', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('as a quoted row on the maintenance side',
+  (SELECT COUNT(*) FROM crm_contacts
+    WHERE source = 'CRM proposal' AND side = 'maintenance' AND status = 'quoted') = 1);
+SELECT assert('carrying the relationship across',
+  (SELECT relationship FROM crm_contacts WHERE source = 'CRM proposal' LIMIT 1) = 'existing',
+  (SELECT relationship FROM crm_contacts WHERE source = 'CRM proposal' LIMIT 1));
+
+DO $$
+BEGIN
+  PERFORM command_raise_proposal(
+    ARRAY['a2222222-0000-0000-0000-000000000001'::UUID], 'nonsense', NULL);
+  PERFORM assert('a proposal type that does not exist is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a proposal type that does not exist is refused',
+    SQLERRM LIKE '%no proposal type%', SQLERRM);
+END
+$$;
+
+-- A viewer, straight at the function.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_raise_proposal(
+    ARRAY['a2222222-0000-0000-0000-000000000001'::UUID], 'trailer_sales', NULL);
+  PERFORM assert('a viewer cannot raise a proposal', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer cannot raise a proposal', SQLERRM LIKE '%crm.proposal%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST %' OR source IN ('From Stock', 'CRM proposal');
+DELETE FROM crm_lists WHERE name = 'Sales tracker';
+
+-- =============================================================
+-- 13. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

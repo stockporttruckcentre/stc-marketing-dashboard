@@ -34,6 +34,7 @@ import { parseEdit, readRecordRefs, type EditPlan } from './mutate';
 import { readOutput } from './output';
 import { parseLifecycle } from './lifecycle';
 import { parseRoleChange } from './roles';
+import { parseOperation } from './operations';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -349,6 +350,19 @@ function planOneClause(
   text: string,
   opts?: PlanOptions,
 ): CommandPlanning | null {
+  /* A DECLARED OPERATION IS THE MOST SPECIFIC READING THERE IS.
+
+     It takes a verb, a word saying WHICH operation, and records it can
+     actually resolve, so it fires on very little and is right when it
+     does. It goes first because the readers under it are all more
+     general: "send STC143580 to my tracker" looks like sending
+     something to somebody called "my tracker", "raise a proposal for
+     Dawson Group" contains a create word, and "put these on the
+     tracker" contains a move word. Each of those would do a third of
+     the job and say it had done all of it. */
+  const operation = readOperation(text, opts);
+  if (operation) return operation;
+
   /* SENDING IS AN INSTRUCTION TOO, AND IT IS THE ONE THAT WAS MEANT.
 
      "Email the sold trailers to Dave as a PDF" starts with a word that
@@ -602,6 +616,46 @@ function nounFor(entityId: string): string {
  * create word and would otherwise be read as making a record called
  * "Dave an admin".
  */
+/**
+ * A declared business operation, if this sentence asks for one.
+ *
+ * Before the lifecycle and instruction readers, because "raise a
+ * proposal for Dawson Group" contains a create word and "send these to
+ * my tracker" contains a move word, and both would otherwise be read as
+ * something tamer than they are.
+ */
+function readOperation(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseOperation(text, caps, opts.context ?? EMPTY_CONTEXT, opts.priorResult);
+  if (!read) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
 function readRoleChange(
   text: string,
   opts?: PlanOptions,

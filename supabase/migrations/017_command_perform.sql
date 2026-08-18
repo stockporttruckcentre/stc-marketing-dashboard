@@ -169,6 +169,14 @@ BEGIN
           args ->> 'describedAs');
         changed := changed + 1;
 
+      ELSIF cap = 'stock.sendToTracker' THEN
+        outcome := command_send_from_stock(subjects, NULL);
+        changed := changed + COALESCE((outcome ->> 'made')::INTEGER, 0);
+
+      ELSIF cap = 'crm.raiseProposal' THEN
+        outcome := command_raise_proposal(subjects, args ->> 'kind', NULL);
+        changed := changed + COALESCE((outcome ->> 'made')::INTEGER, 0);
+
       ELSIF cap = 'user.setRole' THEN
         outcome := command_set_role(subjects[1], args ->> 'role');
         changed := changed + 1;

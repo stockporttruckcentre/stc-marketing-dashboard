@@ -304,6 +304,18 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
        customers on it. */
     args: (c) => ({ p_list_name: c.args.list ?? null, p_ids: c.subjects }),
   },
+  'stock.sendToTracker': {
+    name: 'command_send_from_stock',
+    args: (c) => ({ p_trailers: c.subjects, p_owner: c.args.actorId ?? null }),
+  },
+  'crm.raiseProposal': {
+    name: 'command_raise_proposal',
+    args: (c) => ({
+      p_contacts: c.subjects,
+      p_kind: c.args.kind ?? 'trailer_sales',
+      p_owner: c.args.actorId ?? null,
+    }),
+  },
   'user.setRole': {
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
