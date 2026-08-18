@@ -468,6 +468,65 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { id, status, author }, error: null };
     }
 
+    /* Booking one. Who is booking it and that they are on it come from
+       the caller, never from the sentence. */
+    if (name === 'command_create_meeting') {
+      if (!may('crm.delegate')) {
+        return { data: null, error: { message: 'you do not have crm.delegate' } };
+      }
+      const title = String(args.p_title ?? '').trim();
+      if (!title) return { data: null, error: { message: 'a meeting with no title is not a meeting' } };
+      if (args.p_start == null) {
+        return { data: null, error: { message: 'nothing said when the meeting is' } };
+      }
+      const minutes = Math.max(Number(args.p_minutes ?? 30) || 30, 1);
+      const start = new Date(String(args.p_start));
+      const rows = (tables.calendar_events ??= []);
+      const id = `event${rows.length + 1}`;
+      rows.push({
+        id, title, start_at: start.toISOString(),
+        end_at: new Date(start.getTime() + minutes * 60000).toISOString(),
+        all_day: false, created_by: 'u1', contact_id: args.p_contact ?? null,
+        visibility: args.p_visibility ?? 'private', description: null,
+      });
+      writes.push({ table: 'calendar_events', set: { title }, ids: [id] });
+      return { data: { id, title, start: start.toISOString(), minutes }, error: null };
+    }
+
+    /* Answering the invitation on a meeting: the caller's own. */
+    if (name === 'command_meeting_answer_for') {
+      const events = (args.p_events ?? []) as string[];
+      if (events.length !== 1) {
+        return { data: null, error: { message: 'an invitation is answered on one meeting at a time' } };
+      }
+      const invites = (tables.calendar_invites ??= []);
+      const mine = invites.filter((i) => String(i.event_id) === String(events[0])
+        && (String(i.user_id) === 'u1' || String(i.invited_by) === 'u1'));
+      if (!mine.length) {
+        return { data: null, error: { message: 'you have no invitation to that meeting' } };
+      }
+      const invite = mine.find((i) => String(i.user_id) === 'u1') ?? mine[0];
+      const action = String(args.p_action ?? '');
+      if (action === 'withdraw') {
+        invites.splice(invites.indexOf(invite), 1);
+      } else if (action === 'accept') {
+        invite.status = 'accepted'; invite.awaiting = null;
+      } else if (action === 'decline') {
+        invite.status = 'declined'; invite.awaiting = null;
+      } else if (action === 'propose') {
+        if (args.p_start == null) {
+          return { data: null, error: { message: 'nothing said what time you are suggesting' } };
+        }
+        invite.status = 'proposed';
+        invite.proposed_start_at = String(args.p_start);
+        invite.awaiting = invite.invited_by;
+      } else {
+        return { data: null, error: { message: `there is nothing called ${action}` } };
+      }
+      writes.push({ table: 'calendar_invites', set: { status: invite.status ?? 'gone' }, ids: [String(invite.id)] });
+      return { data: { ok: true, said: 'Done.' }, error: null };
+    }
+
     /* Moving a meeting. Both ends move, so the length is kept: writing
        the start alone leaves a meeting that finishes before it begins. */
     if (name === 'command_reschedule_meeting') {
@@ -981,6 +1040,26 @@ const PERFORMED: Record<string, {
         : null,
       p_scheduled: c.args.scheduledDate ?? null,
       p_caption: c.args.caption ?? null,
+    }),
+  },
+  'meeting.create': {
+    name: 'command_create_meeting',
+    args: (c) => ({
+      p_title: c.args.title ?? null,
+      p_start: c.args.start ?? null,
+      p_minutes: c.args.minutes ?? null,
+      p_contact: c.args.contact ?? null,
+      p_visibility: c.args.visibility ?? 'private',
+    }),
+  },
+  'meeting.answer': {
+    name: 'command_meeting_answer_for',
+    args: (c) => ({
+      p_events: c.subjects,
+      p_action: c.args.action ?? null,
+      p_start: c.args.start ?? null,
+      p_end: c.args.end ?? null,
+      p_note: c.args.note ?? null,
     }),
   },
   'meeting.reschedule': {

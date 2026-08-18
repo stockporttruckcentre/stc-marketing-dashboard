@@ -30,6 +30,8 @@
    ============================================================= */
 import { fakeDb, type Row } from './support/fake-postgrest';
 import { postgrestStore } from '../lib/command/store/postgrest';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
@@ -3034,6 +3036,63 @@ test('a file with no company names anywhere is refused before the preview', asyn
     ok('and says why', /company name/.test(preview.why), preview.why);
   }
   ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+/* =============================================================
+   31. One sentence, one plan, one authority
+
+   A canonical refusal used to fall through to a second parser with its
+   own route behind it, which could decide the sentence meant something
+   else and carry that out. The route is gone; these are the assertions
+   that say so and that nothing rescues a refusal.
+   ============================================================= */
+
+test('a sentence the canonical planner refuses reaches nothing', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+    stock_trailers: [{ id: 't1', stc_no: 'STC1', status: 'in_stock' }],
+  });
+  /* Words the old parser scored as `create_prospect` with a missing
+     slot, and which the canonical planner makes nothing of. */
+  const text = 'wibble the frobnicator for Dawson';
+
+  const planned = await planAndPreview({
+    text, capabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  ok('nothing plans it', planned === null, JSON.stringify(planned?.planned.meaning.summary));
+
+  /* And confirming it anyway, which is what a client could always try,
+     writes nothing. */
+  const done = await applyMutation({
+    text, capabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: 'anything', previewProgrammeHash: 'anything',
+  });
+  ok('and applying it refuses', !done.ok, 'it did something');
+  ok('with nothing written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+test('the deleted executor has no callers in production code', async () => {
+  const walk = (dir: string): string[] => {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { out.push(...walk(full)); continue; }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      if (/api\/command\/execute/.test(readFileSync(full, 'utf8'))) out.push(full);
+    }
+    return out;
+  };
+  const callers = [...walk('app'), ...walk('components'), ...walk('lib')];
+  ok('nothing references it', callers.length === 0, callers.join(', '));
+
+  /* And the route itself is gone, so restoring a caller cannot quietly
+     start working again. */
+  ok('and the route is gone', !existsSync('app/api/command/execute/route.ts'));
 });
 
 /* ============================================================= */

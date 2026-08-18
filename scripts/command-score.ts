@@ -71,7 +71,6 @@ const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 const read = (p: string) => {
   try { return readFileSync(join(process.cwd(), p), 'utf8'); } catch { return ''; }
 };
-const EXECUTE = read('app/api/command/execute/route.ts');
 const QUERY_ROUTE = read('app/api/command/query/route.ts');
 /* The canonical mutation runtime: what plans and previews, and what
    writes. Both, because a preview with nothing behind it is not a path. */
@@ -82,10 +81,6 @@ const MUTATION_PATH = !!read('app/api/command/plan/route.ts')
 const EMIT_PATH = !!read('app/api/command/emit/route.ts')
   && !!read('lib/command/server/emit.ts');
 
-/** Intent ids the execute route branches on. */
-const HANDLED = new Set<string>();
-for (const m of EXECUTE.matchAll(/intent(?:Id)?\s*===\s*['"]([a-z0-9_.]+)['"]/gi)) HANDLED.add(m[1]);
-for (const m of EXECUTE.matchAll(/case\s+['"]([a-z0-9_.]+)['"]/gi)) HANDLED.add(m[1]);
 
 type State = 'PASS' | 'FAIL' | 'UNVERIFIED' | 'N/A';
 

@@ -274,11 +274,21 @@ export const ENTITIES: EntitySpec[] = [
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: DEAL_STATUS },
+      /* THE CUSTOMER'S OWN NAME.
+         The tracker reading of this table has had one all along and the
+         CRM reading had not, so "find Dawson Group" resolved to a list
+         of every customer: the sentence named a record and the answer
+         was everybody. It is also what makes a company name in the live
+         vocabulary able to name the entity on its own. */
+      { key: 'customer', column: 'company_name', kind: 'text', label: 'customer', freeText: true },
+      { key: 'contact', column: 'contact_name', kind: 'text', label: 'contact', freeText: true },
       { key: 'location', column: 'location', kind: 'text', label: 'location', freeText: true },
       { key: 'assigned', column: 'assigned_to', kind: 'text', label: 'assigned to', freeText: true },
     ],
     dimensions: [
       { key: 'status', column: 'status', label: 'status', words: ['status', 'stage'] },
+      { key: 'customer', column: 'company_name', label: 'customer',
+        words: ['customer', 'company', 'client', 'account'] },
       { key: 'location', column: 'location', label: 'location', words: ['location', 'area', 'town', 'city'] },
       { key: 'assigned', column: 'assigned_to', label: 'owner', words: ['rep', 'owner', 'assigned'] },
     ],
@@ -317,6 +327,29 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'author', column: 'created_by', label: 'author', words: ['author', 'who', 'writer'] },
     ],
     hrefFor: () => '/dashboard/social',
+  },
+  {
+    /* WHAT THE MONTH IS SUPPOSED TO BRING IN.
+       `revenue_targets` was reachable by one hand written intent that
+       computed a gap in a route and by nothing else, so nobody could
+       ask what the target actually was. It is an ordinary table with a
+       month and an amount on it, and it is answered like one. */
+    id: 'targets',
+    table: 'revenue_targets',
+    label: 'targets', labelOne: 'target',
+    nouns: ['target', 'targets', 'budget', 'budgets', 'quota', 'quotas'],
+    titleColumn: 'period_month',
+    subtitleColumns: ['target_amount'],
+    dateColumn: 'period_month',
+    amounts: [
+      { key: 'target', column: 'target_amount', label: 'target',
+        words: ['target', 'budget', 'quota', 'goal'] },
+    ],
+    filters: [],
+    dimensions: [
+      { key: 'month', column: 'period_month', label: 'month', words: ['month', 'period'] },
+    ],
+    hrefFor: () => '/dashboard/analytics',
   },
   {
     id: 'meetings',

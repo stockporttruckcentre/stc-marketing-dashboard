@@ -320,6 +320,17 @@ async function resolveArguments(
         candidates: found.candidates.map((c) => ({ id: c.id, label: c.label })),
       };
     }
+    /* AN OPTIONAL REFERENCE THAT MATCHES NOTHING IS NOT SUPPLIED.
+
+       "Book a call with Dawson on Friday" links the meeting to the
+       customer when the CRM holds one by that name. Somebody who is not
+       a customer is still somebody to meet, so the link is simply
+       absent rather than the whole booking being refused. Two Dawsons
+       still ask, because that is a question rather than an absence. */
+    if (found.state === 'no match'
+      && !inputs.find((i) => i.key === key)?.required) {
+      continue;
+    }
     if (found.state !== 'resolved') {
       return { ok: false, reason: 'unresolved', why: found.why };
     }

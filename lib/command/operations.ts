@@ -80,7 +80,11 @@ const OPERATIONS: {
        without the verb the sentence was read as generating a FILE. */
     verbs: ['raise', 'create', 'make', 'start', 'open', 'send', 'do', 'put',
             'generate', 'produce', 'draw up', 'prepare'],
-    objects: ['proposal', 'proposals', 'quote', 'quotes', 'quotation'],
+    /* A contract is what the tracker calls a proposal that has been
+       agreed. Both raise the same quoted row on the same side of the
+       business, which is what the CRM screen's button does. */
+    objects: ['proposal', 'proposals', 'quote', 'quotes', 'quotation',
+              'contract', 'contracts'],
     label: (n, what, kind) => `Raise a ${kind === 'trailer_sales' ? '' : `${kind} `}proposal for ${what}`,
     argument: {
       key: 'kind',

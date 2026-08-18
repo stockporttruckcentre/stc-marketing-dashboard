@@ -806,6 +806,44 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'meeting.create',
+    label: 'Book a meeting',
+    operates: 'invoke',
+    entities: ['meetings'],
+    creates: true,
+    requires: 'crm.delegate',
+    confirm: true,
+    produces: 'record',
+    idempotent: false,
+    handler: 'supabase/migrations/024_command_calendar.sql',
+    inputs: [
+      { key: 'title', label: 'what the meeting is', kind: 'text', required: true },
+      { key: 'start', label: 'when it is', kind: 'date', required: true },
+      { key: 'minutes', label: 'how long', kind: 'number', required: false },
+      /* The customer it is with, when the CRM holds one by that name. A
+         meeting with somebody who is not a customer is still a meeting,
+         so this is optional and an unmatched name is simply not a link. */
+      { key: 'contact', label: 'the customer', kind: 'text', required: false },
+    ],
+  },
+  {
+    id: 'meeting.answer',
+    label: 'Answer a meeting invitation',
+    operates: 'invoke',
+    entities: ['meetings'],
+    /* Answering an invitation you were sent is not a privilege. The
+       function refuses an invitation that is not yours. */
+    requires: 'crm.view',
+    confirm: true,
+    produces: 'record',
+    idempotent: false,
+    handler: 'supabase/migrations/024_command_calendar.sql',
+    inputs: [
+      { key: 'action', label: 'what to say', kind: 'enum', required: true },
+      { key: 'start', label: 'the time being suggested', kind: 'date', required: false },
+    ],
+  },
+  {
     id: 'meeting.reschedule',
     label: 'Move a meeting to another time',
     operates: 'invoke',

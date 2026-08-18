@@ -36,7 +36,7 @@
    moves both and keeps the length, so "move it to 2pm" means what
    somebody dragging the block across the calendar means.
    ============================================================= */
-import type { Cond, Invoke, Mutate, Step } from './ir/types';
+import type { Cond, Expr, Invoke, Mutate, Step } from './ir/types';
 import { capability, entity as entityDef } from './ir/registry';
 import { ENTITIES } from './schema';
 import { readDate } from './mutate';
@@ -506,6 +506,168 @@ function readInvite(
   };
 }
 
+/** Words that book something into a diary. */
+const BOOK_WORDS = ['book', 'schedule', 'arrange', 'diarise', 'set up', 'put in',
+                    'create', 'add', 'new', 'make'];
+
+/** What a meeting is called when the sentence says what kind it is. */
+const KINDS: { words: string[]; title: string }[] = [
+  { words: ['site visit', 'visit', 'yard visit'], title: 'Site visit' },
+  { words: ['call', 'phone call', 'ring', 'callback', 'call back'], title: 'Call' },
+  { words: ['viewing', 'demo', 'demonstration'], title: 'Viewing' },
+  { words: ['review', 'catch up', 'catchup'], title: 'Review' },
+  { words: ['meeting', 'appointment'], title: 'Meeting' },
+];
+
+/**
+ * Booking one.
+ *
+ * "Book a call with Dawson on Friday at 10" is a day, a time, what kind
+ * of meeting it is and who it is with, which between them are the whole
+ * of a calendar entry. The kind becomes the title and the person becomes
+ * the link to the customer record, which is what the calendar screen
+ * does when somebody books from a customer.
+ *
+ * A day and a time are both required. "Book a call with Dawson" is a
+ * sentence with no time in it, and a meeting at a time nobody said is a
+ * meeting somebody misses.
+ */
+function readBook(
+  raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
+): MeetingPlan | null {
+  const t = soften(raw);
+  const verb = BOOK_WORDS.filter((w) => t.includes(` ${w} `))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!verb) return null;
+
+  const cap = capability('meeting.create');
+  if (!cap?.requires || !cap.handler) return null;
+  if (caps && !caps.has(cap.requires)) return null;
+
+  const day = readDay(raw, now);
+  const time = readTime(day ? raw.replace(new RegExp(escape(day.phrase), 'i'), ' ') : raw);
+  if (!day || !time) return null;
+
+  const kind = KINDS.find((k) => k.words.some((w) => t.includes(` ${w} `)));
+  if (!kind) return null;
+
+  /* Who it is with. The words after "with" or "for", which is where a
+     customer sits in every one of these sentences. */
+  const withWhom = raw.match(/\b(?:with|for|to see|and)\s+([A-Za-z0-9&'. -]{2,60}?)\s*(?:\bon\b|\bat\b|\bnext\b|\btomorrow\b|\btoday\b|[.,;]|$)/i)?.[1]
+    ?.trim().replace(/[.,;]+$/, '');
+
+  const at = new Date(day.from.getTime());
+  at.setHours(time.hour, time.minute, 0, 0);
+
+  const title = withWhom ? `${kind.title} with ${withWhom}` : kind.title;
+
+  const args: Record<string, Expr> = {
+    title: { kind: 'literal', value: title },
+    start: { kind: 'literal', value: at.toISOString() },
+  };
+  /* The customer, when the CRM holds one by that name. Optional, so a
+     meeting with somebody who is not a customer is still a meeting. */
+  if (withWhom) {
+    args.contact = {
+      kind: 'reference',
+      entity: 'contacts',
+      where: {
+        kind: 'cmp', op: 'contains',
+        left: { kind: 'field', of: { entity: 'contacts', field: 'company_name' } },
+        right: { kind: 'literal', value: withWhom },
+      },
+      select: 'id',
+      onAmbiguity: 'ask',
+    };
+  }
+
+  return {
+    step: {
+      op: 'invoke',
+      id: 'm1',
+      capability: 'meeting.create',
+      args,
+      produces: { kind: 'record', entity: ENTITY },
+    },
+    summary: `Book ${title} for ${day.label} at ${time.label}`,
+    requires: cap.requires,
+    confidence: 13,
+  };
+}
+
+/** What somebody can say to an invitation. */
+const ANSWERS: { action: string; words: string[]; label: string }[] = [
+  { action: 'accept', words: ['accept', 'confirm', 'agree to', 'say yes to', 'take'],
+    label: 'Accept' },
+  { action: 'decline', words: ['decline', 'reject', 'refuse', 'say no to', 'turn down'],
+    label: 'Decline' },
+  { action: 'withdraw', words: ['withdraw', 'take back', 'uninvite', 'un invite'],
+    label: 'Withdraw' },
+  { action: 'propose', words: ['propose', 'suggest', 'counter', 'offer', 'ask for'],
+    label: 'Suggest another time for' },
+];
+
+/**
+ * Answering one.
+ *
+ * The invitation is named by the meeting it is on, because nobody refers
+ * to an invitation by anything else. Which invitation on that meeting is
+ * yours is a question the database answers: the operation resolves it
+ * from the meeting and the caller.
+ */
+function readAnswer(
+  raw: string, caps: CrmCapabilities | undefined, now: Date, context: CommandContext,
+): MeetingPlan | null {
+  const t = soften(raw);
+  const answer = ANSWERS
+    .map((a) => ({ a, w: a.words.filter((w) => t.includes(` ${w} `)).sort((x, y) => y.length - x.length)[0] }))
+    .filter((x) => !!x.w)
+    .sort((x, y) => (y.w as string).length - (x.w as string).length)[0];
+  if (!answer?.w) return null;
+
+  const cap = capability('meeting.answer');
+  if (!cap?.requires || !cap.handler) return null;
+  if (caps && !caps.has(cap.requires)) return null;
+
+  /* A proposal needs the time being suggested, and it is the time after
+     the verb rather than the meeting's own. */
+  const proposing = answer.a.action === 'propose';
+  const split = proposing ? raw.toLowerCase().lastIndexOf(' for ') : -1;
+  const subject = split > 0 ? raw.slice(split + 5) : raw;
+  const offer = proposing ? raw.slice(0, split > 0 ? split : undefined) : '';
+
+  const reference = readMeetingReference(subject, { verbs: [answer.w, 'invitation', 'invite'], now, context });
+  if (!reference) return null;
+
+  const args: Record<string, Expr> = {
+    action: { kind: 'literal', value: answer.a.action },
+  };
+
+  if (proposing) {
+    const time = readTime(offer);
+    const day = readDay(offer, now);
+    if (!time || !day) return null;
+    const at = new Date(day.from.getTime());
+    at.setHours(time.hour, time.minute, 0, 0);
+    args.start = { kind: 'literal', value: at.toISOString() };
+  }
+
+  return {
+    step: {
+      op: 'invoke',
+      id: 'm1',
+      capability: 'meeting.answer',
+      expect: 'one',
+      subject: selectOf(reference.where),
+      args,
+      produces: { kind: 'record', entity: ENTITY },
+    },
+    summary: `${answer.a.label} the invitation to ${reference.label}`,
+    requires: cap.requires,
+    confidence: 13,
+  };
+}
+
 /**
  * Anything a sentence asks of a meeting.
  *
@@ -530,6 +692,8 @@ export function parseMeeting(
   if (!namesAMeeting(soften(text))) return null;
 
   return readCancel(text, caps, now, context)
+    ?? readAnswer(text, caps, now, context)
+    ?? readBook(text, caps, now, context)
     ?? readReschedule(text, caps, now, context)
     ?? readInvite(text, caps, now, context);
 }

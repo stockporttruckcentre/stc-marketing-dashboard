@@ -74,6 +74,11 @@ export const DELETE_WORDS = [
 const FILLER = [
   'a', 'an', 'the', 'new', 'record', 'entry', 'row', 'called', 'named', 'for', 'to',
   'in', 'on', 'up', 'please', 'me', 'us', 'off', 'of',
+  /* Where the record is going, which is not part of its name. "Add
+     trailer STC142345 to stock" was creating a trailer called
+     "STC142345 to stock", and "add Dawson Group as a prospect" a
+     customer called "Dawson Group as". */
+  'as', 'stock', 'list', 'crm', 'system', 'database', 'tracker', 'onto', 'into',
 ];
 
 /**

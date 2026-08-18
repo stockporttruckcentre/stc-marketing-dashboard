@@ -29,7 +29,7 @@
 
      npm run check:audit
    ============================================================= */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ACTIONS, suggestActions } from '../lib/command/actions';
 import { parseEdit } from '../lib/command/mutate';
@@ -49,7 +49,15 @@ const read = (p: string) => {
   try { return readFileSync(join(process.cwd(), p), 'utf8'); } catch { return ''; }
 };
 
-const EXECUTE = read('app/api/command/execute/route.ts');
+/* THERE IS NO LONGER A SECOND EXECUTOR.
+
+   `app/api/command/execute` performed nine hand written intents on its
+   own, and the bar fell through to it whenever the canonical planner
+   had not produced a runnable meaning. That made a canonical refusal
+   into an invitation for a different parser to decide what the sentence
+   meant. It is deleted, and this check now measures the canonical
+   runtime only. */
+const EXECUTE = '';
 /* The canonical mutation runtime: what plans and previews a change, and
    what writes it. Both, because a preview with nothing behind it is not
    a wired path. */
@@ -62,6 +70,34 @@ const BAR = read('components/dashboard/CommandBar.tsx');
    1. Which actions can actually go somewhere.
    ------------------------------------------------------------- */
 type Wiring = 'screen' | 'seed' | 'handler' | 'none';
+
+/**
+ * Nothing in production may call the deleted executor again.
+ *
+ * A static check rather than a comment, because the fallback was easy to
+ * write the first time and would be easy to write again. It reads the
+ * production tree, not this file's own text.
+ */
+function noSecondExecutor(): string[] {
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      const body = readFileSync(full, 'utf8');
+      /* The route's own path, and the legacy parser being used to decide
+         what happens rather than to suggest words. */
+      if (/api\/command\/execute/.test(body)) offenders.push(`${full} calls /api/command/execute`);
+      if (/from '@\/lib\/command\/intents'/.test(body) && /\bawait fetch\(/.test(body)) {
+        offenders.push(`${full} reads intents.ts and fetches in the same file`);
+      }
+    }
+  };
+  for (const dir of ['app', 'components']) walk(join(process.cwd(), dir));
+  return offenders;
+}
 
 /** Intent ids the execute route has a branch for. */
 function handledIntents(): Set<string> {
@@ -117,6 +153,13 @@ for (const how of ['handler', 'seed', 'screen', 'none'] as Wiring[]) {
   console.log(`  ${String(list.length).padStart(3)}  ${what}`);
   if (how === 'none') for (const x of list) console.log(`         ${x.id.padEnd(26)} ${x.detail}`);
 }
+
+const OFFENDERS = noSecondExecutor();
+console.log(`\n  ONE RUNTIME`);
+console.log(OFFENDERS.length
+  ? `  ${OFFENDERS.length} production file(s) can still execute outside the canonical runtime:`
+  : '  nothing in app/ or components/ executes outside the canonical runtime.');
+for (const o of OFFENDERS) console.log(`    ${o}`);
 
 console.log(`\n  ${ACTIONS.length} actions declared.`);
 console.log(`  ${(byWiring.get('handler') ?? []).length} of them do the thing from the bar.`);
@@ -181,11 +224,27 @@ const WRITES = [
   'add Jane as a new user',
 ];
 
+/**
+ * What the CANONICAL runtime makes of a sentence.
+ *
+ * Four separate answers, because they fail separately and a single
+ * number hides which. A sentence can be understood and not permitted, or
+ * permitted and performed by nothing, and both of those are different
+ * from not being understood at all.
+ */
+type Canonical =
+  | 'executable'    // planned, permitted, and something performs it
+  | 'permitted'     // planned and permitted, nothing performs it yet
+  | 'understood'    // planned, and this actor may not run it
+  | 'navigation'    // no plan; the action registry opens the screen
+  | 'none';
+
 type Outcome = {
   parse: string;
   parseOk: boolean;
   wiring: Wiring;
   detail: string;
+  canonical: Canonical;
 };
 
 /**
@@ -219,19 +278,21 @@ function audit(s: string): Outcome {
   const planned = planCommand(s, {
     actorCapabilities: caps, vocabulary: VOCABULARY, context: SCREEN,
   });
-  if (planned
-    && planned.kind === 'mutate'
+  if (planned && planned.kind === 'mutate'
     && planned.availability.representable
-    && planned.availability.executable
-    && planned.availability.permitted !== false
     && planned.presentation.confidence >= 10) {
+    const permitted = planned.availability.permitted !== false;
+    const performs = planned.availability.executable;
     return {
       parse: `runs: ${planned.presentation.summary}`,
       parseOk: true,
-      wiring: MUTATION ? 'handler' : 'none',
-      detail: MUTATION
-        ? '/api/command/plan then /api/command/apply, previewed then confirmed'
-        : 'no mutation runtime',
+      wiring: permitted && performs && MUTATION ? 'handler' : 'none',
+      detail: !permitted
+        ? `not permitted: ${planned.availability.missingPermissions.join(', ')}`
+        : !performs
+          ? `nothing performs ${planned.availability.unavailable.map((u) => u.need).join(', ')}`
+          : '/api/command/plan then /api/command/apply, previewed then confirmed',
+      canonical: !permitted ? 'understood' : performs ? 'executable' : 'permitted',
     };
   }
 
@@ -247,6 +308,7 @@ function audit(s: string): Outcome {
       detail: MUTATION
         ? '/api/command/plan then /api/command/apply, previewed then confirmed'
         : 'no mutation runtime',
+      canonical: 'executable',
     };
   }
   if (edit) {
@@ -255,6 +317,7 @@ function audit(s: string): Outcome {
       parseOk: false,
       wiring: 'none',
       detail: `still needs ${edit.missing.join(', ') || 'a record'}`,
+      canonical: 'none',
     };
   }
 
@@ -262,7 +325,10 @@ function audit(s: string): Outcome {
   if (hits.length && hits[0].score >= 6) {
     const a = hits[0].action;
     const w = wiringFor(a);
-    return { parse: `action: ${a.label}`, parseOk: true, wiring: w.how, detail: w.detail };
+    return {
+      parse: `action: ${a.label}`, parseOk: true, wiring: w.how, detail: w.detail,
+      canonical: w.how === 'screen' ? 'navigation' : 'none',
+    };
   }
 
   const intent = parse(s);
@@ -271,8 +337,9 @@ function audit(s: string): Outcome {
     return {
       parse: `intent: ${intent.intent.id}`,
       parseOk: intent.missing.length === 0,
-      wiring: handled ? 'handler' : 'none',
-      detail: handled ? 'execute route handles it' : 'no handler in the execute route',
+      wiring: 'none',
+      detail: 'the legacy parser reads it and nothing executes it',
+      canonical: 'none',
     };
   }
 
@@ -283,24 +350,38 @@ function audit(s: string): Outcome {
       parseOk: false,
       wiring: 'none',
       detail: 'an instruction answered with a list is not the instruction',
+      canonical: 'none',
     };
   }
-  return { parse: 'nothing', parseOk: false, wiring: 'none', detail: 'the bar does not reach this' };
+  return {
+    parse: 'nothing', parseOk: false, wiring: 'none',
+    detail: 'the bar does not reach this', canonical: 'none',
+  };
 }
 
 console.log('  FIFTY WRITE COMMANDS, PARSED ONLY. NOTHING HERE RUNS.\n');
 
-let parsed = 0, runnable = 0;
+const tally: Record<Canonical, number> = {
+  executable: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
+};
 WRITES.forEach((s, i) => {
   const o = audit(s);
-  if (o.parseOk) parsed++;
-  if (o.parseOk && o.wiring === 'handler') runnable++;
-  const flag = !o.parseOk ? 'PARSE' : o.wiring === 'handler' ? '  ok ' : 'DEAD ';
+  tally[o.canonical] += 1;
+  const flag = o.canonical === 'executable' ? '  ok '
+    : o.canonical === 'navigation' ? ' nav '
+      : o.canonical === 'none' ? 'DEAD ' : 'PART ';
   console.log(`  ${flag} ${String(i + 1).padStart(2)}. ${s}`);
   console.log(`          ${o.parse}`);
   console.log(`          ${o.detail}`);
 });
 
-console.log(`\n  ${parsed}/${WRITES.length} understood.`);
-console.log(`  ${runnable}/${WRITES.length} both understood AND wired to something that carries it out.`);
-console.log(`  The gap between those two numbers is the honest state of the bar.\n`);
+/* Four numbers rather than one, because they fail separately. Nothing
+   here counts an action registry entry as coverage: an entry that opens
+   a screen is navigation, and navigation is not execution. */
+console.log(`\n  CANONICAL RUNTIME, ${WRITES.length} write sentences`);
+console.log(`    executable       ${String(tally.executable).padStart(3)}  planned, permitted, and something performs it`);
+console.log(`    permitted        ${String(tally.permitted).padStart(3)}  planned and permitted, nothing performs it yet`);
+console.log(`    understood       ${String(tally.understood).padStart(3)}  planned, and this actor may not run it`);
+console.log(`    navigation only  ${String(tally.navigation).padStart(3)}  opens the screen where a person does it by hand`);
+console.log(`    not understood   ${String(tally.none).padStart(3)}`);
+console.log(`\n  ${tally.executable}/${WRITES.length} carried out by the canonical runtime.\n`);

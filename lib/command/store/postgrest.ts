@@ -336,6 +336,26 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_image: null,
     }),
   },
+  'meeting.create': {
+    name: 'command_create_meeting',
+    args: (c) => ({
+      p_title: c.args.title ?? null,
+      p_start: c.args.start ?? null,
+      p_minutes: c.args.minutes ?? null,
+      p_contact: c.args.contact ?? null,
+      p_visibility: c.args.visibility ?? 'private',
+    }),
+  },
+  'meeting.answer': {
+    name: 'command_meeting_answer_for',
+    args: (c) => ({
+      p_events: c.subjects,
+      p_action: c.args.action ?? null,
+      p_start: c.args.start ?? null,
+      p_end: c.args.end ?? null,
+      p_note: c.args.note ?? null,
+    }),
+  },
   'meeting.reschedule': {
     name: 'command_reschedule_meeting',
     args: (c) => ({
