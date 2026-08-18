@@ -39,6 +39,17 @@ export type CommandContext = {
   /** The rows somebody has ticked. */
   selection?: { entity: string; ids: string[] };
   /**
+   * The working list the screen has open.
+   *
+   * Not the same fact as a selection. A CRM screen with nothing ticked
+   * still has a list open, and "share this list with Dave" is about the
+   * list rather than about any rows on it. Like every other piece of
+   * context the browser supplies it and the server decides what it
+   * means: the id is read back through the caller's own session before
+   * anything is granted.
+   */
+  list?: { id: string; name: string };
+  /**
    * A file somebody attached to the bar.
    *
    * Context, like a selection: the browser supplies it, the server

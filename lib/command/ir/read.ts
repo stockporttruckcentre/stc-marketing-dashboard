@@ -115,6 +115,7 @@ function fieldsInCond(c: Cond, out: Set<string>): void {
       case 'window': expr(e.of); return;
       case 'case': e.when.forEach((w) => { fieldsInCond(w.if, out); expr(w.then); }); return;
       case 'reference': fieldsInCond(e.where, out); return;
+      case 'list': e.of.forEach(expr); return;
       default: return;
     }
   };

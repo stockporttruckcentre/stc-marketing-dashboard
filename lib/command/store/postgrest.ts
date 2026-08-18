@@ -386,6 +386,17 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
     name: 'command_link_accounts',
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
   },
+  'list.share': {
+    name: 'command_share_named_list',
+    /* The list is named and the people are resolved. No subjects at
+       all: sharing here is list membership, so a named list needs no
+       records. */
+    args: (c) => ({
+      p_list: c.args.list ?? null,
+      p_users: Array.isArray(c.args.users) ? c.args.users : [c.args.users].filter(Boolean),
+      p_can_edit: c.args.canEdit ?? true,
+    }),
+  },
   'news.refresh': {
     name: 'command_refresh_news',
     args: (c) => ({ p_items: c.args.items ?? [], p_max_age: c.args.maxAge ?? 14 }),

@@ -13,7 +13,10 @@ import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
 import type { MutationPreview } from '@/lib/command/server/mutation';
 import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
-import { currentSelection, onSelectionChange, type ScreenSelection } from '@/lib/command/selection';
+import {
+  currentSelection, onSelectionChange, currentOpenList, onOpenListChange,
+  type ScreenSelection, type ScreenList,
+} from '@/lib/command/selection';
 import type { CommandContext } from '@/lib/command/context';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
@@ -386,6 +389,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const [selection, setSelection] = useState<ScreenSelection | null>(currentSelection());
   useEffect(() => onSelectionChange(setSelection), []);
 
+  /* Which working list the screen is showing. A different fact from the
+     selection: a CRM screen with nothing ticked still has a list open. */
+  const [openList, setOpenList] = useState<ScreenList | null>(currentOpenList());
+  useEffect(() => onOpenListChange(setOpenList), []);
+
   const context = useMemo<CommandContext>(() => {
     const out: CommandContext = {};
     if (typeof window !== 'undefined') {
@@ -397,12 +405,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       }
     }
     if (selection) out.selection = selection;
+    if (openList) out.list = openList;
     if (attached) out.file = attached;
     return out;
     /* Recomputed when the selection changes or the page does. The bar
        reads the URL directly, so a screen that opens a record without a
        navigation is picked up on the next keystroke rather than never. */
-  }, [selection, text, attached]);
+  }, [selection, openList, text, attached]);
 
   /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
      The two sides do not know the same things. The live vocabulary is

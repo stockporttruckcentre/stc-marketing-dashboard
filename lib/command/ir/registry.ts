@@ -1072,6 +1072,35 @@ export const CAPABILITIES: CapabilityDef[] = [
     handler: 'supabase/migrations/013_command_share_list.sql',
   },
   {
+    id: 'list.share',
+    label: 'Share a list with colleagues',
+    operates: 'invoke',
+    /* THE LIST IS THE THING, NOT THE ROWS ON IT.
+
+       `rows.share` takes the exact set of records somebody ticked and
+       refuses unless that set IS the list, which is right off a screen
+       and wrong for a sentence: it made a person select every record on
+       a list before they could share the list. Sharing here is list
+       membership, so a named list needs no records at all.
+
+       The entity is still `contacts`, because what a share grants is
+       sight of customers. The list is how this schema expresses that. */
+    entities: ['contacts'],
+    /* It grants access. There is nothing on the screen to act on. */
+    creates: true,
+    requires: 'crm.manageLists',
+    confirm: true,
+    produces: 'rows',
+    /* Granting the same people the same access twice leaves the same
+       access. */
+    idempotent: true,
+    handler: 'supabase/migrations/032_command_share_named_list.sql',
+    inputs: [
+      { key: 'list', label: 'the list', kind: 'text', required: true },
+      { key: 'users', label: 'who to share it with', kind: 'text', required: true },
+    ],
+  },
+  {
     id: 'rows.email',
     label: 'Email rows out of the company',
     operates: 'emit',

@@ -3682,6 +3682,195 @@ test('a viewer cannot load a stock file', async () => {
     JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
 });
 
+/* =============================================================
+   35. Sharing a list somebody named
+
+   Sharing here is list membership, so a named list needs no records at
+   all. Requiring a selection made somebody tick every row on a list
+   before they could share the list, and ticking ninety nine of a
+   hundred is a refusal rather than a share.
+   ============================================================= */
+
+const SHARER = [...capabilitiesFor({ role: 'sales' } as never)];
+
+function listWorld() {
+  return fakeDb({
+    crm_lists: [
+      { id: 'l1', name: 'Fleet Prospects', is_global: false },
+      { id: 'l2', name: 'Everything', is_global: true },
+    ],
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', list_id: 'l1', status: 'lead' },
+      { id: 'c2', company_name: 'Ward Bros', list_id: 'l1', status: 'lead' },
+    ],
+    profiles: [
+      { id: 'u-dave', full_name: 'Dave Marsh', email: 'dave@stc.co.uk', role: 'sales' },
+      { id: 'u-tom', full_name: 'Tom Riley', email: 'tom@stc.co.uk', role: 'sales' },
+    ],
+    crm_list_members: [],
+  });
+}
+
+test('a list is shared by name, with nothing selected', async () => {
+  const db = listWorld();
+  const text = 'share Fleet Prospects with Dave';
+
+  const planned = await planAndPreview({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {}, preview: true,
+  });
+  ok('it plans as sharing the list itself',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'list.share') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map(
+      (s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  ok('and nothing is written yet', db.writes.length === 0, JSON.stringify(db.writes));
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {},
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const members = db.tables.crm_list_members ?? [];
+  ok('Dave can see the list', members.length === 1, JSON.stringify(members));
+  ok('and it is the list he was named for',
+    String(members[0]?.list_id) === 'l1' && String(members[0]?.user_id) === 'u-dave',
+    JSON.stringify(members[0]));
+});
+
+test('two people named are two grants or none', async () => {
+  const db = listWorld();
+  const text = 'share the Fleet Prospects list with Dave and Tom';
+
+  const planned = await planAndPreview({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {}, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {},
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('both of them can see it',
+    (db.tables.crm_list_members ?? []).length === 2,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('a person who is not here stops the whole share', async () => {
+  const db = listWorld();
+  const text = 'share the Fleet Prospects list with Dave and Mildred';
+
+  const planned = await planAndPreview({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {}, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it refuses rather than sharing with the one it found', preview?.ok !== true,
+    preview?.ok ? 'it previewed' : preview?.why ?? 'no preview');
+  ok('and nobody was granted anything',
+    (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('a list that is not there is refused by name', async () => {
+  const db = listWorld();
+  const text = 'share Coldstore Renewals with Dave';
+
+  const planned = await planAndPreview({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: {}, preview: true,
+  });
+  if (!planned?.preview?.ok) {
+    ok('it refuses at the preview', true);
+  } else {
+    const done = await applyMutation({
+      text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {},
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: planned.preview.programmeHash,
+    });
+    ok('it refuses, saying which list it could not find',
+      !done.ok && /no list called Coldstore Renewals/i.test(done.ok ? '' : done.why),
+      done.ok ? 'it went through' : done.why);
+  }
+  ok('and nothing was shared',
+    (db.tables.crm_list_members ?? []).length === 0,
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('the list on the screen is what "this list" means', async () => {
+  const db = listWorld();
+  const text = 'share this list with Dave';
+  const context = { list: { id: 'l1', name: 'Fleet Prospects' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it points at the open list',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'list.share') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map(
+      (s) => (s.op === 'invoke' ? s.capability : s.op))));
+  const preview = planned?.preview;
+  if (!planned || preview?.ok !== true) {
+    ok('and previews', false, preview && !preview.ok ? preview.why : 'no preview');
+    return;
+  }
+
+  const done = await applyMutation({
+    text, capabilities: SHARER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('and it is the list that was open',
+    String((db.tables.crm_list_members ?? [])[0]?.list_id) === 'l1',
+    JSON.stringify(db.tables.crm_list_members));
+});
+
+test('with no list open, "this list" points at nothing', async () => {
+  const planning = planCommand('share this list with Dave', {
+    actorCapabilities: SHARER, context: {},
+  });
+  ok('it is not read as a list called "this"',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'list.share') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
+test('a described set is still the destination reader', async () => {
+  const planning = planCommand('share the sold trailers with Dave', {
+    actorCapabilities: SHARER, context: {},
+  });
+  ok('it is not read as a list called "the sold trailers"',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'list.share') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
+test('a viewer cannot share a list', async () => {
+  const viewer = [...capabilitiesFor({ role: 'viewer' } as never)];
+  const planning = planCommand('share Fleet Prospects with Dave', {
+    actorCapabilities: viewer, context: {},
+  });
+  ok('it is not offered',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'list.share') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
 /* ============================================================= */
 
 async function main() {

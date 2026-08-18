@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { publishSelection } from '@/lib/command/selection';
+import { publishSelection, publishOpenList } from '@/lib/command/selection';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent, RowClickedEvent } from 'ag-grid-community';
@@ -158,6 +158,16 @@ export function CrmWorkspace({
   }
 
   const selectedList = lists.find((l) => l.id === selectedListId);
+
+  /* Which list is open, told to the command bar. A selection is what
+     somebody ticked; this is what they are looking at, and "share this
+     list with Dave" is about the list rather than about any rows on
+     it. Id and name only, and the server reads the id back through the
+     caller's own session before it grants anybody anything. */
+  useEffect(() => {
+    publishOpenList(selectedList ? { id: selectedList.id, name: selectedList.name } : null);
+    return () => publishOpenList(null);
+  }, [selectedList?.id, selectedList?.name]);
   const isOwner = selectedList ? selectedList.owner_id === profile.id : false;
   /**
    * Two gates, and both have to pass. Your role has to allow editing at

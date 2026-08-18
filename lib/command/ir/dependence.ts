@@ -97,6 +97,9 @@ export function walkExpr(e: Expr, v: Visitor): void {
     case 'reference':
       walkCond(e.where, v);
       return;
+    case 'list':
+      e.of.forEach((x) => walkExpr(x, v));
+      return;
     case 'shift':
       walkExpr(e.of, v);
       return;

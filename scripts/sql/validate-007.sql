@@ -2107,6 +2107,152 @@ DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
 DELETE FROM crm_lists WHERE name = 'TEST import list';
 
 -- =============================================================
+-- 15d. Sharing a list somebody named
+--
+-- Migration 032. Sharing is list membership, so a named list needs no
+-- records at all. The list is resolved exactly: none refuses by name,
+-- one is used, several asks.
+-- =============================================================
+\echo '--- sharing a named list ---'
+
+DELETE FROM crm_list_members WHERE list_id IN
+  (SELECT id FROM crm_lists WHERE name LIKE 'TEST share%');
+DELETE FROM crm_lists WHERE name LIKE 'TEST share%';
+
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c2222222-0000-0000-0000-000000000001', 'TEST share list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_share_named_list(
+    'TEST share list',
+    ARRAY['bbbbbbbb-0000-0000-0000-000000000002']::UUID[]) INTO out;
+  PERFORM assert('a list is shared by name', (out ->> 'granted')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list is shared by name', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the grant is on that list',
+  (SELECT COUNT(*) FROM crm_list_members
+    WHERE list_id = 'c2222222-0000-0000-0000-000000000001') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_list_members
+    WHERE list_id = 'c2222222-0000-0000-0000-000000000001'));
+
+-- Sharing again with the same person is the access they already had.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_share_named_list(
+    'TEST share list',
+    ARRAY['bbbbbbbb-0000-0000-0000-000000000002']::UUID[]) INTO out;
+  PERFORM assert('sharing twice grants nothing twice',
+    (out ->> 'granted')::INT = 0 AND (out ->> 'alreadyHad')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('sharing twice grants nothing twice', FALSE, SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_share_named_list(
+    'a list nobody has', ARRAY['bbbbbbbb-0000-0000-0000-000000000002']::UUID[]);
+  PERFORM assert('a list that is not there is refused by name', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list that is not there is refused by name',
+    SQLERRM LIKE '%no list called%', SQLERRM);
+END
+$$;
+
+-- A name that fits two lists is a question, not a reason to take one.
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c2222222-0000-0000-0000-000000000002', 'test share list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_share_named_list(
+    'TEST share list', ARRAY['cccccccc-0000-0000-0000-00000000000c']::UUID[]);
+  PERFORM assert('a name that fits two lists is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a name that fits two lists is refused',
+    SQLERRM LIKE '%not clear which one%', SQLERRM);
+END
+$$;
+
+SELECT assert('and neither of them was shared',
+  (SELECT COUNT(*) FROM crm_list_members
+    WHERE user_id = 'cccccccc-0000-0000-0000-00000000000c'
+      AND list_id IN ('c2222222-0000-0000-0000-000000000001',
+                      'c2222222-0000-0000-0000-000000000002')) = 0);
+
+DELETE FROM crm_lists WHERE id = 'c2222222-0000-0000-0000-000000000002';
+
+-- Somebody who is not here stops the whole grant.
+DO $$
+BEGIN
+  PERFORM command_share_named_list('TEST share list', ARRAY[
+    'cccccccc-0000-0000-0000-00000000000c',
+    'ffffffff-ffff-ffff-ffff-ffffffffffff']::UUID[]);
+  PERFORM assert('a person who is not here stops the whole share', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a person who is not here stops the whole share',
+    SQLERRM LIKE '%only % of them are here%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the one who is here got nothing',
+  (SELECT COUNT(*) FROM crm_list_members
+    WHERE list_id = 'c2222222-0000-0000-0000-000000000001'
+      AND user_id = 'cccccccc-0000-0000-0000-00000000000c') = 0);
+
+-- Through the programme runner, which is the path the command bar takes.
+DELETE FROM crm_list_members WHERE list_id = 'c2222222-0000-0000-0000-000000000001';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(jsonb_build_object(
+    'op', 'invoke',
+    'capability', 'list.share',
+    'subjects', '[]'::JSONB,
+    'args', jsonb_build_object(
+      'list', 'TEST share list',
+      'users', jsonb_build_array('bbbbbbbb-0000-0000-0000-000000000002'))
+  ))) INTO out;
+  PERFORM assert('a programme can share a named list', (out ->> 'changed')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a programme can share a named list', FALSE, SQLERRM);
+END
+$$;
+
+-- A viewer, straight at the function.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_share_named_list(
+    'TEST share list', ARRAY['bbbbbbbb-0000-0000-0000-000000000002']::UUID[]);
+  PERFORM assert('a viewer cannot share a list', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer cannot share a list', SQLERRM LIKE '%crm.manageLists%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_list_members WHERE list_id = 'c2222222-0000-0000-0000-000000000001';
+DELETE FROM crm_lists WHERE name LIKE 'TEST share%';
+
+-- =============================================================
 -- 15c. Loading a supplier's stock file
 --
 -- Migration 031. The stock screen's import button used to write from

@@ -307,8 +307,41 @@ async function resolveArguments(
      here, through the same lookup a mutation's values go through, so
      two Daves ask rather than one of them being invited. Literals were
      already lifted out by the caller; this is the other kind. */
+  /* SEVERAL NAMES ARE SEVERAL LOOKUPS, AND ALL OF THEM HAVE TO LAND.
+
+     "Share Fleet Prospects with Dave and Tom" carries two references in
+     one argument. Each is resolved the same way a single one is, and any
+     of them being unknown or ambiguous stops the whole thing: sharing
+     with one of two people and reporting both is the failure this layer
+     exists to stop. */
   for (const [key, value] of Object.entries(step.args ?? {})) {
     if (args[key] != null) continue;
+    if ('kind' in value && value.kind === 'list') {
+      const values: (string | number | boolean | null)[] = [];
+      for (const [i, member] of value.of.entries()) {
+        if (!('kind' in member) || member.kind !== 'reference') {
+          if ('kind' in member && member.kind === 'literal') { values.push(member.value); continue; }
+          return {
+            ok: false,
+            reason: 'unresolved',
+            why: 'that argument holds something this cannot look up',
+          };
+        }
+        const one = await resolveReference(opts.store, member, `args.${key}[${i}]`);
+        if (one.state === 'ambiguous') {
+          return {
+            ok: false,
+            reason: 'ambiguous',
+            why: one.why,
+            candidates: one.candidates.map((c) => ({ id: c.id, label: c.label })),
+          };
+        }
+        if (one.state !== 'resolved') return { ok: false, reason: 'unresolved', why: one.why };
+        values.push(one.value as string | number | boolean | null);
+      }
+      args[key] = values as unknown as typeof args[string];
+      continue;
+    }
     if (!('kind' in value) || value.kind !== 'reference') continue;
 
     const found = await resolveReference(opts.store, value, `args.${key}`);

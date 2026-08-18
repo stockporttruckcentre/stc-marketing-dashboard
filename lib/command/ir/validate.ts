@@ -279,6 +279,10 @@ export function validate(plan: Plan): Problem[] {
         }
         return;
       }
+      case 'list':
+        if (!e.of.length) add(at, 'a list of values with nothing in it names nothing');
+        e.of.forEach((x, i) => walkExpr(x, `${at}[${i}]`, ctx));
+        return;
       case 'shift':
         walkExpr(e.of, `${at}.of`, ctx);
         if (!Number.isFinite(e.by.n)) add(`${at}.by`, 'a shift needs a number of units');
@@ -775,6 +779,7 @@ export function derivedRequirements(plan: Plan): Requirement[] {
         fromEntity(e.entity, `reads ${e.entity}`);
         fromCond(e.where);
         return;
+      case 'list': e.of.forEach(fromExpr); return;
       case 'shift': fromExpr(e.of); return;
       case 'agg':
         if (e.of) fromExpr(e.of);

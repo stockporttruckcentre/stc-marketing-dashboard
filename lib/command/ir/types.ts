@@ -164,6 +164,19 @@ export type Expr =
    * dates. This is a date, and the difference matters: one answers "how
    * old is this" and the other answers "when should this be".
    */
+  /**
+   * Several values where an operation takes several.
+   *
+   * "Share Fleet Prospects with Dave and Tom" names two people, and each
+   * of them is a reference the database resolves. Without this the only
+   * way to carry two was a second argument key per recipient, which is a
+   * lookup table of arities rather than a language.
+   *
+   * Deliberately generic. Nothing here knows that its members are
+   * people: they are expressions, and an operation that takes several
+   * dates or several platforms uses the same node.
+   */
+  | { kind: 'list'; of: Expr[] }
   | { kind: 'shift'; of: Expr; by: Interval; direction: 'forward' | 'back' }
   | { kind: 'agg'; fn: AggFn; of?: Expr; where?: Cond; partitionBy?: Expr[] }
   | { kind: 'binary'; op: BinaryOp; left: Expr; right: Expr }

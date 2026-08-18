@@ -1005,6 +1005,70 @@ export function fakeDb(tables: Record<string, Row[]>) {
       };
     }
 
+    /* A list somebody named, rather than one they selected. Sharing is
+       list membership, so this needs no records at all: what it needs is
+       the list, exactly. */
+    if (name === 'command_share_named_list') {
+      if (!may('crm.manageLists')) {
+        return { data: null, error: { message: 'you do not have crm.manageLists' } };
+      }
+      const named = String(args.p_list ?? '').trim();
+      const users = (args.p_users ?? []) as string[];
+      if (!named) return { data: null, error: { message: 'nothing said which list to share' } };
+      if (!users.length) {
+        return { data: null, error: { message: 'nothing said who to share it with' } };
+      }
+
+      const hits = (tables.crm_lists ?? [])
+        .filter((l) => String(l.name ?? '').toLowerCase() === named.toLowerCase());
+      if (!hits.length) {
+        return { data: null, error: { message: `there is no list called ${named}` } };
+      }
+      if (hits.length > 1) {
+        return {
+          data: null,
+          error: {
+            message: `${hits.length} lists match ${named}, so it is not clear which one: `
+              + hits.map((l) => String(l.name)).join(', '),
+          },
+        };
+      }
+      const [list] = hits;
+      if (list.is_global === true) {
+        return {
+          data: null,
+          error: { message: 'that is the global list, which the whole team can already see' },
+        };
+      }
+
+      const present = (tables.profiles ?? []).filter((r) => users.includes(String(r.id)));
+      if (present.length !== users.length) {
+        return {
+          data: null,
+          error: {
+            message: `expected to share with ${users.length} people but only ${present.length} of them are here`,
+          },
+        };
+      }
+
+      const members = (tables.crm_list_members ??= []);
+      let granted = 0;
+      for (const u of users) {
+        if (members.some((m) => String(m.list_id) === String(list.id) && String(m.user_id) === u)) continue;
+        members.push({ list_id: list.id, user_id: u, can_edit: args.p_can_edit !== false });
+        granted += 1;
+      }
+      writes.push({ table: 'crm_list_members', set: { list_id: list.id }, ids: users });
+
+      return {
+        data: {
+          listId: list.id, list: named, asked: users.length,
+          granted, alreadyHad: users.length - granted,
+        },
+        error: null,
+      };
+    }
+
     /* Leaving a file on a record, as bytes on a row covered by the
        row's own policy. */
     if (name === 'command_attach_file') {
@@ -1284,6 +1348,14 @@ const PERFORMED: Record<string, {
   'stock.import': {
     name: 'command_import_stock',
     args: (c) => ({ p_rows: c.args.rows ?? [] }),
+  },
+  'list.share': {
+    name: 'command_share_named_list',
+    args: (c) => ({
+      p_list: c.args.list ?? null,
+      p_users: Array.isArray(c.args.users) ? c.args.users : [c.args.users].filter(Boolean),
+      p_can_edit: c.args.canEdit ?? true,
+    }),
   },
   'post.create': {
     name: 'command_create_post',

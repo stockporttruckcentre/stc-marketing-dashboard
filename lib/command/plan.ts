@@ -38,6 +38,7 @@ import { parseOperation } from './operations';
 import { parseMeeting } from './meetings';
 import { parsePost } from './posts';
 import { parseImport } from './import';
+import { parseShareList } from './sharing';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -396,6 +397,16 @@ function planOneClause(
   const written = readPost(text, opts);
   if (written) return written;
 
+  /* SHARING A LIST SOMEBODY NAMED IS NOT A DESTINATION CLAUSE.
+
+     "Share Fleet Prospects with Dave" looks like an output clause and
+     is not one: it names no records and points at nothing. Read as a
+     destination it meant "every trailer, shared with Dave", because
+     the list name was dropped and the entity fell back. It goes before
+     the output reader for exactly that reason. */
+  const sharing = readShareList(text, opts);
+  if (sharing) return sharing;
+
   const operation = readOperation(text, opts);
   if (operation) return operation;
 
@@ -566,6 +577,33 @@ function planOneClause(
   const sends = plan.steps.some(
     (s) => s.op === 'emit' && s.to.kind !== 'display' && s.to.kind !== 'download',
   );
+
+  /* "SHARE FLEET PROSPECTS WITH DAVE" IS A LIST, AND ONLY DATA KNOWS IT.
+
+     A list name and a described set cannot be told apart by grammar.
+     "Fleet Prospects" reads as a query, because "prospects" is what a
+     customer is called and "fleet" is what a trailer is called, and
+     "the sold trailers" reads as one for real reasons. Deciding by a
+     rule would get one of them wrong.
+
+     So the general reader goes first and this only takes what it could
+     not make sense of. A share whose selection does not hold together
+     is exactly the shape "share <a name> with <somebody>" produces, and
+     a list is the only thing in this application that name could be.
+     If there is no list called that, the database says so by name and
+     writes nothing. */
+  const namedNothing = sends
+    && plan.steps.some((s) => s.op === 'emit' && s.to.kind === 'share')
+    /* Narrowed nothing and pointed at nothing. "Share the sold trailers
+       with Dave" describes a set and gets the honest refusal about what
+       sharing grants; this is the other case, where the words
+       contributed no condition at all because they were a name. */
+    && !select?.where
+    && !fromScreen;
+  if (namedNothing) {
+    const named = readShareList(text, opts, true);
+    if (named) return named;
+  }
 
   return {
     text,
@@ -763,6 +801,47 @@ function readPost(
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
   const read = parsePost(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * A list somebody named, shared with people they named.
+ *
+ * Not the destination reader. Sharing here is list membership, so a
+ * named list needs no records at all, and requiring a selection made
+ * somebody tick every row on a list before they could share the list.
+ */
+function readShareList(
+  text: string,
+  opts?: PlanOptions,
+  bareName = false,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseShareList(text, caps, opts.context ?? EMPTY_CONTEXT, { bareName });
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };
