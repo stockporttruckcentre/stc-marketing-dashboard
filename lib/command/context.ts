@@ -37,7 +37,34 @@ export type CommandContext = {
   record?: { entity: string; id: string; label?: string };
   /** The rows somebody has ticked. */
   selection?: { entity: string; ids: string[] };
+  /**
+   * A file somebody attached to the bar.
+   *
+   * Context, like a selection: the browser supplies it, the server
+   * decides what it means. Nothing about the file's contents reaches
+   * the plan except its `digest`, which is what makes previewing one
+   * file and confirming another a mismatch rather than a surprise.
+   */
+  file?: { name: string; mime: string; size: number; text: string };
 };
+
+/**
+ * A short fingerprint of a file's contents.
+ *
+ * FNV-1a, in plain arithmetic, because this runs in the browser as well
+ * as on the server and pulling a crypto implementation into the reader
+ * for the sake of a change detector would be the wrong trade. It is not
+ * a security boundary: the server re-reads the file it is given on both
+ * passes, and this only has to notice that the file changed.
+ */
+export function fileDigest(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(16).padStart(8, '0')}-${text.length.toString(16)}`;
+}
 
 export const EMPTY_CONTEXT: CommandContext = {};
 

@@ -37,6 +37,7 @@ import { parseRoleChange } from './roles';
 import { parseOperation } from './operations';
 import { parseMeeting } from './meetings';
 import { parsePost } from './posts';
+import { parseImport } from './import';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -420,6 +421,14 @@ function planOneClause(
   const post = outbound ? null : readPost(text, opts);
   if (post) return post;
 
+  /* A FILE ON THE REQUEST IS A FILE SOMEBODY MEANT TO IMPORT.
+
+     "Import this" says nothing about customers, and with a spreadsheet
+     attached it is not ambiguous at all. Read before the lifecycle
+     reader, because "load these customers in" contains create words. */
+  const importing = outbound ? null : readImport(text, opts);
+  if (importing) return importing;
+
   const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
 
@@ -731,6 +740,46 @@ function readPost(
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
   const read = parsePost(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * A spreadsheet the request is carrying.
+ *
+ * Only when there is one. "Import the customers" with nothing attached
+ * is somebody about to attach one, and the import screen is the right
+ * answer to it.
+ */
+function readImport(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseImport(text, caps, opts.context ?? EMPTY_CONTEXT);
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };

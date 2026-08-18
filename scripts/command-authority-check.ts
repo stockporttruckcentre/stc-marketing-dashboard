@@ -243,8 +243,15 @@ ok('a viewer is offered the question exactly when permissions.ts allows it',
    the server will refuse. This is the defect: the bar computed the
    capabilities and then planned without them. */
 const bar = source('components/dashboard/CommandBar.tsx');
+/* The local plan is a filter on what to ask the server about, never the
+   answer. It is planned with the actor's capabilities, the bar's own
+   vocabulary index, and the file the bar is holding, because a sentence
+   about a file means something different when there is one. */
 ok('the command bar plans locally with the actor capabilities and its own index',
-  /planCommand\(text, \{ actorCapabilities: caps, vocabulary \}\)/.test(bar));
+  /planCommand\(text, \{\s*actorCapabilities: caps,\s*vocabulary,/.test(bar));
+ok('and the file it is holding is context, parsed by nobody in the browser',
+  /context: attached \? \{ file: attached \} : undefined/.test(bar)
+  && !/matchColumns\(/.test(bar) && !/buildPlan\(/.test(bar));
 ok('the command bar holds its index in state rather than in a module',
   /useState<VocabularyIndex>\(EMPTY_VOCABULARY\)/.test(bar)
   && /setVocabularyIndex\(buildIndex\(j\.vocabulary\)\)/.test(bar));

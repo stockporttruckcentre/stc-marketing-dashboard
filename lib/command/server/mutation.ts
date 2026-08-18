@@ -47,6 +47,7 @@ import { nounFor, type FileFormat } from '../output';
 import { prepareDelivery, type Prepared } from './emit';
 import { postState } from '../ir/overlay';
 import { PREPARERS } from './prepare';
+import type { CommandContext } from '../context';
 import type { TransactionStep } from '../ir/store';
 import type { Artefact } from '../render/table';
 
@@ -75,6 +76,16 @@ export type OperationPreview = {
   label: string;
   /** True when it makes a record rather than acting on ones that exist. */
   creates: boolean;
+  /**
+   * What an operation outside the database says it would do.
+   *
+   * Present for a capability that declares `prepares`. It is the only
+   * account of an import anybody gets before agreeing to it: how many
+   * customers, what was left out, and what the columns were read as.
+   */
+  says?: string;
+  /** How many records it says it will make. */
+  makes?: number;
   /**
    * The records it will run on, by their own names.
    *
@@ -277,6 +288,10 @@ export async function previewMutation(
   planning: CommandPlanning,
   store: Store,
   policy?: ExecutionPolicy,
+  /* What the request carried. An operation whose work is not SQL may
+     need it to say what it is going to do: an import describes the file
+     the browser is holding, and nothing else can. */
+  context: CommandContext = {},
 ): Promise<MutationPreview> {
   if (planning.kind !== 'mutate') {
     return { ok: false, reason: 'not a mutation', why: 'that sentence is not an instruction' };
@@ -313,10 +328,37 @@ export async function previewMutation(
 
   for (const unit of programme.units) {
     if (unit.kind === 'invoke') {
+      /* WHAT AN OPERATION OUTSIDE THE DATABASE WOULD DO.
+
+         Described, never performed. A preview that spent a Lusha credit
+         would charge for looking, and a preview that could not say how
+         many customers a file holds is not a preview of an import. */
+      const named = capability(unit.plan.capability)?.prepares;
+      let said: string | null = null;
+      let makes = 0;
+      if (named) {
+        const preparer = PREPARERS[named];
+        if (!preparer) {
+          return {
+            ok: false, reason: 'cannot execute',
+            why: `nothing here performs ${unit.plan.capability}`,
+          };
+        }
+        const description = await preparer.describe({
+          subjects: unit.plan.subjects, args: unit.plan.args, context,
+        });
+        if (!description.ok) {
+          return { ok: false, reason: 'cannot execute', why: description.why };
+        }
+        said = description.says;
+        makes = description.count;
+      }
+
       operations.push({
         capability: unit.plan.capability,
         label: unit.plan.label,
         creates: capability(unit.plan.capability)?.creates ?? false,
+        ...(said ? { says: said, makes } : {}),
         subjects: unit.plan.subjects.map((s) => ({
           label: s.label, via: s.viaLabel, values: s.values,
         })),
@@ -343,7 +385,8 @@ export async function previewMutation(
   /* An operation that makes a record changes one record, and it has no
      subjects to count. A preview reading zero would say "this changes
      nothing" about a post it is about to write. */
-  const operated = operations.reduce((n, o) => n + (o.creates ? 1 : o.subjects.length), 0);
+  const operated = operations.reduce(
+    (n, o) => n + (o.makes ?? (o.creates ? 1 : o.subjects.length)), 0);
 
   return {
     ok: true,
@@ -480,7 +523,7 @@ export async function applyMutation(
      against the preview's copy of it. Somebody whose screen moved under
      them gets a fresh preview rather than a smaller deletion. */
   if (planning.plan.steps.some((s) => s.op === 'delete' && s.expect === 'many')) {
-    const fresh = await previewMutation(planning, req.store, req.policy);
+    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
     if (!fresh.ok) return { ok: false, reason: 'refused', why: fresh.why };
 
     if (req.acknowledge == null) {
@@ -568,11 +611,13 @@ export async function applyMutation(
         };
       }
 
-      const ready = await preparer({ subjects: unit.plan.subjects, args: unit.plan.args });
+      const ready = await preparer.run({
+        subjects: unit.plan.subjects, args: unit.plan.args, context: req.context ?? {},
+      });
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
 
-      outsideWork.push({ op: 'changes', changes: ready.changes });
+      outsideWork.push(...ready.steps);
       outsideSaid.push(ready.describe);
     }
   }
@@ -632,7 +677,7 @@ export async function applyMutation(
   });
 
   if (!done.ok && done.reason === 'drift') {
-    const fresh = await previewMutation(planning, req.store, req.policy);
+    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
     return {
       ok: false,
       reason: 'drift',
@@ -711,7 +756,10 @@ export async function planAndPreview(
   const planned = await planAuthoritatively(req);
   if (!planned) return null;
   if (planned.planning.kind !== 'mutate' || !req.preview) return { planned, preview: null };
-  return { planned, preview: await previewMutation(planned.planning, req.store, req.policy) };
+  return {
+    planned,
+    preview: await previewMutation(planned.planning, req.store, req.policy, req.context ?? {}),
+  };
 }
 
 export { planHash };

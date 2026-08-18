@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles, Pencil } from 'lucide-react';
+import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles, Pencil, Paperclip } from 'lucide-react';
 import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
 import { type Suggestion } from '@/lib/command/features';
 import { suggestActions } from '@/lib/command/actions';
@@ -351,11 +351,35 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      a command somebody may not run is not offered as one: an action
      that appears and then refuses teaches people the bar is
      unreliable. This is a filter on what to ask, never the answer. */
+  /* A FILE SOMEBODY ATTACHED, WHICH IS CONTEXT LIKE A SELECTION.
+
+     The browser is the only place that has it, so it goes up with the
+     sentence and the server decides what it means. Read as text here
+     because a spreadsheet is text: nothing is parsed, mapped or
+     validated in the browser. */
+  const [attached, setAttached] = useState<
+    { name: string; mime: string; size: number; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const takeFile = useCallback(async (file: File) => {
+    const body = await file.text();
+    setAttached({
+      name: file.name,
+      mime: file.type || 'text/csv',
+      size: file.size,
+      text: body,
+    });
+  }, []);
+
   const local = useMemo(
     () => (text.trim().length >= 3
-      ? planCommand(text, { actorCapabilities: caps, vocabulary })
+      ? planCommand(text, {
+          actorCapabilities: caps,
+          vocabulary,
+          context: attached ? { file: attached } : undefined,
+        })
       : null),
-    [text, caps, vocabulary]);
+    [text, caps, vocabulary, attached]);
 
   /* WHAT THE SCREEN HAS, SO "THESE" MEANS SOMETHING.
 
@@ -378,11 +402,12 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       }
     }
     if (selection) out.selection = selection;
+    if (attached) out.file = attached;
     return out;
     /* Recomputed when the selection changes or the page does. The bar
        reads the URL directly, so a screen that opens a record without a
        navigation is picked up on the next keystroke rather than never. */
-  }, [selection, text]);
+  }, [selection, text, attached]);
 
   /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
      The two sides do not know the same things. The live vocabulary is
@@ -450,7 +475,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const reset = useCallback(() => {
     setStage('idle'); setResult(null); setSlots({}); setChoices(null);
     setAsking(null); setAnswer(''); setOutcome(null); setText(''); setAnswered(null);
-    setEditPreview(null);
+    setEditPreview(null); setAttached(null);
   }, []);
 
   /** Walk forward: resolve references, then ask for anything still missing. */
@@ -847,6 +872,54 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
             fontFamily: 'var(--inter)', fontSize: bar ? 13.5 : 14.5, letterSpacing: '-0.01em',
           }}
         />
+        {/* A SPREADSHEET, ATTACHED TO THE SENTENCE.
+
+            Nothing is read from it here beyond its text. What its
+            columns are, which rows are usable and what gets written are
+            decided on the server, against the same dictionary the import
+            screen uses. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv,text/plain"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) takeFile(f);
+            e.target.value = '';
+          }}
+        />
+        {attached ? (
+          <button
+            onClick={() => setAttached(null)}
+            title={`${attached.name}, attached. Click to take it off.`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+              border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+              background: 'var(--surface-sunken)', color: 'var(--text-muted)',
+              padding: '2px 7px', fontFamily: 'var(--inter)', fontSize: 11.5,
+              cursor: 'pointer', maxWidth: 180,
+            }}
+          >
+            <Paperclip size={11} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {attached.name}
+            </span>
+            <X size={11} />
+          </button>
+        ) : (
+          <button
+            onClick={() => fileRef.current?.click()}
+            aria-label="Attach a spreadsheet"
+            title="Attach a spreadsheet"
+            style={{
+              border: 'none', background: 'transparent', color: 'var(--text-subtle)',
+              cursor: 'pointer', display: 'flex', flexShrink: 0,
+            }}
+          >
+            <Paperclip size={bar ? 13 : 15} />
+          </button>
+        )}
         {text && (
           <button onClick={reset} aria-label="Clear"
             style={{ border: 'none', background: 'transparent', color: 'var(--text-subtle)', cursor: 'pointer', display: 'flex' }}>
@@ -1610,7 +1683,21 @@ function EditConfirm({ preview, summary, onApply, onCancel }: {
             )}
           </div>
 
-          {preview.rows.every((r) => r.before === r.after) && (
+          {/* WHAT AN OPERATION OUTSIDE THE DATABASE SAYS IT WILL DO.
+
+              For an import this is the only account anybody gets before
+              agreeing to it: how many customers, what is being left out,
+              and what the columns were read as. The last one is the part
+              the old import never showed and the part that goes wrong. */}
+          {preview.operations.filter((o) => o.says).map((o) => (
+            <div key={o.capability} style={{
+              fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.55,
+            }}>
+              {o.says}
+            </div>
+          ))}
+
+          {preview.rows.length > 0 && preview.rows.every((r) => r.before === r.after) && (
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
               That is what it already says, so nothing would change.
             </div>

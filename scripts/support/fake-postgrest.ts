@@ -400,6 +400,44 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId: list, made: people.length, kind, rowId: first }, error: null };
     }
 
+    /* A spreadsheet of customers, already checked. The file never gets
+       here; rows that have a company name and nothing but columns the
+       dictionary produces do. */
+    if (name === 'command_import_contacts') {
+      if (!may('crm.import')) {
+        return { data: null, error: { message: 'you do not have crm.import' } };
+      }
+      const incoming = (args.p_rows ?? []) as Record<string, unknown>[];
+      if (!Array.isArray(incoming) || !incoming.length) {
+        return { data: null, error: { message: 'nothing said what to import' } };
+      }
+
+      const lists = (tables.crm_lists ??= []);
+      const named = args.p_list == null ? '' : String(args.p_list).trim();
+      const list = named
+        ? lists.find((l) => String(l.name ?? '').toLowerCase() === named.toLowerCase())
+        : lists.find((l) => l.is_global === true);
+      if (named && !list) {
+        return { data: null, error: { message: `there is no list called ${named}` } };
+      }
+
+      const rows = (tables.crm_contacts ??= []);
+      const ids: string[] = [];
+      for (const row of incoming) {
+        if (!String(row.company_name ?? '').trim()) {
+          return {
+            data: null,
+            error: { message: 'a row with no company name reached the database' },
+          };
+        }
+        const id = `imported${rows.length + 1}`;
+        rows.push({ id, list_id: list?.id ?? null, ...row });
+        ids.push(id);
+      }
+      writes.push({ table: 'crm_contacts', set: { source: 'Spreadsheet import' }, ids });
+      return { data: { inserted: ids.length, listId: list?.id ?? null }, error: null };
+    }
+
     /* Writing a social post. The author and the status come from the
        profile of whoever is asking, exactly as the composer's own
        insert does, because they are properties of who is writing. */
@@ -843,7 +881,8 @@ export function fakeDb(tables: Record<string, Row[]>) {
                operation reports having done, or the subjects it ran
                over when it reports nothing countable. */
             const body = (out.data ?? {}) as Record<string, unknown>;
-            const n = ['moved', 'granted', 'sent'].map((k) => body[k]).find((v) => typeof v === 'number');
+            const n = ['moved', 'granted', 'sent', 'inserted']
+              .map((k) => body[k]).find((v) => typeof v === 'number');
             changed += typeof n === 'number' ? n
               : cap === 'record.attach' || cap === 'post.create' ? 1
                 : subjects.length;
@@ -917,6 +956,10 @@ const PERFORMED: Record<string, {
   'user.setRole': {
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
+  },
+  'rows.import': {
+    name: 'command_import_contacts',
+    args: (c) => ({ p_rows: c.args.rows ?? [], p_list: c.args.list ?? null }),
   },
   'post.create': {
     name: 'command_create_post',

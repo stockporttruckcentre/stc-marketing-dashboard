@@ -21,6 +21,11 @@
 set -u
 export PATH=/usr/lib/postgresql/16/bin:$PATH
 export PGHOST=/var/tmp/pgtest
+# Somewhere both this script and the psql it runs can write. /tmp is not
+# it when the harness runs as the database user on a shared machine.
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
 P="psql -p 55432 -U postgres -d stctest -q -t -A"
 
 A='eeeeeeee-0000-0000-0000-00000000000a'
@@ -44,26 +49,26 @@ fi
 # Two overlapping transactions. Each holds its write open long enough
 # for the other to have started, so they genuinely race.
 race() {
-  $P >/tmp/race.$1.out 2>&1 <<SQL
+  $P >"$WORK"/race.$1.out 2>&1 <<SQL
 BEGIN;
 SELECT pg_sleep(0.3);
 UPDATE profiles SET role = 'viewer' WHERE id = '$2';
 SELECT pg_sleep(0.5);
 COMMIT;
 SQL
-  echo $? > /tmp/race.$1.code
+  echo $? > "$WORK"/race.$1.code
 }
 
 race a "$A" &
 race b "$B" &
 wait
 
-a_code=$(cat /tmp/race.a.code)
-b_code=$(cat /tmp/race.b.code)
+a_code=$(cat "$WORK"/race.a.code)
+b_code=$(cat "$WORK"/race.b.code)
 left=$($P -c "SELECT COUNT(*) FROM profiles WHERE role = 'admin'")
 
-failed_a=$(grep -c 'only administrator' /tmp/race.a.out || true)
-failed_b=$(grep -c 'only administrator' /tmp/race.b.out || true)
+failed_a=$(grep -c 'only administrator' "$WORK"/race.a.out || true)
+failed_b=$(grep -c 'only administrator' "$WORK"/race.b.out || true)
 refused=$((failed_a + failed_b))
 
 echo "  session A exit $a_code, session B exit $b_code, refusals $refused, administrators left $left"
@@ -71,7 +76,7 @@ echo "  session A exit $a_code, session B exit $b_code, refusals $refused, admin
 status=0
 if [ "$refused" != "1" ]; then
   echo "  FAIL  exactly one of them should have been refused"
-  cat /tmp/race.a.out /tmp/race.b.out
+  cat "$WORK"/race.a.out "$WORK"/race.b.out
   status=1
 else
   echo "  ok    exactly one of two simultaneous demotions was refused"

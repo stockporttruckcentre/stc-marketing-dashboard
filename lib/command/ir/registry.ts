@@ -759,6 +759,31 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'rows.import',
+    label: 'Import a spreadsheet of customers',
+    operates: 'invoke',
+    entities: ['contacts'],
+    /* It makes records out of a file. There is nothing to act on. */
+    creates: true,
+    requires: 'crm.import',
+    confirm: true,
+    produces: 'rows',
+    /* Importing the same file twice is the same customers twice. */
+    idempotent: false,
+    handler: 'supabase/migrations/023_command_import.sql',
+    /* Reading the file is not SQL: the browser is the only place that
+       has it. The preparer parses it against the import dictionary and
+       hands the database rows it has already checked. */
+    prepares: 'rows.import',
+    inputs: [
+      { key: 'file', label: 'the file', kind: 'text', required: true },
+      /* The fingerprint of what was previewed, so confirming a
+         different file is a mismatch rather than a surprise. */
+      { key: 'digest', label: 'the file', kind: 'text', required: true },
+      { key: 'list', label: 'list name', kind: 'text', required: false },
+    ],
+  },
+  {
     id: 'post.create',
     label: 'Write a social post',
     operates: 'invoke',

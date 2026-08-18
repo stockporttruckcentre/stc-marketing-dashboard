@@ -1779,7 +1779,137 @@ SELECT assert('with both platforms it named',
 DELETE FROM social_posts WHERE content LIKE 'TEST post %';
 
 -- =============================================================
--- 15. The allowlist matches the registry
+-- 15. Importing a spreadsheet
+--
+-- Migration 023. The file never reaches the database: what gets here is
+-- rows already checked against the import dictionary. What this proves
+-- is the half a route could not: five thousand rows either all arrive or
+-- none do, the list is resolved by name inside the same transaction, and
+-- a column the import may not write is refused rather than written.
+-- =============================================================
+\echo '--- import ---'
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
+DELETE FROM crm_lists WHERE name = 'TEST import list';
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c1111111-0000-0000-0000-000000000001', 'TEST import list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Dawson', 'email', 'sam@dawson.co.uk',
+                       'source', 'Spreadsheet import', 'status', 'lead'),
+    jsonb_build_object('company_name', 'TEST Ward', 'email', 'lisa@ward.co.uk',
+                       'source', 'Spreadsheet import', 'status', 'lead')
+  ), 'TEST import list') INTO out;
+  PERFORM assert('a file is imported', (out ->> 'inserted')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a file is imported', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('onto the list it was named for',
+  (SELECT COUNT(*) FROM crm_contacts
+    WHERE list_id = 'c1111111-0000-0000-0000-000000000001') = 2,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts
+    WHERE list_id = 'c1111111-0000-0000-0000-000000000001'));
+
+DO $$
+BEGIN
+  PERFORM command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Never', 'source', 'Spreadsheet import')
+  ), 'a list nobody has');
+  PERFORM assert('a list that is not there is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a list that is not there is refused', SQLERRM LIKE '%no list called%', SQLERRM);
+END
+$$;
+
+-- Every row or none. The second row has no company name, which the
+-- preparer would have dropped; if one reaches here the whole import
+-- fails rather than filing half a file.
+DO $$
+BEGIN
+  PERFORM command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Half', 'source', 'Spreadsheet import'),
+    jsonb_build_object('company_name', '', 'source', 'Spreadsheet import')
+  ), 'TEST import list');
+  PERFORM assert('a row with no company name fails the whole import', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a row with no company name fails the whole import',
+    SQLERRM LIKE '%no company name%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the row before it did not arrive',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Half') = 0,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Half'));
+
+-- A column the import may not write is refused rather than written.
+-- `commission` is a real column and not one a spreadsheet gets to set.
+DO $$
+BEGIN
+  PERFORM command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Sneaky', 'made_up_column', 'x')
+  ), 'TEST import list');
+  PERFORM assert('a column the import may not write is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a column the import may not write is refused',
+    SQLERRM LIKE '%not a column it may write%', SQLERRM);
+END
+$$;
+
+-- Through the programme runner, which is the path the command bar takes.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(jsonb_build_object(
+    'op', 'invoke',
+    'capability', 'rows.import',
+    'subjects', '[]'::JSONB,
+    'args', jsonb_build_object(
+      'list', 'TEST import list',
+      'rows', jsonb_build_array(jsonb_build_object(
+        'company_name', 'TEST Programme', 'source', 'Spreadsheet import')))
+  ))) INTO out;
+  PERFORM assert('a programme can import', (out ->> 'changed')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a programme can import', FALSE, SQLERRM);
+END
+$$;
+
+-- A viewer, straight at the function.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_import_contacts(jsonb_build_array(
+    jsonb_build_object('company_name', 'TEST Viewer', 'source', 'Spreadsheet import')
+  ), NULL);
+  PERFORM assert('a viewer cannot import', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer cannot import', SQLERRM LIKE '%crm.import%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
+DELETE FROM crm_lists WHERE name = 'TEST import list';
+
+-- =============================================================
+-- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

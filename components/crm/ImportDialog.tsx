@@ -9,6 +9,7 @@ import {
 import { Button, Alert, Badge } from '@/components/kit/primitives';
 import { Modal, Select } from '@/components/kit/forms';
 import { matchColumns, type ColumnMatch } from '@/lib/import/match';
+import { CSV_OPTIONS, usableRows } from '@/lib/import/parse';
 import { buildPlan, countPlan, type ImportPlan, type PlannedRow, type ExistingRow } from '@/lib/import/plan';
 import type { Dictionary } from '@/lib/import/dictionary';
 
@@ -73,15 +74,13 @@ export function ImportDialog({ dict, existing, listName, onCommit, onClose }: {
   const takeFile = useCallback((file: File) => {
     setParseError(null);
     setFileName(file.name);
+    /* The same settings the command runtime parses with, from one
+       place, because a parser configured one way here and another there
+       would disagree about what the columns are called. */
     Papa.parse(file, {
-      header: true,
-      skipEmptyLines: 'greedy',
-      // Excel exports carry trailing spaces on headers more often than not.
-      transformHeader: (h) => h.trim(),
+      ...CSV_OPTIONS,
       complete: (res) => {
-        const rows = (res.data as Record<string, any>[]).filter(
-          (r) => Object.values(r).some((v) => String(v ?? '').trim() !== ''),
-        );
+        const rows = usableRows(res.data as Record<string, any>[]);
         const headers = (res.meta.fields ?? []).filter((h) => h && h.trim() !== '');
         if (!headers.length || !rows.length) {
           setParseError('That file has no readable header row and rows underneath it. If it came from Excel, save it as CSV first.');

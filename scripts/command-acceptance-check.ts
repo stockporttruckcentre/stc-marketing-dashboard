@@ -2562,20 +2562,25 @@ test('the lock refuses the spend before anything is written', async () => {
     store: postgrestStore(db.supabase), preview: true,
   });
   const preview = planned?.preview;
-  ok('it previews the record it would look up', preview?.ok === true && preview.count === 1,
-    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
-  if (!planned || !preview?.ok) return;
+  /* The preview asks the preparer what it WOULD do, and the lock is the
+     answer. Refusing here rather than at the confirmation means nobody
+     is shown a preview of a lookup that was never going to happen. */
+  ok('the preview refuses', preview?.ok === false,
+    preview?.ok ? String(preview.count) : '');
+  if (preview && !preview.ok) {
+    ok('because Lusha is off', /switched off/.test(preview.why), preview.why);
+  }
+  if (!planned) return;
 
+  /* And confirming it anyway still refuses, before the transaction
+     opens, so there is nothing to undo. */
   const done = await applyMutation({
     text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
     store: postgrestStore(db.supabase),
     previewPlanHash: planned.planned.meaning.hash,
-    previewProgrammeHash: preview.programmeHash,
+    previewProgrammeHash: preview?.ok ? preview.programmeHash : 'none',
   });
-  /* The preparer runs before the transaction opens, so a refusal there
-     leaves nothing to undo. */
   ok('it refuses', !done.ok, 'it spent a credit');
-  if (!done.ok) ok('because Lusha is off', /switched off/.test(done.why), done.why);
   ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
 });
 
@@ -2858,6 +2863,143 @@ test('a sales rep cannot write a post by typing one', async () => {
   const writes = planning?.plan.steps
     .some((s) => s.op === 'invoke' && s.capability === 'post.create') ?? false;
   ok('it is not offered', !writes, JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+/* =============================================================
+   30. A file the browser is holding
+
+   A selection arrives from the browser and the server decides what may
+   be done with it. A file is the same kind of thing. Nothing of it
+   reaches the plan except a fingerprint, the rows are read on the server
+   against the same dictionary the import screen uses, and the preview
+   says how many customers are going to appear before anybody agrees.
+   ============================================================= */
+
+const SHEET = [
+  'Company,Contact,Email,Phone',
+  'Dawson Group,Sam Dawson,sam@dawson.co.uk,0161 000 0001',
+  'Ward Bros,Lisa Ward,lisa@wardbros.co.uk,0161 000 0002',
+  ',Nobody At All,nobody@nowhere.co.uk,0161 000 0003',
+].join('\n');
+
+const withSheet = (text = SHEET) => ({
+  file: { name: 'leads.csv', mime: 'text/csv', size: text.length, text },
+});
+
+const IMPORTER = [...capabilitiesFor({ role: 'sales' } as never)];
+
+test('a spreadsheet on the request is imported', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'import this spreadsheet';
+  const context = withSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it plans as an import',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'rows.import') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map((s) => s.op)));
+
+  const preview = planned?.preview;
+  /* Two of the three rows have a company name. The third has none, and
+     the old import filled that in with "Unknown". */
+  ok('and previews the two rows it can file', preview?.ok === true && preview.count === 2,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const said = preview.operations[0]?.says ?? '';
+  ok('saying what was left out', /1 row has no company name/.test(said), said);
+  ok('and what the columns were read as', /Columns read as:.*Company/i.test(said), said);
+  ok('and nothing has been written yet', db.writes.length === 0, JSON.stringify(db.writes));
+
+  const done = await applyMutation({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const rows = db.tables.crm_contacts ?? [];
+  ok('two customers arrived', rows.length === 2, String(rows.length));
+  ok('with the names the file gave',
+    rows.map((r) => String(r.company_name)).sort().join(', ') === 'Dawson Group, Ward Bros',
+    JSON.stringify(rows.map((r) => r.company_name)));
+  ok('on the list they were imported to',
+    rows.every((r) => String(r.list_id) === 'l1'), JSON.stringify(rows.map((r) => r.list_id)));
+  ok('and marked as having come from a spreadsheet',
+    rows.every((r) => String(r.source) === 'Spreadsheet import'),
+    JSON.stringify(rows.map((r) => r.source)));
+});
+
+test('confirming a different file than the one previewed is refused', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'import this spreadsheet';
+
+  const planned = await planAndPreview({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: withSheet(), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('the first file previews', preview?.ok === true, preview?.ok ? '' : preview?.why ?? '');
+  if (!planned || !preview?.ok) return;
+
+  /* Same sentence, same hashes, different spreadsheet. */
+  const swapped = 'Company,Email\nSomebody Else Ltd,else@nowhere.co.uk';
+  const done = await applyMutation({
+    text, capabilities: IMPORTER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: withSheet(swapped),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it refuses', !done.ok, 'it imported the file nobody looked at');
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+test('an import with no file attached is not an instruction', async () => {
+  const planning = planCommand('import this spreadsheet', { actorCapabilities: IMPORTER });
+  const imports = planning?.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'rows.import') ?? false;
+  ok('nothing is planned from words alone', !imports,
+    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('a marketer cannot import a spreadsheet', async () => {
+  const marketer = [...capabilitiesFor({ role: 'marketer' } as never)];
+  const planning = planCommand('import this spreadsheet', {
+    actorCapabilities: marketer, context: withSheet(),
+  });
+  const imports = planning?.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'rows.import') ?? false;
+  ok('it is not offered', !imports, JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('a file with no company names anywhere is refused before the preview', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const nameless = 'Email,Phone\nsam@dawson.co.uk,0161 000 0001';
+
+  const planned = await planAndPreview({
+    text: 'import this spreadsheet', capabilities: IMPORTER,
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: withSheet(nameless), preview: true,
+  });
+  const preview = planned?.preview;
+  ok('the preview refuses', preview?.ok === false, preview?.ok ? String(preview.count) : '');
+  if (preview && !preview.ok) {
+    ok('and says why', /company name/.test(preview.why), preview.why);
+  }
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
 });
 
 /* ============================================================= */
