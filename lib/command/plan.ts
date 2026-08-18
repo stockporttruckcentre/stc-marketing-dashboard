@@ -36,6 +36,7 @@ import { parseLifecycle } from './lifecycle';
 import { parseRoleChange } from './roles';
 import { parseOperation } from './operations';
 import { parseMeeting } from './meetings';
+import { parsePost } from './posts';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -409,6 +410,16 @@ function planOneClause(
   const meeting = outbound ? null : readMeeting(text, opts);
   if (meeting) return meeting;
 
+  /* A POST SOMEBODY HAS ALREADY WRITTEN IS NOT A FORM TO OPEN.
+
+     "Create a LinkedIn post saying ..." carries the whole post, and
+     handing back a composer with the text pre-filled asks somebody to
+     type it twice. A sentence that names a topic rather than the words
+     still opens the composer, because a draft whose text is the topic
+     is worse than no draft. */
+  const post = outbound ? null : readPost(text, opts);
+  if (post) return post;
+
   const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
 
@@ -681,6 +692,45 @@ function readMeeting(
 
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
   const read = parseMeeting(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * A social post the sentence already contains.
+ *
+ * Only where the words are there. Everything else about writing a post
+ * is visual, and the composer is the right answer to it.
+ */
+function readPost(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parsePost(text, caps);
   if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
 
   const plan: Plan = { steps: [read.step], unmet: [] };

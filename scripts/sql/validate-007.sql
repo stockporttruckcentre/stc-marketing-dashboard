@@ -1663,7 +1663,123 @@ SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001
 DELETE FROM calendar_events WHERE title LIKE 'TEST %';
 
 -- =============================================================
--- 14. The allowlist matches the registry
+-- 14. Writing a social post
+--
+-- Migration 022. The composer fills in the author and the status from
+-- the profile, and a client that decided either could put a post
+-- straight to approved. Both callers go through the function, so these
+-- assertions cover the form as well as the sentence.
+-- =============================================================
+\echo '--- social posts ---'
+
+DELETE FROM social_posts WHERE content LIKE 'TEST post %';
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+UPDATE profiles SET role = 'admin', full_name = 'TEST Author'
+ WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_create_post('TEST post one', ARRAY['LinkedIn'], NULL, NULL, NULL, NULL) INTO out;
+  PERFORM assert('a post is written', (out ->> 'id') IS NOT NULL, out::TEXT);
+  PERFORM assert('an administrator writes an approved post',
+    out ->> 'status' = 'approved', out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a post is written', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('the author is whoever wrote it, not whoever asked for it',
+  (SELECT created_by FROM social_posts WHERE content = 'TEST post one') = 'TEST Author',
+  (SELECT created_by FROM social_posts WHERE content = 'TEST post one'));
+
+SELECT assert('it goes out on the platform the sentence named',
+  (SELECT platform FROM social_posts WHERE content = 'TEST post one') = ARRAY['LinkedIn'],
+  (SELECT platform::TEXT FROM social_posts WHERE content = 'TEST post one'));
+
+-- A date nobody picked is today, which is what the composer defaults to.
+SELECT assert('and it is dated today when nobody said',
+  (SELECT scheduled_date FROM social_posts WHERE content = 'TEST post one') = CURRENT_DATE,
+  (SELECT scheduled_date::TEXT FROM social_posts WHERE content = 'TEST post one'));
+
+DO $$
+BEGIN
+  PERFORM command_create_post('   ', NULL, NULL, NULL, NULL, NULL);
+  PERFORM assert('an empty post is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an empty post is refused', SQLERRM LIKE '%nothing in it%', SQLERRM);
+END
+$$;
+
+-- A marketer writes, and their post waits for approval. Nothing in the
+-- sentence can change that, because the function reads the role.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'marketer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_create_post('TEST post two', NULL, NULL, NULL, NULL, NULL) INTO out;
+  PERFORM assert('a marketer writes a post that waits for approval',
+    out ->> 'status' = 'pending_review', out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a marketer writes a post that waits for approval', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('naming no platform means the two the composer starts with',
+  (SELECT platform FROM social_posts WHERE content = 'TEST post two')
+    = ARRAY['Facebook', 'LinkedIn'],
+  (SELECT platform::TEXT FROM social_posts WHERE content = 'TEST post two'));
+
+-- A sales rep has no marketing.edit at all.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'sales' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_create_post('TEST post three', NULL, NULL, NULL, NULL, NULL);
+  PERFORM assert('a sales rep cannot write a post', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a sales rep cannot write a post', SQLERRM LIKE '%marketing.edit%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+-- Through the programme runner, which is the path the command bar takes.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(jsonb_build_object(
+    'op', 'invoke',
+    'capability', 'post.create',
+    'subjects', '[]'::JSONB,
+    'args', jsonb_build_object('content', 'TEST post four', 'platform', 'LinkedIn,X')
+  ))) INTO out;
+  PERFORM assert('a programme can write a post', (out ->> 'changed')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a programme can write a post', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('with both platforms it named',
+  (SELECT platform FROM social_posts WHERE content = 'TEST post four')
+    = ARRAY['LinkedIn', 'X'],
+  (SELECT platform::TEXT FROM social_posts WHERE content = 'TEST post four'));
+
+DELETE FROM social_posts WHERE content LIKE 'TEST post %';
+
+-- =============================================================
+-- 15. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

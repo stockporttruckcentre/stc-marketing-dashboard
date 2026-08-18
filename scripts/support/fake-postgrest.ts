@@ -400,6 +400,36 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { listId: list, made: people.length, kind, rowId: first }, error: null };
     }
 
+    /* Writing a social post. The author and the status come from the
+       profile of whoever is asking, exactly as the composer's own
+       insert does, because they are properties of who is writing. */
+    if (name === 'command_create_post') {
+      if (!may('marketing.edit')) {
+        return { data: null, error: { message: 'you do not have marketing.edit' } };
+      }
+      const content = String(args.p_content ?? '').trim();
+      if (!content) {
+        return { data: null, error: { message: 'a post with nothing in it is not a post' } };
+      }
+      const me = (tables.profiles ?? []).find((r) => String(r.id) === 'u1');
+      const author = String(me?.full_name ?? me?.email ?? 'tester');
+      const status = String(me?.role ?? role) === 'admin' ? 'approved' : 'pending_review';
+      const places = Array.isArray(args.p_platforms) && (args.p_platforms as string[]).length
+        ? (args.p_platforms as string[])
+        : ['Facebook', 'LinkedIn'];
+
+      const rows = (tables.social_posts ??= []);
+      const id = `post${rows.length + 1}`;
+      rows.push({
+        id, content, platform: places,
+        scheduled_date: args.p_scheduled ?? new Date().toISOString().slice(0, 10),
+        status, created_by: author, caption: args.p_caption ?? null,
+        hashtags: args.p_hashtags ?? [], image_url: args.p_image ?? null,
+      });
+      writes.push({ table: 'social_posts', set: { content }, ids: [id] });
+      return { data: { id, status, author }, error: null };
+    }
+
     /* Moving a meeting. Both ends move, so the length is kept: writing
        the start alone leaves a meeting that finishes before it begins. */
     if (name === 'command_reschedule_meeting') {
@@ -815,7 +845,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
             const body = (out.data ?? {}) as Record<string, unknown>;
             const n = ['moved', 'granted', 'sent'].map((k) => body[k]).find((v) => typeof v === 'number');
             changed += typeof n === 'number' ? n
-              : cap === 'record.attach' ? 1
+              : cap === 'record.attach' || cap === 'post.create' ? 1
                 : subjects.length;
           }
         } else {
@@ -887,6 +917,17 @@ const PERFORMED: Record<string, {
   'user.setRole': {
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
+  },
+  'post.create': {
+    name: 'command_create_post',
+    args: (c) => ({
+      p_content: c.args.content ?? null,
+      p_platforms: typeof c.args.platform === 'string' && c.args.platform
+        ? String(c.args.platform).split(',')
+        : null,
+      p_scheduled: c.args.scheduledDate ?? null,
+      p_caption: c.args.caption ?? null,
+    }),
   },
   'meeting.reschedule': {
     name: 'command_reschedule_meeting',

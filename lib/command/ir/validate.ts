@@ -489,7 +489,13 @@ export function validate(plan: Plan): Problem[] {
             `capability "${v.capability}" operates ${cap.operates}, so an invoke step cannot name it`);
         }
         const subjectEntity = v.subject ? entityOfSource(v.subject) : undefined;
-        if (cap.entities?.length) {
+        /* AN OPERATION THAT MAKES SOMETHING ACTS ON NOTHING.
+
+           Writing a social post names the entity it makes, and there is
+           no selection behind it. Everything below asks whether the
+           records the sentence named can be operated on, which is not a
+           question a create has. */
+        if (cap.entities?.length && !cap.creates) {
           if (!v.subject) {
             add(at, `capability "${v.capability}" applies to ${cap.entities.join(' or ')} and needs a subject`);
           } else if (!subjectEntity) {

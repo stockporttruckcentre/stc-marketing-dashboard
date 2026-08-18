@@ -239,6 +239,18 @@ export type CapabilityDef = {
   /** Present when something actually performs it. Absent means declared only. */
   handler?: string;
   /**
+   * An operation that MAKES a record rather than acting on ones that
+   * already exist.
+   *
+   * Every other operation here starts from a set of records a sentence
+   * named. Writing a social post starts from nothing: the content, the
+   * platforms and the date are the whole of it, and there is no subject
+   * to resolve. Declared rather than inferred from an empty subject,
+   * because a sentence that failed to say which records is exactly what
+   * the subject check exists to catch.
+   */
+  creates?: boolean;
+  /**
    * Work that happens OUTSIDE the database, before the transaction.
    *
    * Names an entry in `server/prepare.ts`. Looking a company up in
@@ -744,6 +756,28 @@ export const CAPABILITIES: CapabilityDef[] = [
       /* `from` is the column that already answers it, so the preview can
          say what somebody IS as well as what they are being made. */
       { key: 'role', label: 'role', kind: 'enum', required: true, from: 'role' },
+    ],
+  },
+  {
+    id: 'post.create',
+    label: 'Write a social post',
+    operates: 'invoke',
+    /* The entity it MAKES. `creates` is what says there is nothing for
+       it to act on, so no subject is required and none is read. */
+    entities: ['posts'],
+    creates: true,
+    requires: 'marketing.edit',
+    confirm: true,
+    produces: 'record',
+    idempotent: false,
+    handler: 'supabase/migrations/022_command_social_posts.sql',
+    inputs: [
+      { key: 'content', label: 'what the post says', kind: 'longtext', required: true },
+      /* Comma separated, because a plan's literals are single values and
+         a post goes out on several platforms. The composer's own
+         default applies when the sentence names none. */
+      { key: 'platform', label: 'platforms', kind: 'text', required: false },
+      { key: 'scheduledDate', label: 'the date it goes out', kind: 'date', required: false },
     ],
   },
   {

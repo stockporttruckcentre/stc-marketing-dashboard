@@ -114,6 +114,17 @@ export async function resolveInvoke(
     return { ok: false, reason: 'unknown', why: cap.needs ?? `nothing performs ${step.capability} yet` };
   }
 
+  /* AN OPERATION THAT MAKES SOMETHING ACTS ON NOTHING.
+
+     Writing a social post starts from the words: the content, the
+     platforms and the date are the whole of it, and there is no
+     selection to resolve. Everything below is about which records an
+     operation runs on, so a capability that declares it creates skips
+     to the arguments. */
+  if (cap.creates) {
+    return resolveArguments(cap, step, [], { store: opts.store, args: opts.args });
+  }
+
   /* The rows, however the step names them: its own selection, or the
      one a clause before it made. "Create a list from them" carries a
      reference rather than a filter, and resolving it here is what keeps
@@ -268,11 +279,25 @@ export async function resolveInvoke(
     };
   }
 
-  /* WHAT IS STILL MISSING, BY NAME.
+  return resolveArguments(cap, step, subjects, { store: opts.store, args: opts.args }, missing);
+}
 
-     An input is satisfied by the sentence or by the record. A required
-     one that is neither is not a thing to guess at: a sale recorded at
-     no price is worse than a sale not recorded. */
+/**
+ * The declared inputs, and what is still missing by name.
+ *
+ * An input is satisfied by the sentence or by the record. A required one
+ * that is neither is not a thing to guess at: a sale recorded at no
+ * price is worse than a sale not recorded.
+ */
+async function resolveArguments(
+  cap: NonNullable<ReturnType<typeof capability>>,
+  step: Invoke,
+  subjects: InvokeSubject[],
+  opts: { store: Store; args?: Record<string, unknown> },
+  found: InvokeMissing[] = [],
+): Promise<InvokeResolution> {
+  const inputs = cap.inputs ?? [];
+  const missing = [...found];
   const args = { ...(opts.args ?? {}) };
 
   /* AN ARGUMENT CAN NAME A ROW WITHOUT SAYING WHICH ROW.
@@ -313,8 +338,12 @@ export async function resolveInvoke(
       continue;
     }
 
+    /* An operation that creates has no subjects, so "every subject
+       supplied it" is vacuously true and a required input would be
+       waved through. It is only satisfied by a record when there is a
+       record. */
     const supplied = subjects.filter((s) => s.values[input.key] != null);
-    if (supplied.length === subjects.length) continue;
+    if (subjects.length && supplied.length === subjects.length) continue;
     const without = subjects.filter((s) => s.values[input.key] == null);
     needs.push({ key: input.key, label: input.label });
     missing.push(...without.map((s) => ({

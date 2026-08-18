@@ -2785,6 +2785,81 @@ test('inviting somebody resolves the person and the meeting', async () => {
     JSON.stringify(invites));
 });
 
+/* =============================================================
+   29. A post somebody has already written is not a form to open
+
+   The command bar used to answer every one of these by opening the
+   composer with the text pre-filled, which asks somebody who has typed
+   the whole post to type it again. A sentence carrying the content
+   writes the draft; one naming only a topic still opens the composer,
+   because a draft whose text is the topic is worse than no draft.
+   ============================================================= */
+
+const MARKETING = [...capabilitiesFor({ role: 'marketer' } as never)];
+
+test('a post with its words in the sentence is written', async () => {
+  const db = fakeDb({
+    social_posts: [],
+    profiles: [{ id: 'u1', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'marketer' }],
+  });
+  const text = 'create a LinkedIn post saying "Our Haydock depot is open Saturday"';
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETING, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  ok('it plans as an operation',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'post.create') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map((s) => s.op)));
+
+  const preview = planned?.preview;
+  /* A post that makes one record is one record, even though the
+     operation acts on none. */
+  ok('and previews one record', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: MARKETING, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const post = (db.tables.social_posts ?? [])[0];
+  ok('the post says what the sentence said',
+    post?.content === 'Our Haydock depot is open Saturday', String(post?.content));
+  ok('on the platform it named',
+    JSON.stringify(post?.platform) === JSON.stringify(['LinkedIn']),
+    JSON.stringify(post?.platform));
+  /* The author and the status come from the profile, not the sentence,
+     which is what stops a typed post arriving unattributed or approved. */
+  ok('by whoever wrote it', post?.created_by === 'Alex Ellis', String(post?.created_by));
+  ok('and waiting for approval', post?.status === 'pending_review', String(post?.status));
+});
+
+test('a post that names only a topic still opens the composer', async () => {
+  const planning = planCommand('create a social post about the Haydock depot', {
+    actorCapabilities: MARKETING,
+  });
+  const writes = planning?.plan.steps
+    .some((s) => (s.op === 'invoke' && s.capability === 'post.create') || s.op === 'create') ?? false;
+  ok('nothing is written from a topic', !writes,
+    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
+test('a sales rep cannot write a post by typing one', async () => {
+  const sales = [...capabilitiesFor({ role: 'sales' } as never)];
+  const planning = planCommand('create a LinkedIn post saying "we are open Saturday"', {
+    actorCapabilities: sales,
+  });
+  const writes = planning?.plan.steps
+    .some((s) => s.op === 'invoke' && s.capability === 'post.create') ?? false;
+  ok('it is not offered', !writes, JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+});
+
 /* ============================================================= */
 
 async function main() {

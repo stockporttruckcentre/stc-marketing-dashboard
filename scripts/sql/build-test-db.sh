@@ -26,7 +26,7 @@ for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"            >/dev/null 2
 $P -f supabase/schema.sql                                           >/dev/null 2>&1
 for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"            >/dev/null 2>&1; done
 
-for m in 009_list_visibility_recursion 007_command_apply 008_writable_columns_seed 010_command_invoke 016_capability_roles_seed 011_command_apply_lifecycle 012_command_create_list 013_command_share_list 014_command_attachments 015_command_add_to_list 017_command_perform 020_command_tracker_operations 021_command_meetings 018_command_set_role 019_last_admin; do
+for m in 009_list_visibility_recursion 007_command_apply 008_writable_columns_seed 010_command_invoke 016_capability_roles_seed 011_command_apply_lifecycle 012_command_create_list 013_command_share_list 014_command_attachments 015_command_add_to_list 017_command_perform 020_command_tracker_operations 021_command_meetings 022_command_social_posts 018_command_set_role 019_last_admin; do
   $P -v ON_ERROR_STOP=1 -f "supabase/migrations/$m.sql" >/dev/null || {
     echo "  $m failed"; exit 1; }
 done

@@ -192,7 +192,12 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'social_posts', label: 'social posts',
-    lifecycle: { create: 'marketing.edit', delete: 'marketing.edit' },
+    /* No generic create. A post's author is not writable and the column
+       is NOT NULL, so an insert built out of writable columns alone
+       cannot be accepted by the database. Writing one is `post.create`,
+       which fills the author and the status in from the profile the way
+       the composer does. Deleting one is still ordinary. */
+    lifecycle: { delete: 'marketing.edit' },
     columns: [
       ...SYSTEM,
       { name: 'content', kind: 'longtext' },

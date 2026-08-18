@@ -139,7 +139,6 @@ INSERT INTO command_entity_permissions (table_name, operation, capability) VALUE
   ('crm_contacts', 'delete', 'crm.delete'),
   ('crm_lists', 'create', 'crm.manageLists'),
   ('crm_lists', 'delete', 'crm.manageLists'),
-  ('social_posts', 'create', 'marketing.edit'),
   ('social_posts', 'delete', 'marketing.edit'),
   ('stock_trailers', 'create', 'stock.edit'),
   ('stock_trailers', 'delete', 'stock.edit');

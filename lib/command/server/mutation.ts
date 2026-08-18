@@ -73,6 +73,8 @@ export type RowChange = {
 export type OperationPreview = {
   capability: string;
   label: string;
+  /** True when it makes a record rather than acting on ones that exist. */
+  creates: boolean;
   /**
    * The records it will run on, by their own names.
    *
@@ -314,6 +316,7 @@ export async function previewMutation(
       operations.push({
         capability: unit.plan.capability,
         label: unit.plan.label,
+        creates: capability(unit.plan.capability)?.creates ?? false,
         subjects: unit.plan.subjects.map((s) => ({
           label: s.label, via: s.viaLabel, values: s.values,
         })),
@@ -337,7 +340,10 @@ export async function previewMutation(
   const uniform = rows.length > 0
     && rows.every((r) => r.before === rows[0].before && r.after === rows[0].after);
 
-  const operated = operations.reduce((n, o) => n + o.subjects.length, 0);
+  /* An operation that makes a record changes one record, and it has no
+     subjects to count. A preview reading zero would say "this changes
+     nothing" about a post it is about to write. */
+  const operated = operations.reduce((n, o) => n + (o.creates ? 1 : o.subjects.length), 0);
 
   return {
     ok: true,

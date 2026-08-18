@@ -320,6 +320,22 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
     name: 'command_set_role',
     args: (c) => ({ p_user: c.subjects[0] ?? null, p_role: c.args.role ?? null }),
   },
+  'post.create': {
+    name: 'command_create_post',
+    /* The platforms arrive as one comma separated literal, because a
+       plan's literals are single values and a post goes out on several
+       platforms. */
+    args: (c) => ({
+      p_content: c.args.content ?? null,
+      p_platforms: typeof c.args.platform === 'string' && c.args.platform
+        ? String(c.args.platform).split(',')
+        : null,
+      p_scheduled: c.args.scheduledDate ?? null,
+      p_caption: c.args.caption ?? null,
+      p_hashtags: null,
+      p_image: null,
+    }),
+  },
   'meeting.reschedule': {
     name: 'command_reschedule_meeting',
     args: (c) => ({ p_events: c.subjects, p_start: c.args.start ?? null }),
