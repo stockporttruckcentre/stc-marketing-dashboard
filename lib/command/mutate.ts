@@ -518,6 +518,15 @@ const MARK_WORDS = [
   /* The other two things that happen to a post. Both are buttons on the
      planner and neither had a word. */
   'submit', 'reject', 'send back', 'knock back',
+  /* "SEND THIS POST FOR APPROVAL" IS WHAT PEOPLE SAY.
+
+     "Submit" already worked and nobody uses it. The verb and the state
+     word sit at opposite ends of the sentence, so the phrase is not
+     contiguous and cannot be listed as one: it is the bare verb, and
+     what makes it a mark rather than a share is that a state word
+     follows it. `send X to somebody` is a destination clause and is
+     read before this, so the two do not compete. */
+  'send',
 ];
 
 /** Words that say which table a sentence is about. */
@@ -737,7 +746,19 @@ export function parseEdit(
         const fromVerb = Object.keys(vocab)
           .filter((w) => fuzzyContains(opener, w))
           .sort((a, b) => b.length - a.length)[0] ?? '';
-        const hit = pick(destination) || fromVerb || pick(subject);
+        /* A FIELD ALIAS THAT IS ALSO A STATE WORD TAKES THE VALUE WITH IT.
+
+           `status` on a post is aliased "approval", and the value hunt
+           runs on the sentence with the field's aliases removed. "Send
+           this post for approval" therefore became "send this post
+           for", and the state it named had been deleted by the step
+           that worked out which column it was about. Falling back to
+           the sentence as typed costs nothing: the vocabulary is state
+           words, and a state word in the original is still the state
+           the sentence named. */
+        const asTyped = splitOnAs(raw);
+        const hit = pick(destination) || fromVerb || pick(subject)
+          || pick(asTyped.destination) || pick(asTyped.subject);
         if (hit) { value = vocab[hit]; valueLabel = String(vocab[hit]).replace(/_/g, ' '); }
         break;
       }
