@@ -2947,6 +2947,154 @@ $$;
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST projected%';
 
 -- =============================================================
+-- 15h. Copying a row, linking a unit, and a file on the brand kit
+--
+-- Migration 038. Four operations the screens had and the command bar
+-- did not. What is asserted here is what each one CARRIES and what it
+-- RESETS, because that is the whole of the difference between a
+-- duplicate somebody wanted and a second commission line nobody did.
+-- =============================================================
+\echo '--- duplicating and linking ---'
+
+SELECT reset_fixtures();
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+-- A STOCK UNIT: everything except the id and the timestamps.
+DO $$
+DECLARE out JSONB; before INTEGER; copy stock_trailers%ROWTYPE;
+BEGIN
+  SELECT COUNT(*) INTO before FROM stock_trailers WHERE stc_no = 'TESTSTC1';
+  SELECT command_duplicate_stock(ARRAY['11111111-1111-1111-1111-111111111111']::UUID[]) INTO out;
+
+  PERFORM assert('a stock unit can be duplicated', (out ->> 'made')::INT = 1, out::TEXT);
+  PERFORM assert('and there are two of it now',
+    (SELECT COUNT(*) FROM stock_trailers WHERE stc_no = 'TESTSTC1') = before + 1,
+    (SELECT COUNT(*)::TEXT FROM stock_trailers WHERE stc_no = 'TESTSTC1'));
+
+  SELECT * INTO copy FROM stock_trailers WHERE id = (out ->> 'id')::UUID;
+  PERFORM assert('the copy carries the stock number, as the button does',
+    copy.stc_no = 'TESTSTC1', copy.stc_no);
+  PERFORM assert('and the money on it', copy.retail_price = 20000, copy.retail_price::TEXT);
+  PERFORM assert('under a new id', copy.id <> '11111111-1111-1111-1111-111111111111');
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_duplicate_stock(ARRAY['99999999-9999-9999-9999-999999999999']::UUID[]);
+  PERFORM assert('a unit that is not there fails the call', FALSE, 'it duplicated nothing quietly');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a unit that is not there fails the call',
+    SQLERRM LIKE '%nothing has been changed%', SQLERRM);
+END
+$$;
+
+DELETE FROM stock_trailers WHERE stc_no = 'TESTSTC1' AND id <> '11111111-1111-1111-1111-111111111111';
+
+-- A DEAL: the conversation carries, the sale does not.
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST dup%';
+INSERT INTO crm_contacts (id, company_name, contact_name, list_id, status, source,
+                          side, requirement, notes, stock_trailer_id,
+                          sale_price, profit, commission, order_date)
+VALUES ('e1111111-0000-0000-0000-000000000001', 'TEST dup buyer', 'Sam', test_global_list(),
+        'customer', 'manual', 'trailer_sales', 'two curtainsiders', 'rings on Fridays',
+        '11111111-1111-1111-1111-111111111111', 24000, 4000, 400, DATE '2026-08-01');
+
+DO $$
+DECLARE out JSONB; copy crm_contacts%ROWTYPE;
+BEGIN
+  SELECT command_duplicate_deal(ARRAY['e1111111-0000-0000-0000-000000000001']::UUID[]) INTO out;
+  SELECT * INTO copy FROM crm_contacts WHERE id = (out ->> 'id')::UUID;
+
+  PERFORM assert('a deal can be duplicated', (out ->> 'made')::INT = 1, out::TEXT);
+  PERFORM assert('the copy is the same customer', copy.company_name = 'TEST dup buyer', copy.company_name);
+  PERFORM assert('and carries what they want', copy.requirement = 'two curtainsiders', copy.requirement);
+  PERFORM assert('and the notes', copy.notes = 'rings on Fridays', copy.notes);
+  PERFORM assert('and the side of the business', copy.side = 'trailer_sales', copy.side);
+
+  PERFORM assert('it is not against the same unit',
+    copy.stock_trailer_id IS NULL, copy.stock_trailer_id::TEXT);
+  PERFORM assert('it carries no sale price', copy.sale_price IS NULL, copy.sale_price::TEXT);
+  PERFORM assert('no profit', copy.profit IS NULL, copy.profit::TEXT);
+  PERFORM assert('no commission', copy.commission IS NULL, copy.commission::TEXT);
+  PERFORM assert('no order date', copy.order_date IS NULL, copy.order_date::TEXT);
+  PERFORM assert('and a deal already sold comes back as a quote rather than a second sale',
+    copy.status = 'quoted', copy.status);
+  PERFORM assert('dated today', copy.date_of_enquiry = CURRENT_DATE, copy.date_of_enquiry::TEXT);
+END
+$$;
+
+-- LINKING A UNIT TO A DEAL.
+DELETE FROM crm_contacts WHERE company_name = 'TEST link deal';
+INSERT INTO crm_contacts (id, company_name, list_id, status, source)
+VALUES ('e1111111-0000-0000-0000-000000000002', 'TEST link deal', test_global_list(), 'quoted', 'manual');
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_link_stock('e1111111-0000-0000-0000-000000000002',
+                            '22222222-2222-2222-2222-222222222222') INTO out;
+  PERFORM assert('a unit can be put against a deal',
+    (SELECT stock_trailer_id FROM crm_contacts WHERE id = 'e1111111-0000-0000-0000-000000000002')
+      = '22222222-2222-2222-2222-222222222222',
+    out::TEXT);
+  PERFORM assert('and it says which unit', out ->> 'stcNo' = 'TESTSTC2', out::TEXT);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_link_stock('e1111111-0000-0000-0000-000000000002',
+                             '33333333-3333-3333-3333-333333333333');
+  PERFORM assert('a deal already against a unit is not moved silently', FALSE, 'it moved it');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a deal already against a unit is not moved silently',
+    SQLERRM LIKE '%already against another unit%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_link_stock('e1111111-0000-0000-0000-000000000002',
+                             '99999999-9999-9999-9999-999999999999');
+  PERFORM assert('a unit that is not there fails the link', FALSE, 'it linked nothing');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a unit that is not there fails the link',
+    SQLERRM LIKE '%not there%', SQLERRM);
+END
+$$;
+
+-- A FILE ON THE BRAND KIT.
+DELETE FROM brand_assets WHERE name LIKE 'TEST %';
+DO $$
+DECLARE out JSONB; row brand_assets%ROWTYPE;
+BEGIN
+  SELECT command_add_brand_asset('TEST yard.png', 'LOGO',
+    'https://example.test/storage/v1/object/public/brand-assets/x-yard.png', NULL) INTO out;
+  SELECT * INTO row FROM brand_assets WHERE id = (out ->> 'id')::UUID;
+
+  PERFORM assert('a brand asset can be recorded', row.name = 'TEST yard.png', row.name);
+  PERFORM assert('the kind is normalised rather than taken', row.type = 'logo', row.type);
+  PERFORM assert('and a category nobody named is the screen''s own default',
+    row.category = 'General', row.category);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_add_brand_asset('TEST bad.png', 'spreadsheet', 'https://example.test/x', NULL);
+  PERFORM assert('a kind the table does not allow is refused', FALSE, 'it inserted one');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a kind the table does not allow is refused',
+    SQLERRM LIKE '%not a kind of brand asset%', SQLERRM);
+END
+$$;
+
+DELETE FROM brand_assets WHERE name LIKE 'TEST %';
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST dup%' OR company_name = 'TEST link deal';
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+
+-- =============================================================
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'

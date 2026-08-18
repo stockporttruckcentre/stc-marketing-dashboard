@@ -4851,6 +4851,308 @@ test('making an address the main one asks which, rather than picking', async () 
     JSON.stringify(db.tables.contact_addresses));
 });
 
+/* =============================================================
+   42. The operations the screens had and the bar did not
+
+   Five of them: two duplicates, a unit against a deal, a file on the
+   brand kit, and two accounts that turn out to be one business. Each
+   one previews without writing and then writes exactly what it showed,
+   which is the whole contract every other operation here holds to.
+   ============================================================= */
+
+const STOCKMAN = [...capabilitiesFor({ role: 'admin' } as never)];
+
+test('duplicate this stock unit', async () => {
+  const db = fakeDb({ stock_trailers: trailers() });
+  const text = 'duplicate this stock unit';
+  const context = { record: { entity: 'trailers', id: 't1', label: 'STC143580' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  ok('and nothing is copied by looking', db.tables.stock_trailers.length === 5,
+    String(db.tables.stock_trailers.length));
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('confirming makes the copy', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('and there are two of that unit now',
+    db.tables.stock_trailers.filter((r) => r.stc_no === 'STC143580').length === 2,
+    String(db.tables.stock_trailers.length));
+
+  /* WHAT THE BUTTON DOES, WHICH IS WHAT THIS DOES. */
+  const copy = db.tables.stock_trailers.find(
+    (r) => r.stc_no === 'STC143580' && r.id !== 't1');
+  ok('carrying the spec', copy?.category === 'curtainsider', String(copy?.category));
+  ok('and the money on it', copy?.retail_price === 20000, String(copy?.retail_price));
+  ok('under a new id', !!copy?.id && copy.id !== 't1', String(copy?.id));
+});
+
+test('duplicate this deal for a second unit', async () => {
+  const db = fakeDb({
+    crm_contacts: [{
+      id: 'k1', company_name: 'Dawson Group', status: 'customer', side: 'trailer_sales',
+      requirement: 'two curtainsiders', notes: 'rings on Fridays',
+      stock_trailer_id: 'u1', sale_price: 24000, profit: 4000, commission: 400,
+      order_date: '2026-08-01',
+    }],
+  });
+  const text = 'duplicate this deal for a second unit';
+  const context = { record: { entity: 'deals', id: 'k1', label: 'Dawson Group' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('confirming makes the second deal', done.ok === true, JSON.stringify(done).slice(0, 200));
+
+  const copy = db.tables.crm_contacts.find((r) => r.id !== 'k1');
+  ok('for the same customer', copy?.company_name === 'Dawson Group', String(copy?.company_name));
+  ok('carrying what they want', copy?.requirement === 'two curtainsiders', String(copy?.requirement));
+  /* THE SECOND UNIT IS A SECOND UNIT, NOT A SECOND SALE. */
+  ok('against no unit yet', copy?.stock_trailer_id == null, String(copy?.stock_trailer_id));
+  ok('with no sale price', copy?.sale_price == null, String(copy?.sale_price));
+  ok('and no commission', copy?.commission == null, String(copy?.commission));
+  ok('and it is a quote rather than a sale', copy?.status === 'quoted', String(copy?.status));
+});
+
+test('link STC143580 to this deal', async () => {
+  const db = fakeDb({
+    stock_trailers: trailers(),
+    crm_contacts: [{ id: 'k1', company_name: 'Dawson Group', status: 'quoted' }],
+  });
+  const text = 'link STC143580 to this deal';
+  const context = { record: { entity: 'deals', id: 'k1', label: 'Dawson Group' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  ok('and nothing is linked by looking',
+    db.tables.crm_contacts[0].stock_trailer_id == null,
+    String(db.tables.crm_contacts[0].stock_trailer_id));
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('confirming links it', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('to the unit the sentence named',
+    db.tables.crm_contacts[0].stock_trailer_id === 't1',
+    String(db.tables.crm_contacts[0].stock_trailer_id));
+});
+
+test('a stock number that fits two units is a question, not a guess', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 't1', stc_no: 'STC143580', status: 'in_stock' },
+      { id: 't9', stc_no: 'STC143580', status: 'in_stock' },
+    ],
+    crm_contacts: [{ id: 'k1', company_name: 'Dawson Group', status: 'quoted' }],
+  });
+  const text = 'link STC143580 to this deal';
+  const context = { record: { entity: 'deals', id: 'k1', label: 'Dawson Group' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it does not go through', planned?.preview?.ok === false, 'it picked one');
+  if (planned?.preview && !planned.preview.ok) {
+    ok('and says two units match', /2|two/.test(planned.preview.why), planned.preview.why);
+  }
+  ok('and nothing was linked', db.tables.crm_contacts[0].stock_trailer_id == null,
+    String(db.tables.crm_contacts[0].stock_trailer_id));
+});
+
+test('upload this logo to the brand kit', async () => {
+  const db = fakeDb({ brand_assets: [] });
+  const bucket = fakeBucket();
+  const text = 'upload this logo to the brand kit';
+  const context = {
+    file: { name: 'stc-blue.png', mime: 'image/png', size: 4, text: 'data:image/png;base64,AAAA' },
+  };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true, files: bucket.store,
+  });
+  ok('it previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  ok('and describing it uploads nothing', bucket.objects.size === 0,
+    String(bucket.objects.size));
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, files: bucket.store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('confirming uploads it', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('the file is on the bucket', bucket.objects.size === 1, String(bucket.objects.size));
+
+  const asset = (db.tables.brand_assets ?? [])[0];
+  ok('and the brand kit has a row for it', !!asset, JSON.stringify(db.tables.brand_assets));
+  ok('under the file\'s own name', asset?.name === 'stc-blue.png', String(asset?.name));
+  ok('filed as the kind the sentence said', asset?.type === 'logo', String(asset?.type));
+  ok('in the screen\'s own default category', asset?.category === 'General', String(asset?.category));
+  ok('pointing at the object that was staged',
+    String(asset?.url ?? '').includes([...bucket.objects.keys()][0] ?? 'nothing'),
+    String(asset?.url));
+});
+
+test('a brand upload whose row fails leaves nothing on the bucket', async () => {
+  const db = fakeDb({ brand_assets: [] });
+  const bucket = fakeBucket();
+  const text = 'upload this logo to the brand kit';
+  const context = {
+    file: { name: 'stc-blue.png', mime: 'image/png', size: 4, text: 'data:image/png;base64,AAAA' },
+  };
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true, files: bucket.store,
+  });
+  if (!planned?.preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const confirmed = {
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    context, files: bucket.store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  };
+
+  /* The upload succeeds and the transaction does not. */
+  const real = postgrestStore(db.supabase);
+  const first = await applyMutation({
+    ...confirmed,
+    store: { ...real, perform: async () => ({ ok: false, why: 'the database fell over' }) },
+  });
+  ok('it fails', first.ok === false, 'it reported success with no row');
+  ok('the file was staged', bucket.staged.length === 1, JSON.stringify(bucket.staged));
+  ok('and then taken away again, so nothing points at it',
+    bucket.objects.size === 0, JSON.stringify([...bucket.objects.keys()]));
+  ok('and the brand kit gained nothing', (db.tables.brand_assets ?? []).length === 0,
+    JSON.stringify(db.tables.brand_assets));
+
+  /* The same confirmation, retried against a database that works. */
+  const second = await applyMutation({ ...confirmed, store: postgrestStore(db.supabase) });
+  ok('the retry goes through', second.ok === true, second.ok ? '' : second.why);
+  ok('and there is exactly one stored object', bucket.objects.size === 1,
+    String(bucket.objects.size));
+  ok('under the same key both times',
+    bucket.staged.length === 2 && bucket.staged[0].key === bucket.staged[1].key,
+    JSON.stringify(bucket.staged));
+  ok('with one row on the brand kit, not two',
+    (db.tables.brand_assets ?? []).length === 1, JSON.stringify(db.tables.brand_assets));
+});
+
+test('link these two customer records as the same account', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Maintenance', status: 'lead' },
+      { id: 'c2', company_name: 'Dawson Group', status: 'customer' },
+    ],
+  });
+  const text = 'link these two customer records as the same account';
+  const context = { selection: { entity: 'contacts', ids: ['c1', 'c2'] } };
+
+  const planning = planCommand(text, { actorCapabilities: STOCKMAN, context });
+  ok('it is understood as linking accounts',
+    planning?.plan.steps.some((x) => x.op === 'invoke' && x.capability === 'contact.link') ?? false,
+    JSON.stringify(planning?.plan.steps.map((x) => x.op)));
+
+  /* NO FIRST ROW CONVENTION. */
+  ok('and it asks which is the main account',
+    planning?.completion.kind === 'incomplete'
+      && planning.completion.missing[0].ask === 'Which should be the main account?',
+    JSON.stringify(planning?.completion));
+  ok('nothing is linked while it asks',
+    db.tables.crm_contacts.every((r) => r.parent_customer_id == null),
+    JSON.stringify(db.tables.crm_contacts));
+
+  const said = completedWith(
+    text,
+    (planning?.completion as { missing: { fills: string }[] }).missing[0] as never,
+    'Dawson Group is the main account',
+  );
+  const planned = await planAndPreview({
+    text: said, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('answering previews', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text: said, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('and confirming links them', done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('the other record went under the one they named',
+    db.tables.crm_contacts.find((r) => r.id === 'c1')?.parent_customer_id === 'c2',
+    JSON.stringify(db.tables.crm_contacts));
+  ok('and the main account is under nobody',
+    db.tables.crm_contacts.find((r) => r.id === 'c2')?.parent_customer_id == null,
+    JSON.stringify(db.tables.crm_contacts));
+});
+
+test('link Dawson Maintenance to Dawson Group as the main account', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Maintenance', status: 'lead' },
+      { id: 'c2', company_name: 'Dawson Group', status: 'customer' },
+    ],
+  });
+  const text = 'link Dawson Maintenance to Dawson Group as the main account';
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), preview: true,
+  });
+  ok('it previews with no screen at all', planned?.preview?.ok === true,
+    planned?.preview && !planned.preview.ok ? planned.preview.why : 'no preview');
+  if (!planned?.preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: STOCKMAN, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: planned.preview.programmeHash,
+  });
+  ok('and it links the one named first under the one named second',
+    done.ok === true, JSON.stringify(done).slice(0, 200));
+  ok('which way round matters and is the way they said it',
+    db.tables.crm_contacts.find((r) => r.id === 'c1')?.parent_customer_id === 'c2',
+    JSON.stringify(db.tables.crm_contacts));
+});
+
 /* ============================================================= */
 
 async function main() {

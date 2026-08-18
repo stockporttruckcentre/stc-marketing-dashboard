@@ -25,6 +25,7 @@ import { composeSuggestions } from '../lib/command/compose';
 import { parseEdit, composeEdits } from '../lib/command/mutate';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { parseSelection, selectionSpace } from '../lib/command/select';
+import { planCommand } from '../lib/command/plan';
 import { attributeNames } from '../lib/command/attributes';
 import type { Cond } from '../lib/command/ir/types';
 import { loadSampleVocabulary } from './sample-vocabulary';
@@ -771,6 +772,78 @@ for (const shape of ['high to low', 'low to high', 'descending']) {
   const named = parseQuery(`list trailers in stock by profit ${shape}`);
   ok(`grammar: "profit ${shape}" sorts on the named attribute`,
     named?.order?.column === 'profit', named?.summary ?? 'no plan');
+}
+
+/* =============================================================
+   The operations behind those actions actually run
+
+   An entry in the action registry means the bar can OFFER something.
+   It says nothing about whether pressing Enter does it, and for four of
+   these the honest answer used to be no: the entry opened a screen, or
+   in two cases pointed at a menu nothing renders.
+
+   So each one is planned through the canonical planner, with the
+   screen somebody would be looking at, and asserted to reach a
+   capability rather than a suggestion. And asserted to be invisible to
+   somebody without the capability, which is the other half of every
+   action in this file.
+   ============================================================= */
+const OPERATIONS: {
+  text: string;
+  capability: string;
+  needs: keyof typeof CAPS;
+  denied: (keyof typeof CAPS)[];
+  context: Record<string, unknown>;
+}[] = [
+  {
+    text: 'duplicate this stock unit',
+    capability: 'stock.duplicate',
+    needs: 'admin', denied: ['viewer'],
+    context: { record: { entity: 'trailers', id: '11111111-1111-1111-1111-111111111111' } },
+  },
+  {
+    text: 'duplicate this deal for a second unit',
+    capability: 'deal.duplicate',
+    needs: 'sales', denied: ['viewer'],
+    context: { record: { entity: 'deals', id: '22222222-2222-2222-2222-222222222222' } },
+  },
+  {
+    text: 'link STC143580 to this deal',
+    capability: 'deal.linkStock',
+    needs: 'sales', denied: ['viewer'],
+    context: { record: { entity: 'deals', id: '22222222-2222-2222-2222-222222222222' } },
+  },
+  {
+    text: 'upload this logo to the brand kit',
+    capability: 'brand.upload',
+    needs: 'marketer', denied: ['viewer', 'sales'],
+    context: {
+      file: { name: 'stc-blue.png', mime: 'image/png', size: 4, text: 'data:image/png;base64,AAAA' },
+    },
+  },
+];
+
+for (const o of OPERATIONS) {
+  const planned = planCommand(o.text, {
+    actorCapabilities: CAPS[o.needs], vocabulary: VOCABULARY, context: o.context as never,
+  });
+  const reaches = planned?.plan.steps.some(
+    (x) => x.op === 'invoke' && x.capability === o.capability) ?? false;
+  ok(`operation: "${o.text}" plans ${o.capability}`, reaches,
+    planned ? planned.presentation.summary : 'nothing');
+  ok(`operation: "${o.text}" is carried out rather than opened`,
+    planned?.availability.executable === true && planned?.availability.permitted === true,
+    JSON.stringify(planned?.availability));
+
+  for (const role of o.denied) {
+    const theirs = planCommand(o.text, {
+      actorCapabilities: CAPS[role], vocabulary: VOCABULARY, context: o.context as never,
+    });
+    const offered = theirs?.plan.steps.some(
+      (x) => x.op === 'invoke' && x.capability === o.capability) ?? false;
+    ok(`operation: "${o.text}" is not offered to a ${role}`, !offered,
+      theirs?.presentation.summary ?? '');
+  }
 }
 
 console.log(`\n${pass}/${pass + fail} passing`);

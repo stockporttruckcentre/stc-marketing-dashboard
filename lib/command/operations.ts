@@ -74,6 +74,31 @@ const OPERATIONS: {
    */
   tail?: { key: string; after: string[]; kind?: 'url' };
   /**
+   * An input that names ANOTHER record.
+   *
+   * "Link STC143580 to this deal" is about two rows: the deal it acts
+   * on and the unit it puts against it. The second one is read the way
+   * every other stock reference in this application is read, by its
+   * stock number, and it becomes a `reference` expression so the
+   * runtime resolves it against the caller's own rows and ASKS when two
+   * match. Nothing here picks one.
+   */
+  names?: {
+    key: string;
+    entity: string;
+    field: string;
+    /**
+     * How the sentence says which record.
+     *
+     * `code` is a stock number, which is how this application names a
+     * unit. `after` is a name following one of a few words, which is
+     * how it names anything else: "link Dawson Maintenance TO Dawson
+     * Group".
+     */
+    by: 'code' | 'after';
+    after?: string[];
+  };
+  /**
    * An operation that names no records.
    *
    * Refreshing the news makes rows out of what fourteen feeds are
@@ -203,6 +228,75 @@ const OPERATIONS: {
     label: (n, what) => `Put this picture on ${what}`,
   },
   {
+    capability: 'stock.duplicate',
+    entity: 'trailers',
+    verbs: ['duplicate', 'copy', 'clone', 'repeat'],
+    /* The word that says WHICH operation is the noun for the thing
+       being copied, because the verb alone is also how somebody copies
+       a hex colour to the clipboard. */
+    objects: ['unit', 'units', 'trailer', 'trailers', 'stock unit', 'stock',
+              'stocklist', 'stock list'],
+    label: (n, what) => `Make another stock unit from ${what}`,
+  },
+  {
+    capability: 'deal.duplicate',
+    entity: 'deals',
+    verbs: ['duplicate', 'copy', 'clone', 'repeat'],
+    objects: ['deal', 'deals', 'tracker row', 'tracker line', 'opportunity',
+              'enquiry', 'quote'],
+    label: (n, what) => `Make another deal from ${what}`,
+  },
+  {
+    capability: 'deal.linkStock',
+    entity: 'deals',
+    verbs: ['link', 'attach', 'assign', 'put', 'add', 'set', 'against'],
+    objects: ['deal', 'deals', 'tracker row', 'tracker line', 'opportunity'],
+    label: (n, what) => `Put that stock unit against ${what}`,
+    /* The unit, by its stock number, resolved by the runtime. */
+    names: { key: 'unit', entity: 'trailers', field: 'stc_no', by: 'code' },
+  },
+  {
+    capability: 'brand.upload',
+    entity: 'brand',
+    subjectless: true,
+    needsFile: true,
+    verbs: ['upload', 'add', 'put', 'save', 'store'],
+    /* "The brand kit" has to be said. Without it, "upload this logo"
+       and "add this image" are the same words the composer uses for a
+       picture on a post, and the two would take each other's
+       sentences. */
+    objects: ['brand kit', 'brand assets', 'brand library', 'brand'],
+    label: () => 'Put this file on the brand kit',
+    argument: {
+      key: 'kind',
+      values: [
+        { value: 'logo', words: ['logo', 'logos', 'emblem', 'wordmark'] },
+        { value: 'font', words: ['font', 'fonts', 'typeface'] },
+        { value: 'template', words: ['template', 'templates', 'artwork file'] },
+        { value: 'image', words: ['image', 'images', 'picture', 'photo', 'graphic'] },
+      ],
+      /* What the screen's own upload menu calls anything else. */
+      fallback: 'image',
+    },
+  },
+  {
+    capability: 'contact.link',
+    entity: 'contacts',
+    verbs: ['link', 'merge', 'connect', 'tie', 'join', 'attach'],
+    /* What makes it this operation rather than a link on an account:
+       the sentence says the two records are one business. */
+    objects: ['same account', 'same business', 'same company', 'same customer',
+              'one account', 'same group', 'main account', 'parent account'],
+    label: (n, what) => `Link ${what} to the main account`,
+    /* The account they all belong to, by name. Absent means the
+       sentence did not say which one is the main one, and the
+       capability's required input turns that into the question. */
+    names: {
+      key: 'parent', entity: 'contacts', field: 'company_name', by: 'after',
+      after: ['to', 'under', 'into', 'onto', 'with'],
+    },
+  },
+  {
     capability: 'contact.enrich',
     entity: 'contacts',
     verbs: ['enrich', 'look up', 'lookup', 'find details for', 'fill in', 'top up'],
@@ -296,6 +390,95 @@ function urlIn(raw: string): string | null {
   return url.length >= 4 ? url : null;
 }
 
+/**
+ * The record a sentence acts on, when it names two.
+ *
+ * "Link Dawson Maintenance to Dawson Group" has the subject in front of
+ * the joining word and the other record behind it. Everything between
+ * the verb and that word, which is where a name sits in this shape.
+ */
+function nameBefore(raw: string, verbs: string[], after: string[]): string | null {
+  const lower = raw.toLowerCase();
+  for (const verb of verbs) {
+    const at = lower.indexOf(` ${verb} `) >= 0 ? lower.indexOf(` ${verb} `) + verb.length + 2
+      : lower.startsWith(`${verb} `) ? verb.length + 1 : -1;
+    if (at < 0) continue;
+    for (const word of after) {
+      const to = lower.indexOf(` ${word} `, at);
+      if (to < 0) continue;
+      const name = raw.slice(at, to)
+        .replace(/[^A-Za-z0-9&'. -]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const words = name.split(' ').filter(Boolean);
+      if (!words.length || words.length > 5) continue;
+      if (name.length >= 2) return name;
+    }
+  }
+  return null;
+}
+
+/**
+ * A record named after a joining word.
+ *
+ * "Link Dawson Maintenance to Dawson Group as the main account" names
+ * two companies and one of them is the parent. The word in front of it
+ * says which: everything after "to" is the account the rest belong to.
+ *
+ * Deliberately narrow. It stops at the words that describe the
+ * operation rather than the record, so "as the main account" is not
+ * part of anybody's name, and a phrase longer than five words is not a
+ * company name at all.
+ */
+function nameAfter(raw: string, after: string[], objects: string[]): string | null {
+  /* SAID THE OTHER WAY ROUND.
+
+     "Dawson Group is the main account" names the parent without any
+     joining word in front of it, and it is how somebody answers the
+     question this operation asks. Read first, because a sentence
+     holding both shapes means this one. */
+  const declared = raw.match(
+    /\b([A-Za-z0-9&'. -]{2,60}?)\s+(?:is|should be|will be)\s+the\s+(?:main|parent|top|primary)\b/i,
+  )?.[1];
+  if (declared) {
+    /* Everything up to and including the words that named the
+       operation belongs to the instruction rather than to the company:
+       "link these two as the same account, Dawson Group is the main
+       one" has the name only in the last clause. */
+    let head = declared;
+    for (const object of objects) {
+      const at = head.toLowerCase().lastIndexOf(object);
+      if (at >= 0) head = head.slice(at + object.length);
+    }
+    const name = head.replace(/^[\s,;:.]+/, '').replace(/\s+/g, ' ').trim();
+    const words = name.split(' ').filter(Boolean);
+    /* The last few words, because the sentence in front of this clause
+       is the rest of the instruction. */
+    if (words.length) return words.slice(-4).join(' ');
+  }
+
+  for (const word of after) {
+    const at = raw.toLowerCase().lastIndexOf(` ${word} `);
+    if (at < 0) continue;
+    let rest = raw.slice(at + word.length + 2);
+    /* The words that say which operation this is come off, wherever
+       they sit: "to Dawson Group as the same account". */
+    for (const object of objects) {
+      const said = rest.toLowerCase().indexOf(object);
+      if (said >= 0) rest = rest.slice(0, said);
+    }
+    const name = rest
+      .replace(/\b(?:as|the|a|an|its|their|main|parent|top|primary)\b/gi, ' ')
+      .replace(/[^A-Za-z0-9&'. -]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const words = name.split(' ').filter(Boolean);
+    if (!words.length || words.length > 5) continue;
+    if (name.length >= 2) return name;
+  }
+  return null;
+}
+
 function tailOf(
   raw: string, after: string[], named: string | null, pointed?: string | null,
 ): string | null {
@@ -364,7 +547,17 @@ export function parseOperation(
        this is not the operation. */
     const points = op.subjectless ? null : readContextReference(raw);
     const named = subject || op.subjectless || points
-      ? null : companyIn(raw, op.objects);
+      ? null
+      /* A SENTENCE THAT NAMES TWO RECORDS NAMES THIS ONE FIRST.
+
+         "Link Dawson Maintenance to Dawson Group" is about Dawson
+         Maintenance, and the ordinary company reader looks AFTER the
+         word that named the operation, which is where the other one
+         is. */
+      : (op.names?.by === 'after'
+          ? nameBefore(raw, op.verbs, op.names.after ?? [])
+          : null)
+        ?? companyIn(raw, op.objects);
 
     let where: Cond | null = subject?.where ?? null;
     let label = subject?.label ?? '';
@@ -411,6 +604,37 @@ export function parseOperation(
         : tailOf(raw, op.tail.after, named, points?.words ?? null);
       if (said) args[op.tail.key] = { kind: 'literal', value: said };
     }
+    /* ANOTHER RECORD, NAMED THE WAY THIS APPLICATION NAMES IT.
+
+       A stock number, turned into a reference the runtime resolves. It
+       is deliberately NOT resolved here: this reader has no store, and
+       a reference carries `onAmbiguity: 'ask'` so two units matching is
+       a question rather than a guess. Absent means the sentence did not
+       say which, which the capability's required input turns into a
+       question of its own. */
+    if (op.names) {
+      const said = op.names.by === 'code'
+        ? [...readRecordRefs(raw).stc, ...readRecordRefs(raw).coded][0]
+        : nameAfter(raw, op.names.after ?? [], op.objects);
+      if (said) {
+        args[op.names.key] = {
+          kind: 'reference',
+          entity: op.names.entity,
+          where: {
+            kind: 'cmp',
+            /* A stock number is exact and a company name is how
+               somebody would say it out loud. Two matches on a name is
+               a question, which is what `onAmbiguity` is for. */
+            op: op.names.by === 'code' ? 'eq' : 'contains',
+            left: { kind: 'field', of: { entity: op.names.entity, field: op.names.field } },
+            right: { kind: 'literal', value: said },
+          },
+          select: 'id',
+          onAmbiguity: 'ask',
+        };
+      }
+    }
+
     if (op.argument) {
       const said = op.argument.values
         .flatMap((v) => v.words.map((w) => ({ value: v.value, w })))

@@ -765,6 +765,85 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'stock.duplicate',
+    label: 'Make a second copy of a stock unit',
+    operates: 'invoke',
+    entities: ['trailers'],
+    /* NOT `creates`. It makes a row and it also ACTS ON one: there is
+       nothing to copy without the unit somebody pointed at, and a
+       capability that creates is one the runtime resolves no subjects
+       for. */
+    /* The same capability the Duplicate item on the stock list gates
+       on, because it is the same operation: `canEdit` there is
+       `stock.edit` here. */
+    requires: 'stock.edit',
+    confirm: true,
+    produces: 'rows',
+    /* Twice is two copies. That is what duplicating means. */
+    idempotent: false,
+    handler: 'supabase/migrations/038_duplicate_and_link.sql',
+  },
+  {
+    id: 'deal.duplicate',
+    label: 'Make a second deal for the same customer',
+    operates: 'invoke',
+    entities: ['deals'],
+    /* Not `creates`, for the same reason as the unit above: the row it
+       makes is a copy of the row it acts on. */
+    /* Starting a deal, which is what every other way onto the tracker
+       gates on. */
+    requires: 'crm.create',
+    confirm: true,
+    produces: 'rows',
+    idempotent: false,
+    handler: 'supabase/migrations/038_duplicate_and_link.sql',
+  },
+  {
+    id: 'deal.linkStock',
+    label: 'Put a stock unit against a deal',
+    operates: 'invoke',
+    entities: ['deals'],
+    /* Editing the deal. The unit is not changed by linking: it changes
+       when the deal is sold, which is `deal.markSold`. */
+    requires: 'crm.edit',
+    confirm: true,
+    produces: 'record',
+    /* Linking the same unit to the same deal twice leaves one link. */
+    idempotent: true,
+    handler: 'supabase/migrations/038_duplicate_and_link.sql',
+    inputs: [
+      {
+        key: 'unit', label: 'which unit', kind: 'text', required: true,
+        ask: 'Which stock unit?',
+      },
+    ],
+  },
+  {
+    id: 'brand.upload',
+    label: 'Put a file on the brand kit',
+    operates: 'invoke',
+    entities: ['brand'],
+    creates: true,
+    /* What the Upload button on the brand kit gates on: the table's own
+       policy is admin and marketer, which is `marketing.edit`. */
+    requires: 'marketing.edit',
+    confirm: true,
+    produces: 'record',
+    /* A second upload of the same file is a second asset row. */
+    idempotent: false,
+    handler: 'lib/social/media.ts',
+    /* The bytes are the browser's and a bucket is not a table, so the
+       file is staged before the transaction and the row that points at
+       it is written inside one. Exactly the shape a picture on a post
+       has. */
+    prepares: 'brand.upload',
+    inputs: [
+      { key: 'file', label: 'the file', kind: 'text', required: true },
+      { key: 'kind', label: 'what kind of asset', kind: 'text', required: false },
+      { key: 'category', label: 'which category', kind: 'text', required: false },
+    ],
+  },
+  {
     id: 'list.create',
     label: 'Make a list out of these records',
     operates: 'invoke',

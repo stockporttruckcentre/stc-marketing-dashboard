@@ -238,11 +238,21 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     gridRef.current?.api.deselectAll();
   }
 
+  /* ONE OPERATION, TWO WAYS IN.
+     This built the copy here, out of the row the grid happened to be
+     holding, and inserted it. The command bar can duplicate a unit too,
+     and two implementations of "duplicate" is how they end up copying
+     different columns: this one copied whatever the grid had loaded.
+     `command_duplicate_stock` is the operation now, and this is one
+     caller of it. Migration 038. */
   async function duplicateRow(row: StockTrailer) {
-    const { id, created_at, updated_at, ...rest } = row;
-    const { data, error } = await supabase.from('stock_trailers').insert(rest).select('*').single();
+    const { data, error } = await supabase.rpc('command_duplicate_stock', { p_ids: [row.id] });
     if (error) { setMessage(error.message); return; }
-    setRows(r => [data as StockTrailer, ...r]);
+    const made = (data as { id?: string } | null)?.id;
+    if (made) {
+      const { data: fresh } = await supabase.from('stock_trailers').select('*').eq('id', made).single();
+      if (fresh) setRows(r => [fresh as StockTrailer, ...r]);
+    }
     setMessage(`Duplicated ${row.stc_no || row.chassis_number || 'row'}`);
   }
 

@@ -987,6 +987,95 @@ const postImage: Preparer = {
   },
 };
 
+/* -------------------------------------------------------------
+   A file on the brand kit
+   ------------------------------------------------------------- */
+
+/**
+ * The same two halves a picture on a post has.
+ *
+ * The bytes go on the bucket before the transaction, because a bucket
+ * cannot be in one, and the row that points at them goes inside it. The
+ * key is derived from the confirmation and the file's own digest, so a
+ * retry of the same confirmed command reuses the object rather than
+ * leaving a second copy nothing references.
+ *
+ * WHAT THE SENTENCE MAY DECIDE, AND WHAT IT MAY NOT.
+ *
+ * The kind and the category, both of which the upload menu on the
+ * screen also asks for. Everything else is derived here or checked in
+ * the database: the name is the file's own, the url is the staged
+ * object's, and the kind is one of five words `brand_assets` allows.
+ */
+const brandUpload: Preparer = {
+  async describe({ context, args }) {
+    const file = context.file;
+    if (!file) {
+      return { ok: false, why: 'there is no file on this request to put on the brand kit' };
+    }
+    if (!BRAND_KINDS.includes(String(args.kind ?? 'image'))) {
+      return { ok: false, why: `${String(args.kind)} is not a kind of brand asset` };
+    }
+
+    const category = String(args.category ?? '').trim() || 'General';
+    return {
+      ok: true,
+      count: 1,
+      says: `Puts ${file.name} on the brand kit as a ${String(args.kind ?? 'image')}`
+        + ` under ${category}.`,
+      /* The file and what it will be filed as. A different file or a
+         different kind is a different operation. */
+      fingerprint: fileDigest(
+        [fileDigest(file.text), file.name, String(args.kind ?? 'image'), category].join('\n')),
+    };
+  },
+
+  async run({ context, args, files, confirmation }) {
+    const file = context.file;
+    if (!file) {
+      return { ok: false, why: 'there is no file on this request to put on the brand kit' };
+    }
+    const kind = String(args.kind ?? 'image');
+    if (!BRAND_KINDS.includes(kind)) {
+      return { ok: false, why: `${kind} is not a kind of brand asset` };
+    }
+
+    const stored = await (files ?? NO_FILES).stage({
+      key: stagingKey({
+        confirmation,
+        digest: fileDigest(file.text),
+        operation: 'brand.upload',
+        target: null,
+        name: file.name,
+      }),
+      name: file.name,
+      mime: file.mime,
+      bytes: bytesOf(file.text),
+    });
+    if (!stored.ok) return { ok: false, why: stored.why };
+
+    return {
+      ok: true,
+      staged: [{ key: stored.key }],
+      steps: [{
+        op: 'invoke',
+        capability: 'brand.upload',
+        subjects: [],
+        args: {
+          name: file.name,
+          kind,
+          url: stored.url,
+          category: String(args.category ?? '').trim() || null,
+        },
+      }],
+      describe: `Put ${file.name} on the brand kit.`,
+    };
+  },
+};
+
+/** What `brand_assets` allows itself to hold. */
+const BRAND_KINDS = ['logo', 'font', 'color', 'template', 'image'];
+
 /**
  * The bytes a request carried, out of the text it carried them as.
  *
@@ -1057,4 +1146,5 @@ export const PREPARERS: Record<string, Preparer> = {
   'stock.import': importStock,
   'post.setImage': postImage,
   'crm.findCompanies': findCompanies,
+  'brand.upload': brandUpload,
 };

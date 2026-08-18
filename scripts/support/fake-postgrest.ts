@@ -236,6 +236,117 @@ export function fakeDb(tables: Record<string, Row[]>) {
      Postgres, but that the executor sends one call whose failure leaves
      nothing behind. */
   const rpc = async (name: string, args: Record<string, unknown>) => {
+    /* Duplicating, linking and a file on the brand kit. Migration 038.
+       Modelled here for the same reason the sale is: a fake that cannot
+       perform an operation cannot show that the operation reached it. */
+    if (name === 'command_duplicate_stock' || name === 'command_duplicate_deal') {
+      const table = name === 'command_duplicate_stock' ? 'stock_trailers' : 'crm_contacts';
+      const ids = (args.p_ids ?? []) as string[];
+      if (!ids.length) return { data: null, error: { message: 'nothing said which row to duplicate' } };
+
+      const made: string[] = [];
+      for (const id of ids) {
+        const row = (tables[table] ?? []).find((r) => String(r.id) === id);
+        if (!row) {
+          return {
+            data: null,
+            error: { message: `expected to duplicate ${ids.length} but duplicated ${made.length}; nothing has been changed` },
+          };
+        }
+        const { id: _id, created_at: _c, updated_at: _u, ...rest } = row;
+        const fresh = `${id}-copy${made.length + 1}`;
+        const copy: Row = name === 'command_duplicate_stock'
+          ? { ...rest, id: fresh }
+          : {
+              /* What the migration carries and what it resets. */
+              ...rest,
+              id: fresh,
+              status: rest.status === 'customer' ? 'quoted' : rest.status,
+              stock_trailer_id: null,
+              sale_price: null, profit: null, profit_pct: null, commission: null,
+              order_date: null, dispatch_date: null,
+              date_of_enquiry: new Date().toISOString().slice(0, 10),
+            };
+        (tables[table] ??= []).push(copy);
+        writes.push({ table, set: { id: fresh }, ids: [fresh] });
+        made.push(fresh);
+      }
+      return { data: { made: made.length, ids: made, id: made[0] }, error: null };
+    }
+
+    /* Every account named except the main one, under the main one.
+       Migration 038. */
+    if (name === 'command_link_among') {
+      const ids = ((args.p_ids ?? []) as string[]).map(String);
+      const parent = args.p_parent ? String(args.p_parent) : null;
+      if (!parent) return { data: null, error: { message: 'nothing said which account is the main one' } };
+      const top = (tables.crm_contacts ?? []).find((r) => String(r.id) === parent);
+      if (!top) {
+        return { data: null, error: { message: 'the account you named as the main one is not there' } };
+      }
+      if (top.parent_customer_id) {
+        return {
+          data: null,
+          error: { message: `${top.company_name} is already linked to another account, and links do not chain` },
+        };
+      }
+
+      let linked = 0;
+      for (const id of ids) {
+        if (id === parent) continue;
+        const child = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+        if (!child) return { data: null, error: { message: 'one of those accounts is not there' } };
+        child.parent_customer_id = parent;
+        writes.push({ table: 'crm_contacts', set: { parent_customer_id: parent }, ids: [id] });
+        linked += 1;
+      }
+      if (!linked) {
+        return {
+          data: null,
+          error: { message: 'that names only the main account, so there is nothing to link to it' },
+        };
+      }
+      return { data: { linked, to: top.company_name }, error: null };
+    }
+
+    if (name === 'command_link_stock') {
+      const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === String(args.p_deal));
+      if (!deal) return { data: null, error: { message: 'that deal is not there' } };
+      const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === String(args.p_unit));
+      if (!unit) return { data: null, error: { message: 'that stock unit is not there' } };
+      if (deal.stock_trailer_id && String(deal.stock_trailer_id) !== String(args.p_unit)) {
+        return {
+          data: null,
+          error: { message: 'that deal is already against another unit; take it off that one first' },
+        };
+      }
+      deal.stock_trailer_id = args.p_unit;
+      writes.push({ table: 'crm_contacts', set: { stock_trailer_id: args.p_unit }, ids: [String(deal.id)] });
+      return { data: { id: deal.id, unit: unit.id, stcNo: unit.stc_no }, error: null };
+    }
+
+    if (name === 'command_add_brand_asset') {
+      const kinds = ['logo', 'font', 'color', 'template', 'image'];
+      const kind = String(args.p_type ?? '').trim().toLowerCase();
+      if (!String(args.p_name ?? '').trim()) {
+        return { data: null, error: { message: 'a brand asset needs a name' } };
+      }
+      if (!String(args.p_url ?? '').trim()) {
+        return { data: null, error: { message: 'a brand asset needs somewhere to point' } };
+      }
+      if (!kinds.includes(kind)) {
+        return { data: null, error: { message: `${args.p_type} is not a kind of brand asset` } };
+      }
+      const rows = (tables.brand_assets ??= []);
+      const id = `asset${rows.length + 1}`;
+      rows.push({
+        id, name: String(args.p_name).trim(), type: kind, url: String(args.p_url).trim(),
+        category: String(args.p_category ?? '').trim() || 'General',
+      });
+      writes.push({ table: 'brand_assets', set: { name: args.p_name }, ids: [id] });
+      return { data: { id, name: args.p_name, kind }, error: null };
+    }
+
     /* The sale, as the database performs it.
        Three writes that have to happen together: the tracker row, the
        stock unit, and every other rep chasing the same unit. Modelled
@@ -1523,8 +1634,29 @@ const PERFORMED: Record<string, {
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_which: c.args.which ?? null }),
   },
   'contact.link': {
-    name: 'command_link_accounts',
-    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
+    name: 'command_link_among',
+    args: (c) => ({ p_ids: c.subjects, p_parent: c.args.parent ?? null }),
+  },
+  'stock.duplicate': {
+    name: 'command_duplicate_stock',
+    args: (c) => ({ p_ids: c.subjects }),
+  },
+  'deal.duplicate': {
+    name: 'command_duplicate_deal',
+    args: (c) => ({ p_ids: c.subjects }),
+  },
+  'deal.linkStock': {
+    name: 'command_link_stock',
+    args: (c) => ({ p_deal: c.subjects[0] ?? null, p_unit: c.args.unit ?? null }),
+  },
+  'brand.upload': {
+    name: 'command_add_brand_asset',
+    args: (c) => ({
+      p_name: c.args.name ?? null,
+      p_type: c.args.kind ?? 'image',
+      p_url: c.args.url ?? null,
+      p_category: c.args.category ?? null,
+    }),
   },
   'crm.toTracker': {
     name: 'command_tracker_from_crm',

@@ -25,6 +25,7 @@
    ============================================================= */
 import type { Cardinality, Cond, Expr } from './ir/types';
 import { ENTITIES } from './schema';
+import { entity as entityDef } from './ir/registry';
 import { MANY_WORDS, ONE_WORDS, OWNED_WORDS } from './pointing';
 
 /**
@@ -206,16 +207,36 @@ export function resolveContext(
 
   /* A sentence that names an entity and points at a different one is
      not a sentence about either. "Move these trailers" with customers
-     selected is somebody who has changed screen since they ticked. */
-  if (wanted && wanted !== source.entity) return null;
+     selected is somebody who has changed screen since they ticked.
 
+     TWO READINGS OF ONE TABLE ARE NOT TWO ENTITIES.
+
+     `deals` and `contacts` are both `crm_contacts`: the account and the
+     attempt to sell to it are the same row read two ways, and every
+     screen that opens one publishes it as a contact. Comparing the
+     entity NAME meant "duplicate this deal" pointed at a tracker row
+     and resolved to nothing, which reads as the sentence being about
+     records nobody can see. What matters is whether the row the screen
+     has is a row of the kind the sentence is about, and that is a
+     question about the table. */
+  if (wanted && wanted !== source.entity) {
+    const here = entityDef(wanted)?.table;
+    const there = entityDef(source.entity)?.table;
+    if (!here || !there || here !== there) return null;
+  }
+
+  const about = wanted && entityDef(wanted)?.table === entityDef(source.entity)?.table
+    ? wanted : source.entity;
   const values = source.ids.map((id) => ({ kind: 'literal' as const, value: id }));
   const match: Cond = values.length === 1
-    ? { kind: 'cmp', op: 'eq', left: field(source.entity, 'id'), right: values[0] }
-    : { kind: 'in', of: field(source.entity, 'id'), values };
+    ? { kind: 'cmp', op: 'eq', left: field(about, 'id'), right: values[0] }
+    : { kind: 'in', of: field(about, 'id'), values };
 
   return {
-    entity: source.entity,
+    /* The entity the SENTENCE is about, where the two readings share a
+       table. A plan built about "contacts" when somebody said "deal"
+       would then be validated against the wrong set of columns. */
+    entity: about,
     ids: source.ids,
     expect: reference.expect,
     match,

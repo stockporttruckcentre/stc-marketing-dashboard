@@ -415,8 +415,10 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_which: c.args.which ?? null }),
   },
   'contact.link': {
-    name: 'command_link_accounts',
-    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
+    /* Every account named except the main one, under the main one. One
+       child is the ordinary case and is the same call. */
+    name: 'command_link_among',
+    args: (c) => ({ p_ids: c.subjects, p_parent: c.args.parent ?? null }),
   },
   'list.share': {
     name: 'command_share_named_list',
@@ -507,6 +509,32 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_mime: c.args.mime ?? 'application/octet-stream',
       p_base64: c.args.base64 ?? '',
       p_described: c.args.describedAs ?? null,
+    }),
+  },
+  'stock.duplicate': {
+    name: 'command_duplicate_stock',
+    args: (c) => ({ p_ids: c.subjects }),
+  },
+  'deal.duplicate': {
+    name: 'command_duplicate_deal',
+    args: (c) => ({ p_ids: c.subjects }),
+  },
+  'deal.linkStock': {
+    name: 'command_link_stock',
+    /* One deal and one unit. The runtime refuses a set before it gets
+       here: linking six deals to one unit is six commissions on one
+       sale. */
+    args: (c) => ({ p_deal: c.subjects[0] ?? null, p_unit: c.args.unit ?? null }),
+  },
+  'brand.upload': {
+    name: 'command_add_brand_asset',
+    /* The url is the staged object's, put there by the preparer before
+       the transaction opened. */
+    args: (c) => ({
+      p_name: c.args.name ?? null,
+      p_type: c.args.kind ?? 'image',
+      p_url: c.args.url ?? null,
+      p_category: c.args.category ?? null,
     }),
   },
   'deal.markSold': {
