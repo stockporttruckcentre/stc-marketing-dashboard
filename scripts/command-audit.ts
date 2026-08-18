@@ -36,7 +36,7 @@ import { parseEdit } from '../lib/command/mutate';
 import { planCommand } from '../lib/command/plan';
 import { parseQuery as readQuery } from '../lib/command/query';
 import { parse } from '../lib/command/intents';
-import { capabilitiesFor } from '../lib/crm/permissions';
+import { capabilitiesFor, WITHHELD } from '../lib/crm/permissions';
 import { loadSampleVocabulary } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
@@ -235,6 +235,7 @@ const WRITES: { text: string; on?: Screen }[] = [
 type Canonical =
   | 'executable'    // planned, permitted, and something performs it
   | 'asks'          // planned and permitted, short of a value it asks for
+  | 'locked'        // planned and performed, switched off for everybody
   | 'permitted'     // planned and permitted, nothing performs it yet
   | 'understood'    // planned, and this actor may not run it
   | 'navigation'    // no plan; the action registry opens the screen
@@ -419,6 +420,38 @@ function audit(s: string, on?: Screen): Outcome {
     };
   }
 
+  /* SWITCHED OFF IS NOT THE SAME AS MISSING.
+
+     "Find waste companies within 20 miles of Hyde" is planned,
+     performed and tested; no actor can run it because the rollout lock
+     withholds `crm.enrich` from every role until somebody decides a
+     usage policy. Reporting that as navigation, with no reason, reads
+     as a hole in the runtime. It is a switch. */
+  if (WITHHELD.length) {
+    const unlocked = planCommand(s, {
+      actorCapabilities: new Set([...caps, ...WITHHELD]) as never,
+      vocabulary: VOCABULARY,
+      context: screenFor(on),
+    });
+    if (unlocked && unlocked.availability.representable
+      && unlocked.availability.permitted === true
+      && unlocked.availability.executable
+      && unlocked.completion.kind !== 'refused'
+      /* And it is the LOCK that made the difference. Without this, any
+         sentence that plans as an ordinary question comes back "locked"
+         because lifting the lock did not stop it planning. */
+      && unlocked.permissions.some((need) => (WITHHELD as string[]).includes(need))) {
+      return {
+        parse: `locked: ${unlocked.presentation.summary}`,
+        parseOk: true,
+        wiring: 'handler',
+        detail: `carried out by the canonical runtime, and ${WITHHELD.join(', ')} `
+          + 'is withheld from every role by the rollout lock',
+        canonical: 'locked',
+      };
+    }
+  }
+
   const hits = suggestActions(s, caps, 3);
   if (hits.length && hits[0].score >= 6) {
     const a = hits[0].action;
@@ -460,13 +493,14 @@ function audit(s: string, on?: Screen): Outcome {
 console.log('  FIFTY WRITE COMMANDS, PARSED ONLY. NOTHING HERE RUNS.\n');
 
 const tally: Record<Canonical, number> = {
-  executable: 0, asks: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
+  executable: 0, asks: 0, locked: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
 };
 WRITES.forEach(({ text: s, on }, i) => {
   const o = audit(s, on);
   tally[o.canonical] += 1;
   const flag = o.canonical === 'executable' ? '  ok '
     : o.canonical === 'asks' ? ' ask '
+      : o.canonical === 'locked' ? 'lock '
       : o.canonical === 'navigation' ? ' nav '
         : o.canonical === 'none' ? 'DEAD ' : 'PART ';
   console.log(`  ${flag} ${String(i + 1).padStart(2)}. ${s}`);
@@ -480,6 +514,7 @@ WRITES.forEach(({ text: s, on }, i) => {
 console.log(`\n  CANONICAL RUNTIME, ${WRITES.length} write sentences`);
 console.log(`    executable       ${String(tally.executable).padStart(3)}  planned, permitted, and something performs it`);
 console.log(`    asks             ${String(tally.asks).padStart(3)}  planned and permitted, waiting on one value it asks for`);
+console.log(`    locked           ${String(tally.locked).padStart(3)}  planned and performed, switched off for every role`);
 console.log(`    permitted        ${String(tally.permitted).padStart(3)}  planned and permitted, nothing performs it yet`);
 console.log(`    understood       ${String(tally.understood).padStart(3)}  planned, and this actor may not run it`);
 console.log(`    navigation only  ${String(tally.navigation).padStart(3)}  opens the screen where a person does it by hand`);

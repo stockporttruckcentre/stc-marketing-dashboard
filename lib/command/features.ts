@@ -36,7 +36,10 @@ export const FEATURES: Feature[] = [
   },
   {
     id: 'crm', title: 'CRM pipeline', path: '/dashboard/crm',
-    aliases: ['crm', 'contacts', 'customers', 'clients', 'companies', 'accounts', 'prospects', 'leads', 'pipeline'],
+    /* Not "companies": in this application's own vocabulary a company
+       is one we do not have yet, which is the finder. Customers,
+       contacts and accounts are this screen. */
+    aliases: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'prospects', 'leads', 'pipeline'],
     blurb: 'Shared and personal contact lists',
     actions: [
       { label: 'Add a prospect', phrase: 'add prospect ' },
@@ -71,7 +74,8 @@ export const FEATURES: Feature[] = [
   },
   {
     id: 'finder', title: 'Company finder', path: '/dashboard/finder',
-    aliases: ['finder', 'prospecting', 'lusha', 'find companies', 'new business', 'search companies'],
+    aliases: ['finder', 'prospecting', 'lusha', 'companies', 'find companies', 'new business',
+              'search companies'],
     blurb: 'Find companies near a depot and add them to the CRM',
   },
   {

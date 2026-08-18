@@ -35,6 +35,7 @@ import { parseQuery } from './query';
 import { condForFilters } from './ir/conditions';
 import { capability, entity as entityDef } from './ir/registry';
 import type { Cardinality, Cond } from './ir/types';
+import type { ColumnKind } from './columns';
 import { EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
 import {
   EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
@@ -121,6 +122,18 @@ const SUB_WORDS = [
    set, so a reduction of a hundred became a refurb cost of a hundred.
    These match the verb with its object in the way people write it. */
 const SPLIT_SUB = /\b(take|knock|shave|chop|cut|trim)\b[^.]{0,20}?\b(off|away|out)\b/i;
+
+/* WHICH WAY A NUMBER IS GOING.
+
+   One idea, said in whichever order English feels like: "put the price
+   up by 500", "up the price by 500", "take it down 500", "drop the
+   retail price by 500". The direction word is the whole of the meaning
+   and the verb in front of it is decoration, so these match on the
+   direction and allow anything in between.
+
+   Only consulted for a column that can count. */
+const LOWER = /\b(down|lower|drop|dropped|reduce|reduced|decrease|knock)\b/i;
+const RAISE = /\b(up|higher|raise|raised|increase|increased|bump|bumped)\b/i;
 const SPLIT_ADD = /\b(put|stick|add|chuck|whack|bung)\b[^.]{0,20}?\b(on|onto|to)\b/i;
 
 /** Replace it outright. */
@@ -622,8 +635,14 @@ function mentionsEntity(
   return assumed === entity;
 }
 
-/** set, add, subtract or clear, from the words around it. */
-function findOp(text: string): { op: EditOp; word: string } {
+/**
+ * set, add, subtract or clear, from the words around it.
+ *
+ * `kind` is the column's, because a direction only means arithmetic on
+ * a column that can count. "Put the notes down as chasing the tyre
+ * quote" is not a reduction of anything.
+ */
+function findOp(text: string, kind?: ColumnKind): { op: EditOp; word: string } {
   const t = soften(text);
   const longest = (words: string[]) => {
     let hit = '';
@@ -640,6 +659,25 @@ function findOp(text: string): { op: EditOp; word: string } {
   /* A split verb outranks whatever single word the contiguous lists
      found, because "take 100 off" ends up matching the bare "to" in the
      set list and quietly becomes a set. */
+  /* WHICH WAY, WHERE THE SENTENCE SAYS WHICH WAY.
+
+     "Put the price up by 500" and "put the price down by 500" are the
+     same sentence with one word changed, and both came out as an
+     addition: the shape below matched "put ... on STC143580", where the
+     "on" is the RECORD rather than the arithmetic. So the direction is
+     read first, from the word that carries it, and only on a column
+     that can count.
+
+     Lowering wins where both appear, because "put it up for sale and
+     knock 500 off" is a reduction and reading it the other way puts the
+     price up. */
+  if (kind === 'money' || kind === 'number') {
+    const down = LOWER.exec(t);
+    if (down && !clear) return { op: 'subtract', word: down[1] };
+    const up = RAISE.exec(t);
+    if (up && !clear) return { op: 'add', word: up[1] };
+  }
+
   const splitSub = SPLIT_SUB.exec(t);
   if (splitSub && !clear) return { op: 'subtract', word: splitSub[1] };
   const splitAdd = SPLIT_ADD.exec(t);
@@ -777,8 +815,17 @@ export function parseEdit(
      is longer than "clear", and it is in the sentence only because it
      is half the field's name. A verb inside the column's own name is
      not a verb. */
+  /* AND WITHOUT THE RECORD IT NAMES.
+
+     "Put the retail price up by 500 on STC143580" was read as an
+     ADDITION for the right reason and the wrong one: the shape that
+     detects "put ... on" matched the "on" in front of the stock number.
+     The same sentence with "down" in it came out as an addition too. A
+     record reference is not a verb either. */
+  const withoutRefs = refs.raws.reduce((so, r) => so.replace(r, ' '), raw);
   const { op: rawOp, word: opWord } = findOp(
-    raw.replace(new RegExp(field.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' '),
+    withoutRefs.replace(new RegExp(field.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' '),
+    spec.kind,
   );
 
   /* The value hunt runs on the sentence with the record reference and

@@ -143,7 +143,21 @@ export const TRAILER_FIELDS: WritableField[] = [
     aliases: ['sale price', 'sales price', 'sold for', 'selling price', 'invoice value'] },
   { key: 'retail_price', label: 'Retail price', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
-    aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price', 'ticket price'] },
+    /* "PRICE", ON ITS OWN, IS THE ASKING PRICE.
+
+       A unit in stock has several money columns and one of them is what
+       it is advertised at. "Put the price up by 500" is somebody
+       repricing a unit on the yard, and every other price on the row is
+       about a sale that has already happened: the sale price and what
+       it sold for are records of the past, and the book value is what
+       it cost us.
+
+       The longer aliases still win, because the field reader takes the
+       longest match: "add 500 to the sale price" is the sale price and
+       "the book price" is the book value. This only claims the word
+       when nothing more specific was said. */
+    aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price',
+              'ticket price', 'price'] },
   { key: 'location', label: 'Location', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit',
     aliases: ['location', 'depot', 'site', 'yard', 'where it is', 'parked at', 'stored at', 'based at'] },

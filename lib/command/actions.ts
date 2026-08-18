@@ -77,7 +77,12 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.crm', label: 'CRM pipeline', blurb: 'Contacts, lists and accounts', kind: 'navigate',
     path: '/dashboard/crm', verbs: GO,
-    objects: ['crm', 'contacts', 'customers', 'clients', 'companies', 'accounts', 'pipeline', 'prospects', 'address book'] },
+    /* NOT "companies". `lib/command/finder.ts` is explicit that a
+       company is one we do NOT have: "show me 20 customers near Hyde"
+       is this screen and "show me 20 companies near Hyde" is the
+       finder, one word apart. Claiming the word here sent every
+       prospecting sentence to the account list. */
+    objects: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'pipeline', 'prospects', 'address book'] },
 
   { id: 'nav.tracker', label: 'Sales tracker', blurb: 'Your own deals and commission', kind: 'navigate',
     path: '/dashboard/leads', verbs: GO,
@@ -101,7 +106,7 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.finder', label: 'Company finder', blurb: 'Prospecting near a depot', kind: 'navigate',
     path: '/dashboard/finder', verbs: GO,
-    objects: ['finder', 'company finder', 'lusha', 'prospecting', 'find companies', 'lead search', 'new business', 'search companies', 'cold leads'] },
+    objects: ['finder', 'companies', 'company', 'firms', 'businesses', 'hauliers', 'company finder', 'lusha', 'prospecting', 'find companies', 'lead search', 'new business', 'search companies', 'cold leads'] },
 
   { id: 'nav.social', label: 'Social planner', blurb: 'Posts, approvals and schedule', kind: 'navigate',
     path: '/dashboard/social', verbs: GO, capability: 'marketing.edit',
@@ -911,8 +916,25 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
       if (q.includes(fold(p))) take(100, p);
     }
 
-    const objectHit = (a.objects ?? []).find((o) => q.includes(fold(o)));
-    const verbHit = (a.verbs ?? []).find((v) => q.includes(fold(v)));
+    /* WHOLE WORDS, NOT SUBSTRINGS.
+
+       "Add Jane as a new user" was offered New social post, level with
+       the Team screen, because the post action lists "ad" among its
+       objects and "add" contains it. A word that happens to sit inside
+       another word is not that word, and a bar that offers to write a
+       social post to somebody adding a colleague has told them it does
+       not understand the sentence.
+
+       The plural is matched too, because "post" and "posts" are the
+       same object and the half typed case is what the prefix rule
+       below is for. */
+    const said = ` ${q} `;
+    const has = (w: string) => {
+      const word = fold(w);
+      return said.includes(` ${word} `) || said.includes(` ${word}s `);
+    };
+    const objectHit = (a.objects ?? []).find(has);
+    const verbHit = (a.verbs ?? []).find(has);
 
     // Word order does not matter. "open the stock list" and "stock list,
     // open it" are the same instruction.

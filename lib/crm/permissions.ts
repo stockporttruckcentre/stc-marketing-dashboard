@@ -143,6 +143,16 @@ export const LUSHA_LOCKED = true;
 export const LUSHA_GATE = { locked: LUSHA_LOCKED };
 
 /**
+ * What the rollout lock withholds from everybody, by name.
+ *
+ * So a report can tell the difference between a sentence this
+ * application cannot carry out and one it can carry out and is
+ * switched off. Derived from the lock rather than written down twice:
+ * lifting the lock empties this list.
+ */
+export const WITHHELD: CrmCapability[] = LUSHA_LOCKED ? ['crm.enrich'] : [];
+
+/**
  * The one place role becomes capability.
  *
  * When the admin panel lands it will store grants per user. Pass them in
