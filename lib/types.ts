@@ -1,7 +1,6 @@
 export type UserRole = 'admin' | 'marketer' | 'sales' | 'viewer';
 export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'customer' | 'lost';
 export type PostStatus = 'draft' | 'pending_review' | 'approved' | 'scheduled' | 'posted';
-export type TrailerStatus = 'available' | 'reserved' | 'sold';
 export type AssetType = 'logo' | 'font' | 'color' | 'template' | 'image';
 
 export interface Profile {
@@ -101,20 +100,13 @@ export interface SocialPost {
   updated_at: string;
 }
 
-export interface Trailer {
-  id: string;
-  make: string;
-  model: string;
-  year: number;
-  price: number;
-  status: TrailerStatus;
-  location: string;
-  description: string | null;
-  images: string[];
-  external_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
+/* `Trailer` and `TrailerStatus` were here, for `trailer_sales`.
+
+   That table is the one `schema.sql` marks as replaced by
+   `stock_trailers`, and the last thing that wrote it was
+   /api/trailers/sync, which is gone. Nothing read the type and nothing
+   reads the table. A shape describing a table nothing touches is a
+   shape somebody will one day write code against. */
 
 export interface BrandAsset {
   id: string;

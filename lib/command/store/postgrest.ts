@@ -339,7 +339,7 @@ const PROJECTIONS: Record<string, { name: string; args: (c: Invocation) => Recor
   },
 };
 
-const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
+export const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
   'list.create': {
     name: 'command_create_list',
     args: (c) => ({

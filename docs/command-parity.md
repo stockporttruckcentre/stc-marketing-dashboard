@@ -49,7 +49,7 @@ Five classifications:
 | Delete a trailer | grid context menu | **lifecycle**, named record only |
 | Mark a deal sold | `app/api/tracker/mark-sold` | **operation** `deal.markSold`, in one transaction over a set |
 | Send a unit to the tracker | `app/api/tracker/send-from-stock` | **not yet**: creates a deal from a unit, no operation declared |
-| Sync trailers from the supplier feed | `app/api/trailers/sync` | **navigation**: it is a scheduled import, not a command |
+| Sync trailers from the supplier feed | nothing: `app/api/trailers/sync` is deleted | **operation** `stock.import`. The old route wrote `trailer_sales`, which `schema.sql` marks as replaced by `stock_trailers`, and its only caller was a component deleted in 93388fc. There was no schedule: the README says the watcher was never built |
 | Export the stock list | `StockList` export | **generic** |
 
 ## Calendar

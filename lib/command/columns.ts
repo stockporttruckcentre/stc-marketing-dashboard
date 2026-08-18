@@ -437,6 +437,16 @@ export const TABLES: TableSpec[] = [
       { name: 'balance', kind: 'number', writable: false, why: 'spent by searching, not typed' },
     ],
   },
+  /* NOTHING WRITES THIS TABLE ANY MORE.
+
+     `schema.sql` marks `trailer_sales` as replaced by `stock_trailers`,
+     and the last thing that wrote it was /api/trailers/sync, which is
+     deleted: its only caller was a component removed in 93388fc, and no
+     external system could have called it because the guard reads a
+     session cookie. It stays described here because the table is still
+     in the database, and it is addressable by nothing: there is no
+     entity for it in `schema.ts`, so no column of it reaches the
+     writable allowlist. */
   {
     table: 'trailer_sales', label: 'legacy listings',
     columns: [

@@ -37,6 +37,8 @@ import { planCommand } from '../lib/command/plan';
 import { parseQuery as readQuery } from '../lib/command/query';
 import { parse } from '../lib/command/intents';
 import { capabilitiesFor, WITHHELD } from '../lib/crm/permissions';
+import { FUNCTIONS } from '../lib/command/store/postgrest';
+import { capability as capabilityDef } from '../lib/command/ir/registry';
 import { loadSampleVocabulary } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
@@ -530,3 +532,94 @@ console.log(`\n  ${tally.executable}/${WRITES.length} carried out by the canonic
    in `check:acceptance` and `check:postgres`, with their own
    denominators. */
 console.log(`  ${tally.executable + tally.asks}/${WRITES.length} read by it, counting the ${tally.asks} it answers with a question.\n`);
+
+/* =============================================================
+   What "executable" means, and what it does not
+
+   `executable` above is three facts: a canonical plan exists, this
+   actor is permitted, and a handler is declared. It is NOT a claim that
+   the sentence has been run end to end, and reporting one number
+   invites it to be read as one.
+
+   So the same fifty sentences are reported again against the checks
+   that actually run them. The evidence is mechanical: a check covers a
+   sentence when the sentence itself, the capability it plans, or the
+   database function that performs it, appears in that check's own
+   source. That is weaker than "this sentence was asserted" and it is
+   stated rather than implied, because the alternative is a column
+   nobody can verify.
+   ============================================================= */
+const EVIDENCE = [
+  { key: 'fake', title: 'production runtime, fake store', file: 'scripts/command-acceptance-check.ts' },
+  { key: 'http', title: 'HTTP routes, as the bar calls them', file: 'scripts/command-route-check.ts' },
+  { key: 'pg', title: 'real PostgreSQL', file: 'scripts/sql/validate-007.sql' },
+  { key: 'ext', title: 'the provider seam', file: 'scripts/command-acceptance-check.ts' },
+] as const;
+
+const SOURCES = new Map(EVIDENCE.map((e) => [e.file, read(e.file)]));
+
+/** Every name a sentence could be recognised by in a check's source. */
+function namesFor(text: string, on?: Screen): string[] {
+  const planned = planCommand(text, {
+    actorCapabilities: new Set([...caps, ...WITHHELD]) as never,
+    vocabulary: VOCABULARY,
+    context: screenFor(on),
+  });
+  const caught: string[] = [text];
+  for (const step of planned?.plan.steps ?? []) {
+    if (step.op === 'invoke') {
+      caught.push(step.capability);
+      const fn = FUNCTIONS[step.capability]?.name;
+      if (fn) caught.push(fn);
+      const prepares = ACTION_CAP(step.capability)?.prepares;
+      if (prepares) caught.push(prepares);
+      continue;
+    }
+    /* A FIELD WRITE HAS NOTHING CAPABILITY SHAPED TO NAME.
+
+       Every one of them goes through one function, and that function is
+       exercised by name. So a write is credited to the path it takes
+       rather than to itself, which is a weaker claim and is the one
+       that can be checked. */
+    if (step.op === 'update' || step.op === 'create' || step.op === 'delete') {
+      caught.push('command_apply', 'applyMutation');
+    }
+  }
+  return caught;
+}
+
+const ACTION_CAP = (id: string) => capabilityDef(id);
+
+console.log('  THE SAME FIFTY, AGAINST THE CHECKS THAT RUN THEM\n');
+const covered: Record<string, number> = { fake: 0, http: 0, pg: 0, ext: 0 };
+let external = 0;
+
+for (const { text: s, on } of WRITES) {
+  const names = namesFor(s, on);
+  const marks: string[] = [];
+  for (const e of EVIDENCE) {
+    const source = SOURCES.get(e.file) ?? '';
+    /* The provider seam only counts for a sentence that reaches one. */
+    if (e.key === 'ext') {
+      const touches = names.some((n) => /enrich|findCompanies|setImage|brand\.upload|import/.test(n));
+      if (!touches) { marks.push('  .'); continue; }
+      external += 1;
+    }
+    const hit = names.some((n) => source.includes(n));
+    if (hit) covered[e.key] += 1;
+    marks.push(hit ? ' ok' : '  -');
+  }
+  console.log(`   ${marks.join(' ')}  ${s}`);
+}
+
+console.log(`\n  CANONICAL RUNTIME, ${WRITES.length} write sentences`);
+console.log(`    canonical plan exists      ${String(tally.executable + tally.asks + tally.locked + tally.permitted + tally.understood).padStart(3)}/${WRITES.length}`);
+console.log(`    this actor permitted       ${String(tally.executable + tally.asks + tally.locked + tally.permitted).padStart(3)}/${WRITES.length}`);
+console.log(`    a handler is declared      ${String(tally.executable + tally.asks + tally.locked).padStart(3)}/${WRITES.length}`);
+for (const e of EVIDENCE) {
+  const of = e.key === 'ext' ? external : WRITES.length;
+  console.log(`    ${e.title.padEnd(26)} ${String(covered[e.key]).padStart(3)}/${of}`);
+}
+console.log('\n  Evidence is the sentence, its capability, its database function or');
+console.log('  the one function every field write goes through, appearing in that');
+console.log('  check. It is not a claim that this exact sentence was asserted there.\n');
