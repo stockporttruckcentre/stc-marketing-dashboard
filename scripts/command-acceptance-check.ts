@@ -38,6 +38,8 @@ import { capabilitiesFor } from '../lib/crm/permissions';
 import { PROVIDER } from '../lib/crm/enrich';
 import { LUSHA_GATE, LUSHA_LOCKED } from '../lib/crm/permissions';
 import { FINDER } from '../lib/crm/finder';
+import { fakeLedger } from './support/fake-ledger';
+import type { FileStore } from '../lib/command/files';
 import { planCommand } from '../lib/command/plan';
 import { EMPTY_VOCABULARY, buildIndex } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
@@ -2755,8 +2757,12 @@ test('a failed transaction does not buy the same lookup twice', async () => {
       /at most one credit/.test(preview.operations[0]?.says ?? ''),
       preview.operations[0]?.says ?? '');
 
+    /* One ledger across both attempts, because that is the point: the
+       retry has to find the answer the first one bought. */
+    const ledger = fakeLedger().store;
     const confirmed = {
       text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
+      ledger, actorId: 'u1',
       previewPlanHash: planned.planned.meaning.hash,
       previewProgrammeHash: preview.programmeHash,
     };
@@ -3890,17 +3896,40 @@ const PICTURE = {
   },
 };
 
-function fakeBucket() {
-  const put: { name: string; bytes: number }[] = [];
-  return {
-    put,
-    store: {
-      async put(file: { name: string; mime: string; bytes: Uint8Array }) {
-        put.push({ name: file.name, bytes: file.bytes.byteLength });
-        return { ok: true as const, url: `https://bucket.test/${file.name}` };
-      },
+/**
+ * A bucket with the same recovery contract and no storage.
+ *
+ * `objects` is what is actually there, keyed the way the real one keys
+ * it, so "at most one stored object" is a thing a check can count
+ * rather than infer. `staged` counts every attempt, including the ones
+ * that reused what was already there.
+ */
+function fakeBucket(opts: { removeFails?: boolean } = {}) {
+  const objects = new Map<string, { name: string; bytes: number }>();
+  const staged: { key: string; reused: boolean }[] = [];
+  const abandoned: { key: string; why: string }[] = [];
+
+  const store: FileStore = {
+    async stage(file) {
+      const already = objects.has(file.key);
+      if (!already) objects.set(file.key, { name: file.name, bytes: file.bytes.byteLength });
+      staged.push({ key: file.key, reused: already });
+      return {
+        ok: true,
+        url: `https://bucket.test/${file.key}`,
+        key: file.key,
+        reused: already,
+      };
     },
+    async remove(key) {
+      if (opts.removeFails) return { ok: false, why: 'the bucket is unreachable' };
+      objects.delete(key);
+      return { ok: true };
+    },
+    async abandon(key, why) { abandoned.push({ key, why }); },
   };
+
+  return { objects, staged, abandoned, store };
 }
 
 test('a picture goes on a post', async () => {
@@ -3929,7 +3958,7 @@ test('a picture goes on a post', async () => {
   ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
   /* Describing never uploads. A preview that put the file on the bucket
      would leave an object behind for a command nobody confirmed. */
-  ok('and nothing has been uploaded yet', bucket.put.length === 0, JSON.stringify(bucket.put));
+  ok('and nothing has been uploaded yet', bucket.staged.length === 0, JSON.stringify(bucket.staged));
   ok('and nothing has been written yet', db.writes.length === 0, JSON.stringify(db.writes));
   if (!planned || preview?.ok !== true) return;
 
@@ -3940,9 +3969,11 @@ test('a picture goes on a post', async () => {
     previewProgrammeHash: preview.programmeHash,
   });
   ok('it goes through', done.ok, done.ok ? '' : done.why);
-  ok('the file was put on the bucket once', bucket.put.length === 1, JSON.stringify(bucket.put));
+  ok('the file was put on the bucket once', bucket.staged.length === 1, JSON.stringify(bucket.staged));
+  ok('and exactly one object exists', bucket.objects.size === 1, String(bucket.objects.size));
   ok('and the post points at it',
-    String((db.tables.social_posts ?? [])[0]?.image_url) === 'https://bucket.test/yard.png',
+    String((db.tables.social_posts ?? [])[0]?.image_url)
+      === `https://bucket.test/${bucket.staged[0]?.key}`,
     String((db.tables.social_posts ?? [])[0]?.image_url));
 });
 
@@ -4010,6 +4041,101 @@ test('taking a picture off a post is an ordinary write', async () => {
   ok('and the picture is off it',
     (db.tables.social_posts ?? [])[0]?.image_url == null,
     String((db.tables.social_posts ?? [])[0]?.image_url));
+});
+
+test('a failed transaction leaves no file behind, and a retry makes no second copy', async () => {
+  const db = fakeDb({
+    social_posts: [{
+      id: 'p1', content: 'Depot open Saturday', status: 'draft',
+      platform: ['linkedin'], scheduled_date: '2026-09-01',
+      created_by: 'TEST Author', image_url: null,
+    }],
+  });
+  const bucket = fakeBucket();
+  const text = 'add this image to this post';
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE, preview: true,
+    files: bucket.store,
+  });
+  const preview = planned?.preview;
+  if (!planned || preview?.ok !== true) {
+    ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+    return;
+  }
+
+  const confirmed = {
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    context: PICTURE, files: bucket.store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  };
+
+  /* The upload succeeds and the transaction does not. */
+  const breaking = postgrestStore(db.supabase);
+  const first = await applyMutation({
+    ...confirmed,
+    store: { ...breaking, perform: async () => ({ ok: false, why: 'the database fell over' }) },
+  });
+  ok('the write fails', !first.ok, 'it should have failed');
+  ok('the file was staged', bucket.staged.length === 1, JSON.stringify(bucket.staged));
+  ok('and then taken away again, so nothing points at it',
+    bucket.objects.size === 0, JSON.stringify([...bucket.objects.keys()]));
+  ok('with nothing recorded as orphaned, because it was removed',
+    bucket.abandoned.length === 0, JSON.stringify(bucket.abandoned));
+  ok('and no row changed', db.writes.length === 0, JSON.stringify(db.writes));
+
+  /* The same confirmation, retried. */
+  const second = await applyMutation({ ...confirmed, store: postgrestStore(db.supabase) });
+  ok('the retry goes through', second.ok, second.ok ? '' : second.why);
+  ok('and there is exactly one stored object', bucket.objects.size === 1,
+    String(bucket.objects.size));
+  ok('under the same key both times',
+    bucket.staged.length === 2 && bucket.staged[0].key === bucket.staged[1].key,
+    JSON.stringify(bucket.staged));
+  ok('and the post points at exactly that object',
+    String((db.tables.social_posts ?? [])[0]?.image_url)
+      === `https://bucket.test/${bucket.staged[0].key}`,
+    String((db.tables.social_posts ?? [])[0]?.image_url));
+});
+
+test('a cleanup that fails is recorded rather than swallowed', async () => {
+  const db = fakeDb({
+    social_posts: [{
+      id: 'p1', content: 'Depot open Saturday', status: 'draft',
+      platform: ['linkedin'], scheduled_date: '2026-09-01',
+      created_by: 'TEST Author', image_url: null,
+    }],
+  });
+  const bucket = fakeBucket({ removeFails: true });
+  const text = 'add this image to this post';
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE, preview: true,
+    files: bucket.store,
+  });
+  const preview = planned?.preview;
+  if (!planned || preview?.ok !== true) {
+    ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+    return;
+  }
+
+  const breaking = postgrestStore(db.supabase);
+  const done = await applyMutation({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    context: PICTURE, files: bucket.store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+    store: { ...breaking, perform: async () => ({ ok: false, why: 'the database fell over' }) },
+  });
+  ok('it fails', !done.ok, 'it should have failed');
+  ok('and says the file was left behind',
+    !done.ok && /could not be removed/i.test(done.why), done.ok ? '' : done.why);
+  ok('and the orphan is recorded durably',
+    bucket.abandoned.length === 1 && bucket.abandoned[0].key === bucket.staged[0].key,
+    JSON.stringify(bucket.abandoned));
 });
 
 test('a viewer cannot put a picture on a post', async () => {
@@ -4106,6 +4232,12 @@ test('a search happens once and what it finds is filed', async () => {
       /Waste Collection/i.test(said) && /20 miles of Hyde/i.test(said)
         && /Everything/.test(said),
       said);
+    /* And what it costs, which is not a credit. lib/lusha.ts is explicit
+       that a company search is free and quota-limited; a credit is spent
+       revealing a person. Saying otherwise in a preview is the same
+       class of mistake as saying nothing. */
+    ok('and that a search costs no credits',
+      /costs no credits/i.test(said) && !/spends? .*credit/i.test(said), said);
 
     const done = await applyMutation({
       text, capabilities: PROSPECTOR, vocabulary: async () => EMPTY_VOCABULARY,
@@ -4274,6 +4406,189 @@ test('a viewer cannot put a customer on a tracker', async () => {
   ok('it is not offered',
     !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'crm.toTracker') ?? false),
     JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
+/* =============================================================
+   40. Twenty simultaneous confirmations, one credit
+
+   The SQL half of this is `scripts/sql/external-claim-race.sh`, which
+   runs twenty real sessions against a real server and asserts exactly
+   one claim is granted. This is the runtime half: twenty confirmations
+   of the same command through the same ledger, with a fake provider
+   whose paid calls are counted.
+
+   The provider must be called exactly once. Nobody who was not granted
+   the claim may call it, whatever they were told instead.
+   ============================================================= */
+
+const ENRICHER = [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'] as never[];
+
+function enrichWorld() {
+  return fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', email: 'sam@dawson.co.uk' },
+    ],
+  });
+}
+
+test('twenty simultaneous confirmations spend one credit', async () => {
+  const db = enrichWorld();
+  const text = 'enrich Dawson Group';
+  const ledger = fakeLedger().store;
+
+  let calls = 0;
+  const real = PROVIDER.lookUp;
+  const wasLocked = LUSHA_GATE.locked;
+  LUSHA_GATE.locked = false;
+  PROVIDER.lookUp = async () => {
+    calls += 1;
+    /* A provider that takes a moment, so every caller is inside the
+       window at once. A synchronous one would let each finish before
+       the next started and prove nothing. */
+    await new Promise((r) => setTimeout(r, 5));
+    return {
+      ok: true,
+      fields: { contact_name: 'Sam Dawson', phone: '0161 000 0001', source: 'Lusha (email)' },
+      strategy: 'email', attempts: [], tried: 'email', remaining: [],
+      address: null, website: null,
+    };
+  };
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), preview: true,
+    });
+    const preview = planned?.preview;
+    if (!planned || preview?.ok !== true) {
+      ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+      return;
+    }
+
+    const confirmed = {
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      ledger, actorId: 'u1',
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    };
+
+    /* All twenty released together. */
+    const outcomes = await Promise.all(
+      Array.from({ length: 20 }, () => applyMutation({
+        ...confirmed, store: postgrestStore(db.supabase),
+      })),
+    );
+
+    ok('the provider was called exactly once', calls === 1, String(calls));
+
+    const went = outcomes.filter((o) => o.ok).length;
+    ok('at least one confirmation went through', went >= 1, String(went));
+
+    /* Every refusal is a stand-off, never a claim of failure that would
+       send somebody back to spend again. */
+    const refusals = outcomes.filter((o) => !o.ok).map((o) => (o.ok ? '' : o.why));
+    ok('and every refusal says it is being looked up, rather than failing',
+      refusals.every((w) => /looked up right now|already/i.test(w) || /Dawson/.test(w)),
+      JSON.stringify([...new Set(refusals)].slice(0, 3)));
+
+    const row = (db.tables.crm_contacts ?? [])[0];
+    ok('the answer landed on the record', row?.contact_name === 'Sam Dawson',
+      String(row?.contact_name));
+  } finally {
+    PROVIDER.lookUp = real;
+    LUSHA_GATE.locked = wasLocked;
+  }
+});
+
+test('a claim nobody settled is not retried', async () => {
+  const db = enrichWorld();
+  const text = 'enrich Dawson Group';
+  /* A ledger whose clock can be moved past the staleness window. */
+  let clock = 0;
+  const ledger = fakeLedger({ now: () => clock, staleAfterMs: 1000 }).store;
+
+  let calls = 0;
+  const real = PROVIDER.lookUp;
+  const wasLocked = LUSHA_GATE.locked;
+  LUSHA_GATE.locked = false;
+  /* The call throws, which is what a process dying mid-request looks
+     like from here: the request may have reached Lusha and been
+     charged, and it may never have left. */
+  PROVIDER.lookUp = async () => { calls += 1; throw new Error('socket hung up'); };
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), preview: true,
+    });
+    const preview = planned?.preview;
+    if (!planned || preview?.ok !== true) {
+      ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+      return;
+    }
+    const confirmed = {
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      ledger, actorId: 'u1', store: postgrestStore(db.supabase),
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    };
+
+    const first = await applyMutation(confirmed);
+    ok('the first attempt refuses', !first.ok, 'it should have failed');
+    ok('saying the charge is unknown rather than that it failed',
+      !first.ok && /whether it was charged is unknown/i.test(first.why),
+      first.ok ? '' : first.why);
+    ok('and the provider was called once', calls === 1, String(calls));
+
+    /* Long enough later that nobody is coming back for it. */
+    clock += 60_000;
+    const second = await applyMutation(confirmed);
+    ok('the retry refuses too', !second.ok, 'it should have failed');
+    ok('and Lusha has no idempotency key, so it was NOT called again',
+      calls === 1, String(calls));
+    ok('the refusal asks for it to be reconciled',
+      !second.ok && /checking against the Lusha account/i.test(second.why),
+      second.ok ? '' : second.why);
+    ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+  } finally {
+    PROVIDER.lookUp = real;
+    LUSHA_GATE.locked = wasLocked;
+  }
+});
+
+test('with no ledger wired up, no credit can be spent', async () => {
+  const db = enrichWorld();
+  const text = 'enrich Dawson Group';
+
+  let calls = 0;
+  const real = PROVIDER.lookUp;
+  const wasLocked = LUSHA_GATE.locked;
+  LUSHA_GATE.locked = false;
+  PROVIDER.lookUp = async () => { calls += 1; throw new Error('should never be reached'); };
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), preview: true,
+    });
+    const preview = planned?.preview;
+    if (!planned || preview?.ok !== true) {
+      ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+      return;
+    }
+    /* No `ledger` and no `actorId`. */
+    const done = await applyMutation({
+      text, capabilities: ENRICHER, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase),
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    });
+    ok('it refuses', !done.ok, 'it should have failed');
+    ok('and the provider was never reached', calls === 0, String(calls));
+  } finally {
+    PROVIDER.lookUp = real;
+    LUSHA_GATE.locked = wasLocked;
+  }
 });
 
 /* ============================================================= */

@@ -2575,35 +2575,49 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST detail%';
 
 DELETE FROM command_external_attempts WHERE key LIKE 'test-%';
 
+-- THE CLAIM IS THE PERMISSION TO SPEND.
+--
+-- Migration 034. `claimed` is the only answer that lets a caller reach
+-- the provider, and exactly one caller can ever be told it for a given
+-- key. Twenty of them at once is `scripts/sql/external-claim-race.sh`;
+-- this is the contract each answer carries.
 DO $$
 DECLARE out JSONB;
 BEGIN
-  SELECT command_external_begin('test-key-1', 'contact.enrich',
-    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
-  PERFORM assert('a new attempt is pending', out ->> 'state' = 'pending', out::TEXT);
+  SELECT command_external_claim('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a new attempt is claimed', out ->> 'state' = 'claimed', out::TEXT);
 END
 $$;
 
 DO $$
 DECLARE out JSONB;
 BEGIN
-  SELECT command_external_begin('test-key-1', 'contact.enrich',
-    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
-  PERFORM assert('claiming it again finds the same one', out ->> 'state' = 'pending', out::TEXT);
+  SELECT command_external_claim('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('claiming it again is refused, not granted again',
+    out ->> 'state' = 'in_progress', out::TEXT);
 END
 $$;
 
 SELECT assert('and there is one row, not two',
   (SELECT COUNT(*) FROM command_external_attempts WHERE key = 'test-key-1') = 1);
 
-SELECT command_external_finish('test-key-1', TRUE,
+SELECT assert('and the second look is recorded',
+  (SELECT seen FROM command_external_attempts WHERE key = 'test-key-1') = 1,
+  (SELECT seen::TEXT FROM command_external_attempts WHERE key = 'test-key-1'));
+
+SELECT command_external_settle('test-key-1', 'aaaaaaaa-0000-0000-0000-000000000001', 'done',
   jsonb_build_object('fields', jsonb_build_object('phone', '0161 000 0001')), NULL);
 
 DO $$
 DECLARE out JSONB;
 BEGIN
-  SELECT command_external_begin('test-key-1', 'contact.enrich',
-    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
+  SELECT command_external_claim('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
   PERFORM assert('a settled attempt comes back done', out ->> 'state' = 'done', out::TEXT);
   PERFORM assert('with what was bought',
     out -> 'result' -> 'fields' ->> 'phone' = '0161 000 0001', out::TEXT);
@@ -2611,26 +2625,93 @@ END
 $$;
 
 -- Settling twice does not overwrite what was bought.
-SELECT command_external_finish('test-key-1', FALSE, NULL, 'a later failure');
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_external_settle('test-key-1', 'aaaaaaaa-0000-0000-0000-000000000001',
+    'failed', NULL, 'a later failure') INTO out;
+  PERFORM assert('settling a settled attempt changes nothing',
+    (out ->> 'settled')::BOOLEAN = FALSE, out::TEXT);
+END
+$$;
+
 SELECT assert('a settled attempt stays settled',
   (SELECT state FROM command_external_attempts WHERE key = 'test-key-1') = 'done',
   (SELECT state FROM command_external_attempts WHERE key = 'test-key-1'));
 
--- Somebody else's purchase is not yours to read or to settle.
-SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE);
-
+-- Somebody else's purchase is not theirs to settle.
 DO $$
 BEGIN
-  PERFORM command_external_begin('test-key-1', 'contact.enrich',
-    'a2222222-0000-0000-0000-000000000001', 'email');
-  PERFORM assert('somebody else cannot claim your attempt', FALSE, 'it succeeded');
+  PERFORM command_external_settle('test-key-1', 'bbbbbbbb-0000-0000-0000-000000000002',
+    'done', NULL, NULL);
+  PERFORM assert('somebody else cannot settle your attempt', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
-  PERFORM assert('somebody else cannot claim your attempt',
+  PERFORM assert('somebody else cannot settle your attempt',
     SQLERRM LIKE '%belongs to somebody else%', SQLERRM);
 END
 $$;
 
-SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+-- AN UNSETTLED CLAIM AGES INTO SOMETHING TO RECONCILE, NOT SOMETHING
+-- TO RETRY. Lusha has no idempotency key, so calling again risks a
+-- second charge for an answer that may already exist.
+DELETE FROM command_external_attempts WHERE key = 'test-key-stale';
+INSERT INTO command_external_attempts
+  (key, capability, subject_id, strategy, spent_by, state, claimed_at)
+VALUES ('test-key-stale', 'contact.enrich', NULL, 'email',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'pending', NOW() - INTERVAL '1 hour');
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_external_claim('test-key-stale', 'contact.enrich', NULL, 'email',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a claim nobody settled becomes uncertain, not retryable',
+    out ->> 'state' = 'uncertain', out::TEXT);
+END
+$$;
+
+SELECT assert('and it stays uncertain on the row',
+  (SELECT state FROM command_external_attempts WHERE key = 'test-key-stale') = 'uncertain',
+  (SELECT state FROM command_external_attempts WHERE key = 'test-key-stale'));
+
+-- -------------------------------------------------------------
+-- The ledger is not reachable from a browser
+-- -------------------------------------------------------------
+--
+-- The runtime turns a stored `done` result into database changes. A
+-- signed-in client that could write here could manufacture a Lusha
+-- answer, so `authenticated` holds no execute on any of it.
+SELECT assert('an ordinary signed-in user cannot claim an attempt',
+  NOT has_function_privilege('authenticated',
+    'command_external_claim(text,text,uuid,text,uuid)', 'EXECUTE'));
+
+SELECT assert('nor settle one',
+  NOT has_function_privilege('authenticated',
+    'command_external_settle(text,uuid,text,jsonb,text)', 'EXECUTE'));
+
+SELECT assert('nor read one',
+  NOT has_function_privilege('authenticated',
+    'command_external_read(text)', 'EXECUTE'));
+
+SELECT assert('and the old pair from migration 027 are withdrawn too',
+  NOT has_function_privilege('authenticated',
+    'command_external_begin(text,text,uuid,text)', 'EXECUTE')
+  AND NOT has_function_privilege('authenticated',
+    'command_external_finish(text,boolean,jsonb,text)', 'EXECUTE'));
+
+SELECT assert('nor may a browser write the table directly',
+  NOT has_table_privilege('authenticated', 'command_external_attempts', 'INSERT')
+  AND NOT has_table_privilege('authenticated', 'command_external_attempts', 'UPDATE')
+  AND NOT has_table_privilege('authenticated', 'command_external_attempts', 'DELETE'));
+
+-- And the server role can, which is what makes the operation possible
+-- at all rather than merely locked.
+SELECT assert('the service role can claim and settle',
+  has_function_privilege('service_role',
+    'command_external_claim(text,text,uuid,text,uuid)', 'EXECUTE')
+  AND has_function_privilege('service_role',
+    'command_external_settle(text,uuid,text,jsonb,text)', 'EXECUTE'));
+
 DELETE FROM command_external_attempts WHERE key LIKE 'test-%';
 
 -- =============================================================

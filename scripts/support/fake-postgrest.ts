@@ -739,38 +739,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
     /* The purchase ledger for work that happens outside the database.
        Claimed before somebody else's service is called, settled when it
        answers, and consulted first so a retry never buys twice. */
-    if (name === 'command_external_begin') {
-      const key = String(args.p_key ?? '');
-      if (!key) return { data: null, error: { message: 'an external attempt needs a key' } };
-      const ledger = (tables.command_external_attempts ??= []);
-      const found = ledger.find((a) => String(a.key) === key);
-      if (found) {
-        return {
-          data: { state: found.state, result: found.result ?? null, why: found.why ?? null },
-          error: null,
-        };
-      }
-      ledger.push({
-        key, capability: args.p_capability, subject_id: args.p_subject,
-        strategy: args.p_strategy, state: 'pending', result: null, why: null, spent_by: 'u1',
-      });
-      return { data: { state: 'pending', result: null, why: null }, error: null };
-    }
 
-    if (name === 'command_external_finish') {
-      const key = String(args.p_key ?? '');
-      const ledger = (tables.command_external_attempts ??= []);
-      const found = ledger.find((a) => String(a.key) === key);
-      if (!found) {
-        return { data: null, error: { message: 'there is no attempt of yours with that key' } };
-      }
-      if (found.state === 'pending') {
-        found.state = args.p_ok ? 'done' : 'failed';
-        found.result = args.p_result ?? null;
-        found.why = args.p_why ?? null;
-      }
-      return { data: null, error: null };
-    }
 
     /* Booking one. Who is booking it and that they are on it come from
        the caller, never from the sentence. */
@@ -1424,26 +1393,6 @@ const PERFORMED: Record<string, {
         : null,
       p_scheduled: c.args.scheduledDate ?? null,
       p_caption: c.args.caption ?? null,
-    }),
-  },
-  'external.begin': {
-    name: 'command_external_begin',
-    /* Not a business operation: a purchase ledger entry, claimed before
-       somebody else's service is called and settled when it answers. */
-    args: (c) => ({
-      p_key: c.args.key ?? null,
-      p_capability: c.args.capability ?? null,
-      p_subject: c.args.subject ?? null,
-      p_strategy: c.args.strategy ?? null,
-    }),
-  },
-  'external.finish': {
-    name: 'command_external_finish',
-    args: (c) => ({
-      p_key: c.args.key ?? null,
-      p_ok: c.args.ok ?? false,
-      p_result: c.args.result ?? null,
-      p_why: c.args.why ?? null,
     }),
   },
   'contact.addAddress': {

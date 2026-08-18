@@ -43,13 +43,28 @@ import { CRM_CONTACTS, STOCK_TRAILERS } from '@/lib/import/dictionary';
 import { prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
 import { prepareStock, STOCK_CEILING } from '@/lib/import/stock';
 import { fileDigest, type CommandContext } from '../context';
-import { NO_FILES, type FileStore } from '../files';
+import { NO_FILES, stagingKey, type FileStore } from '../files';
+import { NO_LEDGER, type ExternalEffectStore } from '../external';
 import { storeImage, looksLikeAnImage } from '@/lib/social/media';
 import { createHash } from 'crypto';
 import type { Store, TransactionStep } from '../ir/store';
 
 export type PreparedOperation =
-  | { ok: true; steps: TransactionStep[]; describe: string }
+  | {
+      ok: true;
+      steps: TransactionStep[];
+      describe: string;
+      /**
+       * External objects this preparation put somewhere.
+       *
+       * A file is staged before the programme commits, so a transaction
+       * that fails leaves an object nothing references. The caller
+       * removes what is listed here when that happens. The key is
+       * deterministic, so a retry of the same confirmed command reuses
+       * the object rather than making a second one.
+       */
+      staged?: { key: string }[];
+    }
   | { ok: false; why: string };
 
 /** What the preview says, without doing any of it. */
@@ -96,6 +111,23 @@ export type PrepareInput = {
    * a command that reports success and puts nothing anywhere.
    */
   files?: FileStore;
+  /**
+   * Where an irreversible purchase is recorded.
+   *
+   * Server only, behind the service role, because the runtime turns a
+   * stored provider answer into database changes and a browser must not
+   * be able to write one. Absent means no paid call may be made at all.
+   */
+  ledger?: ExternalEffectStore;
+  /**
+   * Whose command this is.
+   *
+   * The ledger runs under the service role, where there is no
+   * `auth.uid()` to take, so the real actor is passed and recorded. It
+   * is not a permission: the capability check has already happened
+   * against this person's own session.
+   */
+  actor?: string;
   /**
    * What this confirmation is, as one opaque string.
    *
@@ -163,12 +195,15 @@ const enrich: Preparer = {
     };
   },
 
-  async run({ subjects, store, confirmation }) {
+  async run({ subjects, ledger, actor, confirmation }) {
     if (LUSHA_GATE.locked) {
       return {
         ok: false,
         why: 'Lusha is switched off for everybody at the moment, so no credit can be spent.',
       };
+    }
+    if (!actor) {
+      return { ok: false, why: 'nothing said whose command this is, and a purchase belongs to somebody.' };
     }
 
     const changes = [];
@@ -179,48 +214,78 @@ const enrich: Preparer = {
       const strategy = nextStrategy(details);
       if (!strategy) continue;
 
-      /* THE PURCHASE IS RECORDED BEFORE IT HAPPENS.
+      /* THE CLAIM IS THE PERMISSION TO SPEND.
 
-         Lusha cannot join the transaction below. So the attempt is
-         claimed in its own transaction, the answer is stored as soon as
-         it arrives, and the programme consumes what is stored. If the
-         programme then fails, this same confirmation retried finds the
-         answer already bought and does not buy it again. */
+         Not a look followed by a decision: exactly one of any number of
+         simultaneous callers is told `claimed`, by a single insert under
+         a primary key, and only that one calls Lusha. Everybody else
+         consumes the settled answer, waits, or stops. */
       const key = attemptKey(confirmation, 'contact.enrich', subject.id, strategy);
-      const claimed = await store.invoke({
-        capability: 'external.begin',
-        subjects: [],
-        args: {
-          key, capability: 'contact.enrich', subject: subject.id, strategy,
-        },
+      const claim = await (ledger ?? NO_LEDGER).claim({
+        key, capability: 'contact.enrich', subject: subject.id, strategy, actor,
       });
-      if (!claimed.ok) return { ok: false, why: claimed.why };
-
-      const before = (claimed.results?.[0] ?? {}) as {
-        state?: string; result?: Record<string, unknown>; why?: string;
-      };
 
       let fields: Record<string, unknown> | null = null;
       let via = strategy as string;
 
-      if (before.state === 'done' && before.result) {
+      if (claim.state === 'error') {
+        return { ok: false, why: `${subject.label}: ${claim.why}` };
+      }
+
+      if (claim.state === 'done') {
         /* Already paid for. This is the retry path, and it costs
            nothing. */
-        fields = (before.result.fields ?? {}) as Record<string, unknown>;
-        via = String(before.result.strategy ?? strategy);
-      } else if (before.state === 'failed') {
-        return { ok: false, why: `${subject.label}: ${before.why ?? 'that lookup already failed'}` };
+        fields = (claim.result.fields ?? {}) as Record<string, unknown>;
+        via = String(claim.result.strategy ?? strategy);
+      } else if (claim.state === 'failed') {
+        return { ok: false, why: `${subject.label}: ${claim.why}` };
+      } else if (claim.state === 'in_progress') {
+        /* Somebody else is buying this right now. Waiting here would
+           hold a request open on a provider nobody can hurry, so it
+           stops and says so: the same sentence a moment later finds the
+           answer bought and uses it. */
+        return {
+          ok: false,
+          why: `${subject.label} is being looked up right now by another request. `
+            + 'Try that again in a moment and it will use what comes back.',
+        };
+      } else if (claim.state === 'uncertain') {
+        /* A claim nobody settled. Lusha has no idempotency key, so
+           calling again risks a second charge for an answer that may
+           already exist. This stops and asks for the credit to be
+           reconciled rather than gambling one. */
+        return {
+          ok: false,
+          why: `${subject.label}: a Lusha call for this was started and never finished, `
+            + 'so whether it was charged is unknown. It needs checking against the Lusha '
+            + 'account before it is tried again.',
+        };
       } else {
-        const got = await PROVIDER.lookUp({ ...details, strategy });
-        await store.invoke({
-          capability: 'external.finish',
-          subjects: [],
-          args: {
-            key,
-            ok: got.ok,
-            result: got.ok ? { fields: got.fields, strategy: got.strategy } : null,
-            why: got.ok ? null : got.why,
-          },
+        /* claimed. The one caller that may spend. */
+        let got: Awaited<ReturnType<typeof PROVIDER.lookUp>>;
+        try {
+          got = await PROVIDER.lookUp({ ...details, strategy });
+        } catch (e) {
+          /* The call threw. It may have reached Lusha and been charged,
+             and it may never have left. Settled as uncertain rather
+             than as failed, because `failed` would let the next attempt
+             at this key give up cleanly on a credit that may be gone. */
+          await (ledger ?? NO_LEDGER).settle({
+            key, actor, state: 'uncertain',
+            why: `the call threw: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          return {
+            ok: false,
+            why: `${subject.label}: the Lusha call did not come back, so whether it was `
+              + 'charged is unknown. It needs checking against the Lusha account.',
+          };
+        }
+
+        await (ledger ?? NO_LEDGER).settle({
+          key, actor,
+          state: got.ok ? 'done' : 'failed',
+          result: got.ok ? { fields: got.fields, strategy: got.strategy } : null,
+          why: got.ok ? null : got.why,
         });
         if (!got.ok) return { ok: false, why: `${subject.label}: ${got.why}` };
         fields = got.fields;
@@ -711,16 +776,20 @@ const importStock: Preparer = {
    ------------------------------------------------------------- */
 
 /**
- * A paid read of somebody else's database, then ordinary rows.
+ * A read of somebody else's index, then ordinary rows.
  *
- * The same shape as an enrichment and for the same reason: the search
- * cannot be rolled back and cannot be repeated for free. `describe`
- * says exactly what would be searched for and what it can cost and
- * calls nothing; `run` calls once.
+ * The same SHAPE as an enrichment and not the same COST. `lib/lusha.ts`
+ * is explicit that /prospecting/company/search is free and counts only
+ * against a daily call quota, so this does not go through the purchase
+ * ledger: that exists to make an irreversible debit recoverable and
+ * there is no debit here. `describe` still calls nothing, because a
+ * preview that used up somebody's quota would be doing the thing it was
+ * describing.
  *
  * An incomplete sentence never reaches here. The reader refuses to plan
  * a search with no place at all, because a search of the whole country
- * is one Lusha will answer and charge for.
+ * is one Lusha will answer, against the same shared quota, with a page
+ * of companies nobody asked about.
  */
 const findCompanies: Preparer = {
   async describe({ args, store }) {
@@ -732,7 +801,10 @@ const findCompanies: Preparer = {
     }
     const place = String(args.place ?? '').trim();
     if (!place) {
-      return { ok: false, why: 'nothing said where to look, and a search with no place is a search of the whole country.' };
+      return {
+        ok: false,
+        why: 'nothing said where to look, and a search with no place is a search of the whole country.',
+      };
     }
 
     /* Which list, exactly, before anything is spent. A search that
@@ -750,7 +822,11 @@ const findCompanies: Preparer = {
       count,
       says: `Searches Lusha for up to ${count} ${kind || 'companies'} `
         + (args.radius ? `within ${args.radius} miles of ${place}` : `near ${place}`)
-        + `${size ? `, ${size}` : ''}. One search, charged once. `
+        + `${size ? `, ${size}` : ''}. One search. `
+        /* Said plainly, because the other Lusha operation in this
+           application does spend money and somebody reading two
+           previews should be able to tell them apart. */
+        + 'A company search costs no credits, only one call off the daily quota. '
         + `What it finds goes onto ${list.label} as new customers.`,
       /* The search and where its results go. A list that moved between
          the preview and the confirmation is a different operation. */
@@ -861,7 +937,7 @@ const postImage: Preparer = {
     };
   },
 
-  async run({ subjects, context, files }) {
+  async run({ subjects, context, files, confirmation }) {
     const file = context.file;
     if (!file) {
       return { ok: false, why: 'there is no file on this request to put on the post' };
@@ -870,18 +946,33 @@ const postImage: Preparer = {
       return { ok: false, why: 'nothing said which post the picture goes on' };
     }
 
-    const stored = await storeImage(files ?? NO_FILES, {
+    /* THE KEY DOES NOT MOVE.
+
+       Derived from the confirmation, the file's own digest, the
+       operation and the post it is for, and from no clock at all. The
+       first version of this used `Date.now()`, so every retry of the
+       same confirmed command uploaded another copy under another key
+       and left the first behind for good. */
+    const key = stagingKey({
+      confirmation,
+      digest: fileDigest(file.text),
+      operation: 'post.setImage',
+      target: subjects[0].id,
       name: file.name,
-      mime: file.mime,
-      bytes: bytesOf(file.text),
+    });
+
+    const stored = await storeImage(files ?? NO_FILES, {
+      key, name: file.name, mime: file.mime, bytes: bytesOf(file.text),
     });
     if (!stored.ok) return { ok: false, why: stored.why };
 
     /* The column write is the database's, in the programme's own
        transaction. The upload above could not be in it; this always
-       could. */
+       could. `staged` is how the caller knows what to take away again
+       if it does not commit. */
     return {
       ok: true,
+      staged: [{ key: stored.key }],
       steps: [{
         op: 'changes',
         changes: [{

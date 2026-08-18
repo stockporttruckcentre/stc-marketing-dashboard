@@ -312,6 +312,34 @@ const planner = source('components/SocialPlanner.tsx');
 ok('the social composer stores an image through the shared operation',
   /storeImage\(bucketStore\(supabase\)/.test(planner)
   && !/storage\.from\('brand-assets'\)/.test(planner));
+/* And under a key that does not move, so a second pick of the same file
+   in the same draft reuses the object rather than leaving the first on
+   the bucket for good. */
+ok('and under a deterministic staging key rather than a clock',
+  /stagingKey\(\{/.test(planner) && !/Date\.now\(\)/.test(planner));
+
+/* THE PURCHASE LEDGER IS NOT REACHABLE FROM A BROWSER.
+
+   The runtime turns a stored provider answer into database changes, so
+   a client that could write the ledger could invent one. The SQL half
+   is asserted in validate-007; this is the near side: nothing in the
+   browser bundle names the ledger, and the service-role client is only
+   ever built on the server. */
+const bundle = ['components/dashboard/CommandBar.tsx', 'components/SocialPlanner.tsx',
+  'components/CompanyFinder.tsx', 'components/SalesTracker.tsx'].map(source).join('\n');
+ok('no screen reaches the purchase ledger',
+  !/command_external_/.test(bundle) && !/ledgerStore\(/.test(bundle));
+ok('and no screen builds a service-role client',
+  !/createServiceRoleClient/.test(bundle) && !/SERVICE_ROLE/.test(bundle));
+
+const applyRoute = source('app/api/command/apply/route.ts');
+ok('the apply route records purchases through the server-only ledger',
+  /ledger: ledgerStore\(\(\) => createServiceRoleClient\(\)\)/.test(applyRoute)
+  && /actorId: user\.id/.test(applyRoute));
+/* And the CRM writes still go through the caller's own session, so the
+   service role never becomes the thing that does the business write. */
+ok('and the business writes still go through the actor own session',
+  /store: postgrestStore\(supabase\)/.test(applyRoute));
 
 const localNobody = planCommand(CRM_QUESTION, { actorCapabilities: [] });
 const localAdmin = planCommand(CRM_QUESTION, { actorCapabilities: EVERYTHING });

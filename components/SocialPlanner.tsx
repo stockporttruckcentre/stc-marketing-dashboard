@@ -9,6 +9,8 @@ import type { SocialPost, PostStatus, Profile } from '@/lib/types';
    the first time somebody added a platform. */
 import { PLATFORMS, DEFAULT_PLATFORMS, createPost, type Platform } from '@/lib/social/posts';
 import { bucketStore, storeImage } from '@/lib/social/media';
+import { stagingKey } from '@/lib/command/files';
+import { fileDigest } from '@/lib/command/context';
 
 const STATUSES: { value: PostStatus | 'all'; label: string }[] = [
   { value: 'all',            label: 'All' },
@@ -134,6 +136,9 @@ function ComposeForm({ profile, onClose, onCreated }: { profile: Profile; onClos
   const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().slice(0, 10));
   const [platforms, setPlatforms] = useState<Platform[]>([...DEFAULT_PLATFORMS]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  /* One draft, one staging namespace. Stable for as long as the
+     composer is open, so re-picking a file does not litter the bucket. */
+  const [draftKey] = useState(() => Math.random().toString(36).slice(2));
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,10 +154,20 @@ function ComposeForm({ profile, onClose, onCreated }: { profile: Profile; onClos
      neither caller has its own idea of any of them. */
   async function uploadImage(file: File) {
     setUploading(true); setError(null);
-    const stored = await storeImage(bucketStore(supabase), {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    /* The same deterministic key the command bar uses. There is no
+       confirmation here because the composer has not been confirmed
+       yet: what stands in for it is the draft the picture is being
+       attached to, so picking the same file twice in one draft reuses
+       the object rather than leaving the first on the bucket. */
+    const key = stagingKey({
+      confirmation: `composer:${draftKey}`,
+      digest: fileDigest(new TextDecoder('latin1').decode(bytes)),
+      operation: 'post.create',
       name: file.name,
-      mime: file.type,
-      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+    const stored = await storeImage(bucketStore(supabase), {
+      key, name: file.name, mime: file.type, bytes,
     });
     setUploading(false);
     if (!stored.ok) { setError(stored.why); return; }

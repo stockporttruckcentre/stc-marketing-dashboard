@@ -47,6 +47,7 @@ import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
 import { prepareDelivery, type Prepared } from './emit';
 import type { FileStore } from '../files';
+import { NO_LEDGER, type ExternalEffectStore } from '../external';
 import { postState } from '../ir/overlay';
 import { PREPARERS } from './prepare';
 import type { CommandContext } from '../context';
@@ -518,6 +519,15 @@ export async function applyMutation(
      * puts nothing anywhere.
      */
     files?: FileStore;
+    /**
+     * Where an irreversible purchase is recorded.
+     *
+     * Server only, behind the service role. Absent means no paid
+     * provider call may be made at all, which is the safe direction.
+     */
+    ledger?: ExternalEffectStore;
+    /** Whose command this is, for the purchase ledger. */
+    actorId?: string;
     /** Whose name goes on any file the programme produces. */
     actorName?: string;
     /**
@@ -660,6 +670,10 @@ export async function applyMutation(
      here, where a file is rendered, and what it finds becomes changes
      the transaction writes. */
   const outsideWork: TransactionStep[] = [];
+  /* External objects a preparation staged before the transaction ran.
+     Removed when it does not commit, so nothing live points at an
+     upload from a command that failed. */
+  const outsideStaged: { key: string }[] = [];
   const outsideSaid: string[] = [];
   const outsidePrepared: string[] = [];
 
@@ -706,12 +720,14 @@ export async function applyMutation(
 
       const ready = await preparer.run({
         subjects: unit.plan.subjects, args: unit.plan.args,
-        context: req.context ?? {}, store: req.store, files: req.files, confirmation,
+        context: req.context ?? {}, store: req.store, files: req.files,
+        ledger: req.ledger ?? NO_LEDGER, actor: req.actorId, confirmation,
       });
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
 
       outsideWork.push(...ready.steps);
+      outsideStaged.push(...(ready.staged ?? []));
       outsideSaid.push(ready.describe);
     }
   }
@@ -796,6 +812,30 @@ export async function applyMutation(
         .map((p) => p.step(indexOf)),
     ],
   });
+
+  /* THE TRANSACTION DID NOT COMMIT, SO NOTHING MAY POINT AT THE UPLOAD.
+
+     A file is staged before the programme runs, because a bucket cannot
+     join a transaction. When the transaction then fails, the object is
+     taken away again: the key is deterministic, so this same confirmed
+     command retried stages the same key and gets the same object rather
+     than a second copy, and an object left here would be one nothing
+     ever references.
+
+     Where the removal itself fails, it is written down somewhere
+     durable. A cleanup that fails silently is the same litter with a
+     clear conscience. */
+  if (!done.ok && outsideStaged.length) {
+    const leftBehind = await clearStaged(outsideStaged, req.files, done.why);
+    if (leftBehind.length) {
+      return {
+        ok: false,
+        reason: done.reason === 'refused' ? 'refused' : 'failed',
+        why: `${done.why} The uploaded file could not be removed either and has been `
+          + 'recorded for cleaning up.',
+      };
+    }
+  }
 
   if (!done.ok && done.reason === 'drift') {
     const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {}, req.files);
@@ -883,6 +923,25 @@ export async function planAndPreview(
     planned,
     preview: await previewMutation(planned.planning, req.store, req.policy, req.context ?? {}, req.files),
   };
+}
+
+/**
+ * Take away what a failed programme staged.
+ *
+ * Returns the keys it could not remove, which are then recorded through
+ * the port's own `abandon` so somebody can find them.
+ */
+async function clearStaged(
+  staged: { key: string }[], files: FileStore | undefined, why: string,
+): Promise<string[]> {
+  const leftBehind: string[] = [];
+  for (const { key } of staged) {
+    const gone = files ? await files.remove(key) : { ok: false as const, why: 'no file store' };
+    if (gone.ok) continue;
+    leftBehind.push(key);
+    await files?.abandon(key, `${why} (removal failed: ${gone.why})`);
+  }
+  return leftBehind;
 }
 
 export { planHash };

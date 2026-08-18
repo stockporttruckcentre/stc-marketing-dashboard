@@ -942,19 +942,28 @@ export const CAPABILITIES: CapabilityDef[] = [
     /* It makes customers out of what Lusha returned. There is nothing
        here to act on. */
     creates: true,
-    /* The same capability every other paid Lusha call needs, which is
-       also what the rollout lock switches off for everybody. */
+    /* The same capability every other Lusha call needs, which is also
+       what the rollout lock switches off for everybody.
+
+       NOT A PURCHASE. `lib/lusha.ts` is explicit that
+       /prospecting/company/search is free and counts only against a
+       daily call quota; a credit is spent revealing a PERSON. This
+       entry said "paid" for a while and was wrong, which matters
+       because the preview is the only thing anybody has to go on. */
     requires: 'crm.enrich',
     confirm: true,
     produces: 'rows',
-    /* A second search is a second search, charged again, and the
-       companies it returns are inserted again. */
+    /* A second search is a second search against the same shared daily
+       quota, and the companies it returns are inserted again. */
     idempotent: false,
     handler: 'lib/crm/finder.ts',
-    /* A paid read of somebody else's database. It cannot be rolled back
-       and cannot be repeated for free, so it happens once, on
-       confirmation, and the rows it produces go into the programme's
-       own transaction through the same import a spreadsheet uses. */
+    /* A read of somebody else's index, which no transaction can hold
+       and no rollback can take back. It is not a debit, so it does not
+       go through the purchase ledger: that exists to make an
+       irreversible charge recoverable and there is no charge here. It
+       happens once, on confirmation, and the rows it produces go into
+       the programme's own transaction through the same import a
+       spreadsheet uses. */
     prepares: 'crm.findCompanies',
     inputs: [
       { key: 'place', label: 'where to look', kind: 'text', required: true },

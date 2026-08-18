@@ -2,26 +2,42 @@
    Looking for companies that are not customers yet.
 
    The finder screen's search was written in the component and shaped
-   again in the route: which industries exist, which city a depot maps
-   to, what a result looks like. Three copies of one idea, and a sentence
-   could reach none of them.
+   again in the route: which city a depot maps to, what a result looks
+   like. Two copies of one idea, and a sentence could reach neither.
 
-   WHAT A SEARCH IS, HERE.
+   WHAT A SEARCH COSTS, EXACTLY.
 
-   A paid read of somebody else's database. It cannot be rolled back and
-   it cannot be repeated for free, which puts it in the same category as
-   a Lusha enrichment and not in the same category as a query. So it is
-   a preparer: `describe` says exactly what would be searched for and
-   what it can cost, `run` does it once, and the rows it produces go
-   into the programme's own transaction through the same import the
-   spreadsheet uses.
+   Nothing. `lib/lusha.ts` says so in three places and it is the module
+   that makes the call:
 
-   AN INCOMPLETE SENTENCE COSTS NOTHING.
+     "/prospecting/company/search is FREE - only counts against daily
+      call quota, not credits"
+
+   A CREDIT is spent revealing a person: `GET /v2/person`, or the enrich
+   half of a prospecting flow. Finding companies is a quota-consuming
+   read of Lusha's index and no more.
+
+   This file said the opposite for a while, and the registry entry it
+   came with said it too. Telling somebody a search will spend money
+   when it will not is the same class of mistake as the reverse: the
+   preview is the only thing anybody has to go on.
+
+   So the search is NOT put through the purchase ledger. That ledger
+   exists to make an irreversible DEBIT recoverable, and there is no
+   debit here. What there is instead is a daily call quota, which is
+   shared, exhaustible and worth saying out loud, and a rollout lock
+   that keeps the whole Lusha surface switched off until somebody
+   decides a usage policy. Both of those are policy about volume rather
+   than about money, and neither is served by pretending a credit was
+   spent.
+
+   AN INCOMPLETE SENTENCE STILL COSTS SOMETHING.
 
    "Find waste companies" says what kind and not where. Lusha would
-   happily answer it for the whole of the United Kingdom and charge for
-   the privilege, so it is refused by name before any call is made. The
-   place is the one thing a search cannot be without.
+   answer it for the whole of the United Kingdom, against the same
+   shared daily quota, and return a page of companies nobody asked
+   about. The reader refuses to plan one, which is right whether the
+   unit of cost is a credit or a call.
    ============================================================= */
 import { DEPOTS } from '@/lib/types';
 import { searchCompanies } from '@/lib/lusha';
@@ -88,7 +104,7 @@ export function readCompanies(raw: unknown): FoundCompany[] {
  * A seam, like `PROVIDER` in `enrich.ts` and for the same reason: a
  * check has to be able to prove the search happened once, and happened
  * not at all for a sentence that was incomplete, without a Lusha key
- * and without spending anything.
+ * and without touching the quota.
  */
 export const FINDER = {
   async search(search: FinderSearch): Promise<FoundCompany[]> {

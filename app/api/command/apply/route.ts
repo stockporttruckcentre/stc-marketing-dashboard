@@ -3,7 +3,9 @@ import { requireCapability } from '@/lib/api/guard';
 import { applyMutation } from '@/lib/command/server/mutation';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
-import { bucketStore } from '@/lib/social/media';
+import { bucketStore, orphanNotes } from '@/lib/social/media';
+import { ledgerStore } from '@/lib/command/external';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 import { readContext } from '@/lib/command/server/context';
 
 export const dynamic = 'force-dynamic';
@@ -73,7 +75,24 @@ export async function POST(req: NextRequest) {
     /* Somewhere to put bytes that are not a row: a picture on a post is
        a file on a bucket and a URL in a column. The port is what lets
        the whole path be checked with no bucket anywhere. */
-    files: bucketStore(supabase),
+    /* The caller's own client puts the bytes on the bucket, so storage
+       policy still applies to them. The durable note about an object
+       that could not be removed is server side, like every other record
+       of what happened outside the database. */
+    files: bucketStore(supabase, {
+      notes: orphanNotes(() => createServiceRoleClient()),
+      actor: user.id,
+    }),
+    /* WHERE AN IRREVERSIBLE PURCHASE IS RECORDED.
+
+       Server only, under the service role, because the runtime turns a
+       stored provider answer into database changes and a browser must
+       not be able to write one. It records the purchase and nothing
+       else: the capability check above is against this person's own
+       session, and every CRM write still goes through their own client
+       under row level security. */
+    ledger: ledgerStore(() => createServiceRoleClient()),
+    actorId: user.id,
     context: readContext(raw.context),
     previewPlanHash: planHash,
     previewProgrammeHash: programmeHash,
