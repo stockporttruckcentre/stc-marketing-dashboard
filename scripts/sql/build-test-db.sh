@@ -11,6 +11,10 @@
 # `is_list_member_safe` in a policy and will not create that policy until
 # the function exists. 009 runs again at the end because the second pass
 # of schema.sql recreates `crm_select` in its recursive form.
+#
+# The order of the command runtime's own migrations is `order.txt`, one
+# list, so the database the checks run against and the file somebody
+# pastes into a Supabase SQL editor cannot drift apart.
 # =============================================================
 set -u
 export PATH=/usr/lib/postgresql/16/bin:$PATH
@@ -26,8 +30,9 @@ for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"            >/dev/null 2
 $P -f supabase/schema.sql                                           >/dev/null 2>&1
 for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"            >/dev/null 2>&1; done
 
-for m in 009_list_visibility_recursion 007_command_apply 008_writable_columns_seed 010_command_invoke 016_capability_roles_seed 011_command_apply_lifecycle 012_command_create_list 013_command_share_list 014_command_attachments 015_command_add_to_list 017_command_perform 020_command_tracker_operations 021_command_meetings 022_command_social_posts 023_command_import 024_command_calendar 025_owner_authority 026_import_list_authority 027_external_attempts 028_attach_permission 029_customer_details 030_command_news 031_command_stock_import 032_command_share_named_list 033_command_tracker_from_crm 034_external_claim 035_orphaned_uploads 036_apply_returns_ids 037_sale_projection 038_duplicate_and_link 039_rows_forward 018_command_set_role 019_last_admin; do
+while read -r m; do
+  case "$m" in ''|\#*) continue ;; esac
   $P -v ON_ERROR_STOP=1 -f "supabase/migrations/$m.sql" >/dev/null || {
     echo "  $m failed"; exit 1; }
-done
+done < scripts/sql/order.txt
 echo "  stctest built"

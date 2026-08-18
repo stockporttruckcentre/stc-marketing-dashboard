@@ -326,7 +326,7 @@ export function postgrestStore(supabase: Queryable): Store {
  * first and not the second: a Lusha lookup cannot be projected because
  * the answer is not in this database at all.
  */
-const PROJECTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
+export const PROJECTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
   'deal.markSold': {
     name: 'command_project_sale',
     args: (c) => ({

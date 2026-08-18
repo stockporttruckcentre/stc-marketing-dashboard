@@ -30,7 +30,8 @@
     "check:output": "tsx scripts/command-output-check.ts",
     "check:postgres": "tsx scripts/command-postgres-check.ts",
     "gen:writable-columns": "tsx scripts/generate-writable-columns.ts",
-    "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check"
+    "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check",
+    "check:rpc": "tsx scripts/rpc-contract-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
