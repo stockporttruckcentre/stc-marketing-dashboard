@@ -3,6 +3,7 @@ import { requireCapability } from '@/lib/api/guard';
 import { applyMutation } from '@/lib/command/server/mutation';
 import { vocabularyFor } from '@/lib/command/server/vocabulary';
 import { postgrestStore } from '@/lib/command/store/postgrest';
+import { bucketStore } from '@/lib/social/media';
 import { readContext } from '@/lib/command/server/context';
 
 export const dynamic = 'force-dynamic';
@@ -69,6 +70,10 @@ export async function POST(req: NextRequest) {
     capabilities: caps,
     vocabulary: vocabularyFor(supabase, user.id),
     store: postgrestStore(supabase),
+    /* Somewhere to put bytes that are not a row: a picture on a post is
+       a file on a bucket and a URL in a column. The port is what lets
+       the whole path be checked with no bucket anywhere. */
+    files: bucketStore(supabase),
     context: readContext(raw.context),
     previewPlanHash: planHash,
     previewProgrammeHash: programmeHash,

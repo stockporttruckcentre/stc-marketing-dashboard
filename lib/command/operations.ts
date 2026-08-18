@@ -30,7 +30,7 @@ import type { Cond, Expr, Invoke } from './ir/types';
 import { capability, entity as entityDef } from './ir/registry';
 import { readRecordRefs } from './mutate';
 import {
-  readContextReference, resolveContext, type CommandContext,
+  fileDigest, readContextReference, resolveContext, type CommandContext,
 } from './context';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
 
@@ -81,6 +81,15 @@ const OPERATIONS: {
    * is different from a sentence that forgot to say.
    */
   subjectless?: boolean;
+  /**
+   * An operation whose subject matter is the file on the request.
+   *
+   * Like an import: with nothing attached the sentence is somebody
+   * about to attach something, and reading it as an instruction would
+   * produce a refusal where the right answer is the composer. The file
+   * reaches the plan as its name and a digest, never its contents.
+   */
+  needsFile?: boolean;
 }[] = [
   {
     capability: 'stock.sendToTracker',
@@ -164,6 +173,15 @@ const OPERATIONS: {
     objects: ['news', 'news feed', 'news feeds', 'industry news', 'headlines',
               'stories', 'articles', 'feeds'],
     label: () => 'Refresh the industry news',
+  },
+  {
+    capability: 'post.setImage',
+    entity: 'posts',
+    needsFile: true,
+    verbs: ['add', 'put', 'attach', 'set', 'use', 'upload'],
+    objects: ['image', 'picture', 'photo', 'graphic', 'artwork', 'image on this post',
+              'picture on this post'],
+    label: (n, what) => `Put this picture on ${what}`,
   },
   {
     capability: 'contact.enrich',
@@ -300,6 +318,8 @@ export function parseOperation(
     if (caps && !caps.has(cap.requires)) continue;
     /* Nor anything nothing performs. */
     if (!cap.handler) continue;
+    /* Nor an operation about a file, with no file on the request. */
+    if (op.needsFile && !context.file?.text) continue;
 
     const subject = op.subjectless ? null : subjectOf(raw, op.entity, context, priorResult);
     const named = subject || op.subjectless ? null : companyIn(raw, op.objects);
@@ -343,6 +363,14 @@ export function parseOperation(
         kind: 'literal',
         value: said?.value ?? op.argument.fallback,
       };
+    }
+
+    /* The file, as its name and a digest. Its contents never reach the
+       plan: that is what makes previewing one file and confirming
+       another a mismatch rather than a surprise. */
+    if (op.needsFile && context.file) {
+      args.file = { kind: 'literal', value: context.file.name };
+      args.digest = { kind: 'literal', value: fileDigest(context.file.text) };
     }
 
     return {

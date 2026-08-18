@@ -916,6 +916,28 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'post.setImage',
+    label: 'Put a picture on a social post',
+    operates: 'invoke',
+    entities: ['posts'],
+    /* The same capability the composer's upload button gates on. */
+    requires: 'marketing.edit',
+    confirm: true,
+    produces: 'record',
+    /* Putting the same file on the same post twice leaves the post with
+       that picture on it, and the second upload is a second object on
+       the bucket rather than a second effect anybody can see. */
+    idempotent: true,
+    handler: 'lib/social/media.ts',
+    /* A file on a bucket and a URL in a column. The bucket cannot be in
+       a transaction, so it is a preparer, and the column write goes
+       into the programme's own transaction like any other. */
+    prepares: 'post.setImage',
+    inputs: [
+      { key: 'file', label: 'the picture', kind: 'text', required: true },
+    ],
+  },
+  {
     id: 'stock.import',
     label: 'Import a supplier stock file',
     operates: 'invoke',

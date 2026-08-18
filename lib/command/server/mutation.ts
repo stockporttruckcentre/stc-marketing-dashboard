@@ -46,6 +46,7 @@ import { WRITABLE_FIELDS, type WritableField } from '../fields';
 import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
 import { prepareDelivery, type Prepared } from './emit';
+import type { FileStore } from '../files';
 import { postState } from '../ir/overlay';
 import { PREPARERS } from './prepare';
 import type { CommandContext } from '../context';
@@ -336,6 +337,10 @@ export async function previewMutation(
      need it to say what it is going to do: an import describes the file
      the browser is holding, and nothing else can. */
   context: CommandContext = {},
+  /* Somewhere to put bytes that are not a row. Describing never uploads
+     anything; this is here so the description and the confirmation are
+     given the same world. */
+  files?: FileStore,
 ): Promise<MutationPreview> {
   if (planning.kind !== 'mutate') {
     return { ok: false, reason: 'not a mutation', why: 'that sentence is not an instruction' };
@@ -393,6 +398,7 @@ export async function previewMutation(
         }
         const description = await preparer.describe({
           subjects: unit.plan.subjects, args: unit.plan.args, context, store,
+          files,
           /* Nothing is bought at preview, so there is no purchase to be
              idempotent about. */
           confirmation: '',
@@ -503,6 +509,15 @@ export async function applyMutation(
     previewProgrammeHash: string;
     store: Store;
     policy?: ExecutionPolicy;
+    /**
+     * Somewhere to put bytes that are not a row.
+     *
+     * A picture on a post is a file on a bucket and a URL in a column.
+     * Absent by default, so a caller that has not wired one up gets a
+     * refusal by name rather than a command that reports success and
+     * puts nothing anywhere.
+     */
+    files?: FileStore;
     /** Whose name goes on any file the programme produces. */
     actorName?: string;
     /**
@@ -574,7 +589,7 @@ export async function applyMutation(
      against the preview's copy of it. Somebody whose screen moved under
      them gets a fresh preview rather than a smaller deletion. */
   if (planning.plan.steps.some((s) => s.op === 'delete' && s.expect === 'many')) {
-    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
+    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {}, req.files);
     if (!fresh.ok) return { ok: false, reason: 'refused', why: fresh.why };
 
     if (req.acknowledge == null) {
@@ -691,7 +706,7 @@ export async function applyMutation(
 
       const ready = await preparer.run({
         subjects: unit.plan.subjects, args: unit.plan.args,
-        context: req.context ?? {}, store: req.store, confirmation,
+        context: req.context ?? {}, store: req.store, files: req.files, confirmation,
       });
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
@@ -756,7 +771,7 @@ export async function applyMutation(
   if (outsidePrepared.length && resolved?.ok) {
     const agreed = withPreparation(resolved.hash, outsidePrepared);
     if (agreed !== req.previewProgrammeHash) {
-      const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
+      const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {}, req.files);
       return {
         ok: false,
         reason: 'drift',
@@ -783,7 +798,7 @@ export async function applyMutation(
   });
 
   if (!done.ok && done.reason === 'drift') {
-    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {});
+    const fresh = await previewMutation(planning, req.store, req.policy, req.context ?? {}, req.files);
     return {
       ok: false,
       reason: 'drift',
@@ -857,14 +872,16 @@ export type PlannedMutation = {
  * the preview once when somebody presses Enter.
  */
 export async function planAndPreview(
-  req: PlanRequest & { store: Store; preview: boolean; policy?: ExecutionPolicy },
+  req: PlanRequest & {
+    store: Store; preview: boolean; policy?: ExecutionPolicy; files?: FileStore;
+  },
 ): Promise<PlannedMutation | null> {
   const planned = await planAuthoritatively(req);
   if (!planned) return null;
   if (planned.planning.kind !== 'mutate' || !req.preview) return { planned, preview: null };
   return {
     planned,
-    preview: await previewMutation(planned.planning, req.store, req.policy, req.context ?? {}),
+    preview: await previewMutation(planned.planning, req.store, req.policy, req.context ?? {}, req.files),
   };
 }
 

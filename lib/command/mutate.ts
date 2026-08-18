@@ -1115,9 +1115,16 @@ function confidenceOf(
   let score = 4;
   if (selection.stock) score += 4;                 // a stock number is unambiguous
   else if (selection.named || selection.described) score += 2;
-  if (value != null) score += 3;
+  /* A CLEAR NAMES NO VALUE AND NEEDS NONE.
+
+     The value was worth three points because guessing one wrong is how
+     a write goes wrong. A clear has nothing to guess: the field and the
+     word "clear" are the whole sentence. Charging it for the value it
+     could not have left every clear against a record on the screen one
+     point below the threshold, so "remove the image from this post" was
+     read as a question about posts and answered with a list. */
+  if (value != null || op === 'clear') score += 3;
   if (opWord) score += 2;
-  if (op === 'clear') score += 1;
   // A free text field with a guessed value is the easiest thing to get
   // wrong, so it has to clear a higher bar before it is acted on.
   if ((spec.kind === 'text' || spec.kind === 'longtext') && !opWord) score -= 2;

@@ -3871,6 +3871,156 @@ test('a viewer cannot share a list', async () => {
     JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
 });
 
+/* =============================================================
+   36. A picture on a post is a file and a column
+
+   Neither half is visual. The bytes go where the composer has always
+   put them, through a port so this can run with no bucket anywhere, and
+   the column write goes into the programme's own transaction.
+   ============================================================= */
+
+const MARKETER = [...capabilitiesFor({ role: 'marketer' } as never)];
+
+const PICTURE = {
+  record: { entity: 'posts', id: 'p1' },
+  file: {
+    name: 'yard.png', mime: 'image/png', size: 4,
+    text: 'data:image/png;base64,AAAA',
+  },
+};
+
+function fakeBucket() {
+  const put: { name: string; bytes: number }[] = [];
+  return {
+    put,
+    store: {
+      async put(file: { name: string; mime: string; bytes: Uint8Array }) {
+        put.push({ name: file.name, bytes: file.bytes.byteLength });
+        return { ok: true as const, url: `https://bucket.test/${file.name}` };
+      },
+    },
+  };
+}
+
+test('a picture goes on a post', async () => {
+  const db = fakeDb({
+    social_posts: [{
+      id: 'p1', content: 'Depot open Saturday', status: 'draft',
+      platform: ['linkedin'], scheduled_date: '2026-09-01',
+      created_by: 'TEST Author', image_url: null,
+    }],
+  });
+  const bucket = fakeBucket();
+  const text = 'add this image to this post';
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE, preview: true,
+    files: bucket.store,
+  });
+  ok('it plans as putting a picture on the post',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'post.setImage') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map(
+      (s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  /* Describing never uploads. A preview that put the file on the bucket
+     would leave an object behind for a command nobody confirmed. */
+  ok('and nothing has been uploaded yet', bucket.put.length === 0, JSON.stringify(bucket.put));
+  ok('and nothing has been written yet', db.writes.length === 0, JSON.stringify(db.writes));
+  if (!planned || preview?.ok !== true) return;
+
+  const done = await applyMutation({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE, files: bucket.store,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('the file was put on the bucket once', bucket.put.length === 1, JSON.stringify(bucket.put));
+  ok('and the post points at it',
+    String((db.tables.social_posts ?? [])[0]?.image_url) === 'https://bucket.test/yard.png',
+    String((db.tables.social_posts ?? [])[0]?.image_url));
+});
+
+test('with nowhere to put it, nothing is claimed', async () => {
+  const db = fakeDb({
+    social_posts: [{
+      id: 'p1', content: 'Depot open Saturday', status: 'draft',
+      platform: ['linkedin'], scheduled_date: '2026-09-01',
+      created_by: 'TEST Author', image_url: null,
+    }],
+  });
+  const text = 'add this image to this post';
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE, preview: true,
+  });
+  const preview = planned?.preview;
+  if (!planned || preview?.ok !== true) {
+    ok('it previews', false, preview && !preview.ok ? preview.why : 'no preview');
+    return;
+  }
+
+  const done = await applyMutation({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: PICTURE,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it refuses by name rather than reporting success',
+    !done.ok && /nowhere to put a file/i.test(done.ok ? '' : done.why),
+    done.ok ? 'it went through' : done.why);
+  ok('and the post still has no picture',
+    (db.tables.social_posts ?? [])[0]?.image_url == null,
+    String((db.tables.social_posts ?? [])[0]?.image_url));
+});
+
+test('taking a picture off a post is an ordinary write', async () => {
+  const db = fakeDb({
+    social_posts: [{
+      id: 'p1', content: 'Depot open Saturday', status: 'draft',
+      platform: ['linkedin'], scheduled_date: '2026-09-01',
+      created_by: 'TEST Author', image_url: 'https://bucket.test/old.png',
+    }],
+  });
+  const text = 'remove the image from this post';
+  const context = { record: { entity: 'posts', id: 'p1' } };
+
+  const planned = await planAndPreview({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews as a change to the post', preview?.ok === true,
+    preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || preview?.ok !== true) return;
+
+  const done = await applyMutation({
+    text, capabilities: MARKETER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('and the picture is off it',
+    (db.tables.social_posts ?? [])[0]?.image_url == null,
+    String((db.tables.social_posts ?? [])[0]?.image_url));
+});
+
+test('a viewer cannot put a picture on a post', async () => {
+  const viewer = [...capabilitiesFor({ role: 'viewer' } as never)];
+  const planning = planCommand('add this image to this post', {
+    actorCapabilities: viewer, context: PICTURE,
+  });
+  ok('it is not offered',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'post.setImage') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
 /* ============================================================= */
 
 async function main() {

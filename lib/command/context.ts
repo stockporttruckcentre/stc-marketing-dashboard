@@ -120,11 +120,20 @@ export function readContextReference(text: string): ContextReference | null {
   const nouns = ENTITIES.flatMap((e) => e.nouns);
   for (const word of THIS_WORDS) {
     if (!t.includes(` ${word} `)) continue;
-    /* A noun after the pointing word, or "record" for anything. */
-    const after = t.split(` ${word} `)[1] ?? '';
-    const first = after.trim().split(' ')[0] ?? '';
-    if (first === 'record' || first === 'one' || nouns.includes(first)) {
-      return { kind: 'record', words: `${word} ${first}`.trim(), expect: 'one' };
+    /* A noun after the pointing word, or "record" for anything.
+
+       EVERY OCCURRENCE, NOT THE FIRST.
+
+       "Add this image to this post" points twice and only the second
+       one names a record. Looking at the first alone found "image",
+       which is not a noun for anything, and the sentence came back
+       pointing at nothing at all. */
+    const parts = t.split(` ${word} `).slice(1);
+    for (const after of parts) {
+      const first = after.trim().split(' ')[0] ?? '';
+      if (first === 'record' || first === 'one' || nouns.includes(first)) {
+        return { kind: 'record', words: `${word} ${first}`.trim(), expect: 'one' };
+      }
     }
   }
   return null;

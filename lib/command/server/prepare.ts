@@ -42,6 +42,8 @@ import { CRM_CONTACTS, STOCK_TRAILERS } from '@/lib/import/dictionary';
 import { prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
 import { prepareStock, STOCK_CEILING } from '@/lib/import/stock';
 import { fileDigest, type CommandContext } from '../context';
+import { NO_FILES, type FileStore } from '../files';
+import { storeImage, looksLikeAnImage } from '@/lib/social/media';
 import { createHash } from 'crypto';
 import type { Store, TransactionStep } from '../ir/store';
 
@@ -84,6 +86,15 @@ export type PrepareInput = {
    * duplicate for THIS person.
    */
   store: Store;
+  /**
+   * Somewhere to put bytes that are not a row.
+   *
+   * A picture on a post is a file on a bucket and a URL in a column,
+   * and neither half can be done by SQL alone. Absent by default, so a
+   * caller that has not wired one up gets a refusal by name rather than
+   * a command that reports success and puts nothing anywhere.
+   */
+  files?: FileStore;
   /**
    * What this confirmation is, as one opaque string.
    *
@@ -695,6 +706,100 @@ const importStock: Preparer = {
 };
 
 /* -------------------------------------------------------------
+   Putting a picture on a post
+   ------------------------------------------------------------- */
+
+/**
+ * A post's image is a file on a bucket and a URL in a column.
+ *
+ * Neither half is visual. The bytes cannot go in the row, so they go
+ * where the composer has always put them, and the column write goes
+ * into the programme's own transaction like any other.
+ *
+ * Taking one off is not here and does not need to be: `image_url` is an
+ * ordinary writable column, so "remove the image from this post" is a
+ * field clear through the same preview and the same allowlist as any
+ * other write.
+ */
+const postImage: Preparer = {
+  async describe({ subjects, context }) {
+    const file = context.file;
+    if (!file) {
+      return { ok: false, why: 'there is no file on this request to put on the post' };
+    }
+    if (!looksLikeAnImage(file)) {
+      return { ok: false, why: `${file.name} is not an image, so it cannot go on a post` };
+    }
+    if (subjects.length !== 1) {
+      return {
+        ok: false,
+        why: subjects.length
+          ? `that matches ${subjects.length} posts, so it is not clear which one the picture goes on`
+          : 'nothing said which post the picture goes on',
+      };
+    }
+
+    const already = String(subjects[0].values.image_url ?? '').trim();
+    return {
+      ok: true,
+      count: 1,
+      says: `Puts ${file.name} on ${subjects[0].label}.`
+        + (already ? ' It already has a picture, and this replaces it.' : ''),
+      /* The file and the post. A different file or a different post is a
+         different operation and comes back as a fresh preview. */
+      fingerprint: fileDigest([fileDigest(file.text), file.name, subjects[0].id].join('\n')),
+    };
+  },
+
+  async run({ subjects, context, files }) {
+    const file = context.file;
+    if (!file) {
+      return { ok: false, why: 'there is no file on this request to put on the post' };
+    }
+    if (subjects.length !== 1) {
+      return { ok: false, why: 'nothing said which post the picture goes on' };
+    }
+
+    const stored = await storeImage(files ?? NO_FILES, {
+      name: file.name,
+      mime: file.mime,
+      bytes: bytesOf(file.text),
+    });
+    if (!stored.ok) return { ok: false, why: stored.why };
+
+    /* The column write is the database's, in the programme's own
+       transaction. The upload above could not be in it; this always
+       could. */
+    return {
+      ok: true,
+      steps: [{
+        op: 'changes',
+        changes: [{
+          op: 'update',
+          table: 'social_posts',
+          id: subjects[0].id,
+          set: { image_url: stored.url },
+        }],
+      }],
+      describe: `Put ${file.name} on ${subjects[0].label}.`,
+    };
+  },
+};
+
+/**
+ * The bytes a request carried, out of the text it carried them as.
+ *
+ * The bar reads a file as text so a spreadsheet can be parsed on the
+ * server, and an image read that way is a data URL. Both shapes end up
+ * here as bytes.
+ */
+function bytesOf(text: string): Uint8Array {
+  const base64 = /^data:[^;]*;base64,(.*)$/s.exec(text)?.[1];
+  if (base64) return Uint8Array.from(Buffer.from(base64, 'base64'));
+  return Uint8Array.from(Buffer.from(text, 'binary'));
+}
+
+/* -------------------------------------------------------------
    Refreshing the industry news
    ------------------------------------------------------------- */
 
@@ -749,4 +854,5 @@ export const PREPARERS: Record<string, Preparer> = {
   'news.refresh': refreshNews,
   'rows.import': importRows,
   'stock.import': importStock,
+  'post.setImage': postImage,
 };

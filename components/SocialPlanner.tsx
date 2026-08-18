@@ -8,6 +8,7 @@ import type { SocialPost, PostStatus, Profile } from '@/lib/types';
 /* One list, shared with the sentence reader. Two copies would disagree
    the first time somebody added a platform. */
 import { PLATFORMS, DEFAULT_PLATFORMS, createPost, type Platform } from '@/lib/social/posts';
+import { bucketStore, storeImage } from '@/lib/social/media';
 
 const STATUSES: { value: PostStatus | 'all'; label: string }[] = [
   { value: 'all',            label: 'All' },
@@ -143,19 +144,19 @@ function ComposeForm({ profile, onClose, onCreated }: { profile: Profile; onClos
     setPlatforms((ps) => ps.includes(p) ? ps.filter((x) => x !== p) : [...ps, p]);
   }
 
+  /* The same operation the command bar performs. The bucket, the key
+     rule and what counts as an image are `lib/social/media.ts`, so
+     neither caller has its own idea of any of them. */
   async function uploadImage(file: File) {
     setUploading(true); setError(null);
-    try {
-      const fileName = `post-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const { error: upErr } = await supabase.storage.from('brand-assets').upload(fileName, file, { upsert: false });
-      if (upErr) throw upErr;
-      const { data: pub } = supabase.storage.from('brand-assets').getPublicUrl(fileName);
-      setImageUrl(pub.publicUrl);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setUploading(false);
-    }
+    const stored = await storeImage(bucketStore(supabase), {
+      name: file.name,
+      mime: file.type,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+    setUploading(false);
+    if (!stored.ok) { setError(stored.why); return; }
+    setImageUrl(stored.url);
   }
 
   async function submit(e: React.FormEvent) {
