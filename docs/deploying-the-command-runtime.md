@@ -51,10 +51,24 @@ into the SQL editor and run it.
 
 Three things worth knowing before you do:
 
-- **It is safe to run more than once.** Every statement is
-  `CREATE OR REPLACE`, `CREATE TABLE IF NOT EXISTS`, or a seed that
-  replaces its own rows. Running it against a database that is already
-  half way through is the intended use.
+- **It is safe to run more than once, and that is tested rather than
+  asserted.** Every statement is `CREATE OR REPLACE`,
+  `CREATE TABLE IF NOT EXISTS`, or a seed that replaces its own rows.
+  Running it against a database that is already half way through is the
+  intended use. `npm run check:bundle-twice` builds a database at the
+  state before migration 007, applies the generated file, applies the
+  byte for byte identical file again, and fails unless the second run
+  finishes with no error and no warning and leaves the seeds at their
+  own counts rather than doubled.
+- **It really is one transaction.** Two of the migrations open and close
+  a transaction of their own, because each is also meant to be runnable
+  on its own. Concatenated, that inner `COMMIT` used to end the outer
+  one, so everything after it ran a statement at a time and a failure
+  part way through left the database part way through. The bundler now
+  removes those two boundaries as it writes the file, and leaves a
+  comment where each one was. Nothing else about those migrations
+  changes, and the files keep their own boundaries for anybody running
+  one alone.
 - **It does not include `schema.sql` or migrations 001 to 006.** Those
   create the tables and the policies, and a database that has been in
   use has them. This is the command runtime's own half: functions, two
@@ -133,6 +147,11 @@ It can prove, and does, on every run:
   two checks were run against a database built to the state before
   migration 007, then caught up with `catch-up.sql`, and went from
   `command_perform` missing to 36/36 callable and 276 assertions passing
+- that running the identical file a second time changes nothing and
+  breaks nothing: byte for byte the same `catch-up.sql`, applied again
+  to the database it had just built, finished with no error and no
+  warning, left the two seeds at 103 and 38 rather than doubled, and
+  still answered 36/36 functions and 276 assertions afterwards
 
 It cannot prove anything about a particular Supabase project. No
 repository can: the project reference lives in a deployment's

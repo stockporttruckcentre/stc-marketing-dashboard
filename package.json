@@ -31,7 +31,8 @@
     "check:postgres": "tsx scripts/command-postgres-check.ts",
     "gen:writable-columns": "tsx scripts/generate-writable-columns.ts",
     "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check",
-    "check:rpc": "tsx scripts/rpc-contract-check.ts"
+    "check:rpc": "tsx scripts/rpc-contract-check.ts",
+    "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
