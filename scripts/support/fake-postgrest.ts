@@ -472,6 +472,34 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { inserted: ids.length, listId: list?.id ?? null }, error: null };
     }
 
+    /* A supplier's stock file, already checked. Every unit or none, and
+       a row with no stock number never reaches this. */
+    if (name === 'command_import_stock') {
+      if (!may('stock.edit')) {
+        return { data: null, error: { message: 'you do not have stock.edit' } };
+      }
+      const incoming = (args.p_rows ?? []) as Record<string, unknown>[];
+      if (!Array.isArray(incoming) || !incoming.length) {
+        return { data: null, error: { message: 'nothing said what stock to import' } };
+      }
+
+      const rows = (tables.stock_trailers ??= []);
+      const ids: string[] = [];
+      for (const row of incoming) {
+        if (!String(row.stc_no ?? '').trim()) {
+          return {
+            data: null,
+            error: { message: 'a row with no stock number reached the database' },
+          };
+        }
+        const id = `loaded${rows.length + 1}`;
+        rows.push({ id, status: 'in_stock', ...row });
+        ids.push(id);
+      }
+      writes.push({ table: 'stock_trailers', set: { status: 'in_stock' }, ids });
+      return { data: { inserted: ids.length }, error: null };
+    }
+
     /* Writing a social post. The author and the status come from the
        profile of whoever is asking, exactly as the composer's own
        insert does, because they are properties of who is writing. */
@@ -500,6 +528,36 @@ export function fakeDb(tables: Record<string, Row[]>) {
       });
       writes.push({ table: 'social_posts', set: { content }, ids: [id] });
       return { data: { id, status, author }, error: null };
+    }
+
+    /* The news, written down in one call. The fetch is not here: what
+       arrives is stories that have already been read. */
+    if (name === 'command_refresh_news') {
+      if (!may('marketing.edit')) {
+        return { data: null, error: { message: 'you do not have marketing.edit' } };
+      }
+      const items = (args.p_items ?? []) as Record<string, unknown>[];
+      const maxAge = Math.max(Number(args.p_max_age ?? 14) || 14, 1);
+      const cutoff = new Date(Date.now() - maxAge * 86_400_000).toISOString().slice(0, 10);
+
+      const rows = (tables.news_items ??= []);
+      const before = rows.length;
+      const kept = rows.filter((r) => String(r.published_date ?? '') >= cutoff);
+      const purged = before - kept.length;
+      rows.length = 0;
+      rows.push(...kept);
+
+      let added = 0;
+      for (const item of items) {
+        const url = String(item.url ?? '').trim();
+        if (!url || !String(item.title ?? '').trim()) continue;
+        if (String(item.published_date ?? '') < cutoff) continue;
+        if (rows.some((r) => String(r.url) === url)) continue;
+        rows.push({ id: `news${rows.length + 1}`, ...item });
+        added += 1;
+      }
+      if (added) writes.push({ table: 'news_items', set: { source: 'feed' }, ids: [] });
+      return { data: { added, purged }, error: null };
     }
 
     /* A site on a customer, and which one is the main one. */
@@ -1223,6 +1281,10 @@ const PERFORMED: Record<string, {
       p_list_id: c.args.listId ?? null,
     }),
   },
+  'stock.import': {
+    name: 'command_import_stock',
+    args: (c) => ({ p_rows: c.args.rows ?? [] }),
+  },
   'post.create': {
     name: 'command_create_post',
     args: (c) => ({
@@ -1283,6 +1345,10 @@ const PERFORMED: Record<string, {
   'contact.link': {
     name: 'command_link_accounts',
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
+  },
+  'news.refresh': {
+    name: 'command_refresh_news',
+    args: (c) => ({ p_items: c.args.items ?? [], p_max_age: c.args.maxAge ?? 14 }),
   },
   'meeting.create': {
     name: 'command_create_meeting',

@@ -73,6 +73,14 @@ const OPERATIONS: {
    * with the record it is about taken out.
    */
   tail?: { key: string; after: string[]; kind?: 'url' };
+  /**
+   * An operation that names no records.
+   *
+   * Refreshing the news makes rows out of what fourteen feeds are
+   * carrying. There is nothing to resolve and nothing to point at, which
+   * is different from a sentence that forgot to say.
+   */
+  subjectless?: boolean;
 }[] = [
   {
     capability: 'stock.sendToTracker',
@@ -144,6 +152,18 @@ const OPERATIONS: {
     objects: ['link', 'links', 'website', 'linkedin', 'facebook', 'instagram'],
     label: (n, what) => `Take a link off ${what}`,
     tail: { key: 'which', after: ['link', 'website', 'linkedin', 'facebook', 'instagram'] },
+  },
+  {
+    capability: 'news.refresh',
+    /* It makes rows out of what the feeds are carrying. `subjectless`
+       says there is nothing to name, which is why it is the one entry
+       here that does not resolve records. */
+    entity: 'news_items',
+    subjectless: true,
+    verbs: ['refresh', 'update', 'fetch', 'pull', 'reload', 'sync', 'get'],
+    objects: ['news', 'news feed', 'news feeds', 'industry news', 'headlines',
+              'stories', 'articles', 'feeds'],
+    label: () => 'Refresh the industry news',
   },
   {
     capability: 'contact.enrich',
@@ -281,13 +301,13 @@ export function parseOperation(
     /* Nor anything nothing performs. */
     if (!cap.handler) continue;
 
-    const subject = subjectOf(raw, op.entity, context, priorResult);
-    const named = subject ? null : companyIn(raw, op.objects);
+    const subject = op.subjectless ? null : subjectOf(raw, op.entity, context, priorResult);
+    const named = subject || op.subjectless ? null : companyIn(raw, op.objects);
 
     let where: Cond | null = subject?.where ?? null;
     let label = subject?.label ?? '';
 
-    if (!subject) {
+    if (!subject && !op.subjectless) {
       if (!named) continue;
       const def = entityDef(op.entity);
       const title = def?.titleField;
@@ -333,14 +353,26 @@ export function parseOperation(
         /* One when a single record was named, so "raise a proposal for
            Dawson" with two Dawsons asks rather than raising two. */
         ...(named ? { expect: 'one' as const } : {}),
-        subject: {
-          op: 'select',
-          from: { entity: op.entity },
-          ...(where ? { where } : {}),
-          produces: { kind: 'rows', entity: op.entity },
-        },
+        ...(op.subjectless ? {} : {
+          subject: {
+            op: 'select' as const,
+            from: { entity: op.entity },
+            ...(where ? { where } : {}),
+            produces: { kind: 'rows' as const, entity: op.entity },
+          },
+        }),
         ...(Object.keys(args).length ? { args } : {}),
-        produces: { kind: 'record', entity: op.entity },
+        /* WHAT IT PRODUCES IS THE CAPABILITY'S TO SAY.
+
+           This used to declare a record whatever the operation was, and
+           an operation that makes many, refreshing the news out of
+           fourteen feeds, was fatally malformed: the validator saw a
+           step claiming one record and a capability producing rows. It
+           planned, it was permitted, and it could never run. */
+        produces: {
+          kind: cap.produces === 'rows' ? 'rows' as const : 'record' as const,
+          entity: op.entity,
+        },
       },
       summary: op.label(1, label, String(
         (args[op.argument?.key ?? ''] as { value?: unknown } | undefined)?.value ?? '',

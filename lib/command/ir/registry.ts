@@ -795,6 +795,27 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'news.refresh',
+    label: 'Refresh the industry news',
+    operates: 'invoke',
+    /* It makes rows out of what fourteen feeds are carrying. There is
+       nothing to act on. */
+    entities: ['news_items'],
+    creates: true,
+    /* The same capability the button gates on. This one deletes: it
+       sweeps every story past the cutoff. */
+    requires: 'marketing.edit',
+    confirm: true,
+    produces: 'rows',
+    /* Refreshing twice is the same news. It also deletes twice, which is
+       the same deletion. */
+    idempotent: true,
+    handler: 'lib/news/refresh.ts',
+    /* Fourteen HTTP calls to somebody else's servers. Not SQL, and not
+       something a transaction can hold. */
+    prepares: 'news.refresh',
+  },
+  {
     id: 'contact.addAddress',
     label: 'Add a site to a customer',
     operates: 'invoke',
@@ -892,6 +913,31 @@ export const CAPABILITIES: CapabilityDef[] = [
          different file is a mismatch rather than a surprise. */
       { key: 'digest', label: 'the file', kind: 'text', required: true },
       { key: 'list', label: 'list name', kind: 'text', required: false },
+    ],
+  },
+  {
+    id: 'stock.import',
+    label: 'Import a supplier stock file',
+    operates: 'invoke',
+    entities: ['trailers'],
+    /* It makes units out of a file. There is nothing to act on. */
+    creates: true,
+    /* The same capability the import button on the stock screen gates
+       on, which is also what the grid gates cell edits on. */
+    requires: 'stock.edit',
+    confirm: true,
+    produces: 'rows',
+    /* Loading the same file twice is the same trailers twice. */
+    idempotent: false,
+    handler: 'supabase/migrations/031_command_stock_import.sql',
+    /* Reading the file is not SQL: the browser is the only place that
+       has it. The preparer matches it against the stock dictionary, the
+       same one the import dialog uses, and hands the database rows it
+       has already checked against what is on the stock list. */
+    prepares: 'stock.import',
+    inputs: [
+      { key: 'file', label: 'the file', kind: 'text', required: true },
+      { key: 'digest', label: 'the file', kind: 'text', required: true },
     ],
   },
   {

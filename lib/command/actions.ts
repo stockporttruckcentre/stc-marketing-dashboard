@@ -209,7 +209,16 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'data.import', label: 'Import a spreadsheet', blurb: 'With a mapping and duplicate check', kind: 'data',
     capability: 'crm.import', verbs: PUSH,
-    objects: ['spreadsheet', 'csv', 'excel', 'file', 'contacts', 'stock', 'data', 'sheet'] },
+    objects: ['spreadsheet', 'csv', 'excel', 'file', 'contacts', 'customers', 'data', 'sheet'] },
+
+  /* Stock is a different file onto a different list, gated on a
+     different capability. A marketer may load stock and may not import
+     customers, and one entry claiming both would offer whichever one
+     they cannot do. */
+  { id: 'stock.import', label: 'Load a stock file', blurb: 'A supplier list onto the stock screen', kind: 'data',
+    capability: 'stock.edit', verbs: [...PUSH, 'sync', 'resync'],
+    objects: ['stock', 'stock list', 'stock file', 'supplier list', 'trailers', 'units', 'inventory'],
+    phrases: ['sync the stock list', 'load the supplier spreadsheet'] },
 
   { id: 'data.enrich', label: 'Enrich from Lusha', blurb: 'Fill in missing contact details', kind: 'data',
     capability: 'crm.enrich', verbs: ['enrich', 'lookup', 'look up', 'find details for', 'fill in'],
@@ -548,8 +557,11 @@ export const ACTIONS: CommandActionSpec[] = [
 
   /* ---------- industry news ---------- */
 
+  /* It sweeps every story past the cutoff before it adds anything, so
+     it is gated where the button is gated. It used to say `crm.view`,
+     which offered a viewer a refresh the database would refuse. */
   { id: 'news.refresh', label: 'Refresh the news', blurb: 'Pull the feeds again', kind: 'data',
-    capability: 'crm.view', path: '/dashboard/news', verbs: ['refresh', 'update', 'reload', 'pull', 'fetch', 'sync'],
+    capability: 'marketing.edit', path: '/dashboard/news', verbs: ['refresh', 'update', 'reload', 'pull', 'fetch', 'sync'],
     objects: ['news', 'the feeds', 'headlines', 'industry news', 'the articles'] },
 
   { id: 'news.source', label: 'Filter news by source', blurb: 'One publication at a time', kind: 'navigate',

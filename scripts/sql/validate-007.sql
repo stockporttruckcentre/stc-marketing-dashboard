@@ -2107,6 +2107,110 @@ DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
 DELETE FROM crm_lists WHERE name = 'TEST import list';
 
 -- =============================================================
+-- 15c. Loading a supplier's stock file
+--
+-- Migration 031. The stock screen's import button used to write from
+-- the browser, which put the allowlist and the permission in code
+-- somebody can edit in a console. Both callers land here now, so every
+-- unit or none from either.
+-- =============================================================
+\echo '--- stock import ---'
+
+DELETE FROM stock_trailers WHERE stc_no LIKE 'TESTSYNC%';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_import_stock(jsonb_build_array(
+    jsonb_build_object('stc_no', 'TESTSYNC001', 'make', 'Schmitz', 'model', 'Curtainsider'),
+    jsonb_build_object('stc_no', 'TESTSYNC002', 'make', 'SDC', 'model', 'Box')
+  )) INTO out;
+  PERFORM assert('a supplier file is loaded', (out ->> 'inserted')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a supplier file is loaded', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the units start in stock',
+  (SELECT COUNT(*) FROM stock_trailers
+    WHERE stc_no LIKE 'TESTSYNC%' AND status = 'in_stock') = 2,
+  (SELECT COUNT(*)::TEXT FROM stock_trailers WHERE stc_no LIKE 'TESTSYNC%'));
+
+-- Every unit or none. A row with no stock number cannot be found again,
+-- so one reaching here fails the file rather than loading half of it.
+DO $$
+BEGIN
+  PERFORM command_import_stock(jsonb_build_array(
+    jsonb_build_object('stc_no', 'TESTSYNC003', 'make', 'Krone'),
+    jsonb_build_object('stc_no', '', 'make', 'Krone')
+  ));
+  PERFORM assert('a row with no stock number fails the whole file', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a row with no stock number fails the whole file',
+    SQLERRM LIKE '%no stock number%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the row before it did not arrive',
+  (SELECT COUNT(*) FROM stock_trailers WHERE stc_no = 'TESTSYNC003') = 0,
+  (SELECT COUNT(*)::TEXT FROM stock_trailers WHERE stc_no = 'TESTSYNC003'));
+
+-- A column the import may not write. `profit` is derived from the sale
+-- price and the book value, and a spreadsheet does not get to set it.
+DO $$
+BEGIN
+  PERFORM command_import_stock(jsonb_build_array(
+    jsonb_build_object('stc_no', 'TESTSYNC004', 'profit', 12345)
+  ));
+  PERFORM assert('a column the stock import may not write is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a column the stock import may not write is refused',
+    SQLERRM LIKE '%not a column it may write%', SQLERRM);
+END
+$$;
+
+-- Through the programme runner, which is the path the command bar takes.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(jsonb_build_object(
+    'op', 'invoke',
+    'capability', 'stock.import',
+    'subjects', '[]'::JSONB,
+    'args', jsonb_build_object('rows', jsonb_build_array(
+      jsonb_build_object('stc_no', 'TESTSYNC005', 'make', 'Montracon')))
+  ))) INTO out;
+  PERFORM assert('a programme can load stock', (out ->> 'changed')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a programme can load stock', FALSE, SQLERRM);
+END
+$$;
+
+-- A viewer, straight at the function.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_import_stock(jsonb_build_array(
+    jsonb_build_object('stc_no', 'TESTSYNC006')
+  ));
+  PERFORM assert('a viewer cannot load stock', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer cannot load stock', SQLERRM LIKE '%stock.edit%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM stock_trailers WHERE stc_no LIKE 'TESTSYNC%';
+
+-- =============================================================
 -- 15a. The parts of a customer that are not columns on it
 --
 -- Migration 029. Sites, links and twinned accounts, all of which had

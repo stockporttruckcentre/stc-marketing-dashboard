@@ -34,11 +34,13 @@
    ============================================================= */
 import { PROVIDER, nextStrategy, type EnrichStrategy } from '@/lib/crm/enrich';
 import { LUSHA_GATE } from '@/lib/crm/permissions';
+import { FEEDS, MAX_AGE_DAYS, fetchNews } from '@/lib/news/refresh';
 import { readSheet } from '@/lib/import/parse';
 import { matchColumns } from '@/lib/import/match';
 import { buildPlan, countPlan, type ExistingRow } from '@/lib/import/plan';
-import { CRM_CONTACTS } from '@/lib/import/dictionary';
+import { CRM_CONTACTS, STOCK_TRAILERS } from '@/lib/import/dictionary';
 import { prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
+import { prepareStock, STOCK_CEILING } from '@/lib/import/stock';
 import { fileDigest, type CommandContext } from '../context';
 import { createHash } from 'crypto';
 import type { Store, TransactionStep } from '../ir/store';
@@ -521,7 +523,230 @@ const importRows: Preparer = {
   },
 };
 
+/* -------------------------------------------------------------
+   Loading a supplier's stock file
+   ------------------------------------------------------------- */
+
+/**
+ * The units already on the stock list this file could repeat.
+ *
+ * By the stock dictionary's own duplicate keys, the stock number and the
+ * chassis number, and only the values the file holds, so a file of
+ * twenty units does not load the stock list. Read through the caller's
+ * own store, which is the same comparison the import dialog makes from
+ * the rows on its screen.
+ */
+async function matchingStock(
+  store: Store, draft: { rows: { values: Record<string, unknown> }[] },
+): Promise<{ ok: true; rows: ExistingRow[] } | { ok: false; why: string }> {
+  const found = new Map<string, ExistingRow>();
+
+  for (const key of STOCK_TRAILERS.duplicateKeys) {
+    const values = [...new Set(
+      draft.rows.map((r) => r.values[key]).filter((v) => v != null && String(v).trim() !== '')
+        .map((v) => String(v)),
+    )];
+    for (let from = 0; from < values.length; from += KEY_PAGE) {
+      const slice = values.slice(from, from + KEY_PAGE);
+      const read = await store.read({
+        table: 'stock_trailers',
+        columns: [...new Set(['id', 'stc_no', ...STOCK_TRAILERS.duplicateKeys])],
+        where: {
+          kind: 'in',
+          of: { kind: 'field', of: { entity: 'trailers', field: key } },
+          values: slice.map((v) => ({ kind: 'literal' as const, value: v })),
+        },
+        limit: slice.length,
+      });
+      if (!read.ok) return { ok: false, why: read.why };
+      for (const row of read.rows) found.set(String(row.id), row as ExistingRow);
+    }
+  }
+
+  return { ok: true, rows: [...found.values()] };
+}
+
+/**
+ * The file, read against the stock dictionary and against the stock list.
+ *
+ * The same shape as the CRM import's `read`, and for the same reason: a
+ * sentence has no mapping screen, which is a reason to compare against
+ * what is already on the stock list rather than a reason to skip the
+ * comparison. Loading a supplier's file twice would otherwise double
+ * every unit on it and report success.
+ */
+async function readStock(input: PrepareInput) {
+  const file = input.context.file;
+  if (!file?.text) {
+    return { ok: false as const, why: 'there is no file on this request to import' };
+  }
+  if (input.args.digest && fileDigest(file.text) !== input.args.digest) {
+    return {
+      ok: false as const,
+      why: 'that is not the file that was previewed. Have another look at what it is going to do.',
+    };
+  }
+
+  const sheet = readSheet(file.text);
+  if (!sheet.ok) return { ok: false as const, why: sheet.why };
+
+  if (sheet.rows.length > STOCK_CEILING) {
+    return {
+      ok: false as const,
+      why: `that is ${sheet.rows.length.toLocaleString('en-GB')} rows, which is more than `
+        + `${STOCK_CEILING.toLocaleString('en-GB')}. Split the file and import it in parts.`,
+    };
+  }
+
+  const columns = matchColumns(sheet.headers, sheet.rows, STOCK_TRAILERS);
+
+  const draft = buildPlan(columns, sheet.rows, [], STOCK_TRAILERS);
+  const existing = await matchingStock(input.store, draft);
+  if (!existing.ok) return existing;
+
+  const plan = buildPlan(columns, sheet.rows, existing.rows, STOCK_TRAILERS);
+  const counts = countPlan(plan);
+  const wanted = plan.rows.filter((r) => r.decision === 'import');
+  const { records, refused } = prepareStock(wanted.map((r) => r.values));
+
+  const mapped = columns.filter((c) => c.target)
+    .map((c) => `${c.header} to ${c.field?.label ?? c.target}`);
+
+  const fingerprint = fileDigest([
+    fileDigest(file.text),
+    mapped.join('|'),
+    plan.rows.filter((r) => r.duplicateOf).map((r) => `${r.index}:${r.duplicateOf?.id}`).join('|'),
+    JSON.stringify(records),
+    'stock',
+  ].join('\n'));
+
+  return {
+    ok: true as const,
+    file, plan, counts, records,
+    refused: refused + (sheet.rows.length - wanted.length),
+    mapped,
+    fingerprint,
+  };
+}
+
+const importStock: Preparer = {
+  async describe(input) {
+    const got = await readStock(input);
+    if (!got.ok) return got;
+    if (!got.records.length) {
+      return {
+        ok: false,
+        why: got.counts.duplicates
+          ? 'every readable row in that file is already on the stock list, so there is nothing to import.'
+          : 'none of those rows had a stock number, so there is nothing to identify them by.',
+      };
+    }
+
+    const already = got.plan.rows.filter((r) => r.duplicateOf).length;
+    const inFile = got.plan.rows.filter((r) => r.duplicateInFile !== undefined).length;
+    const bad = got.refused - already - inFile;
+
+    const parts = [
+      `${got.records.length.toLocaleString('en-GB')} new `
+        + `${got.records.length === 1 ? 'trailer' : 'trailers'} from ${got.file.name} `
+        + 'onto the stock list.',
+      already
+        ? `${already} ${already === 1 ? 'row is' : 'rows are'} already on the stock list and will be left alone.`
+        : '',
+      inFile
+        ? `${inFile} ${inFile === 1 ? 'row repeats' : 'rows repeat'} another row in the same file.`
+        : '',
+      bad > 0
+        ? `${bad} ${bad === 1 ? 'row has' : 'rows have'} no stock number and will be left out.`
+        : '',
+      got.counts.unknown
+        ? `${got.counts.unknown} ${got.counts.unknown === 1 ? 'column' : 'columns'} could not be read.`
+        : '',
+      got.mapped.length ? `Columns read as: ${got.mapped.join(', ')}.` : '',
+    ];
+
+    return {
+      ok: true,
+      count: got.records.length,
+      says: parts.filter(Boolean).join(' '),
+      fingerprint: got.fingerprint,
+    };
+  },
+
+  async run(input) {
+    const got = await readStock(input);
+    if (!got.ok) return got;
+    if (!got.records.length) {
+      return { ok: false, why: 'there is nothing left in that file to import.' };
+    }
+
+    return {
+      ok: true,
+      steps: [{
+        op: 'invoke',
+        capability: 'stock.import',
+        subjects: [],
+        args: { rows: got.records },
+      }],
+      describe: `Loaded ${got.records.length.toLocaleString('en-GB')} from ${got.file.name} `
+        + 'onto the stock list.',
+    };
+  },
+};
+
+/* -------------------------------------------------------------
+   Refreshing the industry news
+   ------------------------------------------------------------- */
+
+/**
+ * Fourteen feeds, then the rows.
+ *
+ * Not SQL and not something a transaction can hold, which is why it is
+ * here rather than in the database. Unlike a Lusha lookup it costs
+ * nothing, so a failed write is recovered by asking again: there is
+ * nothing to be idempotent about.
+ *
+ * The write is the one in `lib/news/refresh.ts`, which the button uses
+ * too, and it happens through the caller's own client so row level
+ * security still decides.
+ */
+const refreshNews: Preparer = {
+  async describe() {
+    return {
+      ok: true,
+      count: 0,
+      says: `Reads ${FEEDS.length} feeds, drops anything older than ${MAX_AGE_DAYS} days, `
+        + 'and adds whatever is new. Nothing is bought and nothing is sent.',
+      /* Nothing to fingerprint. What the feeds hold changes second by
+         second and refusing on that would refuse every refresh. */
+      fingerprint: 'news',
+    };
+  },
+
+  async run({ store }) {
+    const { records, report } = await fetchNews();
+    const carried = report.filter((r) => r.itemCount > 0).length;
+
+    /* The rows go into the programme's own transaction, through the
+       operation the button uses. The fetch above could not be in it; the
+       write always could. */
+    return {
+      ok: true,
+      steps: [{
+        op: 'invoke',
+        capability: 'news.refresh',
+        subjects: [],
+        args: { items: records, maxAge: MAX_AGE_DAYS },
+      }],
+      describe: `Read ${carried} of ${FEEDS.length} feeds and found `
+        + `${records.length} ${records.length === 1 ? 'story' : 'stories'} inside the cutoff.`,
+    };
+  },
+};
+
 export const PREPARERS: Record<string, Preparer> = {
   'contact.enrich': enrich,
+  'news.refresh': refreshNews,
   'rows.import': importRows,
+  'stock.import': importStock,
 };

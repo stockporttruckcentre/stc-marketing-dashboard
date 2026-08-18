@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { STOCK_TRAILERS } from '@/lib/import/dictionary';
+import { commitStockImport as writeStock, prepareStock } from '@/lib/import/stock';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
 
 type StatusTab = 'all' | StockStatus;
@@ -202,16 +203,27 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
    * here they are the right shape for the columns, so this only inserts
    * and reloads.
    */
+  /* The import is one operation, in `lib/import/stock.ts`, which the
+     command bar reaches too. It used to be an insert straight from here,
+     which put the allowlist and the permission in code somebody can edit
+     in a console and had no answer for a failure halfway down a
+     supplier's file. */
   async function commitStockImport(records: Record<string, any>[]) {
-    const withDefaults = records.map((r) => ({ status: 'in_stock', ...r }));
-    const { error, count } = await supabase.from('stock_trailers')
-      .insert(withDefaults, { count: 'exact' });
-    if (error) return { inserted: 0, error: error.message };
+    const { records: ready, refused } = prepareStock(records);
+    if (!ready.length) {
+      return { inserted: 0, error: 'none of those rows had a stock number to identify them by' };
+    }
+
+    const done = await writeStock(supabase, ready);
+    if (!done.ok) return { inserted: 0, error: done.why };
+
     const { data } = await supabase.from('stock_trailers').select('*')
       .order('updated_at', { ascending: false });
     setRows((data ?? []) as StockTrailer[]);
-    setMessage(`Imported ${count ?? withDefaults.length} trailers`);
-    return { inserted: count ?? withDefaults.length };
+    setMessage(refused
+      ? `Imported ${done.inserted} trailers. ${refused} had no stock number and were left out.`
+      : `Imported ${done.inserted} trailers`);
+    return { inserted: done.inserted };
   }
 
   async function bulkDelete() {

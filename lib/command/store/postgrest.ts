@@ -386,6 +386,10 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
     name: 'command_link_accounts',
     args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
   },
+  'news.refresh': {
+    name: 'command_refresh_news',
+    args: (c) => ({ p_items: c.args.items ?? [], p_max_age: c.args.maxAge ?? 14 }),
+  },
   'meeting.create': {
     name: 'command_create_meeting',
     args: (c) => ({

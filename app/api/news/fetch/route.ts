@@ -1,124 +1,36 @@
 import { NextResponse } from 'next/server';
-import { XMLParser } from 'fast-xml-parser';
 import { requireCapability } from '@/lib/api/guard';
+import { fetchNews, storeNews } from '@/lib/news/refresh';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 25;
 
-// Use Google News RSS - reliable, no auth, normalised XML format.
-// Each feed is a search either by-site (publisher-scoped) or by-topic.
-// All feeds use Google News search RSS with `when:7d` to force last-week freshness.
-// Returned in reverse chronological order via the pubDate field on each item.
-// Each source has two queries: site:domain for direct articles, and a topical search
-// so we catch coverage of the publication elsewhere on Google News.
-const FEEDS = [
-  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=site:commercialmotor.com&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Commercial Motor', url: 'https://news.google.com/rss/search?q=%22Commercial+Motor%22+truck+UK&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=site:fleetnews.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Fleet News',       url: 'https://news.google.com/rss/search?q=%22Fleet+News%22+UK+fleet&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=site:transportengineer.org.uk&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'IRTE',             url: 'https://news.google.com/rss/search?q=%22IRTE%22+OR+%22Transport+Engineer%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=site:motortransport.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Motor Transport',  url: 'https://news.google.com/rss/search?q=%22Motor+Transport%22+UK+logistics&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=site:truckingmag.co.uk&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Trucking',         url: 'https://news.google.com/rss/search?q=%22Trucking+magazine%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=site:logistics.org.uk&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'Logistics UK',     url: 'https://news.google.com/rss/search?q=%22Logistics+UK%22+OR+%22FTA%22+haulage&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=site:rha.uk.net&hl=en-GB&gl=GB&ceid=GB:en' },
-  { source: 'RHA',              url: 'https://news.google.com/rss/search?q=%22Road+Haulage+Association%22+UK&hl=en-GB&gl=GB&ceid=GB:en' },
-];
-
-const MAX_AGE_DAYS = 14;
-
-function stripHtml(s: string) {
-  return s ? s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500) : '';
-}
-
+/**
+ * Refresh the industry news.
+ *
+ * The feed list, the age cutoff and the write are `lib/news/refresh.ts`,
+ * which the command bar's `news.refresh` capability reaches too. The
+ * list IS the operation: which publications count and how old a story
+ * may be, and a second copy of it would drift the first time somebody
+ * added a publication on one side.
+ *
+ * This route is the button on the news screen.
+ */
 export async function POST() {
-  /* This one deletes. Any signed in user could purge every row older than
-     the cutoff and every row from one publication. */
+  /* This one deletes. Any signed in user could purge every row older
+     than the cutoff and every row from one publication. */
   const gate = await requireCapability('marketing.edit');
   if (!gate.ok) return gate.response;
-  const { supabase, user } = gate;
+  const { supabase } = gate;
 
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-  type Record = { title: string; source: string; url: string; summary: string | null; published_date: string };
-  const debug: { source: string; status: number | string; itemCount: number }[] = [];
-
-  // Fetch a single feed with strict per-feed timeout so one slow feed can't stall the batch.
-  async function fetchFeed(feed: { source: string; url: string }): Promise<Record[]> {
-    const out: Record[] = [];
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 6000);
-    try {
-      const res = await fetch(feed.url, {
-        signal: ctrl.signal,
-        cache: 'no-store',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; STC-Dashboard/1.0)',
-          'Accept': 'application/rss+xml, application/xml, text/xml',
-        },
-      });
-      clearTimeout(tid);
-      if (!res.ok) { debug.push({ source: feed.source, status: res.status, itemCount: 0 }); return out; }
-      const xml = await res.text();
-      const json = parser.parse(xml);
-      const itemsRaw = json?.rss?.channel?.item ?? json?.feed?.entry ?? [];
-      const items: any[] = Array.isArray(itemsRaw) ? itemsRaw : [itemsRaw];
-      let count = 0;
-      for (const it of items.slice(0, 50)) {
-        const title = String(it.title?.['#text'] ?? it.title ?? '').trim();
-        const url   = String(it.link?.['@_href'] ?? it.link ?? it.guid?.['#text'] ?? it.guid ?? '').trim();
-        const pub = it.pubDate ?? it.published ?? it.updated;
-        const dateObj = pub ? new Date(pub) : null;
-        if (!dateObj || isNaN(+dateObj)) continue; // skip items without a real pubDate
-        const ageDays = (Date.now() - +dateObj) / 86_400_000;
-        if (ageDays > MAX_AGE_DAYS) continue; // hard cutoff regardless of what Google returns
-        const dateStr = dateObj.toISOString().slice(0, 10);
-        const rawDesc = String(it.description?.['#text'] ?? it.description ?? it.summary?.['#text'] ?? it.summary ?? '');
-        const summary = stripHtml(rawDesc);
-        // Try every common RSS image location, then fall back to first <img> in description
-        if (title && url) { out.push({ title, source: feed.source, url, summary: summary || null, published_date: dateStr }); count++; }
-      }
-      debug.push({ source: feed.source, status: 200, itemCount: count });
-    } catch (e: any) {
-      clearTimeout(tid);
-      debug.push({ source: feed.source, status: e?.name === 'AbortError' ? 'timeout' : 'fetch_error', itemCount: 0 });
-    }
-    return out;
-  }
-
-  // Run all feeds in parallel; each has its own 6s ceiling so total stays bounded
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
-  const records: Record[] = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-
-  // Rename legacy source values from earlier feed configurations + delete dead-source rows.
-  // Idempotent, runs every refresh so the chips stay clean.
-  await supabase.from('news_items').update({ source: 'IRTE' }).eq('source', 'Transport Engineer');
-  await supabase.from('news_items').update({ source: 'RHA'  }).eq('source', 'UK HGV / haulage');
-  await supabase.from('news_items').delete().eq('source', 'Road Transport');
-
-  // Always sweep stale stories first - older than the cutoff cannot live on the site
-  const cutoffIso = new Date(Date.now() - MAX_AGE_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const { count: purged } = await supabase
-    .from('news_items')
-    .delete({ count: 'exact' })
-    .lt('published_date', cutoffIso);
-
-  if (!records.length) {
-    return NextResponse.json({ added: 0, purged: purged ?? 0, sources: 0, debug }, { status: 200 });
-  }
-
-  // Insert new stories - existing rows (same url) are skipped
-  const { error: insErr, count: insCount } = await supabase
-    .from('news_items')
-    .upsert(records, { onConflict: 'url', ignoreDuplicates: true, count: 'exact' });
-  if (insErr) return NextResponse.json({ error: insErr.message, debug }, { status: 500 });
+  const { records, report } = await fetchNews();
+  const done = await storeNews(supabase, records);
+  if (!done.ok) return NextResponse.json({ error: done.why, debug: report }, { status: 500 });
 
   return NextResponse.json({
-    added: insCount ?? 0,
-    purged: purged ?? 0,
-    sources: debug.filter((d) => d.itemCount > 0).length,
-    debug,
+    added: done.added,
+    purged: done.purged,
+    sources: report.filter((d) => d.itemCount > 0).length,
+    debug: report,
   });
 }

@@ -3538,6 +3538,150 @@ test('a viewer cannot add a site or a link', async () => {
   }
 });
 
+/* =============================================================
+   34. A supplier's stock file is not a list of customers
+
+   Two things in this application are loaded from a spreadsheet and they
+   are not interchangeable. The sentence says which, the file is checked
+   against the stock list the same way the import dialog checks it, and
+   the write is the operation the stock screen's own import button uses.
+   ============================================================= */
+
+const STOCK_SHEET = [
+  'STC No,Chassis,Make,Model,Year,Location',
+  'STC144001,C99001,Schmitz,Curtainsider,2021,Carrington',
+  'STC144002,C99002,SDC,Box,2019,Hyde',
+  ',C99003,Krone,Fridge,2020,Hyde',
+].join('\n');
+
+const withStockSheet = () => ({
+  file: {
+    name: 'supplier-stock.csv', mime: 'text/csv',
+    size: STOCK_SHEET.length, text: STOCK_SHEET,
+  },
+});
+
+const STOCK_LOADER = [...capabilitiesFor({ role: 'sales' } as never)];
+
+test('a stock file goes onto the stock list', async () => {
+  const db = fakeDb({ stock_trailers: [], crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }] });
+  const text = 'import this stock file';
+  const context = withStockSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  ok('it plans as a stock import rather than a customer import',
+    planned?.planned.planning.plan.steps
+      .some((s) => s.op === 'invoke' && s.capability === 'stock.import') ?? false,
+    JSON.stringify(planned?.planned.planning.plan.steps.map(
+      (s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+  const preview = planned?.preview;
+  /* Two of the three rows have a stock number. The third has none, and
+     a unit without one cannot be found again. */
+  ok('and previews the two units it can identify', preview?.ok === true && preview.count === 2,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const said = preview.operations[0]?.says ?? '';
+  ok('saying what was left out', /1 row has no stock number/.test(said), said);
+  ok('and what the columns were read as', /Columns read as:.*STC No/i.test(said), said);
+  ok('and nothing has been written yet', db.writes.length === 0, JSON.stringify(db.writes));
+
+  const done = await applyMutation({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+
+  const rows = db.tables.stock_trailers ?? [];
+  ok('two trailers arrived', rows.length === 2, String(rows.length));
+  ok('with the stock numbers the file gave',
+    rows.map((r) => String(r.stc_no)).sort().join(', ') === 'STC144001, STC144002',
+    JSON.stringify(rows.map((r) => r.stc_no)));
+  ok('and no customer was created',
+    (db.tables.crm_contacts ?? []).length === 0,
+    String((db.tables.crm_contacts ?? []).length));
+});
+
+test('a unit already on the stock list is left alone', async () => {
+  const db = fakeDb({
+    stock_trailers: [{ id: 's1', stc_no: 'STC144001', chassis_number: 'C99001', status: 'in_stock' }],
+  });
+  const text = 'sync the stock list from this file';
+  const context = withStockSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('only the new one is counted', preview?.ok === true && preview.count === 1,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  ok('and the duplicate is named as one',
+    /1 row is already on the stock list/.test(preview.operations[0]?.says ?? ''),
+    preview.operations[0]?.says ?? '');
+
+  const done = await applyMutation({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  ok('and STC144001 is not on the list twice',
+    (db.tables.stock_trailers ?? []).filter((r) => String(r.stc_no) === 'STC144001').length === 1,
+    JSON.stringify((db.tables.stock_trailers ?? []).map((r) => r.stc_no)));
+});
+
+test('a unit arriving between the preview and the confirmation refuses', async () => {
+  const db = fakeDb({ stock_trailers: [] });
+  const text = 'import this stock file';
+  const context = withStockSheet();
+
+  const planned = await planAndPreview({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('two units are previewed', preview?.ok === true && preview.count === 2,
+    preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  /* Somebody else loads one of them while the preview is on the screen. */
+  (db.tables.stock_trailers ??= []).push({
+    id: 's9', stc_no: 'STC144002', chassis_number: 'C99002', status: 'in_stock',
+  });
+
+  const done = await applyMutation({
+    text, capabilities: STOCK_LOADER, vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('the confirmation refuses rather than loading one of the two', !done.ok,
+    done.ok ? 'it went through' : done.why);
+  ok('and nothing new was written',
+    (db.tables.stock_trailers ?? []).length === 1,
+    String((db.tables.stock_trailers ?? []).length));
+});
+
+test('a viewer cannot load a stock file', async () => {
+  const viewer = [...capabilitiesFor({ role: 'viewer' } as never)];
+  const planning = planCommand('import this stock file', {
+    actorCapabilities: viewer, context: withStockSheet(),
+  });
+  ok('it is not offered',
+    !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'stock.import') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
 /* ============================================================= */
 
 async function main() {
