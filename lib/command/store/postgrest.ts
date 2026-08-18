@@ -22,7 +22,8 @@
    ============================================================= */
 import type { Cond, Expr } from '../ir/types';
 import type {
-  ApplyOutcome, Change, Invocation, InvokeOutcome, PerformOutcome, ReadOutcome, ReadRequest,
+  ApplyOutcome, Change, Invocation, InvokeOutcome, PerformOutcome, ProjectedRow,
+  ReadOutcome, ReadRequest,
   Store, TransactionStep,
 } from '../ir/store';
 
@@ -259,6 +260,35 @@ export function postgrestStore(supabase: Queryable): Store {
     },
 
     /**
+     * What an operation would leave behind, asked without doing it.
+     *
+     * One entry per capability that can answer, and the answer comes
+     * from the operation's own arithmetic rather than from a second
+     * copy of it here: `command_project_sale` and `command_mark_sold`
+     * both go through `command_sale_of`, so the preview and the sale
+     * cannot come to different numbers.
+     */
+    async project(call: Invocation) {
+      if (!supabase.rpc) return { ok: false as const, why: 'this client cannot project operations' };
+
+      const fn = PROJECTIONS[call.capability];
+      if (!fn) return { ok: false as const, why: `nothing here can say what ${call.capability} would do` };
+
+      const { data, error } = await supabase.rpc(fn.name, fn.args(call));
+      if (error) return { ok: false as const, why: String((error as { message?: string }).message ?? error) };
+
+      const body = (data ?? {}) as {
+        ok?: boolean; rows?: ProjectedRow[];
+        refused?: { id?: string; why?: string }[];
+      };
+      if (body.ok === false) {
+        const why = (body.refused ?? []).map((r) => r.why).filter(Boolean).join('; ');
+        return { ok: false as const, why: why || 'that operation cannot be worked out in advance' };
+      }
+      return { ok: true as const, rows: body.rows ?? [] };
+    },
+
+    /**
      * Every database effect of one programme, in one call.
      *
      * `command_perform` dispatches to the same functions `invoke` reaches
@@ -287,6 +317,28 @@ export function postgrestStore(supabase: Queryable): Store {
  * function is one transaction and calling a single subject function in a
  * loop from here would be several.
  */
+/**
+ * Which database function says what an operation would do.
+ *
+ * Deliberately a separate map from `FUNCTIONS`. Being able to perform
+ * something and being able to say in advance exactly what it will leave
+ * behind are two different properties, and most operations have the
+ * first and not the second: a Lusha lookup cannot be projected because
+ * the answer is not in this database at all.
+ */
+const PROJECTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
+  'deal.markSold': {
+    name: 'command_project_sale',
+    args: (c) => ({
+      p_tracker_ids: c.subjects,
+      p_rep_initials: c.args.repInitials ?? 'Unknown',
+      p_sale_price: c.args.salePrice ?? null,
+      p_dispatch_date: c.args.dispatchDate ?? null,
+      p_today: c.args.today ?? null,
+    }),
+  },
+};
+
 const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<string, unknown> }> = {
   'list.create': {
     name: 'command_create_list',

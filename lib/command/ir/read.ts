@@ -104,7 +104,15 @@ export type ReadResult = ({ ok: true } & ReadRows) | ReadFailure;
    ------------------------------------------------------------- */
 
 /** Every plain field a condition names. */
-function fieldsInCond(c: Cond, out: Set<string>): void {
+/**
+ * Every column a condition mentions.
+ *
+ * Exported because a file of "the rows that step touched" is read by
+ * id, and the columns the SENTENCE talked about have to survive that:
+ * "mark the in stock curtainsiders sold and export the result" wants
+ * the status in the file, and the id condition mentions nothing.
+ */
+export function fieldsInCond(c: Cond, out: Set<string>): void {
   const expr = (e: Expr): void => {
     switch (e.kind) {
       case 'field': if (!('via' in e.of)) out.add(e.of.field); return;

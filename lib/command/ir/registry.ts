@@ -300,6 +300,20 @@ export type CapabilityDef = {
    */
   prepares?: string;
   /**
+   * Its result can be worked out exactly, before it happens.
+   *
+   * For operations whose post-state is calculated inside SQL. A sale
+   * works out a commission from a rate on the deal, so the command
+   * layer cannot describe the result with `effect` alone and used to
+   * declare those columns unpredictable, which made "mark these sold
+   * and export the result" a refusal.
+   *
+   * The store asks the operation itself instead. `effect` below stays,
+   * and stays honest: it is what this application can say when nothing
+   * can be asked, and a store with no projection falls back to it.
+   */
+  projects?: boolean;
+  /**
    * What it leaves on its subjects, for a step that reads the result.
    *
    * A programme's file is rendered before its transaction opens, so
@@ -703,6 +717,14 @@ export const CAPABILITIES: CapabilityDef[] = [
        twice is not the same as running it once. */
     idempotent: false,
     handler: 'lib/crm/mark-sold.ts',
+    /* THE SALE ANSWERS FOR ITSELF.
+
+       `command_project_sale` runs the same arithmetic
+       `command_mark_sold` runs, without the writes, so the exact rows
+       are known before the transaction and "mark these sold and export
+       the result" holds the sale rather than the state before it.
+       Migration 037. */
+    projects: true,
     /* What a sale leaves on the tracker row. The commission and the
        stock unit are the operation's other two writes and are not on
        this record, so nothing here claims them. */

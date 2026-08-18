@@ -414,6 +414,23 @@ export async function previewMutation(
         prepared.push(description.fingerprint);
       }
 
+      /* WHAT IT WILL LEAVE ON EACH ROW, WHERE THE OPERATION CAN SAY.
+
+         Shown as ordinary before and after lines, because that is what
+         it is: the sale worked out its own commission and this is the
+         number, not an estimate of it. Where an operation cannot say,
+         there are no lines and the preview describes the operation as
+         it always did. */
+      for (const r of unit.projection ?? []) {
+        const columns = Object.keys(r.set);
+        const table = r.table === 'stock_trailers' ? 'trailers' : 'deals';
+        rows.push({
+          label: r.label ?? r.id,
+          before: columns.map((c) => display(dictionary(table, c), r.was?.[c])).join(', '),
+          after: columns.map((c) => display(dictionary(table, c), r.set[c])).join(', '),
+        });
+      }
+
       operations.push({
         capability: unit.plan.capability,
         label: unit.plan.label,

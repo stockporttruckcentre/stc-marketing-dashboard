@@ -108,6 +108,30 @@ export type InvokeOutcome =
   | { ok: false; why: string };
 
 /**
+ * One row an operation is going to leave behind, exactly.
+ *
+ * Not a guess and not a re-implementation. It comes from the operation
+ * itself, asked without the writes: the same function that performs the
+ * sale works out the numbers, and this is what it says they will be.
+ *
+ * `was` is the same columns as they stand now, so a preview can show a
+ * change rather than a destination, and both halves of the line come
+ * from one read of one row.
+ */
+export type ProjectedRow = {
+  table: string;
+  id: string;
+  /** The row's own name, for the preview. */
+  label?: string;
+  set: Record<string, unknown>;
+  was?: Record<string, unknown>;
+};
+
+export type ProjectOutcome =
+  | { ok: true; rows: ProjectedRow[] }
+  | { ok: false; why: string };
+
+/**
  * A value one step takes from an earlier step's result.
  *
  * Sharing the list a previous step created needs that list's id, and
@@ -147,6 +171,22 @@ export type Store = {
   apply(changes: Change[]): Promise<ApplyOutcome>;
   /** One business operation over every subject, in one transaction. */
   invoke(call: Invocation): Promise<InvokeOutcome>;
+  /**
+   * What an operation would leave behind, without doing any of it.
+   *
+   * For operations whose result is computed inside SQL. A sale's
+   * commission comes from a rate on the deal, and the command layer
+   * neither knows it nor should: duplicating that arithmetic in
+   * TypeScript is two implementations of one business rule, and the one
+   * that drifts is the one somebody was shown.
+   *
+   * Optional. A store that cannot project is a store where an operation
+   * declaring a projection falls back to what the registry can describe,
+   * which for a sale is "these columns cannot be worked out in advance"
+   * and a refusal to export them in the same breath. That is the old
+   * behaviour, kept honest rather than assumed away.
+   */
+  project?(call: Invocation): Promise<ProjectOutcome>;
   /**
    * EVERY database effect of one programme, in one transaction.
    *

@@ -240,48 +240,149 @@ export function fakeDb(tables: Record<string, Row[]>) {
        Three writes that have to happen together: the tracker row, the
        stock unit, and every other rep chasing the same unit. Modelled
        here rather than skipped, because a fake that cannot perform an
-       operation cannot show that the operation reached it. */
+       operation cannot show that the operation reached it.
+
+       ONE CALCULATION HERE TOO.
+
+       `saleOf` is this fake's `command_sale_of`: the arithmetic, once,
+       read by the projection and by the sale. A fake with two of them
+       would pass a check that the real thing fails, which is the one
+       thing a fake must never do. */
+    const saleOf = (id: string, rep: string, price: number | null, dispatch: string | null, today: string) => {
+      const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+      if (!deal) return { ok: false as const, id, why: 'that deal is not there' };
+
+      const salePrice = price ?? (deal.sale_price as number | null) ?? null;
+      const rate = (deal.commission_rate as number | null) ?? 0.1;
+      const profit = (deal.profit as number | null) ?? null;
+      const commission = profit == null ? null : Math.round(profit * rate * 100) / 100;
+      const orderDate = (deal.order_date as string | null) ?? today;
+
+      const unitId = (deal.stock_trailer_id as string | null) ?? null;
+      const unit = unitId
+        ? (tables.stock_trailers ?? []).find((r) => String(r.id) === unitId)
+        : undefined;
+      if (unitId && !unit) {
+        return { ok: false as const, id, why: 'the stock unit on that deal is not there' };
+      }
+
+      const cascades = unitId
+        ? (tables.crm_contacts ?? [])
+          .filter((r) => String(r.id) !== id
+            && String(r.stock_trailer_id ?? '') === unitId
+            && r.status !== 'customer')
+          .map((r) => String(r.id))
+        : [];
+
+      return {
+        ok: true as const,
+        id,
+        label: String(deal.company_name ?? id),
+        deal: {
+          status: 'customer',
+          sale_price: salePrice,
+          profit,
+          commission,
+          order_date: orderDate,
+          dispatch_date: dispatch ?? (deal.dispatch_date as string | null) ?? null,
+        } as Record<string, unknown>,
+        unit: unit
+          ? {
+              id: unitId as string,
+              label: String(unit.stc_no ?? unitId),
+              set: {
+                status: 'sold',
+                customer: deal.company_name,
+                sales_rep: rep,
+                sales_price: salePrice,
+                profit,
+                order_date: orderDate,
+                dispatch_date: dispatch ?? (unit.dispatch_date as string | null) ?? null,
+              } as Record<string, unknown>,
+            }
+          : null,
+        cascades,
+      };
+    };
+
+    const today = () => new Date().toISOString().slice(0, 10);
+
+    if (name === 'command_project_sale') {
+      const ids = (args.p_tracker_ids ?? []) as string[];
+      const rep = String(args.p_rep_initials ?? 'Unknown');
+      const price = (args.p_sale_price ?? null) as number | null;
+      const dispatch = (args.p_dispatch_date ?? null) as string | null;
+      const when = String(args.p_today ?? today());
+
+      const rows: Record<string, unknown>[] = [];
+      const refused: Record<string, unknown>[] = [];
+      const only = (row: Row | undefined, keys: string[]) => Object.fromEntries(
+        keys.map((k) => [k, row?.[k] ?? null]));
+
+      for (const id of ids) {
+        const sale = saleOf(id, rep, price, dispatch, when);
+        if (!sale.ok) { refused.push({ id: sale.id, why: sale.why }); continue; }
+
+        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+        rows.push({
+          table: 'crm_contacts', id, label: sale.label,
+          was: only(deal, Object.keys(sale.deal)), set: sale.deal,
+        });
+        if (sale.unit) {
+          const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === sale.unit!.id);
+          rows.push({
+            table: 'stock_trailers', id: sale.unit.id, label: sale.unit.label,
+            was: only(unit, Object.keys(sale.unit.set)), set: sale.unit.set,
+          });
+        }
+        for (const other of sale.cascades) {
+          const row = (tables.crm_contacts ?? []).find((r) => String(r.id) === other);
+          rows.push({
+            table: 'crm_contacts', id: other,
+            label: String(row?.company_name ?? other),
+            was: { status: row?.status ?? null }, set: { status: 'customer' },
+          });
+        }
+      }
+      return { data: { ok: refused.length === 0, rows, refused }, error: null };
+    }
+
     if (name === 'command_mark_sold_many') {
       const ids = (args.p_tracker_ids ?? []) as string[];
-      const price = args.p_sale_price as number | null;
+      const price = (args.p_sale_price ?? null) as number | null;
+      const dispatch = (args.p_dispatch_date ?? null) as string | null;
       const rep = String(args.p_rep_initials ?? 'Unknown');
+      const when = String(args.p_today ?? today());
       const results: Row[] = [];
 
       for (const id of ids) {
-        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
-        if (!deal) return { data: null, error: { message: `that deal is not there` } };
+        const sale = saleOf(id, rep, price, dispatch, when);
+        if (!sale.ok) return { data: null, error: { message: sale.why } };
 
-        const salePrice = price ?? (deal.sale_price as number | null);
-        const rate = (deal.commission_rate as number | null) ?? 0.1;
-        const profit = deal.profit as number | null;
-        const commission = profit == null ? null : Math.round(profit * rate * 100) / 100;
+        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id)!;
+        /* Exactly what the projection said, and nothing else. */
+        writes.push({ table: 'crm_contacts', set: sale.deal, ids: [id] });
+        Object.assign(deal, sale.deal);
 
-        writes.push({ table: 'crm_contacts', set: { status: 'customer' }, ids: [id] });
-        Object.assign(deal, {
-          status: 'customer', sale_price: salePrice, commission,
-        });
-
-        let stockUpdated = false;
         let cascaded = 0;
-        const unitId = deal.stock_trailer_id as string | null;
-        if (unitId) {
-          const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === unitId);
-          if (!unit) return { data: null, error: { message: 'the stock unit could not be updated' } };
-          writes.push({ table: 'stock_trailers', set: { status: 'sold' }, ids: [unitId] });
-          Object.assign(unit, {
-            status: 'sold', customer: deal.company_name, sales_rep: rep, sales_price: salePrice,
-          });
-          stockUpdated = true;
+        if (sale.unit) {
+          const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === sale.unit!.id)!;
+          writes.push({ table: 'stock_trailers', set: sale.unit.set, ids: [sale.unit.id] });
+          Object.assign(unit, sale.unit.set);
 
-          for (const other of tables.crm_contacts ?? []) {
-            if (String(other.id) === id) continue;
-            if (String(other.stock_trailer_id) !== unitId) continue;
-            if (other.status === 'customer') continue;
-            other.status = 'customer';
+          for (const other of sale.cascades) {
+            const row = (tables.crm_contacts ?? []).find((r) => String(r.id) === other);
+            if (!row) continue;
+            row.status = 'customer';
             cascaded += 1;
           }
         }
-        results.push({ trackerId: id, commission, stockUpdated, cascadedOthers: cascaded });
+        results.push({
+          trackerId: id,
+          commission: sale.deal.commission as number | null,
+          stockUpdated: !!sale.unit,
+          cascadedOthers: cascaded,
+        });
       }
       return { data: results, error: null };
     }

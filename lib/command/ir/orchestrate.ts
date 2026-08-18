@@ -51,7 +51,7 @@ import type { Mutate, Plan, Step } from './types';
 import { entity as entityDef, capability } from './registry';
 import { evaluate, type EvalContext } from './evaluate';
 import { resolveMutation, resolutionHash, type Resolution, type ResolvedReference } from './resolve';
-import type { Change, Store, TransactionStep } from './store';
+import type { Change, ProjectOutcome, ProjectedRow, Store, TransactionStep } from './store';
 import { resolveInvoke, type InvokePlan } from './invoke';
 import { dependencesAmong, overlappingRows } from './dependence';
 import { postState, type PlannedEffect } from './overlay';
@@ -158,6 +158,16 @@ export type InvokeUnit = {
   stepId: string;
   kind: 'invoke';
   plan: InvokePlan;
+  /**
+   * Exactly what it will leave behind, from the operation itself.
+   *
+   * Present for a capability that declares `projects` when the store
+   * can answer. It is what a later step in the same programme reads,
+   * and what the preview shows: a sale's commission is arithmetic this
+   * layer cannot do and must not copy, so it is asked for rather than
+   * declared unknowable.
+   */
+  projection?: ProjectedRow[];
 };
 
 export type Unit = UpdateUnit | InvokeUnit;
@@ -203,6 +213,23 @@ function resolvedSoFar(units: Unit[]): Map<string, string[]> {
 }
 
 export function stagedEffect(u: Unit): PlannedEffect {
+  /* AN EXACT ANSWER BEATS A DESCRIBED ONE.
+
+     The registry's `effect` is what this application can say about an
+     operation from the outside, and for a sale that includes columns it
+     declares unpredictable. A projection is the operation's own answer
+     about the same rows, so where there is one it is used instead, as
+     ordinary column values: the predictive reader then treats a sale
+     exactly as it treats a field write, because at that point it is
+     one. */
+  if (u.kind === 'invoke' && u.projection?.length) {
+    return {
+      kind: 'changes',
+      changes: u.projection.map((r) => ({
+        op: 'update' as const, table: r.table, id: r.id, set: r.set,
+      })),
+    };
+  }
   return u.kind === 'invoke'
     ? {
         kind: 'invoke',
@@ -396,7 +423,23 @@ export async function resolveProgramme(
           stepId: s.id,
         };
       }
-      units.push({ stepId: s.id ?? '?', kind: 'invoke', plan: resolved.plan });
+      /* WHAT IT WILL LEAVE BEHIND, ASKED OF THE OPERATION ITSELF.
+
+         Only where the capability says its result is knowable and the
+         store can answer. A projection reads and writes nothing, so
+         this is as safe on the preview pass as it is on the
+         confirmation, and it is the same call on both. */
+      const projected = await projectionOf(resolved.plan, opts.store);
+      if (projected && !projected.ok) {
+        return {
+          ok: false, reason: 'unresolved', why: projected.why, stepId: s.id,
+        };
+      }
+
+      units.push({
+        stepId: s.id ?? '?', kind: 'invoke', plan: resolved.plan,
+        ...(projected?.ok ? { projection: projected.rows } : {}),
+      });
       continue;
     }
 
@@ -550,6 +593,29 @@ export async function resolveProgramme(
  * Every step's resolution, in step order, so a plan whose second
  * mutation drifts is refused as surely as one whose first does.
  */
+/**
+ * The operation's own account of what it will do, where there is one.
+ *
+ * `null` when the capability does not claim its result is knowable, or
+ * when the store cannot answer. Both of those mean the registry's
+ * description stands, which for a sale means the columns it cannot work
+ * out are declared unknowable and a command asking to show them
+ * afterwards is refused rather than answered with the values from
+ * before. That is the old behaviour and it is still the right one when
+ * nothing better is available.
+ */
+async function projectionOf(
+  plan: InvokePlan, store: Store,
+): Promise<ProjectOutcome | null> {
+  const cap = capability(plan.capability);
+  if (!cap?.projects || !store.project) return null;
+  return store.project({
+    capability: plan.capability,
+    subjects: plan.subjects.map((s) => s.id),
+    args: plan.args,
+  });
+}
+
 export function programmeHash(units: Unit[]): string {
   const updates = units.filter((u): u is UpdateUnit => u.kind !== 'invoke');
   const invokes = units.filter((u): u is InvokeUnit => u.kind === 'invoke');
@@ -584,6 +650,15 @@ export function programmeHash(units: Unit[]): string {
       ...invokes.flatMap((u) => [
         `${u.stepId}:${u.plan.capability}`,
         ...Object.entries(u.plan.args).map(([k, v]) => `${u.stepId}:arg:${k}=${String(v)}`),
+        /* AND EXACTLY WHAT IT SAID IT WOULD DO.
+
+           A sale whose profit moved between the preview and the
+           confirmation projects a different commission, which changes
+           this hash, which means a fresh preview rather than a write.
+           Without it, drift in a value the operation COMPUTES would be
+           invisible to a check that only watches the values it reads. */
+        ...(u.projection ?? []).map(
+          (r) => `${u.stepId}:will:${r.table}:${r.id}=${JSON.stringify(r.set)}`),
       ]),
     ],
   );

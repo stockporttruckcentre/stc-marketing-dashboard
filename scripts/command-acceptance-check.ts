@@ -2360,30 +2360,94 @@ test('marking deals sold and exporting them exports them sold', async () => {
   ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
   if (!planned || !preview?.ok) return;
 
+  /* WHAT THE PREVIEW SAYS, BEFORE ANYTHING HAPPENS.
+
+     This used to be a refusal, and the refusal was honest: a sale
+     computes a commission from a rate the command layer cannot see, so
+     a file built beside it would have held the figure from before the
+     sale. The answer was not to guess the figure, and it was not to
+     refuse for ever. `command_sale_of` works it out, `command_mark_sold`
+     writes what it says, and the preview asks the same function without
+     the writes. */
+  const shown = preview.rows.map((r) => `${r.label}: ${r.before} -> ${r.after}`).join(' | ');
+  ok('the preview shows the commission the sale will raise',
+    /400/.test(shown), shown);
+  ok('and the unit going sold', /sold/.test(shown), shown);
+  ok('and nothing was written to show it', db.writes.length === 0,
+    JSON.stringify(db.writes).slice(0, 160));
+
   const done = await applyMutation({
     text, ...actor('admin'), store: postgrestStore(db.supabase),
     previewPlanHash: planned.planned.meaning.hash,
     previewProgrammeHash: preview.programmeHash,
   });
 
-  /* A SALE IS NOT PREDICTABLE ENOUGH TO EXPORT IN THE SAME BREATH.
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
 
-     The status, the price and the customer are. The commission is
-     computed from a rate this cannot see, and the dates come from the
-     deal rather than from the sentence. A trailer export shows those
-     columns, so the file would carry a stale figure next to a fresh
-     price, which is worse than no file. The whole thing is refused
-     BEFORE anything is written, and it names the column. */
-  ok('the whole thing is refused', !done.ok, 'it exported a stale sale');
-  if (!done.ok) {
-    ok('naming what it cannot work out in advance',
-      /order_date|commission|profit/.test(done.why), done.why);
-  }
-  ok('and the sale did not happen either',
-    db.tables.crm_contacts[0]?.status === 'quoted',
+  ok('the deal is sold', db.tables.crm_contacts[0]?.status === 'customer',
     String(db.tables.crm_contacts[0]?.status));
-  ok('nor the stock unit', db.tables.stock_trailers[0]?.status === 'in_stock',
+  ok('with the commission the preview showed',
+    db.tables.crm_contacts[0]?.commission === 400,
+    String(db.tables.crm_contacts[0]?.commission));
+  ok('and the stock unit went with it', db.tables.stock_trailers[0]?.status === 'sold',
     String(db.tables.stock_trailers[0]?.status));
+
+  /* THE FILE HOLDS THE SALE, NOT THE STATE BEFORE IT. */
+  const csv = asText(done.artefact.bytes);
+  const line = csv.split('\n').find((l) => l.includes('STC910001')) ?? '';
+  ok('the exported row is the unit that was sold', !!line, csv.slice(0, 200));
+  ok('and it says sold', /sold/i.test(line), line);
+  ok('at the price it went for', /20,?000/.test(line), line);
+  ok('with the profit on it', /4,?000/.test(line), line);
+  ok('and the order date the sale put on it', /2026/.test(line), line);
+  /* The customer is on the unit and is not a column this export
+     carries: the sentence was about trailers in stock, and the file
+     holds what the sentence talked about plus the figures. The write
+     itself is asserted above. */
+  ok('and the unit really carries the buyer',
+    db.tables.stock_trailers[0]?.customer === 'Dawson Group',
+    String(db.tables.stock_trailers[0]?.customer));
+});
+
+test('a sale whose numbers move between looking and agreeing is not written', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
+    ],
+    crm_contacts: [
+      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+        sale_price: 20000, profit: 4000, commission_rate: 0.1 },
+    ],
+  });
+  const text = 'mark all the in stock curtainsiders as sold';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  /* Somebody else changes the rate. Nothing the sentence reads has
+     moved: the price is the same, the profit is the same, the status is
+     the same. What has moved is a number the OPERATION computes from,
+     which is exactly the drift a check watching only the read values
+     cannot see. */
+  db.tables.crm_contacts[0].commission_rate = 0.2;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+
+  ok('confirming is refused', !done.ok, 'it wrote a commission nobody was shown');
+  ok('and the deal is untouched', db.tables.crm_contacts[0]?.status === 'quoted',
+    String(db.tables.crm_contacts[0]?.status));
+  ok('and the unit is still in stock', db.tables.stock_trailers[0]?.status === 'in_stock',
+    String(db.tables.stock_trailers[0]?.status));
+  if (!done.ok) {
+    ok('with a fresh preview to look at', !!done.preview, JSON.stringify(done).slice(0, 200));
+  }
 });
 
 test('marking deals sold on its own still sells them', async () => {

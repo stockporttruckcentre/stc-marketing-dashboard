@@ -30,7 +30,7 @@ import type { CommandPlanning } from '../plan';
 import type { Store, TransactionStep } from '../ir/store';
 import type { Cond, Emit, Expr, Plan, Select } from '../ir/types';
 import { entity as entityDef } from '../ir/registry';
-import { runSelect, selectBehind } from '../ir/read';
+import { fieldsInCond, runSelect, selectBehind } from '../ir/read';
 import { buildTable, type Artefact, type Table, type TableColumn } from '../render/table';
 import { renderCsv } from '../render/csv';
 import { renderXlsx } from '../render/xlsx';
@@ -202,9 +202,34 @@ function rowsBehind(
 
   const step = plan.steps.find((x) => x.id === from.step);
   const behind = selectBehind(plan, from);
-  const entity = (step && 'target' in step && (step as { target?: { entity?: string } }).target?.entity)
+  /* A write says which entity on the step itself. An operation does
+     not: it acts on the records its subject selection found, which is
+     what `selectBehind` walks back to.
+
+     This read `a && b in c && c.target?.entity ?? d`, and for an
+     operation the left half is `false` rather than undefined, so the
+     fallback never ran and every emit consuming an operation came back
+     with nothing. It then fell back to the ORIGINAL condition, which
+     for "mark these sold and export the result" is "the ones in stock",
+     which after the sale is none of them: an empty file, reported as a
+     successful export. */
+  const onTheStep = step && 'target' in step
+    ? (step as { target?: { entity?: string } }).target?.entity
+    : undefined;
+  const entity = onTheStep
     ?? (behind && 'entity' in behind.from ? (behind.from as { entity: string }).entity : null);
   if (!entity) return null;
+
+  /* AND THE COLUMNS THE SENTENCE TALKED ABOUT.
+
+     Which columns a file holds is derived partly from the condition,
+     which is right for an ordinary export and wrong here: reading by id
+     mentions nothing, so "mark the in stock curtainsiders sold and
+     export the result" produced a file with no status column, which is
+     the one column the sentence was about. The original condition's
+     fields are carried over so the file shows what changed. */
+  const named = new Set<string>();
+  if (behind?.where) fieldsInCond(behind.where, named);
 
   return {
     op: 'select',
@@ -214,6 +239,14 @@ function rowsBehind(
       of: { kind: 'field', of: { entity, field: 'id' } },
       values: ids.map((id) => ({ kind: 'literal' as const, value: id })),
     },
+    ...(named.size
+      ? {
+          select: [...named].map((f) => ({
+            as: f,
+            expr: { kind: 'field' as const, of: { entity, field: f } },
+          })),
+        }
+      : {}),
     /* The shaping the original selection asked for still applies: a
        file of "the five cheapest, moved to Hyde" is five rows. */
     ...(behind?.shape ? { shape: behind.shape } : {}),

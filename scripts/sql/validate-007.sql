@@ -2837,6 +2837,116 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST Chain%';
 DELETE FROM crm_lists WHERE name = 'TEST chain list';
 
 -- =============================================================
+-- 15g. What a sale will leave behind, before it happens
+--
+-- Migration 037. "Mark these sold and export the result" needs the
+-- exact post-state of a sale before the transaction, and the sale
+-- computes a commission from a rate the command layer cannot see.
+--
+-- The property asserted here is the one that matters: the projection
+-- and the sale are the same answer, because they are the same
+-- arithmetic. Not "close enough" and not "the same in this fixture":
+-- the row the projection describes is compared column by column with
+-- the row the sale writes.
+-- =============================================================
+\echo '--- what a sale will leave behind ---'
+
+SELECT reset_fixtures();
+
+INSERT INTO crm_contacts (id, company_name, list_id, status, source,
+                          stock_trailer_id, profit, sale_price, commission_rate)
+VALUES
+  ('f0000000-0000-0000-0000-000000000030', 'TEST projected buyer', test_global_list(),
+   'quoted', 'manual', '11111111-1111-1111-1111-111111111111', 4000, 24000, 0.15),
+  ('f0000000-0000-0000-0000-000000000031', 'TEST projected rival', test_global_list(),
+   'quoted', 'manual', '11111111-1111-1111-1111-111111111111', NULL, NULL, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE
+  projected JSONB;
+  after     JSONB;
+  writes    INTEGER;
+BEGIN
+  SELECT command_project_sale(
+    ARRAY['f0000000-0000-0000-0000-000000000030']::UUID[], 'DA', NULL, NULL, DATE '2026-08-14')
+  INTO projected;
+
+  PERFORM assert('a sale can say what it will do',
+    (projected ->> 'ok')::BOOLEAN, projected::TEXT);
+
+  -- The deal, the unit, and the rival chasing the same unit.
+  PERFORM assert('it names every row the sale touches',
+    jsonb_array_length(projected -> 'rows') = 3,
+    jsonb_array_length(projected -> 'rows')::TEXT);
+
+  PERFORM assert('with the commission the rate on the deal gives',
+    (SELECT r -> 'set' ->> 'commission' FROM jsonb_array_elements(projected -> 'rows') AS r
+      WHERE r ->> 'id' = 'f0000000-0000-0000-0000-000000000030')::NUMERIC = 600,
+    projected::TEXT);
+
+  PERFORM assert('and what those columns hold now, for the before',
+    (SELECT r -> 'was' ->> 'status' FROM jsonb_array_elements(projected -> 'rows') AS r
+      WHERE r ->> 'id' = 'f0000000-0000-0000-0000-000000000030') = 'quoted',
+    projected::TEXT);
+
+  -- NOTHING HAPPENED.
+  PERFORM assert('and nothing was written to work it out',
+    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000030') = 'quoted'
+    AND (SELECT status FROM stock_trailers WHERE id = '11111111-1111-1111-1111-111111111111') <> 'sold',
+    'the projection wrote something');
+
+  -- NOW DO IT, AND COMPARE.
+  PERFORM command_mark_sold_many(
+    ARRAY['f0000000-0000-0000-0000-000000000030']::UUID[], 'DA', NULL, NULL, DATE '2026-08-14');
+
+  SELECT jsonb_object_agg(k, to_jsonb(c.*) -> k) INTO after
+    FROM crm_contacts c,
+         LATERAL jsonb_object_keys(
+           (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
+             WHERE r ->> 'id' = 'f0000000-0000-0000-0000-000000000030')) AS k
+   WHERE c.id = 'f0000000-0000-0000-0000-000000000030';
+
+  PERFORM assert('the deal is exactly what was projected',
+    after = (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
+              WHERE r ->> 'id' = 'f0000000-0000-0000-0000-000000000030'),
+    after::TEXT);
+
+  SELECT jsonb_object_agg(k, to_jsonb(t.*) -> k) INTO after
+    FROM stock_trailers t,
+         LATERAL jsonb_object_keys(
+           (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
+             WHERE r ->> 'table' = 'stock_trailers')) AS k
+   WHERE t.id = '11111111-1111-1111-1111-111111111111';
+
+  PERFORM assert('and so is the stock unit',
+    after = (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
+              WHERE r ->> 'table' = 'stock_trailers'),
+    after::TEXT);
+
+  PERFORM assert('including the rival it said would be told',
+    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000031') = 'customer',
+    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000031'));
+END
+$$;
+
+-- A deal that is not there is named, not raised.
+DO $$
+DECLARE projected JSONB;
+BEGIN
+  SELECT command_project_sale(
+    ARRAY['99999999-9999-9999-9999-999999999999']::UUID[], 'DA', NULL, NULL, NULL)
+  INTO projected;
+  PERFORM assert('a deal that is not there is refused by name',
+    (projected ->> 'ok')::BOOLEAN = FALSE
+    AND projected -> 'refused' -> 0 ->> 'why' LIKE '%not there%',
+    projected::TEXT);
+END
+$$;
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST projected%';
+
+-- =============================================================
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
