@@ -502,6 +502,124 @@ export function fakeDb(tables: Record<string, Row[]>) {
       return { data: { id, status, author }, error: null };
     }
 
+    /* A site on a customer, and which one is the main one. */
+    if (name === 'command_add_address') {
+      if (!may('crm.edit')) {
+        return { data: null, error: { message: 'you do not have crm.edit' } };
+      }
+      const address = String(args.p_address ?? '').trim();
+      if (!address) {
+        return { data: null, error: { message: 'an address with nothing in it is not an address' } };
+      }
+      const who = (tables.crm_contacts ?? []).find((r) => String(r.id) === String(args.p_contact));
+      if (!who) return { data: null, error: { message: 'that customer is not there' } };
+
+      const rows = (tables.contact_addresses ??= []);
+      const id = `addr${rows.length + 1}`;
+      rows.push({
+        id, contact_id: args.p_contact, address,
+        label: args.p_label ?? 'Site', is_primary: args.p_primary === true,
+      });
+      writes.push({ table: 'contact_addresses', set: { address }, ids: [id] });
+      return { data: { id, customer: who.company_name, address }, error: null };
+    }
+
+    if (name === 'command_primary_address') {
+      if (!may('crm.edit')) {
+        return { data: null, error: { message: 'you do not have crm.edit' } };
+      }
+      const wanted = String(args.p_address ?? '').trim().toLowerCase();
+      const rows = (tables.contact_addresses ?? []).filter(
+        (r) => String(r.contact_id) === String(args.p_contact)
+          && (!wanted || String(r.address ?? '').toLowerCase().includes(wanted)
+            || String(r.label ?? '').toLowerCase().includes(wanted)),
+      );
+      if (!rows.length) {
+        return { data: null, error: { message: 'that customer has no address matching that' } };
+      }
+      if (rows.length > 1) {
+        return {
+          data: null,
+          error: { message: `${rows.length} addresses match that, so it is not clear which one` },
+        };
+      }
+      for (const r of (tables.contact_addresses ?? [])) {
+        if (String(r.contact_id) === String(args.p_contact)) r.is_primary = false;
+      }
+      rows[0].is_primary = true;
+      writes.push({ table: 'contact_addresses', set: { is_primary: true }, ids: [String(rows[0].id)] });
+      return { data: { id: rows[0].id }, error: null };
+    }
+
+    /* A link on the account. `links` is one JSON column holding a list,
+       which is why it is not a field somebody types at. */
+    if (name === 'command_add_link' || name === 'command_remove_link') {
+      if (!may('crm.edit')) {
+        return { data: null, error: { message: 'you do not have crm.edit' } };
+      }
+      const who = (tables.crm_contacts ?? []).find((r) => String(r.id) === String(args.p_contact));
+      if (!who) return { data: null, error: { message: 'that customer is not there' } };
+      const held = (who.links ?? []) as Record<string, unknown>[];
+
+      if (name === 'command_add_link') {
+        let url = String(args.p_url ?? '').trim();
+        if (!url) return { data: null, error: { message: 'a link with no address is not a link' } };
+        if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+        if (held.some((l) => String(l.url) === url)) {
+          return { data: null, error: { message: 'that link is already on the account' } };
+        }
+        const kind = /linkedin\./i.test(url) ? 'linkedin'
+          : /facebook\./i.test(url) ? 'facebook'
+            : /instagram\./i.test(url) ? 'instagram'
+              : /twitter\.|\/\/x\.com/i.test(url) ? 'x' : 'website';
+        who.links = [...held, {
+          id: `link${held.length + 1}`,
+          label: args.p_label ?? kind, url, kind,
+        }];
+        writes.push({ table: 'crm_contacts', set: { links: who.links }, ids: [String(who.id)] });
+        return { data: { url, kind }, error: null };
+      }
+
+      const which = String(args.p_which ?? '').trim().toLowerCase();
+      const hits = held.filter((l) => String(l.url ?? '').toLowerCase().includes(which)
+        || String(l.kind ?? '').toLowerCase() === which
+        || String(l.label ?? '').toLowerCase().includes(which));
+      if (!hits.length) {
+        return { data: null, error: { message: 'there is no link matching that on that account' } };
+      }
+      if (hits.length > 1) {
+        return {
+          data: null,
+          error: { message: `${hits.length} links match that, so it is not clear which one` },
+        };
+      }
+      who.links = held.filter((l) => l !== hits[0]);
+      writes.push({ table: 'crm_contacts', set: { links: who.links }, ids: [String(who.id)] });
+      return { data: { removed: hits[0].url }, error: null };
+    }
+
+    /* The same business, held twice. Links are flat. */
+    if (name === 'command_link_accounts') {
+      if (!may('crm.edit')) {
+        return { data: null, error: { message: 'you do not have crm.edit' } };
+      }
+      const rows = tables.crm_contacts ?? [];
+      const mine = rows.find((r) => String(r.id) === String(args.p_contact));
+      const theirs = rows.find((r) => String(r.id) === String(args.p_parent));
+      if (!mine || !theirs) {
+        return { data: null, error: { message: 'one of those accounts is not there' } };
+      }
+      if (theirs.parent_customer_id) {
+        return {
+          data: null,
+          error: { message: `${theirs.company_name} is already linked to another account` },
+        };
+      }
+      mine.parent_customer_id = theirs.id;
+      writes.push({ table: 'crm_contacts', set: { parent_customer_id: theirs.id }, ids: [String(mine.id)] });
+      return { data: { linked: mine.company_name, to: theirs.company_name }, error: null };
+    }
+
     /* The purchase ledger for work that happens outside the database.
        Claimed before somebody else's service is called, settled when it
        answers, and consulted first so a retry never buys twice. */
@@ -1135,6 +1253,36 @@ const PERFORMED: Record<string, {
       p_result: c.args.result ?? null,
       p_why: c.args.why ?? null,
     }),
+  },
+  'contact.addAddress': {
+    name: 'command_add_address',
+    args: (c) => ({
+      p_contact: c.subjects[0] ?? null,
+      p_address: c.args.address ?? null,
+      p_label: c.args.label ?? null,
+      p_primary: c.args.primary ?? false,
+    }),
+  },
+  'contact.primaryAddress': {
+    name: 'command_primary_address',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_address: c.args.address ?? null }),
+  },
+  'contact.addLink': {
+    name: 'command_add_link',
+    args: (c) => ({
+      p_contact: c.subjects[0] ?? null,
+      p_url: c.args.url ?? null,
+      p_label: c.args.label ?? null,
+      p_kind: null,
+    }),
+  },
+  'contact.removeLink': {
+    name: 'command_remove_link',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_which: c.args.which ?? null }),
+  },
+  'contact.link': {
+    name: 'command_link_accounts',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
   },
   'meeting.create': {
     name: 'command_create_meeting',

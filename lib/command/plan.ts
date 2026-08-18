@@ -385,6 +385,17 @@ function planOneClause(
      Dawson Group" contains a create word, and "put these on the
      tracker" contains a move word. Each of those would do a third of
      the job and say it had done all of it. */
+  /* A POST SOMEBODY HAS ALREADY WRITTEN IS THE MOST SPECIFIC READING
+     THERE IS.
+
+     Before the operations, because a post's own words are not the
+     sentence's grammar: "create a LinkedIn post saying "Our Haydock
+     depot is open Saturday"" contains the word depot, and the operation
+     reader read it as adding a site to a customer called "is open
+     Saturday". Content in quotes belongs to whatever asked for it. */
+  const written = readPost(text, opts);
+  if (written) return written;
+
   const operation = readOperation(text, opts);
   if (operation) return operation;
 
@@ -432,16 +443,6 @@ function planOneClause(
      the meeting is about, in any order and any of them absent. */
   const meeting = outbound ? null : readMeeting(text, opts);
   if (meeting) return meeting;
-
-  /* A POST SOMEBODY HAS ALREADY WRITTEN IS NOT A FORM TO OPEN.
-
-     "Create a LinkedIn post saying ..." carries the whole post, and
-     handing back a composer with the text pre-filled asks somebody to
-     type it twice. A sentence that names a topic rather than the words
-     still opens the composer, because a draft whose text is the topic
-     is worse than no draft. */
-  const post = outbound ? null : readPost(text, opts);
-  if (post) return post;
 
   /* A FILE ON THE REQUEST IS A FILE SOMEBODY MEANT TO IMPORT.
 

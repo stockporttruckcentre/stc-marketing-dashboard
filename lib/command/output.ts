@@ -24,6 +24,22 @@
    would have to be.
    ============================================================= */
 import type { Cond, Destination, Expr, Output } from './ir/types';
+import { TABLES } from './columns';
+
+/**
+ * Every value of every enum column this application writes.
+ *
+ * A destination whose recipient is one of these is not a destination:
+ * "send this post back to draft" is a status change. Derived from the
+ * schema rather than listed, so a new state cannot be read as a person
+ * the day somebody adds one.
+ */
+const STATE_WORDS: ReadonlySet<string> = new Set(
+  TABLES.flatMap((t) => t.columns)
+    .filter((c) => c.kind === 'enum')
+    .flatMap((c) => c.values ?? [])
+    .map((v) => v.toLowerCase().replace(/_/g, ' ')),
+);
 
 export type FileFormat = 'csv' | 'xlsx' | 'pdf' | 'docx';
 
@@ -255,6 +271,15 @@ function readDestinationClause(
     if (!tail || new RegExp(String.raw`^(?:an?\s+|the\s+)?(?:${formatAlternation})\b`, 'i').test(tail)) {
       continue;
     }
+
+    /* A STATE IS NOT A PERSON.
+
+       "Send this post back to draft" is a status change, and reading
+       "draft" as a recipient turned it into a share with somebody of
+       that name. Any value of any enum column this application writes is
+       a state, from the same dictionary the instruction reader narrows
+       on, so this needs no list of its own. */
+    if (STATE_WORDS.has(tail.toLowerCase().replace(/^(?:an?|the)\s+/, '').trim())) continue;
 
     const middle = m[2].trim();
     const rest = `${text.slice(0, m.index)} ${middle}`.replace(/\s+/g, ' ').trim();

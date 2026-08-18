@@ -356,6 +356,36 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_why: c.args.why ?? null,
     }),
   },
+  'contact.addAddress': {
+    name: 'command_add_address',
+    args: (c) => ({
+      p_contact: c.subjects[0] ?? null,
+      p_address: c.args.address ?? null,
+      p_label: c.args.label ?? null,
+      p_primary: c.args.primary ?? false,
+    }),
+  },
+  'contact.primaryAddress': {
+    name: 'command_primary_address',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_address: c.args.address ?? null }),
+  },
+  'contact.addLink': {
+    name: 'command_add_link',
+    args: (c) => ({
+      p_contact: c.subjects[0] ?? null,
+      p_url: c.args.url ?? null,
+      p_label: c.args.label ?? null,
+      p_kind: null,
+    }),
+  },
+  'contact.removeLink': {
+    name: 'command_remove_link',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_which: c.args.which ?? null }),
+  },
+  'contact.link': {
+    name: 'command_link_accounts',
+    args: (c) => ({ p_contact: c.subjects[0] ?? null, p_parent: c.args.parent ?? null }),
+  },
   'meeting.create': {
     name: 'command_create_meeting',
     args: (c) => ({

@@ -427,9 +427,36 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
       && Object.keys(best.field.vocabulary).some((w) => w === alias || w.startsWith(alias));
     const aliasIsInDestination = destination.includes(` ${alias} `);
 
-    if (namesAValue || aliasIsInDestination) {
+    /* AN ALIAS THAT OPENS THE SENTENCE IS THE VERB.
+
+       "Make" is the trailer's manufacturer column and it is also how
+       people say "set". "Make this meeting private" matched the column,
+       could find no value for it, and came back as nothing at all. A
+       marking verb at the front of a sentence is what somebody is doing,
+       not what they are naming. */
+    const opensAsVerb = MARK_WORDS.includes(alias)
+      && soften(beforeColon).trimStart().startsWith(`${alias} `);
+
+    if (namesAValue || aliasIsInDestination || opensAsVerb) {
       const destinationField = destinationState();
       if (destinationField && destinationField.field.key !== best.field.key) return destinationField;
+
+      /* With no destination half there is still a state in there. Same
+         rule as the block below, reached earlier because an alias
+         happened to match the verb. */
+      if (opensAsVerb) {
+        let hit: { field: WritableField; alias: string } | null = null;
+        for (const f of WRITABLE_FIELDS) {
+          if (f.kind !== 'enum' || !f.vocabulary) continue;
+          if (caps && !caps.has(f.capability)) continue;
+          if (!mentionsEntity(t, f.entity)) continue;
+          for (const word of Object.keys(f.vocabulary)) {
+            if (!fuzzyContains(t, word)) continue;
+            if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
+          }
+        }
+        if (hit) return hit;
+      }
     }
     return best;
   }
@@ -488,6 +515,9 @@ const MARK_WORDS = [
      were falling through to the query engine and being answered as
      questions. */
   'sell', 'sold', 'approve', 'approving', 'sign off', 'publish', 'schedule', 'scrap',
+  /* The other two things that happen to a post. Both are buttons on the
+     planner and neither had a word. */
+  'submit', 'reject', 'send back', 'knock back',
 ];
 
 /** Words that say which table a sentence is about. */

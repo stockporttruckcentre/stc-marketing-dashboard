@@ -95,6 +95,13 @@ const POST_STATUS: Record<string, string> = {
   unreviewed: 'pending_review', 'not approved': 'pending_review',
   approved: 'approved', 'signed off': 'approved', ok: 'approved',
   approve: 'approved', approving: 'approved', 'sign off': 'approved',
+  /* The two buttons on the planner that had no words. A post goes for
+     approval and comes back from it, and both were reachable by
+     clicking and by nothing anybody could type. */
+  submit: 'pending_review', submitted: 'pending_review',
+  'for review': 'pending_review', 'send for approval': 'pending_review',
+  reject: 'draft', rejected: 'draft', 'send back': 'draft', 'sent back': 'draft',
+  'back to draft': 'draft', 'knock back': 'draft',
   scheduled: 'scheduled', queued: 'scheduled',
   posted: 'posted', published: 'posted', live: 'posted',
 };

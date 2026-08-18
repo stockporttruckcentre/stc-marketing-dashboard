@@ -2107,6 +2107,138 @@ DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
 DELETE FROM crm_lists WHERE name = 'TEST import list';
 
 -- =============================================================
+-- 15a. The parts of a customer that are not columns on it
+--
+-- Migration 029. Sites, links and twinned accounts, all of which had
+-- buttons and no words.
+-- =============================================================
+\echo '--- customer details ---'
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST detail%';
+INSERT INTO crm_contacts (id, company_name, status, source, relationship)
+VALUES ('a4444444-0000-0000-0000-000000000001', 'TEST detail one', 'lead', 'manual', 'prospect'),
+       ('a4444444-0000-0000-0000-000000000002', 'TEST detail two', 'lead', 'manual', 'prospect')
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_add_address('a4444444-0000-0000-0000-000000000001',
+    '4 Ashton Road, Hyde', 'Yard', FALSE) INTO out;
+  PERFORM assert('a site is added', (out ->> 'id') IS NOT NULL, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a site is added', FALSE, SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_add_address('a4444444-0000-0000-0000-000000000001',
+    '9 Bredbury Way', 'Depot', FALSE);
+  PERFORM command_primary_address('a4444444-0000-0000-0000-000000000001', 'Bredbury');
+  PERFORM assert('one of them becomes the main one', TRUE);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('one of them becomes the main one', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and only one is',
+  (SELECT COUNT(*) FROM contact_addresses
+    WHERE contact_id = 'a4444444-0000-0000-0000-000000000001' AND is_primary) = 1,
+  (SELECT COUNT(*)::TEXT FROM contact_addresses
+    WHERE contact_id = 'a4444444-0000-0000-0000-000000000001' AND is_primary));
+
+DO $$
+BEGIN
+  PERFORM command_primary_address('a4444444-0000-0000-0000-000000000001', '');
+  PERFORM assert('a reference that fits two addresses is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a reference that fits two addresses is refused',
+    SQLERRM LIKE '%not clear which one%', SQLERRM);
+END
+$$;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_add_link('a4444444-0000-0000-0000-000000000001',
+    'linkedin.com/company/test', NULL, NULL) INTO out;
+  PERFORM assert('a link is added', out ->> 'kind' = 'linkedin', out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a link is added', FALSE, SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_add_link('a4444444-0000-0000-0000-000000000001',
+    'https://linkedin.com/company/test', NULL, NULL);
+  PERFORM assert('the same link twice is refused', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('the same link twice is refused', SQLERRM LIKE '%already on the account%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_remove_link('a4444444-0000-0000-0000-000000000001', 'linkedin');
+  PERFORM assert('and it can be taken off again', TRUE);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('and it can be taken off again', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('leaving none behind',
+  (SELECT jsonb_array_length(COALESCE(links, '[]'::JSONB)) FROM crm_contacts
+    WHERE id = 'a4444444-0000-0000-0000-000000000001') = 0,
+  (SELECT links::TEXT FROM crm_contacts WHERE id = 'a4444444-0000-0000-0000-000000000001'));
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_link_accounts('a4444444-0000-0000-0000-000000000002',
+    'a4444444-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('two accounts are linked', out ->> 'to' = 'TEST detail one', out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('two accounts are linked', FALSE, SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  PERFORM command_link_accounts('a4444444-0000-0000-0000-000000000001',
+    'a4444444-0000-0000-0000-000000000001');
+  PERFORM assert('an account cannot be linked to itself', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an account cannot be linked to itself', SQLERRM LIKE '%to itself%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_add_address('a4444444-0000-0000-0000-000000000001', 'Anywhere', NULL, FALSE);
+  PERFORM assert('a viewer adds nothing', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer adds nothing', SQLERRM LIKE '%crm.edit%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST detail%';
+
+-- =============================================================
 -- 15b. Paid work that is bought once
 --
 -- Migration 027. Lusha cannot join a transaction, so the purchase is

@@ -3458,6 +3458,86 @@ test('a stock updater may attach to a trailer and not to a customer', async () =
     JSON.stringify(crmOnTrailer?.availability.missingPermissions));
 });
 
+/* =============================================================
+   33. The parts of a customer that are not columns on it
+
+   A site, a link, and the same business held as two accounts. All three
+   have had buttons in the drawer since it was built and no words at
+   all.
+   ============================================================= */
+
+const CUSTOMER = { record: { entity: 'contacts', id: 'c1' } };
+
+test('a site is added to a customer', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead', links: [] }],
+    contact_addresses: [],
+  });
+  const text = 'add a site to this customer at 4 Ashton Road Hyde';
+
+  const planned = await planAndPreview({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: CUSTOMER, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: CUSTOMER,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  const site = (db.tables.contact_addresses ?? [])[0];
+  ok('and the address is on the account',
+    String(site?.address ?? '').includes('4 Ashton Road'), String(site?.address));
+});
+
+test('a link is added to a customer and read for what it is', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead', links: [] }],
+  });
+  const text = 'add their linkedin profile to this account linkedin.com/company/dawson';
+
+  const planned = await planAndPreview({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: CUSTOMER, preview: true,
+  });
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, capabilities: [...capabilitiesFor({ role: 'sales' } as never)],
+    vocabulary: async () => EMPTY_VOCABULARY,
+    store: postgrestStore(db.supabase), context: CUSTOMER,
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it goes through', done.ok, done.ok ? '' : done.why);
+  const links = ((db.tables.crm_contacts ?? [])[0]?.links ?? []) as { url: string; kind: string }[];
+  ok('the link is on the account', links.length === 1, JSON.stringify(links));
+  ok('and it knows what kind it is', links[0]?.kind === 'linkedin', JSON.stringify(links));
+});
+
+test('a viewer cannot add a site or a link', async () => {
+  const viewer = [...capabilitiesFor({ role: 'viewer' } as never)];
+  for (const text of [
+    'add a site to this customer at 4 Ashton Road Hyde',
+    'add their linkedin profile to this account linkedin.com/company/dawson',
+  ]) {
+    const planning = planCommand(text, { actorCapabilities: viewer, context: CUSTOMER });
+    const writes = planning?.plan.steps.some((s) => s.op === 'invoke') ?? false;
+    ok(`it is not offered: ${text.slice(0, 24)}`, !writes,
+      JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+  }
+});
+
 /* ============================================================= */
 
 async function main() {

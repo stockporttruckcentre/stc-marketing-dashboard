@@ -65,6 +65,14 @@ const OPERATIONS: {
     /** Used when the sentence names none of them. */
     fallback: string;
   };
+  /**
+   * An input that is simply the rest of the sentence.
+   *
+   * An address, a URL, a name: things nobody can enumerate and nobody
+   * would want to. Everything after the word that named the operation,
+   * with the record it is about taken out.
+   */
+  tail?: { key: string; after: string[]; kind?: 'url' };
 }[] = [
   {
     capability: 'stock.sendToTracker',
@@ -98,6 +106,44 @@ const OPERATIONS: {
          default side. */
       fallback: 'trailer_sales',
     },
+  },
+  {
+    capability: 'contact.addAddress',
+    entity: 'contacts',
+    verbs: ['add', 'put', 'record', 'register', 'create', 'new'],
+    objects: ['site', 'sites', 'address', 'addresses', 'depot', 'yard', 'premises'],
+    label: (n, what) => `Add a site to ${what}`,
+    /* Everything after the object word is the address itself. */
+    tail: { key: 'address', after: ['site', 'address', 'depot', 'yard', 'premises'] },
+  },
+  {
+    capability: 'contact.primaryAddress',
+    entity: 'contacts',
+    verbs: ['make', 'set', 'mark'],
+    objects: ['main address', 'primary address', 'head office', 'main site',
+              'primary site', 'registered address'],
+    label: (n, what) => `Make that the main address on ${what}`,
+    tail: { key: 'address', after: ['main address', 'primary address', 'head office'] },
+  },
+  {
+    capability: 'contact.addLink',
+    entity: 'contacts',
+    verbs: ['add', 'put', 'attach', 'record', 'save'],
+    objects: ['link', 'links', 'website', 'web site', 'linkedin', 'linkedin profile',
+              'facebook', 'instagram', 'twitter', 'url'],
+    label: (n, what) => `Add a link to ${what}`,
+    /* A link is recognisable by shape rather than by position: "add
+       their linkedin profile to this account linkedin.com/company/x"
+       has the word twice and only one of them is the address. */
+    tail: { key: 'url', after: [], kind: 'url' },
+  },
+  {
+    capability: 'contact.removeLink',
+    entity: 'contacts',
+    verbs: ['remove', 'delete', 'take off', 'drop', 'get rid of'],
+    objects: ['link', 'links', 'website', 'linkedin', 'facebook', 'instagram'],
+    label: (n, what) => `Take a link off ${what}`,
+    tail: { key: 'which', after: ['link', 'website', 'linkedin', 'facebook', 'instagram'] },
   },
   {
     capability: 'contact.enrich',
@@ -172,6 +218,50 @@ function companyIn(raw: string, objects: string[]): string | null {
   return null;
 }
 
+/**
+ * Everything after the word that named the operation.
+ *
+ * The connecting words in front of it go, and so does the record's own
+ * name when the sentence gave one, because "add a site to Dawson Group
+ * at 4 Ashton Road" names the customer and the address in one breath.
+ */
+/**
+ * The address in a sentence, by its shape.
+ *
+ * A link is recognisable rather than positional. Deliberately narrow:
+ * something with a dot and a domain-looking end, so "4 Ashton Road" and
+ * "e.g." are not links.
+ */
+function urlIn(raw: string): string | null {
+  const m = raw.match(/\b(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s,;]*)?/i);
+  if (!m) return null;
+  const url = m[0].replace(/[.,;]+$/, '');
+  return url.length >= 4 ? url : null;
+}
+
+function tailOf(raw: string, after: string[], named: string | null): string | null {
+  let best: string | null = null;
+  for (const word of after) {
+    const at = raw.toLowerCase().lastIndexOf(word);
+    if (at < 0) continue;
+    const rest = raw.slice(at + word.length)
+      .replace(/^\s*(?:for|on|to|of|at|is|as|:|,)\s*/i, ' ')
+      .trim();
+    if (rest.length >= 3 && (!best || rest.length < best.length)) best = rest;
+  }
+  if (!best) return null;
+
+  let out = best;
+  if (named) {
+    out = out.replace(new RegExp(named.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');
+  }
+  out = out.replace(/^\s*(?:for|on|to|of|at|is|as|:|,|and)\s*/i, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[.,;]+$/, '')
+    .trim();
+  return out.length >= 3 ? out : null;
+}
+
 export function parseOperation(
   raw: string,
   caps: CrmCapabilities | undefined,
@@ -212,6 +302,18 @@ export function parseOperation(
 
     /* The declared input, read out of the sentence. */
     const args: Record<string, Expr> = {};
+
+    /* An input that is the rest of the words. Taken from after the word
+       that named the operation, with the customer's own name removed so
+       "add a site to Dawson Group at 4 Ashton Road" does not file the
+       company name as part of the address. */
+    if (op.tail) {
+      const said = op.tail.kind === 'url'
+        ? urlIn(raw)
+        : tailOf(raw, op.tail.after, named);
+      if (!said) continue;
+      args[op.tail.key] = { kind: 'literal', value: said };
+    }
     if (op.argument) {
       const said = op.argument.values
         .flatMap((v) => v.words.map((w) => ({ value: v.value, w })))
