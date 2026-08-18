@@ -273,7 +273,13 @@ function planProgramme(
     const last = one.plan.steps[one.plan.steps.length - 1];
     const entity = last && 'target' in last ? (last as { target: { entity: string } }).target.entity
       : last && last.op === 'select' && 'entity' in last.from ? last.from.entity
-        : last && last.op === 'invoke' ? entityBehind(last.subject) ?? prior?.entity
+        : last && last.op === 'invoke'
+          /* The records it RAN ON, where it ran on any: "mark these as
+             sold and export the result" is about the units. An
+             operation that makes rows has no subject at all, and what
+             it leaves behind is what it says it produces: the finder
+             hands the next clause the companies it found. */
+          ? entityBehind(last.subject) ?? entityOfProduces(last.produces) ?? prior?.entity
           : one.select && 'entity' in one.select.from ? one.select.from.entity
             : prior?.entity;
     if (entity) prior = { entity };
@@ -365,6 +371,14 @@ function attachTarget(
     };
   }
   return null;
+}
+
+/** The entity a step says it produces, where the shape has one. */
+function entityOfProduces(p: unknown): string | undefined {
+  if (!p || typeof p !== 'object') return undefined;
+  const kind = (p as { kind?: string }).kind;
+  if (kind !== 'rows' && kind !== 'record' && kind !== 'series') return undefined;
+  return (p as { entity?: string }).entity;
 }
 
 /** The entity a source names, however it names it. */
@@ -502,6 +516,17 @@ function planOneClause(
 
   const lifecycle = outbound ? null : readLifecycle(text, opts);
   if (lifecycle) return lifecycle;
+
+  /* A CLAUSE THAT TAKES ITS RECORDS FROM THE CLAUSE BEFORE.
+
+     "Reject this post and send it back to draft" says the same thing
+     twice, and the second half names no record. Read here rather than
+     with the other writes above, because the readers in between have
+     better claims on some of those sentences: "put them on Fleet
+     Prospects" is a list, and read as a write it is a column called
+     relationship set to the word "prospect". */
+  const carried = outbound ? null : readInstruction(text, opts, true);
+  if (carried) return carried;
 
   /* WHAT COMES OUT IS NOT PART OF THE QUESTION.
 
@@ -737,6 +762,17 @@ function planOneClause(
 function readInstruction(
   text: string,
   opts?: PlanOptions,
+  /**
+   * Read a clause that takes its records from the clause before.
+   *
+   * Off by default, and tried once every other reader has had its turn.
+   * A clause pointing back is not less certain for not repeating the
+   * records, so the bar comes down by what naming them is worth; but a
+   * bar that low would also let "put them on Fleet Prospects" through
+   * as a change to a column called relationship, and that clause has a
+   * better reading further down. Held back rather than weakened.
+   */
+  pointing = false,
 ): CommandPlanning | null {
   if (!opts?.actorCapabilities) return null;
   if (text.trim().length < 4) return null;
@@ -744,11 +780,44 @@ function readInstruction(
   const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
   const edit: EditPlan | null = parseEdit(
     text, caps, opts.vocabulary, opts.context ?? EMPTY_CONTEXT,
+    /* What a clause with no noun of its own is about: what the clause
+       before was about, or what the screen has open. Only on the last
+       chance pass, because it widens what the field reader will match
+       and the readers in between have better claims on some of those
+       sentences. */
+    pointing ? opts.priorResult?.entity ?? opts.context?.record?.entity : undefined,
   );
   if (!edit) return null;
-  if (edit.missing.length > 0 || edit.confidence < INSTRUCTION_THRESHOLD) return null;
 
-  const { plan } = adaptEditPlan(edit);
+  /* A CLAUSE THAT POINTS BACK IS NOT MISSING ITS RECORDS.
+
+     "Reject this post and send it back to draft" says the same thing
+     twice, which is how people talk: the second half describes the
+     STATE the first half puts it in. Read alone it names no record, so
+     the instruction reader declined and the clause fell through to the
+     question engine, which took "send" and "back" as words it could not
+     match and refused the whole sentence.
+
+     The records are the ones the clause before produced, and the
+     composer wires them in: a write is a step that can consume, and its
+     own match is replaced by the earlier rows. So a target is only
+     missing here when there is no clause in front of this one. */
+  const pointsBack = pointing && !!opts.priorResult && edit.missing.includes('target');
+  const missing = pointsBack
+    ? edit.missing.filter((m) => m !== 'target')
+    : edit.missing;
+
+  /* AND IT IS NOT LESS SURE FOR NOT REPEATING THEM.
+
+     Confidence pays two points for a record the sentence names. A
+     clause that points back has its records from the clause before,
+     which is at least as certain as a name typed into this half, so the
+     bar it has to clear comes down by exactly those two points rather
+     than the score being invented upwards. */
+  const bar = pointsBack ? INSTRUCTION_THRESHOLD - 2 : INSTRUCTION_THRESHOLD;
+  if (missing.length > 0 || edit.confidence < bar) return null;
+
+  const { plan } = adaptEditPlan(edit, { rowsFromEarlier: pointsBack });
 
   return {
     text,

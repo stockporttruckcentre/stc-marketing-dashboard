@@ -132,6 +132,15 @@ export const SET_WORDS = [
 /** Empty it. */
 export const CLEAR_WORDS = [
   'clear', 'blank', 'wipe', 'empty', 'unset', 'reset', 'remove the', 'delete the', 'take out',
+  /* GIVING SOMETHING UP IS EMPTYING A COLUMN.
+
+     "Take this account off me", "unassign it", "put it back in the
+     unassigned pool". Nobody says "clear the owner", and every one of
+     these was read as something else: "take ... off" is the shape of a
+     subtraction, so a text column came out as a reduction of nothing.
+     A clear outranks the split subtraction, which is what makes these
+     land. */
+  'unassign', 'unassigned', 'off me', 'off my', 'remove me from', 'release',
 ];
 
 /**
@@ -345,7 +354,9 @@ export const MOVE_WORDS = ['move', 'relocate', 'shift', 'transfer', 'park', 'par
                     'stored', 'send', 'put', 'stick', 'place', 'drop', 'bring'];
 
 /** The field being written, longest alias first so "refurb at sale" beats "refurb". */
-function findField(text: string, caps?: CrmCapabilities): { field: WritableField; alias: string } | null {
+function findField(
+  text: string, caps?: CrmCapabilities, assumed?: string,
+): { field: WritableField; alias: string } | null {
   /* Anything after a colon is the value, not the field. Without this
      cut, "add a note to Dawson: chasing tyre quote" was filed under
      Tread depths, because "tyres" is one of its words and it is a longer
@@ -373,7 +384,7 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
       if (caps && !caps.has(f.capability)) continue;
       /* The entity comes from the whole sentence, since that is where
          the noun is. Only the VALUE has to be in the destination. */
-      if (!mentionsEntity(t, f.entity)) continue;
+      if (!mentionsEntity(t, f.entity, assumed)) continue;
       for (const word of Object.keys(f.vocabulary)) {
         if (!fuzzyContains(destination, word)) continue;
         if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
@@ -449,7 +460,7 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
         for (const f of WRITABLE_FIELDS) {
           if (f.kind !== 'enum' || !f.vocabulary) continue;
           if (caps && !caps.has(f.capability)) continue;
-          if (!mentionsEntity(t, f.entity)) continue;
+          if (!mentionsEntity(t, f.entity, assumed)) continue;
           for (const word of Object.keys(f.vocabulary)) {
             if (!fuzzyContains(t, word)) continue;
             if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
@@ -459,6 +470,34 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
       }
     }
     return best;
+  }
+
+  /* OWNERSHIP IS NEVER SAID BY NAMING THE COLUMN.
+
+     "Take this account off me", "unassign it", "put it back in the
+     unassigned pool", "hand it over to Dave". One field, and not one of
+     those sentences contains the words "assigned to". They came back as
+     nothing at all, which is worse than a refusal: the account stayed
+     in somebody's name and the bar said it had not understood.
+
+     The same shape as the depot rule below: a word that can only be
+     about this field names it. */
+  const owning = OWNER_WORDS.some((w) => fuzzyContains(t, w))
+    /* "Give it to Dave", "hand this over to Sam". English puts the
+       record in the middle of the verb, which is why this is a shape
+       rather than a phrase. Not when the sentence opens by asking for
+       something: "give me a list of customers" is a question. */
+    || (GIVE_TO.test(t) && !/^\s*(?:give|show|send|get) me\b/i.test(beforeColon));
+  if (owning) {
+    const owner = WRITABLE_FIELDS.find(
+      (f) => f.key === 'assigned_to' && f.entity === 'contacts');
+    if (owner && (!caps || caps.has(owner.capability))) {
+      /* The field's own name, which is NOT in the sentence. The alias
+         is stripped out before the operation is read, and reporting the
+         words that carried the meaning would take "off me" out and
+         leave a set with no value. */
+      return { field: owner, alias: 'owner' };
+    }
   }
 
   /* Some sentences name the field by naming the value. "Move STC143980
@@ -489,7 +528,7 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
       if (f.kind !== 'enum' || !f.vocabulary) continue;
       if (caps && !caps.has(f.capability)) continue;
       // Only where the sentence is plausibly about this entity.
-      if (!mentionsEntity(t, f.entity)) continue;
+      if (!mentionsEntity(t, f.entity, assumed)) continue;
       for (const word of Object.keys(f.vocabulary)) {
         if (!fuzzyContains(t, word)) continue;
         if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
@@ -499,6 +538,33 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
   }
   return null;
 }
+
+/**
+ * Words that can only be about who an account belongs to.
+ *
+ * Both directions, because taking an account on and giving one up are
+ * the same column. Deliberately not "assign" on its own: that is
+ * already an alias of the field and is handled where every other alias
+ * is, and listing it here would take sentences off the reader that
+ * knows how to find the person's name in them.
+ */
+/**
+ * A word that points, with or without a noun behind it.
+ *
+ * Only consulted once the column is known and the screen has a record
+ * of that column's own entity open, which is what makes the missing
+ * noun safe to supply.
+ */
+const POINTS_AT_SOMETHING = /\b(?:this|that|it|these|those|here)\b/i;
+
+const GIVE_TO = /\b(?:give|giving|hand|handing|pass|passing|allocate|allocating|transfer|transferring)\b[^.]{0,24}?\bto\b/i;
+
+const OWNER_WORDS = [
+  'unassign', 'unassigned', 'off me', 'off my', 'remove me from',
+  'my portfolio', 'my accounts', 'my list', 'my patch',
+  'hand over', 'handover', 'hand it over', 'pass it to', 'take it on',
+  'take this on', 'pick it up', 'release',
+];
 
 /** Words that point at what is on the screen rather than at a column. */
 const POINTING = ['this', 'that', 'these', 'those', 'the current', 'the open'];
@@ -539,11 +605,21 @@ const ENTITY_WORDS: Record<WritableEntity, string[]> = {
              'visit', 'visits', 'diary', 'event', 'events'],
 };
 
-function mentionsEntity(softened: string, entity: WritableEntity): boolean {
+function mentionsEntity(
+  softened: string, entity: WritableEntity, assumed?: string,
+): boolean {
   if (ENTITY_WORDS[entity].some((w) => softened.includes(` ${w} `))) return true;
   // A stock reference names a trailer without using any of those words.
   if (entity === 'trailers') return /\bstc[\s\-_]?\d{3,8}\b/i.test(softened);
-  return false;
+  /* OR THE SENTENCE IS ABOUT WHAT IS IN FRONT OF THEM.
+
+     "Send it back to draft" names a state and no noun, because the noun
+     was in the clause before or is on the screen. Without this the
+     state hunt below had no entity to look in and the sentence came
+     back as nothing at all, which is how "reject this post and send it
+     back to draft" refused a sentence whose first half it had already
+     understood. */
+  return assumed === entity;
 }
 
 /** set, add, subtract or clear, from the words around it. */
@@ -651,11 +727,25 @@ export function parseEdit(
   caps?: CrmCapabilities,
   vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
   context: CommandContext = EMPTY_CONTEXT,
+  /**
+   * The entity a clause is about when it does not say.
+   *
+   * "Send it back to draft" is the second half of a sentence and names
+   * no noun. The caller knows what the first half was about, or what
+   * the screen has open, and passes it. It only ever WIDENS what can be
+   * read: a sentence naming its own entity is unaffected.
+   */
+  assume?: string,
 ): EditPlan | null {
   const raw = input.trim();
   if (raw.length < 4) return null;
 
-  const field = findField(raw, caps);
+  /* The caller decides, and only ever for a clause every other reader
+     has already declined. Reading it off the context here would widen
+     every sentence typed on a screen with a record open: "put them on
+     Fleet Prospects" is a list, and read against an open customer it is
+     a column called relationship set to the word "prospect". */
+  const field = findField(raw, caps, assume);
   if (!field) return null;
 
   // A question is not an instruction. "How much is the refurb on STC1"
@@ -792,9 +882,24 @@ export function parseEdit(
     valueLabel = formatMoney(value);
   }
 
+  /* TAKING SOMETHING OFF A COLUMN THAT CANNOT COUNT IS EMPTYING IT.
+
+     "Take the owner off this account" came out as setting the owner to
+     the word "off": the verb reads as a subtraction, a name cannot be
+     subtracted from, and turning that into a set left the preposition
+     standing where the value should be. Nothing can be taken off a name
+     except the name, so this is a clear, and a clear on a column that
+     may not be emptied is refused by the rule that already exists for
+     that. */
+  if (op === 'subtract' && spec.kind !== 'money' && spec.kind !== 'number') {
+    op = spec.clearable ? 'clear' : 'set';
+    /* The preposition is not a value. A clear writes nothing, and
+       leaving "off" here would put it in the preview. */
+    if (op === 'clear') { value = null; valueLabel = ''; }
+  }
+
   // Adding to something that cannot be added to is just setting it.
   if ((op === 'add' || op === 'subtract') && !spec.arithmetic) op = 'set';
-  if (op === 'subtract' && spec.kind !== 'money' && spec.kind !== 'number') op = 'set';
 
   /* Which records. All of them, because "mark STC143580 and 144504 as
      sold" is two units and doing one of them silently is a bug that
@@ -850,7 +955,19 @@ export function parseEdit(
        resolved to a name could never match a record nobody was looking
        at. Read before the described set, because "these" is not a
        description of anything. */
-    const pointed = readContextReference(raw);
+    const pointed = readContextReference(raw)
+      /* A POINTING WORD WITH NO NOUN, WHEN THE FIELD SAYS WHICH NOUN.
+
+         "Put this back in the unassigned pool" points at something and
+         never says what. On its own that is not enough, which is why
+         `readContextReference` wants a noun: "set this to Bredbury" is
+         a sentence with a missing value rather than one about a
+         trailer. Here the column has already been identified, so the
+         entity is known, and the screen has a record of exactly that
+         kind open. That is the noun, in the only place it could be. */
+      ?? (context.record?.entity === spec.entity && POINTS_AT_SOMETHING.test(raw)
+        ? { kind: 'record' as const, words: 'this', expect: 'one' as const }
+        : null);
     const fromScreen = pointed ? resolveContext(pointed, context, spec.entity) : null;
     if (fromScreen) {
       match = fromScreen.match;

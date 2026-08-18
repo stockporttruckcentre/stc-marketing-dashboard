@@ -122,16 +122,53 @@ export type AdaptedEdit = {
   lost: Unmet[];
 };
 
-export function adaptEditPlan(p: EditPlan): AdaptedEdit {
+export function adaptEditPlan(
+  p: EditPlan,
+  opts: {
+    /**
+     * The rows come from the clause before this one.
+     *
+     * "Reject this post and send it back to draft" says the same thing
+     * twice, and the second half names no record because the first half
+     * already did. The composer wires the earlier rows into this step's
+     * `match`, so a clause with no rows of its own is not an
+     * instruction with a missing record: it is an instruction whose
+     * record is somewhere else in the sentence.
+     */
+    rowsFromEarlier?: boolean;
+  } = {},
+): AdaptedEdit {
   const entity = p.entity;
   const lost: Unmet[] = [];
-  const unmet: Unmet[] = (p.missing ?? []).map((part) => ({
-    part,
-    why: part === 'target' ? 'the instruction did not say which record'
-      : 'the instruction did not say what to change it to',
-  }));
+  const unmet: Unmet[] = (p.missing ?? [])
+    .filter((part) => !(part === 'target' && opts.rowsFromEarlier))
+    .map((part) => ({
+      part,
+      why: part === 'target' ? 'the instruction did not say which record'
+        : 'the instruction did not say what to change it to',
+    }));
 
-  const match = matchFor(entity, p.match);
+  const match = matchFor(entity, p.match)
+    /* A MATCH THAT IS ABOUT TO BE REPLACED, AND MATCHES NOTHING UNTIL
+       IT IS.
+
+       An empty `in` rather than no condition at all. The composer puts
+       the earlier clause's rows here, and if anything ever failed to,
+       this update touches zero rows and the database refuses it for
+       changing the wrong number. The other candidate, leaving the match
+       off, means EVERY row of the table. */
+    ?? (opts.rowsFromEarlier
+      ? {
+          op: 'select' as const,
+          from: { entity },
+          where: {
+            kind: 'in' as const,
+            of: { kind: 'field' as const, of: { entity, field: 'id' } },
+            values: [],
+          },
+          produces: { kind: 'rows' as const, entity },
+        }
+      : null);
 
   /* A discrete business operation, not a column.
      Selling raises a commission line, flips the stock unit and tells

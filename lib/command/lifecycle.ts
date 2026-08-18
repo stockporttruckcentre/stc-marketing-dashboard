@@ -195,6 +195,29 @@ function writableFor(entityId: string, title: string) {
  * uuid in the plan, and a list renamed between the preview and the
  * confirmation could then end up with somebody's customers on it.
  */
+/**
+ * The list a clause names, either way round.
+ *
+ * "Onto the Fleet Prospects list" and "onto the list called Fleet
+ * Prospects" are the same list.
+ *
+ * A NAME CANNOT START WITH A WORD THAT POINTS.
+ *
+ * "Add their LinkedIn profile to this account" ends in the same shape a
+ * destination does, and the name it produced was "this account", so the
+ * sentence became a customer put on a list called that. Somebody
+ * pointing at a record is not naming a list, whatever the grammar
+ * underneath the two looks like.
+ */
+function listNameIn(raw: string): string | undefined {
+  const said = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
+    ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1]?.trim();
+  const points = POINTING_WORDS.has(
+    (said ?? '').split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, '') ?? '',
+  );
+  return points ? undefined : said;
+}
+
 function readListAdd(
   raw: string, caps: CrmCapabilities | undefined, context: CommandContext,
   priorResult?: { entity: string },
@@ -230,11 +253,22 @@ function readListAdd(
      customers on a list called Bredbury. A noun for another entity is
      the sentence saying what it is about, and it outranks a pointing
      word every time. */
+  /* THE NAME IS NOT PART OF THE SENTENCE'S SUBJECT MATTER.
+
+     "Put them on Fleet Prospects" is a list called Fleet Prospects, and
+     "fleet" is one of the words this application uses for a trailer, so
+     the guard above threw out the very sentence the rule was written
+     for. A list somebody named can be called anything; what decides
+     what the sentence is ABOUT is the words outside that name. */
+  const named = listNameIn(raw);
   if (!saidList) {
+    const outside = named
+      ? t.replace(soften(named).trim(), ' ')
+      : t;
     const elsewhere = ENTITIES
       .filter((e) => e.id !== 'contacts' && e.id !== 'proposals')
       .flatMap((e) => e.nouns);
-    if (elsewhere.some((n) => t.includes(` ${n} `))) return null;
+    if (elsewhere.some((n) => outside.includes(` ${n} `))) return null;
   }
 
   const cap = capability('list.add');
@@ -256,14 +290,6 @@ function readListAdd(
      the sentence became a customer put on a list called that. Somebody
      pointing at a record is not naming a list, whatever the grammar
      underneath the two looks like. */
-  const saidName = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
-    ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1]?.trim();
-
-  const points = POINTING_WORDS.has(
-    (saidName ?? '').split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, '') ?? '',
-  );
-  const named = points ? undefined : saidName;
-
   /* A name is required where the word was not said, because "put them
      on" with nothing after it is half a sentence rather than a move
      onto a list nobody named. */

@@ -5153,6 +5153,82 @@ test('link Dawson Maintenance to Dawson Group as the main account', async () => 
     JSON.stringify(db.tables.crm_contacts));
 });
 
+test('what the finder found goes onto the list, and nothing else does', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      /* A company already here whose name looks like one of the ones
+         about to be found. Nothing may pick this up: the clause is
+         about the rows the SEARCH returned. */
+      { id: 'old1', company_name: 'Pennine Waste Services', status: 'lead', list_id: 'l1' },
+    ],
+    crm_lists: [
+      { id: 'l1', name: 'Everything', is_global: true },
+      { id: 'l2', name: 'Fleet Prospects' },
+    ],
+  });
+  const text = 'find 20 waste companies within 20 miles of Hyde and put them on Fleet Prospects';
+
+  let calls = 0;
+  const was = FINDER.search;
+  const wasLocked = LUSHA_GATE.locked;
+  FINDER.search = async () => {
+    calls += 1;
+    return [
+      { name: 'Pennine Waste', employees: 40, location: 'Hyde', distance: 2, domain: 'pennine.co.uk', industry: 'Waste' },
+      { name: 'Tameside Skips', employees: 12, location: 'Dukinfield', distance: 4, domain: null, industry: 'Waste' },
+    ];
+  };
+  LUSHA_GATE.locked = false;
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: PROSPECTOR, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {}, preview: true,
+    });
+
+    /* TWO STEPS, WIRED, NOT TWO SENTENCES. */
+    const steps = planned?.planned.planning.plan.steps ?? [];
+    ok('it plans the search and the list move',
+      steps.length === 2
+      && steps[0].op === 'invoke' && steps[0].capability === 'crm.findCompanies'
+      && steps[1].op === 'invoke' && steps[1].capability === 'list.add',
+      JSON.stringify(steps.map((x) => (x.op === 'invoke' ? x.capability : x.op))));
+    ok('with the list move taking the search\'s own rows',
+      steps[1]?.op === 'invoke'
+      && JSON.stringify(steps[1].subject) === JSON.stringify({ ref: 'rows', step: steps[0].id }),
+      JSON.stringify(steps[1]?.op === 'invoke' ? steps[1].subject : null));
+
+    const preview = planned?.preview;
+    ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+    ok('and nothing has been searched for yet', calls === 0, String(calls));
+    if (!planned || preview?.ok !== true) return;
+
+    const done = await applyMutation({
+      text, capabilities: PROSPECTOR, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {},
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    });
+    ok('it goes through', done.ok, done.ok ? '' : done.why);
+    ok('and the search happened exactly once', calls === 1, String(calls));
+
+    const onList = db.tables.crm_contacts.filter((r) => r.list_id === 'l2');
+    ok('both companies it found are on the list', onList.length === 2,
+      JSON.stringify(db.tables.crm_contacts.map((r) => [r.company_name, r.list_id])));
+    ok('by the names the search returned',
+      onList.map((r) => r.company_name).sort().join('|') === 'Pennine Waste|Tameside Skips',
+      JSON.stringify(onList.map((r) => r.company_name)));
+
+    /* THE ROW THAT WAS ALREADY HERE IS NOT PART OF THE ANSWER. */
+    ok('and the customer already here with a similar name was left alone',
+      db.tables.crm_contacts.find((r) => r.id === 'old1')?.list_id === 'l1',
+      String(db.tables.crm_contacts.find((r) => r.id === 'old1')?.list_id));
+  } finally {
+    FINDER.search = was;
+    LUSHA_GATE.locked = wasLocked;
+  }
+});
+
 /* ============================================================= */
 
 async function main() {

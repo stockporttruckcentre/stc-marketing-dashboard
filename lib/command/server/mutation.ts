@@ -267,16 +267,15 @@ export function changedFields(plan: Plan): ChangedField[] {
  * The plan holds them as literal expressions, because everything in a
  * plan is an expression. The operation wants numbers.
  */
-function invokeArgs(plan: Plan): Record<string, unknown> {
-  const step = plan.steps.find((s) => s.op === 'invoke');
-  if (!step || step.op !== 'invoke') return {};
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(step.args ?? {})) {
-    if (!('kind' in value)) continue;
-    if (value.kind === 'literal') out[key] = value.value;
-  }
-  return out;
-}
+/* `invokeArgs` used to live here: the literal arguments of the FIRST
+   operation in a plan, handed to every operation in it. That was fine
+   while a programme held one, and wrong the moment it held two, because
+   the second one was resolved against the first one's arguments and
+   none of its own.
+
+   Each step's literals are read where the step is, in
+   `resolveArguments`, which is the only place that knows which step it
+   is looking at. */
 
 /**
  * The names a destination carries, read back out of its references.
@@ -349,9 +348,7 @@ export async function previewMutation(
     return { ok: false, reason: 'not a mutation', why: 'that sentence is not an instruction' };
   }
 
-  const programme = await resolveProgramme(planning.plan, {
-    store, policy, args: invokeArgs(planning.plan),
-  });
+  const programme = await resolveProgramme(planning.plan, { store, policy });
   if (!programme.ok) {
     const res = programme.resolution;
     return {
@@ -673,9 +670,7 @@ export async function applyMutation(
     (s) => s.op === 'invoke' && !!capability(s.capability)?.prepares,
   );
   const resolved = outgoing.length || outsideOperations
-    ? await resolveProgramme(planning.plan, {
-        store: req.store, policy: req.policy, args: invokeArgs(planning.plan),
-      })
+    ? await resolveProgramme(planning.plan, { store: req.store, policy: req.policy })
     : null;
   if (resolved && !resolved.ok) {
     return { ok: false, reason: 'refused', why: resolved.why };
@@ -688,7 +683,7 @@ export async function applyMutation(
      cannot be inside the transaction and must not be after it. It runs
      here, where a file is rendered, and what it finds becomes changes
      the transaction writes. */
-  const outsideWork: TransactionStep[] = [];
+  const outsideWork = new Map<string, TransactionStep[]>();
   /* External objects a preparation staged before the transaction ran.
      Removed when it does not commit, so nothing live points at an
      upload from a command that failed. */
@@ -745,7 +740,11 @@ export async function applyMutation(
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };
 
-      outsideWork.push(...ready.steps);
+      /* Kept BY STEP rather than in one pile, so the transaction can
+         put each preparer's work where its step is. A search that makes
+         twenty customers and a clause that puts them on a list are one
+         ordered programme. */
+      outsideWork.set(unit.stepId, ready.steps);
       outsideStaged.push(...(ready.staged ?? []));
       outsideSaid.push(ready.describe);
     }
@@ -814,12 +813,11 @@ export async function applyMutation(
   const done = await executeProgramme(planning.plan, {
     store: req.store,
     policy: req.policy,
-    args: invokeArgs(planning.plan),
     agreedHash: outsidePrepared.length && resolved?.ok
       ? resolved.hash
       : req.previewProgrammeHash,
+    prepared: outsideWork,
     deliveries: (indexOf) => [
-      ...outsideWork,
       ...prepared
         .filter((p): p is Extract<Prepared, { kind: 'effect' }> => p.kind === 'effect')
         .map((p) => p.step(indexOf)),

@@ -739,7 +739,9 @@ export function fakeDb(tables: Record<string, Row[]>) {
         ids.push(id);
       }
       writes.push({ table: 'crm_contacts', set: { source: 'Spreadsheet import' }, ids });
-      return { data: { inserted: ids.length, listId: list?.id ?? null }, error: null };
+      /* The rows it made, not only how many. A clause after an import
+         is about those rows. Migration 039. */
+      return { data: { inserted: ids.length, listId: list?.id ?? null, ids }, error: null };
     }
 
     /* A supplier's stock file, already checked. Every unit or none, and
@@ -1455,7 +1457,17 @@ export function fakeDb(tables: Record<string, Row[]>) {
 
     /* A value one step takes from an earlier step's result. */
     const resolve = (v: unknown): unknown => {
-      if (Array.isArray(v)) return v.map(resolve);
+      /* A REFERENCE TO A SET, STANDING IN A LIST, IS THAT SET.
+
+         Migration 039. "Put them on Fleet Prospects" names however many
+         rows the search made, as one reference, and wrapping it would
+         make `subjects` a list holding one list. */
+      if (Array.isArray(v)) {
+        return v.flatMap((item) => {
+          const got = resolve(item);
+          return Array.isArray(got) && item && typeof item === 'object' ? got : [got];
+        });
+      }
       if (v && typeof v === 'object') {
         const ref = (v as Record<string, unknown>).$from as { step: number; key: string } | undefined;
         if (ref) {

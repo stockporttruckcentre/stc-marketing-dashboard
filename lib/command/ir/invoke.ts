@@ -33,6 +33,7 @@
    sale recorded at nothing is worse than a sale not recorded.
    ============================================================= */
 import type { Invoke, Plan, Select } from './types';
+import { isResultRef } from './types';
 import { capability, entity as entityDef, RELATIONSHIPS } from './registry';
 import type { Store } from './store';
 import { runSelect, selectBehind } from './read';
@@ -59,6 +60,16 @@ export type InvokePlan = {
   capability: string;
   label: string;
   subjects: InvokeSubject[];
+  /**
+   * The step whose rows this one acts on, when they do not exist yet.
+   *
+   * "Find 20 waste companies near Hyde and put them on Fleet Prospects"
+   * puts twenty rows on a list, and those rows are made by the step in
+   * front of it inside the same transaction. There is nothing to
+   * resolve here and nothing to preview by id: the plan step is named,
+   * and the transaction hands the ids forward.
+   */
+  fromStep?: string;
   /** Named records this cannot act on, and why. Never silently dropped. */
   missing: InvokeMissing[];
   /** Inputs the operation still needs and nothing supplied. */
@@ -98,6 +109,24 @@ function labelOf(row: Record<string, unknown>, title: string | null): string {
 }
 
 /**
+ * The step that is going to MAKE the rows this one acts on.
+ *
+ * `null` for everything else, including a reference to a step that acts
+ * on rows already here: those can be read, and reading them is what
+ * lets the preview say which records before anything runs.
+ */
+function madeEarlier(plan: Plan, subject: Invoke['subject']): string | null {
+  if (!subject || !isResultRef(subject)) return null;
+  const ref = subject;
+  const step = plan.steps.find((x) => x.id === ref.step);
+  if (!step) return null;
+  if (step.op === 'create') return step.id ?? null;
+  if (step.op !== 'invoke') return null;
+  const cap = capability((step as Invoke).capability);
+  return cap?.creates ? step.id ?? null : null;
+}
+
+/**
  * Resolve an invoke step into the rows it will act on.
  *
  * Nothing is performed. This is the preview: which records, which of
@@ -123,6 +152,24 @@ export async function resolveInvoke(
      to the arguments. */
   if (cap.creates) {
     return resolveArguments(cap, step, [], { store: opts.store, args: opts.args });
+  }
+
+  /* ROWS THAT DO NOT EXIST YET.
+
+     "Find 20 waste companies near Hyde and put them on Fleet Prospects"
+     acts on rows the step in front of it is about to MAKE. There is
+     nothing to read: resolving it would either find nothing or, worse,
+     find companies with similar names that were already here. The step
+     is named instead and the transaction hands the real ids forward,
+     which is the same answer migration 036 gave for a created record.
+
+     Only for a step that makes rows. A reference to something that
+     merely acts on rows still resolves, because those rows are there
+     to be read. */
+  const made = madeEarlier(plan, step.subject);
+  if (made) {
+    const ready = await resolveArguments(cap, step, [], { store: opts.store, args: opts.args });
+    return ready.ok ? { ok: true, plan: { ...ready.plan, fromStep: made } } : ready;
   }
 
   /* The rows, however the step names them: its own selection, or the
@@ -315,6 +362,17 @@ async function resolveArguments(
      with one of two people and reporting both is the failure this layer
      exists to stop. */
   for (const [key, value] of Object.entries(step.args ?? {})) {
+    /* THE STEP'S OWN VALUES, NOT THE PROGRAMME'S.
+
+       A literal on this step is what the reader took out of this clause,
+       and it is the authority on what this operation was asked for. It
+       used to be lifted at the top of the programme, from the first
+       operation in it, so a sentence with two operations gave both of
+       them the first one's arguments: "find 20 waste companies near
+       Hyde and put them on Fleet Prospects" handed the list step the
+       search's own arguments and none of its own, and the list name it
+       had read went nowhere. */
+    if ('kind' in value && value.kind === 'literal') { args[key] = value.value; continue; }
     if (args[key] != null) continue;
     if ('kind' in value && value.kind === 'list') {
       const values: (string | number | boolean | null)[] = [];

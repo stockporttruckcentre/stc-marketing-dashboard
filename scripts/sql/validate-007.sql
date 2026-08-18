@@ -3095,6 +3095,83 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST dup%' OR company_name = '
 SELECT set_config('request.jwt.claim.sub', '', FALSE);
 
 -- =============================================================
+-- 15i. Rows one step made, named by the step after it
+--
+-- Migration 039. "Find 20 waste companies near Hyde and put them on
+-- Fleet Prospects" is one instruction whose second half is about the
+-- rows the first half made. The import now says WHICH rows, and a
+-- reference to them keeps its shape instead of arriving as one piece of
+-- text that looks like a list.
+-- =============================================================
+\echo '--- rows handed forward ---'
+
+SELECT reset_fixtures();
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST found%';
+DELETE FROM crm_lists WHERE name = 'TEST forward list';
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c5555555-0000-0000-0000-000000000001', 'TEST forward list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+DECLARE out JSONB; ids JSONB; onlist INTEGER;
+BEGIN
+  SELECT command_perform(jsonb_build_array(
+    -- What a search's preparer contributes: the rows it found, imported.
+    jsonb_build_object(
+      'op', 'invoke', 'capability', 'rows.import',
+      'subjects', '[]'::JSONB,
+      'args', jsonb_build_object(
+        'rows', jsonb_build_array(
+          jsonb_build_object('company_name', 'TEST found one', 'source', 'Lusha'),
+          jsonb_build_object('company_name', 'TEST found two', 'source', 'Lusha')))),
+    -- And the clause after it, about those rows and no others.
+    jsonb_build_object(
+      'op', 'invoke', 'capability', 'list.add',
+      'subjects', jsonb_build_array(
+        jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'ids'))),
+      'args', jsonb_build_object('list', 'TEST forward list'))
+  )) INTO out;
+
+  PERFORM assert('an import and a list move are one transaction',
+    out IS NOT NULL, out::TEXT);
+
+  ids := out -> 'results' -> 0 -> 'ids';
+  PERFORM assert('the import says which rows it made',
+    jsonb_typeof(ids) = 'array' AND jsonb_array_length(ids) = 2, COALESCE(ids::TEXT, 'nothing'));
+
+  SELECT COUNT(*) INTO onlist FROM crm_contacts
+   WHERE list_id = 'c5555555-0000-0000-0000-000000000001';
+  PERFORM assert('and both of them went on the list', onlist = 2, onlist::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('an import and a list move are one transaction', FALSE, SQLERRM);
+END
+$$;
+
+-- AND A REFERENCE TO A SET IS THE SET.
+DO $$
+DECLARE got JSONB;
+BEGIN
+  got := command_resolve_ref(
+    jsonb_build_array(jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'ids'))),
+    jsonb_build_array(jsonb_build_object('ids', jsonb_build_array('a', 'b', 'c'))));
+  PERFORM assert('a reference to a list is spliced into the list around it',
+    got = '["a","b","c"]'::JSONB, got::TEXT);
+
+  got := command_resolve_ref(
+    jsonb_build_object('id', jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'id'))),
+    jsonb_build_array(jsonb_build_object('id', 'one')));
+  PERFORM assert('and a scalar still arrives as text, which is what casts it',
+    got ->> 'id' = 'one', got::TEXT);
+END
+$$;
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST found%';
+DELETE FROM crm_lists WHERE name = 'TEST forward list';
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+
+-- =============================================================
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'

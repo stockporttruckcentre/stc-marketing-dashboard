@@ -40,7 +40,18 @@ function produces(step: Step): ResultRef | null {
     case 'update':
     case 'delete': return { ref: 'rows', step: id };
     case 'create': return { ref: 'record', step: id };
-    case 'invoke': return { ref: 'record', step: id };
+    /* WHAT AN OPERATION LEAVES BEHIND IS THE OPERATION'S TO SAY.
+
+       Most of them make or act on one record, and this said `record`
+       for all of them. The finder makes a set: "find 20 waste companies
+       near Hyde and put them on Fleet Prospects" hands twenty
+       companies to the next clause, and a reference calling that one
+       record is a malformed plan the validator refuses. The step
+       already declares its shape, derived from the registry. */
+    case 'invoke': {
+      const kind = (step as Invoke).produces?.kind;
+      return { ref: kind === 'rows' ? 'rows' : 'record', step: id };
+    }
     case 'emit': return { ref: 'artefact', step: id };
     default: return null;
   }
@@ -87,6 +98,30 @@ function withSource(step: Step, from: Source): Step {
 function canConsume(step: Step): boolean {
   return step.op === 'emit' || step.op === 'invoke'
     || step.op === 'update' || step.op === 'delete';
+}
+
+/**
+ * Is this step the one before it, said again?
+ *
+ * The same table, the same columns, the same values, and the rows this
+ * one acts on are the rows that one produced. Anything else is a second
+ * change: "put it back to draft and take the picture off it" writes two
+ * columns and is two things.
+ */
+function restates(step: Step | undefined, before: Step | undefined): boolean {
+  if (!step || !before) return false;
+  if (step.op !== 'update' || before.op !== 'update') return false;
+
+  const mine = step as Mutate;
+  const theirs = before as Mutate;
+  if (mine.target.entity !== theirs.target.entity) return false;
+
+  /* It has to be acting on what the step before produced. A clause that
+     found its own rows is about its own rows. */
+  const from = mine.match;
+  if (!from || !isResultRef(from) || from.step !== theirs.id) return false;
+
+  return JSON.stringify(mine.set) === JSON.stringify(theirs.set);
 }
 
 /** Every reference a step holds, rewritten. */
@@ -231,11 +266,27 @@ export function composeProgramme(
       })
       .map((s) => remap(s, resolve));
 
-    steps.push(...kept);
-    summaries.push(describe(clause.planning, dropped.size > 0, adopted));
+    /* THE SAME THING SAID TWICE IS ONE THING.
 
-    /* What the LAST step of this clause makes available. */
-    previous = produces(kept[kept.length - 1]) ?? previous;
+       "Reject this post and send it back to draft" is one instruction
+       in two halves: the second describes the state the first puts the
+       post in. Read as two steps it writes draft over draft, and the
+       preview says a change is happening twice.
+
+       So a clause whose only step writes exactly the same columns to
+       exactly the same values, on the rows the step before it produced,
+       is a restatement rather than a second change. Narrow on purpose:
+       a different column, a different value or different rows is a
+       second change and stays one. */
+    const restated = kept.length === 1 && restates(kept[0], steps[steps.length - 1]);
+    if (!restated) {
+      steps.push(...kept);
+      summaries.push(describe(clause.planning, dropped.size > 0, adopted));
+    }
+
+    /* What the LAST step of this clause makes available. A restatement
+       makes available what the step it restated does. */
+    if (!restated) previous = produces(kept[kept.length - 1]) ?? previous;
   });
 
   if (!steps.length) return null;

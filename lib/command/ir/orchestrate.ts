@@ -694,6 +694,16 @@ export type ExecuteOptions = OrchestrateOptions & {
    * positions are not known until the resolved units are laid out.
    */
   deliveries?: (indexOf: (planStepId: string) => number | null) => TransactionStep[];
+  /**
+   * What each operation outside the database contributed, by plan step.
+   *
+   * The caller runs those preparers, because they are the half that
+   * cannot be in a transaction. Where their work lands in the
+   * transaction is this layer's business, and it is where the step
+   * itself is: a later clause about the rows a search made has to come
+   * after the step that makes them.
+   */
+  prepared?: Map<string, TransactionStep[]>;
 };
 
 /**
@@ -704,7 +714,19 @@ export type ExecuteOptions = OrchestrateOptions & {
  * order. `indexOf` says where a plan step landed, so a later step can
  * refer to what it produced.
  */
-function transactionFor(units: Unit[]): {
+function transactionFor(
+  units: Unit[],
+  /**
+   * What each operation whose work happens outside the database
+   * contributes, by the plan step it belongs to.
+   *
+   * In PLACE, not at the end. A search that makes twenty customers and
+   * a clause that puts them on a list are one ordered programme, and
+   * appending the search's own work after everything else would put the
+   * rows on the list before the rows existed.
+   */
+  prepared: Map<string, TransactionStep[]> = new Map(),
+): {
   steps: TransactionStep[];
   indexOf: (planStepId: string) => number | null;
 } {
@@ -725,12 +747,28 @@ function transactionFor(units: Unit[]): {
        CHANGES rather than an invoke, and the caller has already
        prepared them. Sending its capability to `command_perform` would
        ask the database to do something it has never heard of. */
-    if (capability(u.plan.capability)?.prepares) continue;
+    if (capability(u.plan.capability)?.prepares) {
+      const its = prepared.get(u.stepId) ?? [];
+      if (its.length) {
+        /* Where it landed, so a later step can name what it produced. */
+        at.set(u.stepId, steps.length);
+        steps.push(...its);
+      }
+      continue;
+    }
     at.set(u.stepId, steps.length);
     steps.push({
       op: 'invoke',
       capability: u.plan.capability,
-      subjects: u.plan.subjects.map((s) => s.id),
+      /* THE ROWS THE STEP IN FRONT IS ABOUT TO MAKE.
+
+         Named as a position in this transaction rather than as ids,
+         because the ids do not exist until it runs. `command_perform`
+         resolves it against what that step returned, and a reference to
+         a set standing in a list is spliced into it. */
+      subjects: u.plan.fromStep && at.has(u.plan.fromStep)
+        ? [{ $from: { step: at.get(u.plan.fromStep) as number, key: 'ids' } }]
+        : u.plan.subjects.map((s) => s.id),
       args: u.plan.args,
     });
   }
@@ -769,7 +807,7 @@ export async function executeProgramme(
      them over a kind at a time is what made a share that failed leave a
      list behind, and it is not something this layer can put right
      afterwards: a compensating delete can fail too. */
-  const laid = transactionFor(fresh.units);
+  const laid = transactionFor(fresh.units, opts.prepared);
   const steps = [...laid.steps, ...(opts.deliveries?.(laid.indexOf) ?? [])];
 
   if (!steps.length) {
