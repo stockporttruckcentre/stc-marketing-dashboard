@@ -59,7 +59,7 @@ import { executability, selectToQueryPayload, type QueryPayload, type Unavailabl
 import {
   capability as capabilityDef, destination, entity as entityDef, FILE_EMIT_CAPABILITY,
 } from './ir/registry';
-import type { Emit, Expr, Invoke, Plan, Select } from './ir/types';
+import type { Cond, Emit, Expr, Invoke, Plan, Select } from './ir/types';
 
 /* =============================================================
    Availability
@@ -488,7 +488,7 @@ function planOneClause(
      and "to Excel" ended up inside a filter. The clause comes off
      first, and what is left is an ordinary question. */
   const output = sending;
-  const asked = output ? output.rest : text;
+  const asked0 = output ? output.rest : text;
 
   /* "SHARE IT WITH DAVE" IS ALL DESTINATION AND NO QUESTION.
 
@@ -496,7 +496,7 @@ function planOneClause(
      no entity. The word that pointed at what is being sent is the only
      part of that sentence which says what it is about, so it is put
      back in front of whatever is left before the entity is worked out. */
-  const pointing = output?.pointer ? `${output.pointer} ${asked}`.trim() : asked;
+  const pointing = output?.pointer ? `${output.pointer} ${asked0}`.trim() : asked0;
 
   /* "EXPORT THESE TO EXCEL" NAMES NO ENTITY, AND DOES NOT NEED TO.
 
@@ -505,9 +505,23 @@ function planOneClause(
      the context and the sentence is read again with it, which is how
      one word ends up meaning a selection of forty customers. */
   const pointedFirst = readContextReference(pointing);
+  /* "THIS LIST" IS THE LIST ON THE SCREEN.
+
+     A working list is not a record and not a selection, so the pointing
+     reader had nothing to resolve and "export this list as a CSV" named
+     no entity at all. What is on a CRM list is customers, and the
+     screen sends which list it is showing, so the sentence narrows to
+     that list by its id exactly as a selection narrows to its rows. */
+  const openList = pointsAtOpenList(pointing) ? opts?.context?.list ?? null : null;
+  /* And the words that named it come out, the way every other clause
+     does. "This CRM list" left "crm" behind, and the reader reported
+     that nothing in the customers matches it. */
+  const asked = openList ? asked0.replace(LIST_PHRASE, ' ').replace(/\s+/g, ' ').trim() : asked0;
+
   const pointedEntity = (pointedFirst
     ? resolveContext(pointedFirst, opts?.context ?? EMPTY_CONTEXT)?.entity
     : undefined)
+    ?? (openList ? 'contacts' : undefined)
     /* Or whatever the clause before produced. "Export it to Excel"
        names no entity and does not need to. */
     ?? (refersBack(pointing) ? opts?.priorResult?.entity : undefined);
@@ -536,6 +550,18 @@ function planOneClause(
     select.where = select.where
       ? { kind: 'and', of: [select.where, fromScreen.match] }
       : fromScreen.match;
+  }
+
+  /* And the same for the list the screen is showing. By its id, because
+     a list renamed while somebody was looking at it is still the list
+     they were looking at. */
+  if (openList && 'entity' in select.from && select.from.entity === 'contacts') {
+    const onList: Cond = {
+      kind: 'cmp', op: 'eq',
+      left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
+      right: { kind: 'literal', value: openList.id },
+    };
+    select.where = select.where ? { kind: 'and', of: [select.where, onList] } : onList;
   }
 
   /* One emit step, over the result of the select. Not a copy of the
@@ -715,6 +741,23 @@ function readInstruction(
       derivedLabel: null,
     },
   };
+}
+
+/**
+ * Does the sentence point at the working list the screen is showing?
+ *
+ * A different fact from a selection: a CRM screen with nothing ticked
+ * still has a list open, and "export this list" is about every customer
+ * on it rather than about any rows somebody ticked.
+ */
+/* Two spellings of one pattern, because a global regex carries state
+   between calls and a shared one would answer differently on every
+   other sentence. */
+const LIST_PHRASE = /\b(?:this|that|the current|the open|my)\s+(?:crm\s+)?list\b/ig;
+const A_LIST_PHRASE = /\b(?:this|that|the current|the open|my)\s+(?:crm\s+)?list\b/i;
+
+function pointsAtOpenList(text: string): boolean {
+  return A_LIST_PHRASE.test(text);
 }
 
 /** The plainest noun for an entity, so a pointing word can be read. */

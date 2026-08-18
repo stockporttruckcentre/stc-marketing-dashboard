@@ -130,9 +130,19 @@ export function readContextReference(text: string): ContextReference | null {
        pointing at nothing at all. */
     const parts = t.split(` ${word} `).slice(1);
     for (const after of parts) {
-      const first = after.trim().split(' ')[0] ?? '';
-      if (first === 'record' || first === 'one' || nouns.includes(first)) {
-        return { kind: 'record', words: `${word} ${first}`.trim(), expect: 'one' };
+      /* A NOUN CAN BE MORE THAN ONE WORD.
+
+         "This social post" and "this site visit" name a record, and
+         looking at one word after the pointing word saw "social" and
+         "site", which are nouns for nothing. Longest first, so "social
+         post" wins over "post" where both would match. */
+      const words = after.trim().split(' ').filter(Boolean);
+      for (const take of [3, 2, 1]) {
+        const phrase = words.slice(0, take).join(' ');
+        if (!phrase) continue;
+        if (phrase === 'record' || phrase === 'one' || nouns.includes(phrase)) {
+          return { kind: 'record', words: `${word} ${phrase}`, expect: 'one' };
+        }
       }
     }
   }

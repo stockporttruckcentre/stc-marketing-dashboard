@@ -868,6 +868,15 @@ export function parseQuery(
       ...consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
       ...grammar.consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
       ...entityNoun.split(/\s+/),
+      /* EVERY WORD THAT NAMES THIS ENTITY IS READ, NOT UNREAD.
+
+         Only the noun that matched was counted as spent, so a sentence
+         naming the same thing twice reported the second one as a word
+         nobody could place: "the brand colour hex" matched on "brand
+         colour" and then said nothing in the brand assets matches
+         "hex". People name a thing and then qualify it with another
+         name for the same thing, and neither is content. */
+      ...entity.nouns.filter((n) => lower.includes(n)).flatMap((n) => n.split(/\s+/)),
       ...groupWord.split(/\s+/),
       ...(measureHit ? measureHit.split(/\s+/) : []),
       ...filters.flatMap((f) => `${f.label} ${f.value}`.toLowerCase().split(/\s+/)),

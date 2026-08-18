@@ -171,57 +171,57 @@ console.log(`  ${(byWiring.get('none') ?? []).length} of them are dead entries.\
    Parsed ONLY. None of these run. A write that parses is a write that
    somebody could reach, and reaching it is a third of the job.
    ------------------------------------------------------------- */
-const WRITES = [
-  'move STC143580 to Bredbury',
-  'set the MOT on STC143580 to 30 September 2026',
-  'add £1,250 refurb cost to STC143580',
-  'change the retail price on STC143580 to £24,995',
-  'mark the deposit as received on STC143580',
-  'mark STC143580 as paid in full',
-  'set the expected delivery on STC143580 to 1 October 2026',
-  'change the supplier on STC143580 to Tiger Trailers',
-  'add a refurb update to STC143580 saying curtains repaired and floor replaced',
-  'duplicate STC143580 as another stock unit',
-  'put this trailer onto my sales tracker',
-  'move all the selected trailers to Hyde',
-  'create a new lead for Smith Logistics',
-  'pull this customer from the CRM onto my tracker',
-  'link STC143580 to this deal',
-  'duplicate this deal for a second unit',
-  'switch my tracker over to the maintenance side',
-  'link these two customer records as the same account',
-  'generate a trailer sales proposal for this customer',
-  'send this proposal for signature through DocuSign',
-  'assign this account to Dave',
-  'take this account off me and put it back in the unassigned pool',
-  'set the next action on this customer to call them on Friday',
-  "change this customer's phone number to 0161 555 0142",
-  'add a note to this customer saying fleet review completed',
-  'add another site to this customer',
-  'make this address their main address',
-  'add their LinkedIn profile to this account',
-  'share this CRM list with Dave',
-  'book a site visit with this customer next Tuesday at 10am',
-  'schedule a callback with this customer for tomorrow afternoon',
-  'move my 3pm meeting tomorrow to 4:30',
-  "cancel Friday's site visit",
-  'make this meeting private',
-  'invite Dave to this meeting',
-  'suggest Friday at 2pm instead for this invitation',
-  'create a new LinkedIn post',
-  'add an image to this social post',
-  'put this post on LinkedIn and Instagram',
-  'send this social post for approval',
-  'reject this post and send it back to draft',
-  'mark this social post as published',
-  'upload this logo to the brand kit',
-  'copy the navy brand colour hex',
-  'refresh the industry news feeds',
-  'find waste companies within 20 miles of Hyde',
-  'import this spreadsheet into the CRM',
-  'download this CRM list as a CSV',
-  'make Dave a read-only user',
-  'add Jane as a new user',
+const WRITES: { text: string; on?: Screen }[] = [
+  { text: 'move STC143580 to Bredbury', on: { open: 'trailer' } },
+  { text: 'set the MOT on STC143580 to 30 September 2026', on: { open: 'trailer' } },
+  { text: 'add £1,250 refurb cost to STC143580', on: { open: 'trailer' } },
+  { text: 'change the retail price on STC143580 to £24,995', on: { open: 'trailer' } },
+  { text: 'mark the deposit as received on STC143580', on: { open: 'trailer' } },
+  { text: 'mark STC143580 as paid in full', on: { open: 'trailer' } },
+  { text: 'set the expected delivery on STC143580 to 1 October 2026', on: { open: 'trailer' } },
+  { text: 'change the supplier on STC143580 to Tiger Trailers', on: { open: 'trailer' } },
+  { text: 'add a refurb update to STC143580 saying curtains repaired and floor replaced', on: { open: 'trailer' } },
+  { text: 'duplicate STC143580 as another stock unit', on: { open: 'trailer' } },
+  { text: 'put this trailer onto my sales tracker', on: { open: 'trailer' } },
+  { text: 'move all the selected trailers to Hyde', on: { selected: 'trailer' } },
+  { text: 'create a new lead for Smith Logistics' },
+  { text: 'pull this customer from the CRM onto my tracker', on: { open: 'customer' } },
+  { text: 'link STC143580 to this deal', on: { open: 'deal' } },
+  { text: 'duplicate this deal for a second unit', on: { open: 'deal' } },
+  { text: 'switch my tracker over to the maintenance side', on: { open: 'deal' } },
+  { text: 'link these two customer records as the same account', on: { selected: 'customer' } },
+  { text: 'generate a trailer sales proposal for this customer', on: { open: 'customer' } },
+  { text: 'send this proposal for signature through DocuSign', on: { open: 'customer' } },
+  { text: 'assign this account to Dave', on: { open: 'customer' } },
+  { text: 'take this account off me and put it back in the unassigned pool', on: { open: 'customer' } },
+  { text: 'set the next action on this customer to call them on Friday', on: { open: 'customer' } },
+  { text: "change this customer's phone number to 0161 555 0142", on: { open: 'customer' } },
+  { text: 'add a note to this customer saying fleet review completed', on: { open: 'customer' } },
+  { text: 'add another site to this customer', on: { open: 'customer' } },
+  { text: 'make this address their main address', on: { open: 'customer' } },
+  { text: 'add their LinkedIn profile to this account', on: { open: 'customer' } },
+  { text: 'share this CRM list with Dave', on: { list: true } },
+  { text: 'book a site visit with this customer next Tuesday at 10am', on: { open: 'customer' } },
+  { text: 'schedule a callback with this customer for tomorrow afternoon', on: { open: 'customer' } },
+  { text: 'move my 3pm meeting tomorrow to 4:30' },
+  { text: "cancel Friday's site visit" },
+  { text: 'make this meeting private', on: { open: 'meeting' } },
+  { text: 'invite Dave to this meeting', on: { open: 'meeting' } },
+  { text: 'suggest Friday at 2pm instead for this invitation', on: { open: 'meeting' } },
+  { text: 'create a new LinkedIn post' },
+  { text: 'add an image to this social post', on: { open: 'post', file: 'picture' } },
+  { text: 'put this post on LinkedIn and Instagram', on: { open: 'post' } },
+  { text: 'send this social post for approval', on: { open: 'post' } },
+  { text: 'reject this post and send it back to draft', on: { open: 'post' } },
+  { text: 'mark this social post as published', on: { open: 'post' } },
+  { text: 'upload this logo to the brand kit', on: { file: 'picture' } },
+  { text: 'copy the navy brand colour hex' },
+  { text: 'refresh the industry news feeds' },
+  { text: 'find waste companies within 20 miles of Hyde' },
+  { text: 'import this spreadsheet into the CRM', on: { file: 'sheet' } },
+  { text: 'download this CRM list as a CSV', on: { list: true } },
+  { text: 'make Dave a read-only user' },
+  { text: 'add Jane as a new user' },
 ];
 
 /**
@@ -257,16 +257,61 @@ type Outcome = {
  * reason: "import this spreadsheet" is only ever typed with one
  * attached.
  */
-const SCREEN = {
-  record: { entity: 'contacts', id: '11111111-1111-1111-1111-111111111111' },
-  selection: { entity: 'trailers', ids: ['22222222-2222-2222-2222-222222222222'] },
-  file: {
-    name: 'leads.csv', mime: 'text/csv', size: 64,
-    text: 'Company,Email\nDawson Group,sam@dawson.co.uk',
-  },
+/**
+ * WHICH SCREEN, PER SENTENCE.
+ *
+ * One fixed context measured the fixture rather than the runtime.
+ * "Make this meeting private" typed against a CRM record points at
+ * nothing, and came back not understood for a reason that has nothing
+ * to do with meetings. Every sentence below declares the screen
+ * somebody would actually be looking at when they typed it, and the
+ * screens are exactly what those screens publish: an open record, a
+ * selection, an open list, an attached file.
+ */
+const OPEN: Record<string, { entity: string; id: string }> = {
+  customer: { entity: 'contacts', id: '11111111-1111-1111-1111-111111111111' },
+  trailer: { entity: 'trailers', id: '22222222-2222-2222-2222-222222222222' },
+  deal: { entity: 'proposals', id: '33333333-3333-3333-3333-333333333333' },
+  meeting: { entity: 'meetings', id: '44444444-4444-4444-4444-444444444444' },
+  post: { entity: 'posts', id: '55555555-5555-5555-5555-555555555555' },
 };
 
-function audit(s: string): Outcome {
+const SHEET = {
+  name: 'leads.csv', mime: 'text/csv', size: 64,
+  text: 'Company,Email\nDawson Group,sam@dawson.co.uk',
+};
+
+const PICTURE = {
+  name: 'yard.png', mime: 'image/png', size: 4, text: 'data:image/png;base64,AAAA',
+};
+
+function screenFor(on?: Screen) {
+  const context: Record<string, unknown> = {};
+  if (on?.open) context.record = OPEN[on.open];
+  if (on?.selected) {
+    context.selection = {
+      entity: OPEN[on.selected].entity,
+      ids: [OPEN[on.selected].id, '66666666-6666-6666-6666-666666666666'],
+    };
+  }
+  if (on?.list) context.list = { id: '77777777-7777-7777-7777-777777777777', name: 'Fleet Prospects' };
+  if (on?.file === 'sheet') context.file = SHEET;
+  if (on?.file === 'picture') context.file = PICTURE;
+  return context;
+}
+
+type Screen = {
+  /** A record the screen has open, by its URL. */
+  open?: keyof typeof OPEN;
+  /** Rows somebody has ticked. */
+  selected?: keyof typeof OPEN;
+  /** A working list the screen is showing. */
+  list?: boolean;
+  /** Something attached to the bar. */
+  file?: 'sheet' | 'picture';
+};
+
+function audit(s: string, on?: Screen): Outcome {
   /* THE PRODUCTION ENTRY POINT, FIRST.
 
      This used to ask `parseEdit` and then the action registry, which
@@ -276,7 +321,7 @@ function audit(s: string): Outcome {
      came back DEAD from a check that had never been told to ask. The
      planner is what the bar calls, so it is what this asks. */
   const planned = planCommand(s, {
-    actorCapabilities: caps, vocabulary: VOCABULARY, context: SCREEN,
+    actorCapabilities: caps, vocabulary: VOCABULARY, context: screenFor(on),
   });
   if (planned && planned.kind === 'mutate'
     && planned.availability.representable
@@ -294,6 +339,31 @@ function audit(s: string): Outcome {
           : '/api/command/plan then /api/command/apply, previewed then confirmed',
       canonical: !permitted ? 'understood' : performs ? 'executable' : 'permitted',
     };
+  }
+
+  /* AN EFFECT IS NOT ALWAYS A WRITE.
+
+     "Download this list as a CSV" and "copy the navy hex" change no
+     record and are still carried out by the canonical runtime: one goes
+     through /api/command/emit and produces a file, the other declares
+     the clipboard and the browser does it. Counting them as navigation
+     because they are not mutations measured the word rather than the
+     effect. Display is excluded: an answer on screen is a question. */
+  if (planned && planned.availability.representable
+    && planned.availability.permitted !== false
+    && planned.availability.executable) {
+    const emit = planned.plan.steps.find((x) => x.op === 'emit');
+    if (emit && emit.op === 'emit' && emit.to.kind !== 'display') {
+      return {
+        parse: `runs: ${planned.presentation.summary}`,
+        parseOk: true,
+        wiring: 'handler',
+        detail: emit.to.kind === 'clipboard'
+          ? '/api/command/query, then the browser puts it on the clipboard'
+          : '/api/command/emit, which returns the file itself',
+        canonical: 'executable',
+      };
+    }
   }
 
   /* A field write. This is the one path that previews before it writes,
@@ -364,8 +434,8 @@ console.log('  FIFTY WRITE COMMANDS, PARSED ONLY. NOTHING HERE RUNS.\n');
 const tally: Record<Canonical, number> = {
   executable: 0, permitted: 0, understood: 0, navigation: 0, none: 0,
 };
-WRITES.forEach((s, i) => {
-  const o = audit(s);
+WRITES.forEach(({ text: s, on }, i) => {
+  const o = audit(s, on);
   tally[o.canonical] += 1;
   const flag = o.canonical === 'executable' ? '  ok '
     : o.canonical === 'navigation' ? ' nav '

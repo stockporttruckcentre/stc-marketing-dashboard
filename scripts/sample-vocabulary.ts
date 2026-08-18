@@ -92,6 +92,16 @@ export function loadSampleVocabulary(): VocabularyIndex {
       location: depots,
       assigned_to: distinct(rows, 'sales_rep'),
     },
+    /* The brand kit's own rows. There are exactly two colours in it and
+       everybody calls them by half their name, which is what a live
+       vocabulary is for: "the navy" reaches "Navy Primary" because that
+       is what the row is called. */
+    brand: {
+      name: [
+        { value: 'Navy Primary', rows: 1 },
+        { value: 'STC Red', rows: 1 },
+      ],
+    },
   });
 }
 

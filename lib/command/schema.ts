@@ -343,7 +343,11 @@ export const ENTITIES: EntitySpec[] = [
        that could only mean this. */
     nouns: ['brand asset', 'brand assets', 'brand colour', 'brand colours',
             'brand color', 'brand colors', 'brand hex', 'brand kit',
-            'logo', 'logos', 'brand font', 'brand fonts'],
+            'logo', 'logos', 'brand font', 'brand fonts',
+            /* A hex is a hex. Nothing else in this application calls
+               anything one, so the word can stand on its own where
+               "colour" cannot. */
+            'hex', 'hexes', 'hex code', 'hex codes', 'colour code', 'color code'],
     titleColumn: 'name',
     subtitleColumns: ['type', 'category', 'url'],
     dateColumn: 'created_at',
@@ -401,7 +405,13 @@ export const ENTITIES: EntitySpec[] = [
     id: 'meetings',
     table: 'calendar_events',
     label: 'meetings', labelOne: 'meeting',
-    nouns: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments', 'visit', 'visits', 'diary'],
+    /* An invitation is a meeting seen from the other side. "Suggest
+       Friday at 2pm instead for this invitation" is about the same row
+       as "for this meeting", and without the word the sentence pointed
+       at nothing. */
+    nouns: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments',
+            'visit', 'visits', 'site visit', 'site visits', 'diary',
+            'invitation', 'invitations', 'invite', 'invites'],
     titleColumn: 'title',
     subtitleColumns: ['start_at'],
     dateColumn: 'start_at',

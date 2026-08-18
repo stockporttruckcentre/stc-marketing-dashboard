@@ -259,9 +259,9 @@ export const ACTIONS: CommandActionSpec[] = [
      The entry stays, because the question is a real one and the team
      screen is the honest answer to it. What changed is the label: it
      said "add a user" and opened a screen that cannot. */
-  { id: 'admin.addUser', label: 'See who has signed up', blurb: 'People join by signing up, then you promote them', kind: 'navigate',
+  { id: 'admin.addUser', label: 'See who has signed up', blurb: 'People join by signing up, then you promote them', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: MAKE,
-    objects: ['user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
+    objects: ['user', 'new user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
 
   { id: 'admin.dashboard', label: 'Set somebody’s dashboard', blurb: 'Rep, exec or support view', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: [...CHANGE, 'give'],
