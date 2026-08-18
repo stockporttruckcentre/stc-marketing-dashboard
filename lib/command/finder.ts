@@ -35,6 +35,16 @@ export type FinderPlan = {
   /** What was said, and what was assumed. */
   filled: string[];
   assumed: string[];
+  /**
+   * What the sentence actually carried, before the defaults were laid
+   * over it.
+   *
+   * The difference matters the moment this stops being a link and
+   * becomes a search somebody is charged for. A place nobody named is
+   * filled in with Hyde so the screen opens somewhere, and running the
+   * search on that would spend a credit on a place nobody asked about.
+   */
+  slots: Slots;
   confidence: number;
 };
 
@@ -152,7 +162,7 @@ function build(slots: Slots, verb: string, _caps?: CrmCapabilities): FinderPlan 
     location, radiusMiles, industryIds, minEmployees, maxEmployees, limit,
     summary,
     href: `/dashboard/finder?${params.toString()}`,
-    filled, assumed, confidence,
+    filled, assumed, slots, confidence,
   };
 }
 

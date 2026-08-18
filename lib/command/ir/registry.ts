@@ -916,6 +916,40 @@ export const CAPABILITIES: CapabilityDef[] = [
     ],
   },
   {
+    id: 'crm.findCompanies',
+    label: 'Find companies that are not customers yet',
+    operates: 'invoke',
+    entities: ['contacts'],
+    /* It makes customers out of what Lusha returned. There is nothing
+       here to act on. */
+    creates: true,
+    /* The same capability every other paid Lusha call needs, which is
+       also what the rollout lock switches off for everybody. */
+    requires: 'crm.enrich',
+    confirm: true,
+    produces: 'rows',
+    /* A second search is a second search, charged again, and the
+       companies it returns are inserted again. */
+    idempotent: false,
+    handler: 'lib/crm/finder.ts',
+    /* A paid read of somebody else's database. It cannot be rolled back
+       and cannot be repeated for free, so it happens once, on
+       confirmation, and the rows it produces go into the programme's
+       own transaction through the same import a spreadsheet uses. */
+    prepares: 'crm.findCompanies',
+    inputs: [
+      { key: 'place', label: 'where to look', kind: 'text', required: true },
+      { key: 'city', label: 'where to look', kind: 'text', required: true },
+      { key: 'count', label: 'how many', kind: 'number', required: false },
+      { key: 'radius', label: 'how far', kind: 'number', required: false },
+      { key: 'industry', label: 'what kind', kind: 'number', required: false },
+      { key: 'industryLabel', label: 'what kind', kind: 'text', required: false },
+      { key: 'minEmployees', label: 'smallest', kind: 'number', required: false },
+      { key: 'maxEmployees', label: 'largest', kind: 'number', required: false },
+      { key: 'list', label: 'list name', kind: 'text', required: false },
+    ],
+  },
+  {
     id: 'post.setImage',
     label: 'Put a picture on a social post',
     operates: 'invoke',

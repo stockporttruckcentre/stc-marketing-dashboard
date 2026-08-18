@@ -36,7 +36,8 @@ import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { PROVIDER } from '../lib/crm/enrich';
-import { LUSHA_GATE } from '../lib/crm/permissions';
+import { LUSHA_GATE, LUSHA_LOCKED } from '../lib/crm/permissions';
+import { FINDER } from '../lib/crm/finder';
 import { planCommand } from '../lib/command/plan';
 import { EMPTY_VOCABULARY } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
@@ -4019,6 +4020,119 @@ test('a viewer cannot put a picture on a post', async () => {
   ok('it is not offered',
     !(planning?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'post.setImage') ?? false),
     JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
+/* =============================================================
+   37. Looking for companies we do not have
+
+   A paid read of somebody else's database, so the rules are the ones
+   the enrichment already lives by: describing never calls out, an
+   incomplete sentence never reaches a call at all, and the rows it
+   finds go into the programme's own transaction.
+   ============================================================= */
+
+/* Everything except the lock, which is what the lock hides. */
+const PROSPECTOR = [...capabilitiesFor({ role: 'sales' } as never), 'crm.enrich'] as never[];
+
+test('the finder is invisible while Lusha is locked', async () => {
+  ok('the lock is on', LUSHA_LOCKED, 'it is off');
+  const planning = planCommand('find waste companies within 20 miles of Hyde', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+    context: {},
+  });
+  ok('nobody is offered a paid search',
+    !(planning?.plan.steps.some(
+      (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false),
+    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+});
+
+test('a sentence with no place never reaches a search', async () => {
+  let calls = 0;
+  const was = FINDER.search;
+  FINDER.search = async () => { calls += 1; return []; };
+  try {
+    const planning = planCommand('find waste companies', {
+      actorCapabilities: PROSPECTOR, context: {},
+    });
+    ok('it is not planned as a paid search',
+      !(planning?.plan.steps.some(
+        (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false),
+      JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+    ok('and nothing was searched for', calls === 0, String(calls));
+  } finally {
+    FINDER.search = was;
+  }
+});
+
+test('a search happens once and what it finds is filed', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'find waste companies within 20 miles of Hyde';
+
+  let calls = 0;
+  let asked: unknown = null;
+  const was = FINDER.search;
+  const wasLocked = LUSHA_GATE.locked;
+  FINDER.search = async (search) => {
+    calls += 1; asked = search;
+    return [
+      { name: 'Pennine Waste', employees: 40, location: 'Hyde', distance: 2, domain: 'pennine.co.uk', industry: 'Waste' },
+      { name: 'Tameside Skips', employees: 12, location: 'Dukinfield', distance: 4, domain: null, industry: 'Waste' },
+    ];
+  };
+  LUSHA_GATE.locked = false;
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: PROSPECTOR, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {}, preview: true,
+    });
+    ok('it plans as a company search',
+      planned?.planned.planning.plan.steps
+        .some((s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false,
+      JSON.stringify(planned?.planned.planning.plan.steps.map(
+        (s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+    const preview = planned?.preview;
+    ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+    /* Describing a paid search must not make one. */
+    ok('and nothing has been searched for yet', calls === 0, String(calls));
+    if (!planned || preview?.ok !== true) return;
+
+    const said = preview.operations[0]?.says ?? '';
+    ok('the preview says what it will look for and where it goes',
+      /Waste Collection/i.test(said) && /20 miles of Hyde/i.test(said)
+        && /Everything/.test(said),
+      said);
+
+    const done = await applyMutation({
+      text, capabilities: PROSPECTOR, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), context: {},
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    });
+    ok('it goes through', done.ok, done.ok ? '' : done.why);
+    ok('the search happened exactly once', calls === 1, String(calls));
+    ok('and it searched the city the depot maps to',
+      (asked as { city?: string } | null)?.city === 'Manchester',
+      JSON.stringify(asked));
+
+    const rows = db.tables.crm_contacts ?? [];
+    ok('both companies are in the CRM', rows.length === 2, String(rows.length));
+    ok('marked as having come from the finder',
+      rows.every((r) => String(r.source) === 'Lusha Company Finder'),
+      JSON.stringify(rows.map((r) => r.source)));
+    /* fleet_size is derived by a trigger from the three vehicle counts,
+       so the employee count is kept where it can be read instead. */
+    ok('and no derived column was written',
+      rows.every((r) => r.fleet_size === undefined),
+      JSON.stringify(rows.map((r) => r.fleet_size)));
+  } finally {
+    FINDER.search = was;
+    LUSHA_GATE.locked = wasLocked;
+  }
 });
 
 /* ============================================================= */

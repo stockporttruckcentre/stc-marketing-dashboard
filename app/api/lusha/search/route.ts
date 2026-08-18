@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { lushaLockResponse } from '@/lib/crm/lusha-gate';
 import { searchCompanies } from '@/lib/lusha';
+import { readCompanies } from '@/lib/crm/finder';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,14 +40,10 @@ export async function POST(req: NextRequest) {
     lushaError = e.message || 'Lusha error';
   }
 
-  const companies = (raw?.data ?? raw?.companies ?? []).map((c: any) => ({
-    name: c.name ?? c.companyName ?? '—',
-    employees: c.employees ?? c.companySize ?? null,
-    location: c.location?.city ?? c.city ?? c.location ?? '',
-    distance: c.distanceMiles ?? null,
-    domain: c.website ?? c.domain ?? null,
-    industry: c.industry ?? null,
-  }));
+  /* One reading of what came back, shared with the command bar's own
+     search. Two copies of this had already drifted on what a location
+     is: one read `location.city`, the other read `location`. */
+  const companies = readCompanies(raw);
 
   return NextResponse.json({
     companies,

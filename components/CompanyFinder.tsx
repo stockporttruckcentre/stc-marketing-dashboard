@@ -6,6 +6,8 @@ import { Alert } from '@/components/kit/primitives';
 import { LUSHA_LOCKED } from '@/lib/crm/permissions';
 import { createClient } from '@/lib/supabase/client';
 import { DEPOTS, type CrmList } from '@/lib/types';
+import { asContactRows } from '@/lib/crm/finder';
+import { commitImport } from '@/lib/import/commit';
 import { BusinessActivityStrip } from './BusinessActivityStrip';
 
 // LinkedIn / Lusha numeric industry IDs (mainIndustriesIds)
@@ -81,15 +83,18 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
     } finally { setSearching(false); }
   }
 
+  /* The same operation the command bar performs, in one transaction.
+     This used to insert straight from the browser, which put the
+     allowlist and the permission in code somebody can edit in a
+     console, and wrote `fleet_size` from Lusha's employee count: a
+     column a trigger derives from the three vehicle counts, so the
+     number was written and then thrown away. */
   async function addToCrm(companies: FinderResult[], listId: string) {
-    const rows = companies.map((c) => ({
-      list_id: listId,
-      company_name: c.name, location: c.location, fleet_size: c.employees,
-      source: 'Lusha Company Finder', status: 'lead',
-      notes: c.domain ? `Domain: ${c.domain}` : null,
-    }));
-    const { error } = await supabase.from('crm_contacts').insert(rows);
-    if (error) { setMessage(error.message); return; }
+    const done = await commitImport(supabase, {
+      rows: asContactRows(companies),
+      listId,
+    });
+    if (!done.ok) { setMessage(done.why); return; }
     const a = { ...added };
     companies.forEach((c) => { a[c.name] = listId; });
     setAdded(a);
@@ -202,7 +207,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
           <div className="cf-summary">
             <MapPin size={13} />
             <strong>{locationLabel()}</strong>
-            <span className="cf-summary__sub">· within {radius} mi · {empMin}–{empMax} employees</span>
+            <span className="cf-summary__sub">· within {radius} mi · {empMin} to {empMax} employees</span>
           </div>
           <button onClick={handleSearch}
             disabled={LUSHA_LOCKED || searching || (isCustom && !customPostcode.trim())}

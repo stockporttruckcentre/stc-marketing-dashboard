@@ -593,6 +593,16 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['companies near', 'hauliers in', 'prospects near', 'firms around', 'businesses in'],
     phrases: ['who is near carrington', 'find hauliers around bredbury'] },
 
+  /* Opening the screen is free and gated on crm.view above. Running the
+     search is not: it reads somebody else's database and is charged
+     for, so it needs what every other paid Lusha call needs, and the
+     rollout lock hides it from everybody until that lifts. */
+  { id: 'finder.run', label: 'Search for companies near a depot', blurb: 'A paid Lusha search, previewed first', kind: 'data',
+    capability: 'crm.enrich', verbs: ['find', 'search for', 'look for', 'prospect for'],
+    objects: ['waste companies near', 'hauliers within', 'construction firms near',
+              'companies within miles of', 'firms near the depot'],
+    phrases: ['find waste companies within 20 miles of hyde'] },
+
   { id: 'finder.add', label: 'Add a find to the CRM', blurb: 'One company onto a list', kind: 'record',
     capability: 'crm.create', verbs: MAKE,
     objects: ['to the crm', 'this company', 'them to my list', 'to the pipeline'] },

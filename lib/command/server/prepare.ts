@@ -34,6 +34,7 @@
    ============================================================= */
 import { PROVIDER, nextStrategy, type EnrichStrategy } from '@/lib/crm/enrich';
 import { LUSHA_GATE } from '@/lib/crm/permissions';
+import { FINDER, asContactRows } from '@/lib/crm/finder';
 import { FEEDS, MAX_AGE_DAYS, fetchNews } from '@/lib/news/refresh';
 import { readSheet } from '@/lib/import/parse';
 import { matchColumns } from '@/lib/import/match';
@@ -706,6 +707,115 @@ const importStock: Preparer = {
 };
 
 /* -------------------------------------------------------------
+   Looking for companies that are not customers yet
+   ------------------------------------------------------------- */
+
+/**
+ * A paid read of somebody else's database, then ordinary rows.
+ *
+ * The same shape as an enrichment and for the same reason: the search
+ * cannot be rolled back and cannot be repeated for free. `describe`
+ * says exactly what would be searched for and what it can cost and
+ * calls nothing; `run` calls once.
+ *
+ * An incomplete sentence never reaches here. The reader refuses to plan
+ * a search with no place at all, because a search of the whole country
+ * is one Lusha will answer and charge for.
+ */
+const findCompanies: Preparer = {
+  async describe({ args, store }) {
+    if (LUSHA_GATE.locked) {
+      return {
+        ok: false,
+        why: 'Lusha is switched off for everybody at the moment, so no credit can be spent.',
+      };
+    }
+    const place = String(args.place ?? '').trim();
+    if (!place) {
+      return { ok: false, why: 'nothing said where to look, and a search with no place is a search of the whole country.' };
+    }
+
+    /* Which list, exactly, before anything is spent. A search that
+       succeeded and then had nowhere to put what it found would have
+       cost the credits either way. */
+    const list = await destination(store, args.list as string | undefined);
+    if (!list.ok) return list;
+
+    const count = Number(args.count ?? 25) || 25;
+    const kind = String(args.industryLabel ?? '').trim();
+    const size = sizeSaid(args);
+
+    return {
+      ok: true,
+      count,
+      says: `Searches Lusha for up to ${count} ${kind || 'companies'} `
+        + (args.radius ? `within ${args.radius} miles of ${place}` : `near ${place}`)
+        + `${size ? `, ${size}` : ''}. One search, charged once. `
+        + `What it finds goes onto ${list.label} as new customers.`,
+      /* The search and where its results go. A list that moved between
+         the preview and the confirmation is a different operation. */
+      fingerprint: [
+        place, args.city, count, args.radius ?? '', args.industry ?? '',
+        args.minEmployees ?? '', args.maxEmployees ?? '', list.id ?? 'global',
+      ].join('|'),
+    };
+  },
+
+  async run({ args, store }) {
+    if (LUSHA_GATE.locked) {
+      return {
+        ok: false,
+        why: 'Lusha is switched off for everybody at the moment, so no credit can be spent.',
+      };
+    }
+    const city = String(args.city ?? '').trim();
+    if (!city) return { ok: false, why: 'nothing said where to look' };
+
+    const list = await destination(store, args.list as string | undefined);
+    if (!list.ok) return list;
+
+    const count = Number(args.count ?? 25) || 25;
+    const found = await FINDER.search({
+      city,
+      radiusMiles: args.radius == null ? undefined : Number(args.radius),
+      industryIds: args.industry == null ? undefined : [Number(args.industry)],
+      minEmployees: args.minEmployees == null ? undefined : Number(args.minEmployees),
+      maxEmployees: args.maxEmployees == null ? undefined : Number(args.maxEmployees),
+      limit: count,
+    });
+
+    if (!found.length) {
+      return {
+        ok: false,
+        why: `Lusha found nothing matching that near ${args.place ?? city}. Nothing has been added.`,
+      };
+    }
+
+    return {
+      ok: true,
+      steps: [{
+        op: 'invoke',
+        capability: 'rows.import',
+        subjects: [],
+        args: { rows: asContactRows(found), listId: list.id },
+      }],
+      describe: `Found ${found.length} ${found.length === 1 ? 'company' : 'companies'} `
+        + `and added ${found.length === 1 ? 'it' : 'them'} to ${list.label}.`,
+    };
+  },
+};
+
+/** The size filter, in the words the preview shows. */
+function sizeSaid(args: Record<string, unknown>): string {
+  const min = args.minEmployees == null ? null : Number(args.minEmployees);
+  const max = args.maxEmployees == null ? null : Number(args.maxEmployees);
+  if (min != null && max != null) return `with ${min} to ${max} staff`;
+  if (min != null) return `with more than ${min} staff`;
+  if (max != null) return `with fewer than ${max} staff`;
+  return '';
+}
+
+/* -------------------------------------------------------------
    Putting a picture on a post
    ------------------------------------------------------------- */
 
@@ -855,4 +965,5 @@ export const PREPARERS: Record<string, Preparer> = {
   'rows.import': importRows,
   'stock.import': importStock,
   'post.setImage': postImage,
+  'crm.findCompanies': findCompanies,
 };

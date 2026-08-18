@@ -39,6 +39,8 @@ import { parseMeeting } from './meetings';
 import { parsePost } from './posts';
 import { parseImport } from './import';
 import { parseShareList } from './sharing';
+import { parseFinder } from './finder';
+import { placeIn } from '@/lib/crm/finder';
 import { ENTITIES } from './schema';
 import { refersBack, splitClauses, type Clause } from './clauses';
 import { composeProgramme } from './programme';
@@ -54,8 +56,10 @@ import {
   type Problem, type Requirement, type Completion,
 } from './ir/validate';
 import { executability, selectToQueryPayload, type QueryPayload, type Unavailable } from './ir/execute';
-import { destination, entity as entityDef, FILE_EMIT_CAPABILITY } from './ir/registry';
-import type { Emit, Plan, Select } from './ir/types';
+import {
+  capability as capabilityDef, destination, entity as entityDef, FILE_EMIT_CAPABILITY,
+} from './ir/registry';
+import type { Emit, Expr, Invoke, Plan, Select } from './ir/types';
 
 /* =============================================================
    Availability
@@ -406,6 +410,16 @@ function planOneClause(
      the output reader for exactly that reason. */
   const sharing = readShareList(text, opts);
   if (sharing) return sharing;
+
+  /* LOOKING FOR COMPANIES WE DO NOT HAVE.
+
+     Before the operations, because "find hauliers near Haydock" has a
+     verb and a noun that half the readers below would take. It is also
+     the only reader here whose sentence reaches somebody else's paid
+     service, which is why it insists on a place rather than filling one
+     in the way the screen does. */
+  const finding = readFinder(text, opts);
+  if (finding) return finding;
 
   const operation = readOperation(text, opts);
   if (operation) return operation;
@@ -824,6 +838,98 @@ function readPost(
       amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
     },
   };
+}
+
+/**
+ * Companies that are not customers yet.
+ *
+ * The slot reader is the one the finder screen's own suggestions use,
+ * so a sentence means the same thing whether it opens the screen or
+ * runs the search. What is different here is the place: the screen
+ * fills a missing one in with Hyde so it opens somewhere, and running
+ * a paid search on a place nobody named would charge for an answer
+ * nobody asked for. A sentence that named none is left to the screen.
+ */
+function readFinder(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const cap = capabilityDef('crm.findCompanies');
+  if (!cap?.requires || !cap.handler) return null;
+  if (!caps.has(cap.requires as never)) return null;
+
+  const read = parseFinder(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+  /* No place, no search. See above. */
+  if (!read.slots.place) return null;
+
+  const place = placeIn(read.slots.place.value);
+  if (!place) return null;
+
+  const args: Record<string, Expr> = {
+    place: { kind: 'literal', value: place.said },
+    city: { kind: 'literal', value: place.city },
+    count: { kind: 'literal', value: read.limit },
+  };
+  if (read.slots.radius != null) args.radius = { kind: 'literal', value: read.slots.radius };
+  if (read.slots.industry) {
+    args.industry = { kind: 'literal', value: read.slots.industry.id };
+    args.industryLabel = { kind: 'literal', value: read.slots.industry.label };
+  }
+  if (read.slots.employees) {
+    args.minEmployees = { kind: 'literal', value: read.slots.employees.min };
+    args.maxEmployees = { kind: 'literal', value: read.slots.employees.max };
+  }
+  const list = listForFinder(text);
+  if (list) args.list = { kind: 'literal', value: list };
+
+  const step: Invoke = {
+    op: 'invoke',
+    id: 'f1',
+    capability: 'crm.findCompanies',
+    args,
+    produces: { kind: 'rows', entity: 'contacts' },
+  };
+  const plan: Plan = { steps: [step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: `${read.summary}${list ? `, onto the ${list} list` : ''}`,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Where the companies it finds should go.
+ *
+ * A sentence has no screen to pick from, so what it finds goes on a
+ * list. Naming none means the global list every customer starts on,
+ * which is where the import puts them too.
+ */
+function listForFinder(raw: string): string | null {
+  const said = raw.match(/\b(?:onto|into|on|to|for)\s+(?:the\s+)?(.{2,60}?)\s*\blist\b/i)?.[1]
+    ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1];
+  const name = said?.trim().replace(/[.,;]+$/, '');
+  if (!name) return null;
+  if (/^(?:crm|database|system|this|that)$/i.test(name)) return null;
+  return name.length >= 2 ? name : null;
 }
 
 /**
