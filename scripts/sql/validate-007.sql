@@ -2715,6 +2715,128 @@ SELECT assert('the service role can claim and settle',
 DELETE FROM command_external_attempts WHERE key LIKE 'test-%';
 
 -- =============================================================
+-- 15f. One transaction, both kinds of step, in order
+--
+-- Migration 036. `command_perform` has run changes and operations in
+-- one ordered transaction since 017, and a change set now reports the
+-- rows it made, so a later step can name what an earlier one created.
+-- =============================================================
+\echo '--- ordered programmes ---'
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST Chain%';
+DELETE FROM crm_lists WHERE name = 'TEST chain list';
+INSERT INTO crm_lists (id, name, owner_id, is_global)
+VALUES ('c4444444-0000-0000-0000-000000000001', 'TEST chain list',
+        'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+-- CREATE, THEN USE WHAT WAS CREATED.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(
+    jsonb_build_object(
+      'op', 'changes',
+      'changes', jsonb_build_array(jsonb_build_object(
+        'op', 'insert', 'table', 'crm_contacts',
+        -- `list_id` is not a column the bar may write. The list is what
+        -- `list.add` is for, which the mixed programme below uses.
+        'set', jsonb_build_object(
+          'company_name', 'TEST Chain Co', 'status', 'lead', 'source', 'Chain')))),
+    jsonb_build_object(
+      'op', 'changes',
+      'changes', jsonb_build_array(jsonb_build_object(
+        'op', 'update', 'table', 'crm_contacts',
+        -- The row the step before made. Its id did not exist when this
+        -- payload was built.
+        'id', jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'id')),
+        'set', jsonb_build_object('next_action', 'ring them Friday'))))
+  )) INTO out;
+  PERFORM assert('a create and a change to it are one transaction',
+    (out ->> 'changed')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a create and a change to it are one transaction', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and the change landed on the row that was just made',
+  (SELECT next_action FROM crm_contacts WHERE company_name = 'TEST Chain Co')
+    = 'ring them Friday',
+  COALESCE((SELECT next_action FROM crm_contacts WHERE company_name = 'TEST Chain Co'), 'nothing'));
+
+-- A FIELD WRITE AND AN OPERATION, TOGETHER.
+--
+-- This was refused by the runtime for several migrations after
+-- `command_perform` could do it.
+DELETE FROM crm_contacts WHERE company_name = 'TEST Chain Mixed';
+INSERT INTO crm_contacts (id, list_id, company_name, status, source)
+VALUES ('c4444444-0000-0000-0000-000000000009',
+        (SELECT id FROM crm_lists WHERE is_global = TRUE LIMIT 1),
+        'TEST Chain Mixed', 'lead', 'Chain');
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_perform(jsonb_build_array(
+    jsonb_build_object(
+      'op', 'changes',
+      'changes', jsonb_build_array(jsonb_build_object(
+        'op', 'update', 'table', 'crm_contacts',
+        'id', 'c4444444-0000-0000-0000-000000000009',
+        'set', jsonb_build_object('status', 'quoted')))),
+    jsonb_build_object(
+      'op', 'invoke', 'capability', 'list.add',
+      'subjects', jsonb_build_array('c4444444-0000-0000-0000-000000000009'),
+      'args', jsonb_build_object('list', 'TEST chain list'))
+  )) INTO out;
+  PERFORM assert('a field write and an operation go in one transaction',
+    (out ->> 'changed')::INT >= 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a field write and an operation go in one transaction', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('the field changed',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST Chain Mixed') = 'quoted',
+  (SELECT status FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
+
+SELECT assert('and the operation ran',
+  (SELECT list_id FROM crm_contacts WHERE company_name = 'TEST Chain Mixed')
+    = 'c4444444-0000-0000-0000-000000000001',
+  (SELECT list_id::TEXT FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
+
+-- AND THE WHOLE THING ROLLS BACK WHEN THE LAST STEP FAILS.
+DELETE FROM crm_contacts WHERE company_name = 'TEST Chain Rollback';
+
+DO $$
+BEGIN
+  PERFORM command_perform(jsonb_build_array(
+    jsonb_build_object(
+      'op', 'changes',
+      'changes', jsonb_build_array(jsonb_build_object(
+        'op', 'insert', 'table', 'crm_contacts',
+        'set', jsonb_build_object(
+          'company_name', 'TEST Chain Rollback', 'status', 'lead', 'source', 'Chain')))),
+    jsonb_build_object(
+      'op', 'invoke', 'capability', 'list.add',
+      'subjects', jsonb_build_array(
+        jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'id'))),
+      'args', jsonb_build_object('list', 'a list nobody has'))
+  ));
+  PERFORM assert('a failing last step takes the create with it', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a failing last step takes the create with it',
+    SQLERRM LIKE '%no list%' OR SQLERRM LIKE '%not clear which one%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the record it created is not there',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Chain Rollback') = 0,
+  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Chain Rollback'));
+
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST Chain%';
+DELETE FROM crm_lists WHERE name = 'TEST chain list';
+
+-- =============================================================
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'

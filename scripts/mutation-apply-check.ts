@@ -18,6 +18,7 @@
    ============================================================= */
 import { resolveMutation, resolutionHash, fieldsTouched } from '../lib/command/ir/resolve';
 import { resolveProgramme, executeProgramme } from '../lib/command/ir/orchestrate';
+import { dependencesAmong } from '../lib/command/ir/dependence';
 import { postgrestStore } from '../lib/command/store/postgrest';
 import { evaluate } from '../lib/command/ir/evaluate';
 import { validate } from '../lib/command/ir/validate';
@@ -528,24 +529,39 @@ test('a step this cannot carry out refuses the whole plan', async () => {
   ok('and nothing was written', db.writes.length === 0);
 });
 
-test('field writes and an operation in one plan are refused', async () => {
-  const db = fakeDb({ stock_trailers: trailerRows() });
+test('field writes and an operation go in one programme', async () => {
+  const db = fakeDb({
+    stock_trailers: trailerRows(),
+    crm_contacts: [{
+      id: 'c1', company_name: 'Dawson Group', status: 'quoted',
+      stock_trailer_id: 't1', list_id: 'l1', sale_price: 1000,
+    }],
+    crm_lists: [{ id: 'l1', name: 'Sales tracker', owner_id: 'u1', is_global: false }],
+  });
   const plan = twoUpdates();
   plan.steps.push({
-    op: 'invoke', id: 's3', capability: 'deal.markSold',
-    subject: selectTrailers(byStc('STC143580')),
-    produces: { kind: 'record', entity: 'deals' },
+    op: 'invoke', id: 's3', capability: 'list.add',
+    subject: {
+      op: 'select', from: { entity: 'contacts' },
+      where: { kind: 'cmp', op: 'eq',
+        left: { kind: 'field', of: { entity: 'contacts', field: 'id' } },
+        right: lit('c1') },
+      produces: { kind: 'rows', entity: 'contacts' },
+    },
+    args: { list: lit('Sales tracker') },
+    produces: { kind: 'record', entity: 'contacts' },
+  } as never);
+
+  const preview = await resolveProgramme(plan, {
+    store: postgrestStore(db.supabase), args: { list: 'Sales tracker' },
   });
-  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  /* A set of column writes goes to one database function and a business
-     operation goes to another, and there is no way to put both inside
-     one transaction. Two transactions is exactly the promise the
-     preview does not make, so the plan is refused whole. */
-  ok('the plan is refused whole',
-    !preview.ok && preview.reason === 'cannot execute',
-    preview.ok ? 'it resolved' : preview.reason);
-  ok('saying which two things cannot be done together',
-    !preview.ok && /one at a time/.test(preview.why), preview.ok ? '' : preview.why);
+  /* This used to be refused whole, and the reason it gave was true when
+     it was written: `command_apply` took column writes and
+     `command_invoke_one` took operations, with no way to put both in
+     one commit. `command_perform` was built for exactly this and the
+     restriction outlived its reason by several migrations. */
+  ok('the programme holds both kinds of step', preview.ok,
+    preview.ok ? '' : `${preview.reason}: ${preview.why}`);
   ok('and nothing was written', db.writes.length === 0);
 });
 
@@ -571,7 +587,7 @@ test('independent steps run together', async () => {
   ok('and both are in the one programme', preview.ok && preview.changes.length === 2);
 });
 
-test('a step computing from what another step writes is refused', async () => {
+test('a step computing from what another step writes is ordered', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan: Plan = {
     steps: [
@@ -598,15 +614,17 @@ test('a step computing from what another step writes is refused', async () => {
     unmet: [],
   };
 
+  ok('the analysis sees the field they share',
+    dependencesAmong(plan.steps).some((d) => /retail_price/.test(d.why)),
+    JSON.stringify(dependencesAmong(plan.steps)));
+
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('it is refused', !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? 'it resolved' : preview.reason);
-  ok('naming the field that makes them dependent',
-    !preview.ok && /retail_price/.test(preview.why), preview.ok ? '' : preview.why);
-  ok('and nothing was written', db.writes.length === 0);
+  ok('and it resolves in order', preview.ok,
+    preview.ok ? '' : `${preview.reason}: ${preview.why}`);
+  ok('with nothing written', db.writes.length === 0);
 });
 
-test('a step selecting on what another step writes is refused', async () => {
+test('a step selecting on what another step writes sees the change', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan: Plan = {
     steps: [
@@ -628,14 +646,31 @@ test('a step selecting on what another step writes is refused', async () => {
     unmet: [],
   };
 
+  const before = (db.tables.stock_trailers ?? [])
+    .filter((r) => r.location === 'Hyde' && r.status === 'in_stock').map((r) => String(r.id));
+  ok('the fixture has trailers at Hyde to move', before.length > 0, String(before.length));
+
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('the second selection depending on the first change is refused',
-    !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? 'it resolved' : preview.reason);
+  ok('it resolves in order rather than being refused', preview.ok,
+    preview.ok ? '' : `${preview.reason}: ${preview.why}`);
+  if (!preview.ok) return;
+
+  /* THE SECOND STEP SEES THE FIRST STEP'S MOVE.
+
+     Which trailers are at Bredbury depends on whether the step above
+     has happened. It has not yet, and it is going to, so the rows it
+     moves are the rows the second step is about. */
+  const noted = preview.units
+    .filter((u) => u.kind !== 'invoke' && u.stepId === 's2')
+    .flatMap((u) => (u.kind === 'invoke' ? [] : u.changes))
+    .map((c) => String(c.id));
+  ok('every trailer it moved is one the second step notes',
+    before.every((id) => noted.includes(id)),
+    `moved ${JSON.stringify(before)}, noted ${JSON.stringify(noted)}`);
   ok('and nothing was written', db.writes.length === 0);
 });
 
-test('a step consuming another step\'s result is refused', async () => {
+test('a step consuming another step\'s result is about those rows', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan: Plan = {
     steps: [
@@ -658,15 +693,25 @@ test('a step consuming another step\'s result is refused', async () => {
   };
 
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('it is refused as dependent rather than resolved',
-    !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? 'it resolved' : preview.reason);
-  ok('naming the step it depends on',
-    !preview.ok && /"s1"/.test(preview.why), preview.ok ? '' : preview.why);
+  /* s2 consumes what s1 produced and s1 comes first, so this is an
+     order rather than an error now: `command_perform` runs them in that
+     order in one transaction, and the reference becomes a selection by
+     the ids s1 actually resolved to. */
+  ok('it resolves in order rather than being refused', preview.ok,
+    preview.ok ? '' : `${preview.reason}: ${preview.why}`);
+  if (!preview.ok) return;
+
+  const first = preview.units.find((u) => u.stepId === 's1');
+  const second = preview.units.find((u) => u.stepId === 's2');
+  const firstIds = first && first.kind !== 'invoke' ? first.changes.map((c) => String(c.id)) : [];
+  const secondIds = second && second.kind !== 'invoke' ? second.changes.map((c) => String(c.id)) : [];
+  ok('and it is about exactly the rows the first step touched',
+    firstIds.length > 0 && firstIds.join('|') === secondIds.join('|'),
+    `${JSON.stringify(firstIds)} against ${JSON.stringify(secondIds)}`);
   ok('and nothing was written', db.writes.length === 0);
 });
 
-test('two steps changing the same record are refused', async () => {
+test('two steps changing the same record run in order', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   const plan: Plan = {
     steps: [
@@ -689,9 +734,13 @@ test('two steps changing the same record are refused', async () => {
   };
 
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('the overlap is found from the rows, not from the plan',
-    !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? 'it resolved' : preview.reason);
+  /* Two changes to one row are two changes to one row, in order. The
+     later one wins and the order is the sentence's, which is the same
+     rule everything else here follows. It is still said out loud. */
+  ok('it resolves', preview.ok, preview.ok ? '' : `${preview.reason}: ${preview.why}`);
+  ok('and the overlap is reported rather than swallowed',
+    preview.ok && /both change the same record/.test(preview.twiceTouched ?? ''),
+    preview.ok ? String(preview.twiceTouched) : '');
   ok('and nothing was written', db.writes.length === 0);
 });
 
@@ -840,16 +889,114 @@ const HIDDEN: { where: string; plan: Plan }[] = [
   },
 ];
 
+/* A DEPENDENCE HAS TO BE FOUND WHEREVER IT HIDES.
+ *
+ * What happens once it is found changed: a step that depends on an
+ * EARLIER one is now resolved against the rows that step will leave,
+ * rather than refused. What has not changed is that the dependence must
+ * be seen at all. A condition shape the analysis walks past is a step
+ * resolved against a value that is about to be wrong, and no amount of
+ * ordering saves that.
+ */
 for (const c of HIDDEN) {
   test(`a dependence inside ${c.where} is found`, async () => {
+    ok('the analysis sees it', dependencesAmong(c.plan.steps).length > 0,
+      JSON.stringify(dependencesAmong(c.plan.steps)));
+    ok('and it names the earlier step',
+      dependencesAmong(c.plan.steps).some((d) => d.needs === 's1'),
+      JSON.stringify(dependencesAmong(c.plan.steps)));
+  });
+
+  test(`a dependence inside ${c.where} is ordered, not refused`, async () => {
     const db = fakeDb({ stock_trailers: trailerRows() });
     const preview = await resolveProgramme(c.plan, { store: postgrestStore(db.supabase) });
-    ok('it is refused as dependent',
-      !preview.ok && preview.reason === 'dependent steps',
-      preview.ok ? 'it resolved' : preview.reason);
+    /* The ordering rule no longer stands in the way. Two of these
+       conditions, `related` and a `case` over a single row, cannot be
+       resolved by this store at all, with or without a dependence, and
+       fail for their own reasons rather than for this one. */
+    ok('the dependence is not what stops it',
+      preview.ok || preview.reason !== 'dependent steps',
+      preview.ok ? '' : `${preview.reason}: ${preview.why}`);
     ok('and nothing was written', db.writes.length === 0);
   });
 }
+
+test('a later step reads the value an earlier step is about to write', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  /* s1 puts the retail price up by a tenth. s2 copies the retail price
+     into the book value. The number s2 writes must be the one s1 is
+     about to produce, not the one on the row now: that is the whole
+     reason a dependence used to be refused. */
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{
+          field: trailer('retail_price'),
+          to: { kind: 'binary', op: '*', left: f('retail_price'), right: lit(2) },
+        }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        op: 'update', id: 's2', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{ field: trailer('nbv'), to: f('retail_price') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const before = Number((db.tables.stock_trailers ?? [])
+    .find((r) => r.stc_no === 'STC143580')?.retail_price ?? 0);
+  ok('the fixture has a retail price to double', before > 0, String(before));
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('it resolves', preview.ok, preview.ok ? '' : `${preview.reason}: ${preview.why}`);
+  if (!preview.ok) return;
+
+  const wrote = preview.units
+    .flatMap((u) => (u.kind === 'invoke' ? [] : u.changes))
+    .find((c) => 'set' in c && c.set && 'nbv' in c.set);
+  ok('and the book value is the doubled price, not the old one',
+    Number((wrote as { set: Record<string, unknown> })?.set?.nbv) === before * 2,
+    `${JSON.stringify((wrote as { set?: unknown })?.set)} against ${before * 2}`);
+});
+
+test('a step that needs a LATER one is still refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  /* The same dependence, the other way round. No ordering satisfies it,
+     so it is refused rather than resolved against a value that will not
+     exist until afterwards. */
+  const plan: Plan = {
+    steps: [
+      {
+        op: 'update', id: 's1', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143580')),
+        set: [{ field: trailer('nbv'), to: f('retail_price') }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+      {
+        op: 'update', id: 's2', expect: 'one', target: { entity: 'trailers' },
+        match: selectTrailers(byStc('STC143581')),
+        set: [{
+          field: trailer('retail_price'),
+          to: { kind: 'binary', op: '*', left: f('retail_price'), right: lit(2) },
+        }],
+        produces: { kind: 'rows', entity: 'trailers' },
+      },
+    ],
+    unmet: [],
+  };
+
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('it is refused', !preview.ok && preview.reason === 'dependent steps',
+    preview.ok ? 'it resolved' : preview.reason);
+  ok('saying which way round it needs to be',
+    !preview.ok && /comes after it/.test(preview.why), preview.ok ? '' : preview.why);
+  ok('and nothing was written', db.writes.length === 0);
+});
 
 test('a result reference buried in a case arm is found', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
@@ -863,12 +1010,12 @@ test('a result reference buried in a case arm is found', async () => {
       }],
     },
   });
+  ok('the analysis sees it', dependencesAmong(plan.steps).some((d) => d.needs === 's1'),
+    JSON.stringify(dependencesAmong(plan.steps)));
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('it is refused as dependent',
-    !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? 'it resolved' : preview.reason);
-  ok('naming the step it consumes', !preview.ok && /"s1"/.test(preview.why),
-    preview.ok ? '' : preview.why);
+  ok('and the dependence is not what stops it',
+    preview.ok || preview.reason !== 'dependent steps',
+    preview.ok ? '' : `${preview.reason}: ${preview.why}`);
 });
 
 test('and a plan that hides nothing still runs', async () => {

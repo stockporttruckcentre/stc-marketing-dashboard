@@ -472,6 +472,18 @@ export function postState(store: Store, effects: PlannedEffect[]): Store {
         return out;
       };
 
+      /* WHICH COLUMNS THE QUESTION IS ACTUALLY ABOUT.
+         Membership only has to be recomputed when this programme changes
+         something the condition reads. */
+      const asked = new Set(columnsIn(req.where));
+
+      /* Which rows the database itself returned. Everything else here
+         is a CANDIDATE: a row this programme touches that the ordinary
+         read did not match, brought in so its membership can be
+         reconsidered. The two are not the same and the difference
+         decides what happens when nothing needs reconsidering. */
+      const answered = new Set(got.rows.map((r) => String(r.id)));
+
       const out: Record<string, unknown>[] = [];
       for (const row of [...got.rows, ...extra]) {
         const over = staged.rows.get(`${req.table}:${String(row.id)}`);
@@ -486,7 +498,28 @@ export function postState(store: Store, effects: PlannedEffect[]): Store {
            what it will hold, which is how a trailer moved to Hyde turns
            up in "all the trailers at Hyde" and how one moved away from
            it does not. */
-        if (over) {
+        /* A CHANGE THAT CANNOT MOVE A ROW IN OR OUT DOES NOT DECIDE
+           MEMBERSHIP.
+
+           The database has already answered which rows match. That
+           answer only stops being true when this programme writes a
+           column the condition READS. "Put the price up on STC143580,
+           then set the book value on the trailers near Hyde" changes a
+           price and asks about a location, so the location answer
+           stands, and a `near` this reader cannot evaluate is not a
+           reason to refuse a question it did not need to re-ask.
+
+           A row this programme MAKES is different: the database never
+           saw it, so its membership has to be worked out here or not at
+           all. */
+        const touchesTheQuestion = over
+          && (over.made
+            || [...asked].some((c) => (over.set ? c in over.set : false))
+            || staged.pending.some((p) => p.table === req.table
+              && p.ids.has(String(row.id))
+              && Object.keys(p.effect.set).some((c) => asked.has(c))));
+
+        if (touchesTheQuestion) {
           const m = matches(post, req.where);
           if (m === 'unknown') {
             return {
@@ -497,6 +530,11 @@ export function postState(store: Store, effects: PlannedEffect[]): Store {
             };
           }
           if (!m) continue;
+        } else if (!answered.has(String(row.id))) {
+          /* A candidate the database did not match, changed in a way
+             that cannot affect whether it matches. It was not in the
+             answer and it is not going to be. */
+          continue;
         }
         out.push(post);
       }

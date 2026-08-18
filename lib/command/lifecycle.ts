@@ -200,11 +200,42 @@ function readListAdd(
   priorResult?: { entity: string },
 ): LifecyclePlan | null {
   const t = soften(raw);
-  if (!/\blist\b/.test(t)) return null;
   /* A create wins. "Create a list called X from these" makes a list;
      "add these to the X list" moves them onto one. Both contain "add". */
   if (/\b(?:create|make|start|set up|new)\b/.test(t)) return null;
   if (!/\b(?:add|move|put|stick|file)\b/.test(t)) return null;
+
+  /* THE WORD "LIST" IS HOW SOMEBODY SAYS IT, NOT WHAT IT MEANS.
+
+     "Put them on the Fleet Prospects list" and "put it on Fleet
+     Prospects" are the same instruction, and requiring the word made
+     the second one fall through to the question reader, which went
+     looking for trailers called Fleet Prospects.
+
+     Without the word, the clause has to be pointing at customers the
+     sentence has already produced. That is the only thing a customer
+     gets put ON in this application: a tracker says "tracker" and has
+     its own operation, and a location belongs to a trailer. A clause
+     naming its own subject still has to say "list", because "put
+     Dawson on Bredbury" would otherwise be a list called Bredbury. */
+  const saidList = /\blist\b/.test(t);
+  const pointsAtCustomers = priorResult?.entity === 'contacts'
+    || readContextReference(raw) !== null;
+  if (!saidList && !pointsAtCustomers) return null;
+
+  /* AND THE SENTENCE MUST NOT BE ABOUT SOMETHING ELSE.
+
+     "Move these trailers to Bredbury" points at a selection and names
+     trailers, and without this it was read as putting the ticked
+     customers on a list called Bredbury. A noun for another entity is
+     the sentence saying what it is about, and it outranks a pointing
+     word every time. */
+  if (!saidList) {
+    const elsewhere = ENTITIES
+      .filter((e) => e.id !== 'contacts' && e.id !== 'proposals')
+      .flatMap((e) => e.nouns);
+    if (elsewhere.some((n) => t.includes(` ${n} `))) return null;
+  }
 
   const cap = capability('list.add');
   if (!cap || !cap.requires) return null;
@@ -219,6 +250,11 @@ function readListAdd(
      list" and "onto the list called Fleet Prospects". */
   const named = raw.match(/\b(?:to|onto|on|into|in)\s+(?:the\s+)?(?:list\s+(?:called|named)\s+)?(.{2,60}?)\s*(?:\blist\b)?\s*[.;]?\s*$/i)?.[1]?.trim()
     ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1]?.trim();
+
+  /* A name is required where the word was not said, because "put them
+     on" with nothing after it is half a sentence rather than a move
+     onto a list nobody named. */
+  if (!saidList && !named) return null;
 
   return {
     op: 'create',

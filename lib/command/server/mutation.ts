@@ -38,7 +38,9 @@
 import { createHash } from 'crypto';
 import type { CommandPlanning } from '../plan';
 import { planAuthoritatively, planForExecution, planHash, type Planned, type PlanRequest } from './planner';
-import { resolveProgramme, executeProgramme, deliverySteps, type Programme } from '../ir/orchestrate';
+import {
+  resolveProgramme, executeProgramme, deliverySteps, stagedEffect, type Programme,
+} from '../ir/orchestrate';
 import type { ExecutionPolicy } from '../ir/orchestrate';
 import type { Store } from '../ir/store';
 import type { Cond, Emit, Mutate, Plan } from '../ir/types';
@@ -732,18 +734,12 @@ export async function applyMutation(
     }
   }
 
+  /* The rows as the whole programme will leave them. The same
+     projection the sequential resolution above uses, from the same
+     function, so a delivery and a resolution cannot disagree about what
+     a step is going to do. */
   const asItWillBe = resolved?.ok
-    ? postState(req.store, resolved.units.map((u) => (u.kind === 'invoke'
-      ? {
-          kind: 'invoke' as const,
-          capability: u.plan.capability,
-          subjects: u.plan.subjects.map((x) => x.id),
-          /* The records the sentence named, when the operation runs on
-             different ones. A sale names units and sells deals. */
-          via: u.plan.subjects.map((x) => x.viaId).filter((x): x is string => !!x),
-          args: u.plan.args,
-        }
-      : { kind: 'changes' as const, changes: u.staged ?? u.changes })))
+    ? postState(req.store, resolved.units.map(stagedEffect))
     : req.store;
 
   for (const step of outgoing) {

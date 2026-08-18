@@ -54,6 +54,7 @@ import { resolveMutation, resolutionHash, type Resolution, type ResolvedReferenc
 import type { Change, Store, TransactionStep } from './store';
 import { resolveInvoke, type InvokePlan } from './invoke';
 import { dependencesAmong, overlappingRows } from './dependence';
+import { postState, type PlannedEffect } from './overlay';
 
 /* -------------------------------------------------------------
    Which steps have an effect
@@ -174,8 +175,59 @@ function plannedId(stepId: string, set: Record<string, unknown>): string {
   return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join('-');
 }
 
+/**
+ * One resolved unit, as the predictive reader wants it.
+ *
+ * The same shape `mutation.ts` builds for the preview, in one place so
+ * the sequential resolution above and the preview below cannot come to
+ * different conclusions about what a step is going to do.
+ */
+/**
+ * The rows each step so far resolved to, by step id.
+ *
+ * A create's row does not exist yet and has no id to give, so it is
+ * absent here and a step naming it is refused rather than resolved
+ * against nothing. What a create produces is handed forward inside the
+ * transaction instead, by `command_perform`.
+ */
+function resolvedSoFar(units: Unit[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const u of units) {
+    if (u.kind === 'invoke') {
+      out.set(u.stepId, u.plan.subjects.map((s) => s.id));
+    } else if (u.kind !== 'create') {
+      out.set(u.stepId, u.changes.map((c) => String(c.id ?? '')).filter(Boolean));
+    }
+  }
+  return out;
+}
+
+export function stagedEffect(u: Unit): PlannedEffect {
+  return u.kind === 'invoke'
+    ? {
+        kind: 'invoke',
+        capability: u.plan.capability,
+        subjects: u.plan.subjects.map((x) => x.id),
+        /* The records the sentence named, when the operation runs on
+           different ones. A sale names units and sells deals. */
+        via: u.plan.subjects.map((x) => x.viaId).filter((x): x is string => !!x),
+        args: u.plan.args,
+      }
+    : { kind: 'changes', changes: u.staged ?? u.changes };
+}
+
 export type Programme =
-  | { ok: true; units: Unit[]; changes: Change[]; hash: string }
+  | {
+      ok: true; units: Unit[]; changes: Change[]; hash: string;
+      /**
+       * Two steps landing on the same row.
+       *
+       * Not a refusal any more: the steps run in order, so the later
+       * change wins and the order is the sentence's. It is still worth
+       * saying before it happens.
+       */
+      twiceTouched?: string;
+    }
   | {
       ok: false;
       reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved'
@@ -262,54 +314,78 @@ export async function resolveProgramme(
     }
   }
 
-  /* STEPS THAT NEED EACH OTHER ARE REFUSED, NOT RESHUFFLED.
+  /* A DEPENDENCE IS AN ORDER, NOT AN ERROR.
 
-     Everything below computes each step's changes from the rows as they
-     stand now, and hands all of them over together. That is right for
-     steps that have nothing to do with each other and wrong for a step
-     that was meant to run after another: it would read the old value,
-     write a number that was never true, and report success. */
-  const dependent = dependencesAmong(effects);
-  if (dependent.length) {
-    const d = dependent[0];
+     Everything below used to compute each step's changes from the rows
+     as they stand NOW and hand them all over together, so a step meant
+     to run after another would read the old value, write a number that
+     was never true, and report success. Refusing every dependence was
+     the safe answer to that, and it also refused the thing anybody
+     would actually type: "assign Dawson to Dave and raise a proposal
+     for it" is one intention.
+
+     Resolution is sequential now. Each step is resolved against the
+     rows as the steps before it will leave them, through the same
+     predictive reader the preview uses. So a dependence on an EARLIER
+     step is ordinary and expected. What is still refused:
+
+       a dependence on a LATER step, which no ordering can satisfy
+       a dependence on a column nothing can predict, which the
+         predictive reader itself reports when the read is attempted
+
+     The second is not decided here. It is decided where it is known, by
+     `postState` refusing to answer a read it cannot answer honestly. */
+  const order = new Map(effects.map((s, i) => [s.id ?? `#${i}`, i]));
+  for (const d of dependencesAmong(effects)) {
+    const at = order.get(d.stepId) ?? -1;
+    const on = order.get(d.needs) ?? -1;
+    if (on < at) continue;
     return {
       ok: false,
       reason: 'dependent steps',
-      why: `"${d.stepId}" depends on "${d.needs}": ${d.why}. `
-        + 'Ask for them one at a time.',
+      why: on === at
+        ? `"${d.stepId}" depends on itself: ${d.why}.`
+        : `"${d.stepId}" needs "${d.needs}", which comes after it: ${d.why}. `
+          + 'Ask for them the other way round.',
       stepId: d.stepId,
     };
   }
 
-  /* ONE TRANSACTION IS ONE KIND OF THING.
+  /* ONE TRANSACTION HOLDS BOTH KINDS OF THING.
 
-     A set of column writes goes to one database function and a business
-     operation goes to another, and there is no way to put both inside
-     one transaction from here. A plan holding both is refused rather
-     than run as two, because two transactions is exactly the promise
-     the preview does not make.
+     It did not always. `command_apply` took column writes and
+     `command_invoke_one` took operations, and there was no way to put
+     both in one commit, so a plan holding both was refused rather than
+     run as two: two transactions is exactly the promise a preview does
+     not make.
 
-     Asked of the plan, before anything is read. Finding this out after
-     resolving half of it would report whichever half failed first
-     rather than the thing that is actually wrong. */
-  const shapes = new Set(effects.map((s) => (s.op === 'invoke' ? 'operation' : 'write')));
-  if (shapes.size > 1) {
-    return {
-      ok: false,
-      reason: 'cannot execute',
-      why: 'that mixes changing fields with performing an operation, and the two cannot be done in one go. Ask for them one at a time.',
-    };
-  }
+     `command_perform` was built for this. It takes an ordered list of
+     change sets and operations, runs them in that order inside one
+     PostgreSQL function, and lets a later step name what an earlier one
+     produced. The restriction that stood in front of it outlived the
+     reason for it by several migrations. */
 
   const now = opts.now ?? new Date().toISOString().slice(0, 10);
   const units: Unit[] = [];
 
   for (const s of effects) {
+    /* THE ROWS AS THE STEPS BEFORE THIS ONE WILL LEAVE THEM.
+
+       Rebuilt for every step rather than once, because each resolution
+       adds to what the next one sees. A step that reads a column an
+       earlier step wrote gets the value it is about to have; a step
+       that reads a column nothing can predict is refused by the reader
+       itself, before anything is written. */
+    const asItWillBe = units.length
+      ? postState(opts.store, units.map(stagedEffect))
+      : opts.store;
+    const stepStore = asItWillBe;
+
     /* A business operation, resolved to the records it will run on.
        Nothing about it is a column and a value, so it does not go
        through the mutation resolver at all. */
     if (s.op === 'invoke') {
-      const resolved = await resolveInvoke(plan, s, { store: opts.store, args: opts.args });
+      const resolved = await resolveInvoke(plan, s, { store: stepStore, args: opts.args });
       if (!resolved.ok) {
         return {
           ok: false,
@@ -372,7 +448,10 @@ export async function resolveProgramme(
 
     const step = s as Mutate & { id: string };
     const resolution = await resolveMutation(plan, {
-      store: opts.store, stepId: step.id, readCap: opts.readCap,
+      store: stepStore, stepId: step.id, readCap: opts.readCap,
+      /* What every step before this one resolved to, so this one can be
+         about those rows rather than repeating their condition. */
+      resolvedIds: resolvedSoFar(units),
     });
     if (!resolution.ok) {
       return { ok: false, reason: 'unresolved', why: resolution.why, stepId: step.id, resolution };
@@ -425,19 +504,21 @@ export async function resolveProgramme(
     });
   }
 
-  /* The same question as above, asked of the rows rather than of the
-     plan. Two updates over the same entity usually pick out different
-     rows and are independent; it is only when the conditions actually
-     overlap that one row would receive two changes in one call. */
+  /* TWO CHANGES TO ONE ROW ARE TWO CHANGES TO ONE ROW, IN ORDER.
+
+     This used to be refused, and the reason it gave was true at the
+     time: the changes went over as one unordered batch and nothing said
+     which won. They are ordered now, the later one wins, and the order
+     is the one in the sentence, which is the same rule everything else
+     here follows. "Put the price up on STC143580 and set its book value
+     to the new price" is one intention and used to come back as a
+     complaint about itself.
+
+     `overlappingRows` is still asked, and what it finds is reported as
+     a caution on the preview rather than as a refusal, because two
+     changes landing on one row is worth SEEING before it happens.
+     Finding it and saying nothing would be the other mistake. */
   const overlap = overlappingRows(units.filter((u): u is UpdateUnit => u.kind !== 'invoke'));
-  if (overlap) {
-    return {
-      ok: false,
-      reason: 'dependent steps',
-      why: `"${overlap.stepId}" and "${overlap.needs}" ${overlap.why}. Ask for them one at a time.`,
-      stepId: overlap.stepId,
-    };
-  }
 
   const changes = units.flatMap((u) => (u.kind === 'invoke' ? [] : u.changes));
 
@@ -452,7 +533,15 @@ export async function resolveProgramme(
     };
   }
 
-  return { ok: true, units, changes, hash: programmeHash(units) };
+  return {
+    ok: true, units, changes,
+    /* Said out loud on the preview: two of these steps land on the same
+       row, and the later one wins. */
+    twiceTouched: overlap
+      ? `"${overlap.stepId}" and "${overlap.needs}" ${overlap.why}, so the later one wins`
+      : undefined,
+    hash: programmeHash(units),
+  };
 }
 
 /**

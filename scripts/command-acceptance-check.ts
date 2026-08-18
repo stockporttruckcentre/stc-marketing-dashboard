@@ -438,7 +438,7 @@ test('a bulk arithmetic change starts from each row\'s own value', async () => {
    7. Steps that need each other, through the runtime
    ============================================================= */
 
-test('a dependent plan is refused by the runtime, not just by the checker', async () => {
+test('a plan whose second step needs the first is ordered by the runtime', async () => {
   const db = fakeDb({ stock_trailers: trailers() });
   const planned = await plan('set the retail price on STC143580 to £24,995', 'admin', db);
   ok('it planned', !!planned?.preview?.ok);
@@ -446,8 +446,8 @@ test('a dependent plan is refused by the runtime, not just by the checker', asyn
 
   /* One sentence produces one step today, so the dependence is
      introduced here, at the plan the runtime is given. What is being
-     asserted is that `previewMutation` refuses it rather than resolving
-     it, which is the path a multi step sentence will take. */
+     asserted is that `previewMutation` RESOLVES it in order rather than
+     refusing it, which is the path a multi step sentence takes. */
   const plan2 = structuredClone(planned.planned.planning.plan);
   plan2.steps.push({
     op: 'update', id: 's2', expect: 'one', target: { entity: 'trailers' },
@@ -472,10 +472,10 @@ test('a dependent plan is refused by the runtime, not just by the checker', asyn
     { ...planned.planned.planning, plan: plan2 },
     postgrestStore(db.supabase),
   );
-  ok('it is refused', !preview.ok, 'it previewed');
-  ok('as dependent steps', !preview.ok && preview.reason === 'dependent steps',
-    preview.ok ? '' : preview.reason);
-  ok('nothing was written', db.writes.length === 0);
+  ok('it previews', preview.ok, preview.ok ? '' : preview.why);
+  ok('with both steps in it', preview.ok && preview.rows.length === 2,
+    preview.ok ? String(preview.rows.length) : '');
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
 });
 
 /* =============================================================

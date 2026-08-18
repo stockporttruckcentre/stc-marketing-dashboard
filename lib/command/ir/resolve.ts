@@ -254,6 +254,14 @@ export type ResolveOptions = {
    * about running it.
    */
   readCap?: number;
+  /**
+   * The rows each earlier step resolved to.
+   *
+   * What lets a step say "the ones the last step touched" rather than
+   * repeating its condition. Filled in by `resolveProgramme` as it goes,
+   * which is the only place the answer exists.
+   */
+  resolvedIds?: Map<string, string[]>;
 };
 
 /**
@@ -283,7 +291,38 @@ export async function resolveMutation(
   const def = entityDef(step.target.entity);
   if (!def) return fail('unresolvable', `nothing here holds ${step.target.entity}`);
 
-  const match = step.match;
+  /* WHICH ROWS, INCLUDING "THE ONES THE LAST STEP TOUCHED".
+     A step can name an earlier step's result rather than a condition:
+     "create a lead and put it on Fleet Prospects" is one intention, and
+     the second half has no condition of its own. Resolution is
+     sequential, so by the time this runs the earlier step's rows are
+     known and the reference becomes a selection by id.
+
+     A reference to a step whose rows are NOT known is a reference to
+     something that has not happened, which is refused rather than
+     guessed at. */
+  let match = step.match;
+  if (match && !('op' in match) && 'ref' in match) {
+    const from = (match as { step: string }).step;
+    const ids = opts.resolvedIds?.get(from);
+    if (!ids) {
+      return fail('unresolvable',
+        `step "${stepId}" is about what "${from}" produces, and that has not been worked out yet`);
+    }
+    if (!ids.length) {
+      return fail('nothing matched', `"${from}" matched no records, so there is nothing to change`);
+    }
+    match = {
+      op: 'select',
+      from: { entity: step.target.entity },
+      where: {
+        kind: 'in',
+        of: { kind: 'field', of: { entity: step.target.entity, field: 'id' } },
+        values: ids.map((id) => ({ kind: 'literal' as const, value: id })),
+      },
+      produces: { kind: 'rows', entity: step.target.entity },
+    };
+  }
   if (!match || !('op' in match)) {
     return fail('unresolvable', `step "${stepId}" does not say which rows`);
   }
