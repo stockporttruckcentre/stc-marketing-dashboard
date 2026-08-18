@@ -185,6 +185,41 @@ export type PrepareOutcome =
  * list does not exist until the transaction runs. Finding the step that
  * makes it lets the share refer to its result by position instead.
  */
+/**
+ * The rows an earlier step resolved to, as a selection by id.
+ *
+ * `null` when the source is not a reference to a step with known rows,
+ * which leaves the caller to fall back to that step's own condition.
+ */
+function rowsBehind(
+  plan: Plan, from: Emit['from'], resolved?: Map<string, string[]>,
+): Select | null {
+  if (!resolved?.size || !from || typeof from !== 'object') return null;
+  if (!('ref' in from)) return null;
+
+  const ids = resolved.get(from.step);
+  if (!ids?.length) return null;
+
+  const step = plan.steps.find((x) => x.id === from.step);
+  const behind = selectBehind(plan, from);
+  const entity = (step && 'target' in step && (step as { target?: { entity?: string } }).target?.entity)
+    ?? (behind && 'entity' in behind.from ? (behind.from as { entity: string }).entity : null);
+  if (!entity) return null;
+
+  return {
+    op: 'select',
+    from: { entity },
+    where: {
+      kind: 'in',
+      of: { kind: 'field', of: { entity, field: 'id' } },
+      values: ids.map((id) => ({ kind: 'literal' as const, value: id })),
+    },
+    /* The shaping the original selection asked for still applies: a
+       file of "the five cheapest, moved to Hyde" is five rows. */
+    ...(behind?.shape ? { shape: behind.shape } : {}),
+  } as Select;
+}
+
 function listStepBehind(plan: Plan, from: Emit['from']): string | null {
   const seen = new Set<string>();
   const walk = (source: Emit['from'] | undefined): string | null => {
@@ -506,6 +541,14 @@ export async function prepareDelivery(
      * downloaded and a spreadsheet was attached.
      */
     produced?: Map<string, { artefact: Artefact; rows: number }>;
+    /**
+     * Which rows each earlier step actually resolved to, by step id.
+     *
+     * A clause that consumes an earlier step means THOSE records. The
+     * condition that found them may no longer hold once the step has
+     * run, which is exactly the case a chained export is for.
+     */
+    resolvedIds?: Map<string, string[]>;
   },
 ): Promise<PrepareOutcome> {
   const from = emit.from;
@@ -514,7 +557,16 @@ export async function prepareDelivery(
     if (already) return prepareAttach(planning, emit, already.artefact, already.rows, opts.store);
   }
 
-  const select = selectBehind(planning.plan, emit.from);
+  /* THE ROWS THAT STEP ACTED ON, BY ID.
+
+     "Move these to Hyde and export them" points at what the move
+     touched. Re-running the move's own condition would ask for the
+     trailers at Carrington, which is where they no longer are, so the
+     rows are read by the ids the programme already resolved. Falling
+     back to the condition is right for anything with no resolved rows
+     behind it, like a bare selection nothing has acted on. */
+  const select = rowsBehind(planning.plan, emit.from, opts.resolvedIds)
+    ?? selectBehind(planning.plan, emit.from);
   if (!select) return { ok: false, reason: 'unsupported', why: 'that emit has no rows to work from' };
 
   /* Sharing produces nothing. It grants access to records somebody

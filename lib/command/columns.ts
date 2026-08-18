@@ -61,6 +61,16 @@ export type ColumnSpec = {
 export type LifecyclePermissions = {
   create?: string;
   delete?: string;
+  /**
+   * What it takes to hang a file off one of these rows.
+   *
+   * A property of the target, not of attaching: a condition report goes
+   * on a trailer under `stock.edit` and a signed proposal goes on a
+   * customer under `crm.edit`, and somebody may hold one and not the
+   * other. Migration 014 already derived it this way; declaring it here
+   * is what lets the planner give the same answer.
+   */
+  attach?: string;
 };
 
 export type TableSpec = {
@@ -81,7 +91,7 @@ const SYSTEM: ColumnSpec[] = [
 export const TABLES: TableSpec[] = [
   {
     table: 'crm_contacts', label: 'customers',
-    lifecycle: { create: 'crm.create', delete: 'crm.delete' },
+    lifecycle: { create: 'crm.create', delete: 'crm.delete', attach: 'crm.edit' },
     columns: [
       ...SYSTEM,
       { name: 'company_name', kind: 'text' },
@@ -132,7 +142,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'stock_trailers', label: 'trailers',
-    lifecycle: { create: 'stock.edit', delete: 'stock.edit' },
+    lifecycle: { create: 'stock.edit', delete: 'stock.edit', attach: 'stock.edit' },
     columns: [
       ...SYSTEM,
       { name: 'status', kind: 'enum', values: ['new_build', 'in_stock', 'sales_order', 'sold', 'rental', 'scrap'] },

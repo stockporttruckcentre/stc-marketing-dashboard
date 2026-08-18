@@ -25,6 +25,7 @@
    ============================================================= */
 import type { Cardinality, Cond, Expr } from './ir/types';
 import { ENTITIES } from './schema';
+import { MANY_WORDS, ONE_WORDS } from './pointing';
 
 /**
  * What the screen has, sent with the sentence.
@@ -72,15 +73,11 @@ export const EMPTY_CONTEXT: CommandContext = {};
    The words
    ------------------------------------------------------------- */
 
-/** One record, the one in front of you. */
-const THIS_WORDS = ['this', 'that', 'the current', 'the open', 'here'];
-
-/** However many are ticked. */
-const THESE_WORDS = [
-  'these', 'those', 'the selected', 'selected', 'the ones selected',
-  'the selection', 'the ticked', 'highlighted', 'the ones i have selected',
-  'the ones i picked', 'the marked',
-];
+/* The words themselves are `pointing.ts`, so the clause reader and the
+   create reader cannot disagree with this one about what points at
+   something. */
+const THIS_WORDS: readonly string[] = ONE_WORDS;
+const THESE_WORDS: readonly string[] = MANY_WORDS;
 
 const soften = (s: string) =>
   ` ${s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()} `;

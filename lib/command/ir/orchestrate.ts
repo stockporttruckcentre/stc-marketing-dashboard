@@ -46,6 +46,7 @@
    payload cannot reach a column the command bar was never meant to
    write, even if something upstream of it is wrong.
    ============================================================= */
+import { createHash } from 'crypto';
 import type { Mutate, Plan, Step } from './types';
 import { entity as entityDef, capability } from './registry';
 import { evaluate, type EvalContext } from './evaluate';
@@ -132,6 +133,14 @@ export type UpdateUnit = {
   resolution: Extract<Resolution, { ok: true }> | null;
   /** What the preview shows, and exactly what will be written. */
   changes: Change[];
+  /**
+   * The same effect, as a later step in this programme will see it.
+   *
+   * Only different for a create: the database issues the real id, so
+   * what gets written carries none and what gets predicted carries a
+   * stand-in. Absent means `changes` is already both.
+   */
+  staged?: Change[];
   /** Row label to before and after, for the preview. */
   preview: { id: string; label: string; before: Record<string, unknown>; after: Record<string, unknown> }[];
 };
@@ -151,6 +160,19 @@ export type InvokeUnit = {
 };
 
 export type Unit = UpdateUnit | InvokeUnit;
+
+/**
+ * A stand-in id for a row that does not exist yet.
+ *
+ * Derived rather than random, because the preview and the confirmation
+ * resolve the same programme independently and a random id would make
+ * their hashes differ every time. Shaped like a UUID so anything reading
+ * it sees an id, and never written: the database issues the real one.
+ */
+function plannedId(stepId: string, set: Record<string, unknown>): string {
+  const h = createHash('sha256').update(`${stepId}|${JSON.stringify(set)}`).digest('hex');
+  return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join('-');
+}
 
 export type Programme =
   | { ok: true; units: Unit[]; changes: Change[]; hash: string }
@@ -324,9 +346,24 @@ export async function resolveProgramme(
         return { ok: false, reason: 'incomplete', why: 'that says nothing about the record to create', stepId: step.id };
       }
 
+      /* WHERE THE ROW WILL BE, BEFORE IT IS ANYWHERE.
+
+         A later step in the same programme can name what this makes.
+         The database gives the real id on insert, so this carries a
+         stand-in derived from the step and the values it is writing:
+         the same resolution twice produces the same one, which is what
+         keeps the programme hash stable between the preview and the
+         confirmation, and it is never sent to the database. It exists
+         so a predicted read can hold the row at all. */
+      const standIn = plannedId(step.id, set);
+
       units.push({
         stepId: step.id, kind: 'create', entity: step.target.entity, table: def.table,
         changes: [{ op: 'insert', table: def.table, set }],
+        /* The staged row for anything reading ahead. Separate from the
+           change, because the change is what the database is told and
+           this is what the programme predicts. */
+        staged: [{ op: 'insert' as const, table: def.table, id: standIn, set }],
         preview: [{ id: '', label: 'a new record', before: {}, after: set }],
         resolution: null,
       });

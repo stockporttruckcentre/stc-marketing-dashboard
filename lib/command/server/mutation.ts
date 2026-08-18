@@ -177,6 +177,30 @@ export type MutationPreview =
 export const SAMPLE_SIZE = 8;
 
 /**
+ * The rows each step of a resolved programme acts on, by step id.
+ *
+ * What a later clause means by "them". The condition that found them is
+ * not it: "move these to Hyde and export them" would ask for the
+ * trailers still at Carrington.
+ */
+function resolvedRows(programme: Programme | null): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (!programme?.ok) return out;
+  for (const unit of programme.units) {
+    if (unit.kind === 'invoke') {
+      /* The records the SENTENCE named, which is what a following
+         clause is pointing at. */
+      out.set(unit.stepId, unit.plan.subjects.map((s) => s.viaId ?? s.id));
+      continue;
+    }
+    const ids = (unit.resolution?.rows ?? []).map((r) => r.id)
+      .concat((unit.staged ?? []).map((c) => String(c.id ?? '')).filter(Boolean));
+    if (ids.length) out.set(unit.stepId, ids);
+  }
+  return out;
+}
+
+/**
  * The programme hash, plus whatever an operation outside the database
  * decided.
  *
@@ -683,13 +707,20 @@ export async function applyMutation(
           kind: 'invoke' as const,
           capability: u.plan.capability,
           subjects: u.plan.subjects.map((x) => x.id),
+          /* The records the sentence named, when the operation runs on
+             different ones. A sale names units and sells deals. */
+          via: u.plan.subjects.map((x) => x.viaId).filter((x): x is string => !!x),
           args: u.plan.args,
         }
-      : { kind: 'changes' as const, changes: u.changes })))
+      : { kind: 'changes' as const, changes: u.staged ?? u.changes })))
     : req.store;
 
   for (const step of outgoing) {
     const ready = await prepareDelivery(planning, step as Emit, {
+      /* Which rows each earlier step resolved to, so a clause consuming
+         one exports those records rather than whatever its condition
+         still matches. */
+      resolvedIds: resolvedRows(resolved),
       /* The rows as they will be. The record an attachment goes on and
          the people a share names are looked up through the same lens,
          which changes nothing for them: no programme in this

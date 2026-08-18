@@ -126,6 +126,11 @@ export function entityPermissions(): { table: string; operation: string; capabil
   for (const e of entities()) {
     for (const [operation, capability] of [
       ['create', e.createRequires], ['delete', e.deleteRequires],
+      /* Hanging a file off a row is the third thing that happens to one,
+         and what it takes depends on the row. Migration 014 derived it
+         from the table already; this is the same answer from the same
+         registry, so the planner and the database cannot disagree. */
+      ['attach', e.attachRequires],
     ] as const) {
       if (!capability) continue;
       const key = `${e.table}.${operation}`;
@@ -199,10 +204,20 @@ GRANT EXECUTE ON FUNCTION command_may(TEXT) TO authenticated;
 -- is not a permission.
 CREATE TABLE IF NOT EXISTS command_entity_permissions (
   table_name TEXT NOT NULL,
-  operation  TEXT NOT NULL CHECK (operation IN ('create', 'delete')),
+  operation  TEXT NOT NULL CHECK (operation IN ('create', 'delete', 'attach')),
   capability TEXT NOT NULL,
   PRIMARY KEY (table_name, operation)
 );
+
+-- The set of operations grows. CREATE TABLE IF NOT EXISTS leaves an
+-- existing table's constraint exactly as it was, so a database migrated
+-- before the attach operation existed would refuse the seed below
+-- rather than the seed telling it what changed.
+ALTER TABLE command_entity_permissions
+  DROP CONSTRAINT IF EXISTS command_entity_permissions_operation_check;
+ALTER TABLE command_entity_permissions
+  ADD CONSTRAINT command_entity_permissions_operation_check
+  CHECK (operation IN ('create', 'delete', 'attach'));
 
 ALTER TABLE command_entity_permissions ENABLE ROW LEVEL SECURITY;
 

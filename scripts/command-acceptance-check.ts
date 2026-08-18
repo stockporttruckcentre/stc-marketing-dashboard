@@ -2361,19 +2361,137 @@ test('marking deals sold and exporting them exports them sold', async () => {
     previewPlanHash: planned.planned.meaning.hash,
     previewProgrammeHash: preview.programmeHash,
   });
+
+  /* A SALE IS NOT PREDICTABLE ENOUGH TO EXPORT IN THE SAME BREATH.
+
+     The status, the price and the customer are. The commission is
+     computed from a rate this cannot see, and the dates come from the
+     deal rather than from the sentence. A trailer export shows those
+     columns, so the file would carry a stale figure next to a fresh
+     price, which is worse than no file. The whole thing is refused
+     BEFORE anything is written, and it names the column. */
+  ok('the whole thing is refused', !done.ok, 'it exported a stale sale');
+  if (!done.ok) {
+    ok('naming what it cannot work out in advance',
+      /order_date|commission|profit/.test(done.why), done.why);
+  }
+  ok('and the sale did not happen either',
+    db.tables.crm_contacts[0]?.status === 'quoted',
+    String(db.tables.crm_contacts[0]?.status));
+  ok('nor the stock unit', db.tables.stock_trailers[0]?.status === 'in_stock',
+    String(db.tables.stock_trailers[0]?.status));
+});
+
+test('marking deals sold on its own still sells them', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
+    ],
+    crm_contacts: [
+      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+        sale_price: 20000, profit: 4000, commission_rate: 0.1 },
+    ],
+  });
+  const text = 'mark all the in stock curtainsiders as sold';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  ok('the deal sold', db.tables.crm_contacts[0]?.status === 'customer',
+    String(db.tables.crm_contacts[0]?.status));
+  ok('and the unit with it', db.tables.stock_trailers[0]?.status === 'sold',
+    String(db.tables.stock_trailers[0]?.status));
+});
+
+test('moving trailers then exporting where they went finds them', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 't1', stc_no: 'STC930001', status: 'in_stock', location: 'Carrington', category: 'Curtainsider' },
+      { id: 't2', stc_no: 'STC930002', status: 'in_stock', location: 'Hyde', category: 'Curtainsider' },
+    ],
+  });
+  /* The moved unit is not in the pre-state answer to "at Hyde". A
+     reader that patched rows the ordinary query returned could never
+     have found it. */
+  const text = 'move all the trailers at Carrington to Hyde and export the trailers at Hyde to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
 
-  ok('the deal really sold',
-    db.tables.crm_contacts[0]?.status === 'customer',
-    String(db.tables.crm_contacts[0]?.status));
-
-  /* The file is of the trailers the sentence named, and the sale marks
-     the trailer sold too. What matters is that it is not the pre-sale
-     row. */
   const csv = asText(done.artefact.bytes);
-  ok('and the file is not a copy of the rows before it',
-    csv.includes('STC910001'), csv.slice(0, 200));
+  ok('the moved unit is in the file', csv.includes('STC930001'), csv.slice(0, 300));
+  ok('and so is the one that was already there', csv.includes('STC930002'), csv.slice(0, 300));
+});
+
+test('a record made by the same sentence turns up in what follows it', async () => {
+  const db = fakeDb({
+    crm_contacts: [],
+    crm_lists: [{ id: 'l1', name: 'Everything', is_global: true }],
+  });
+  const text = 'create a customer called Ravenscroft Haulage and export the customers to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
+
+  /* An insert has no id until the database issues one, which is why
+     this used to be impossible: the row could not be staged at all. */
+  const csv = asText(done.artefact.bytes);
+  ok('the new customer is in the file', csv.includes('Ravenscroft Haulage'), csv.slice(0, 300));
+  ok('and it really exists', (db.tables.crm_contacts ?? []).length === 1,
+    String((db.tables.crm_contacts ?? []).length));
+});
+
+test('a meeting moved and then exported shows both ends moved', async () => {
+  const db = fakeDb(DIARY());
+  const text = 'move my site visit on Friday to 2pm and export it to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
+
+  const csv = asText(done.artefact.bytes);
+  /* The meeting starts at two and finishes an hour later. A file that
+     showed the new start against the old end would describe a meeting
+     that finishes before it begins. */
+  ok('the file shows the new start', /14:00|T14:00/.test(csv), csv.slice(0, 400));
+  ok('and the end moved with it', !/T09:00|T10:00/.test(csv), csv.slice(0, 400));
 });
 
 test('a renderer that fails leaves the chained change unwritten', async () => {
@@ -3294,6 +3412,50 @@ test('the deleted executor has no callers in production code', async () => {
   /* And the route itself is gone, so restoring a caller cannot quietly
      start working again. */
   ok('and the route is gone', !existsSync('app/api/command/execute/route.ts'));
+});
+
+/* =============================================================
+   32. What it takes to attach depends on what it is attached to
+
+   The database has always derived this from the target table. The
+   registry said crm.edit flatly, which is the same answer only while the
+   role bundles happen to overlap, and the architecture supports
+   per-user grants on purpose.
+   ============================================================= */
+
+test('a stock updater may attach to a trailer and not to a customer', async () => {
+  /* Not a role. An explicit grant, which is what the admin panel will
+     hand out and what the four bundles cannot express. */
+  const stockOnly = capabilitiesFor({ role: 'viewer' } as never, {
+    'stock.edit': true, 'crm.edit': false,
+  });
+
+  const onTrailer = planCommand('export the sold trailers as a PDF and attach it to STC143580', {
+    actorCapabilities: [...stockOnly],
+  });
+  ok('attaching to a trailer is offered',
+    onTrailer?.availability.permitted !== false,
+    JSON.stringify(onTrailer?.availability.missingPermissions));
+
+  const onCustomer = planCommand('export the sold trailers as a PDF and attach it to this customer', {
+    actorCapabilities: [...stockOnly],
+    context: { record: { entity: 'contacts', id: '11111111-1111-1111-1111-111111111111' } },
+  });
+  ok('attaching to a customer is not',
+    onCustomer === null || onCustomer.availability.permitted === false,
+    JSON.stringify(onCustomer?.availability.missingPermissions));
+
+  /* And the other way round, so this is a real distinction rather than
+     one grant being stricter than the other. */
+  const crmOnly = capabilitiesFor({ role: 'viewer' } as never, {
+    'crm.edit': true, 'stock.edit': false,
+  });
+  const crmOnTrailer = planCommand('export the sold trailers as a PDF and attach it to STC143580', {
+    actorCapabilities: [...crmOnly],
+  });
+  ok('somebody with crm.edit alone cannot attach to a trailer',
+    crmOnTrailer === null || crmOnTrailer.availability.permitted === false,
+    JSON.stringify(crmOnTrailer?.availability.missingPermissions));
 });
 
 /* ============================================================= */

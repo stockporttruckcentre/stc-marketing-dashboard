@@ -313,8 +313,30 @@ function planProgramme(
  * reference-shaped title column can be attached to without this
  * changing.
  */
-function attachTarget(words: string[] | string): Select | null {
+function attachTarget(
+  words: string[] | string, context: CommandContext = EMPTY_CONTEXT,
+): Select | null {
   const text = Array.isArray(words) ? words.join(' ') : words;
+
+  /* THE RECORD IN FRONT OF YOU.
+
+     "Attach it to this customer" names a record exactly and names it
+     with a word. The screen sends what it has open, and this resolves
+     it the same way every other reader does, which is also what makes
+     the permission derivable: what it takes to attach depends on what
+     it is attached to, and until now a pointed-at target had no entity
+     at all. */
+  const pointed = readContextReference(text);
+  const fromScreen = pointed ? resolveContext(pointed, context) : null;
+  if (fromScreen) {
+    return {
+      op: 'select',
+      from: { entity: fromScreen.entity },
+      where: fromScreen.match,
+      produces: { kind: 'rows', entity: fromScreen.entity },
+    };
+  }
+
   const refs = readRecordRefs(text);
   const named = [...refs.stc, ...refs.coded][0];
   if (!named) return null;
@@ -509,7 +531,7 @@ function planOneClause(
        STC143580" reaches a real row rather than a blank entity. */
     let attachTo = output.to;
     if (output.to.kind === 'attach') {
-      const target = attachTarget(output.recipients?.[0] ?? '');
+      const target = attachTarget(output.recipients?.[0] ?? '', opts?.context ?? EMPTY_CONTEXT);
       if (target) attachTo = { kind: 'attach', to: target };
       else {
         plan.unmet.push({

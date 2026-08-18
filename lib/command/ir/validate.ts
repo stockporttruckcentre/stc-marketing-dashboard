@@ -741,6 +741,19 @@ export function derivedRequirements(plan: Plan): Requirement[] {
   const fromEntity = (id: string, because: string) =>
     need('permission', entity(id)?.readRequires, because);
 
+  /** The entity a source names, as far as this pass can tell. */
+  const entityNamedBy = (src: Source): string | undefined => {
+    if (!src || typeof src !== 'object') return undefined;
+    if ('entity' in src) return (src as { entity: string }).entity;
+    if ('op' in src && (src as Select).op === 'select') {
+      const from = (src as Select).from;
+      return from && typeof from === 'object' && 'entity' in from
+        ? (from as { entity: string }).entity
+        : undefined;
+    }
+    return undefined;
+  };
+
   const fromPath = (f: FieldRef | PathRef): void => {
     if (!('via' in f)) { fromEntity(f.entity, `reads ${f.entity}`); return; }
     let current = f.entity;
@@ -876,6 +889,23 @@ export function derivedRequirements(plan: Plan): Requirement[] {
         const dest = destination(e.to.kind);
         const capId = e.capability ?? dest?.capability;
         if (capId) needCapability(capId, `sends it ${dest?.label.toLowerCase() ?? e.to.kind}`);
+
+        /* WHAT IT TAKES TO ATTACH DEPENDS ON WHAT IT IS ATTACHED TO.
+
+           The database has always derived this from the target table:
+           a file on a customer is `crm.edit`, one on a stock unit is
+           `stock.edit`. The registry said `crm.edit` flatly, which is
+           the same answer only while the roles happen to overlap. A
+           stock updater with `stock.edit` and no `crm.edit` may put a
+           condition report on a trailer and may not put one on a
+           customer, and the derived requirement now says so before the
+           database has to. */
+        if (e.to.kind === 'attach') {
+          const onto = entityNamedBy(e.to.to);
+          const def = onto ? entity(onto) : undefined;
+          need('permission', def?.attachRequires,
+            `attaches it to ${onto ?? 'a record'}`);
+        }
 
         /* The destination is not just a label. Who it goes to and what
            it attaches to are expressions and sources of their own, and

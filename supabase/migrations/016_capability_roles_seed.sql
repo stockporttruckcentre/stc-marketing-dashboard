@@ -51,10 +51,20 @@ GRANT EXECUTE ON FUNCTION command_may(TEXT) TO authenticated;
 -- is not a permission.
 CREATE TABLE IF NOT EXISTS command_entity_permissions (
   table_name TEXT NOT NULL,
-  operation  TEXT NOT NULL CHECK (operation IN ('create', 'delete')),
+  operation  TEXT NOT NULL CHECK (operation IN ('create', 'delete', 'attach')),
   capability TEXT NOT NULL,
   PRIMARY KEY (table_name, operation)
 );
+
+-- The set of operations grows. CREATE TABLE IF NOT EXISTS leaves an
+-- existing table's constraint exactly as it was, so a database migrated
+-- before the attach operation existed would refuse the seed below
+-- rather than the seed telling it what changed.
+ALTER TABLE command_entity_permissions
+  DROP CONSTRAINT IF EXISTS command_entity_permissions_operation_check;
+ALTER TABLE command_entity_permissions
+  ADD CONSTRAINT command_entity_permissions_operation_check
+  CHECK (operation IN ('create', 'delete', 'attach'));
 
 ALTER TABLE command_entity_permissions ENABLE ROW LEVEL SECURITY;
 
@@ -135,11 +145,13 @@ INSERT INTO command_entity_permissions (table_name, operation, capability) VALUE
   ('contact_addresses', 'delete', 'crm.edit'),
   ('contact_notes', 'create', 'crm.edit'),
   ('contact_notes', 'delete', 'crm.edit'),
+  ('crm_contacts', 'attach', 'crm.edit'),
   ('crm_contacts', 'create', 'crm.create'),
   ('crm_contacts', 'delete', 'crm.delete'),
   ('crm_lists', 'create', 'crm.manageLists'),
   ('crm_lists', 'delete', 'crm.manageLists'),
   ('social_posts', 'delete', 'marketing.edit'),
+  ('stock_trailers', 'attach', 'stock.edit'),
   ('stock_trailers', 'create', 'stock.edit'),
   ('stock_trailers', 'delete', 'stock.edit');
 

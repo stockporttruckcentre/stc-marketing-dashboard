@@ -103,6 +103,15 @@ export type EntityDef = {
    */
   createRequires?: CrmCapability;
   deleteRequires?: CrmCapability;
+  /**
+   * What it takes to hang a file off one of these rows.
+   *
+   * Migration 014 derives it from the target table and this is the same
+   * answer on the near side, so a permission set that holds one and not
+   * the other is offered exactly what it may do. Absent means a file
+   * cannot be attached to this entity at all.
+   */
+  attachRequires?: CrmCapability;
 };
 
 /* =============================================================
@@ -273,7 +282,7 @@ export type CapabilityDef = {
    * behind, which is the safe way round. A guess would be worse than the
    * old rows, because at least those were true once.
    */
-  effect?: { table: string; set: Record<string, unknown | { arg: string }> };
+  effect?: import('./overlay').DeclaredEffect;
   /**
    * What is missing, exactly, when there is no handler.
    *
@@ -390,6 +399,7 @@ export function entities(): EntityDef[] {
       readRequires: readRequiresFor(spec.table),
       createRequires: t.lifecycle?.create as CrmCapability | undefined,
       deleteRequires: t.lifecycle?.delete as CrmCapability | undefined,
+      attachRequires: t.lifecycle?.attach as CrmCapability | undefined,
     });
   }
 
@@ -417,6 +427,7 @@ export function entities(): EntityDef[] {
       readRequires: readRequiresFor(t.table),
       createRequires: t.lifecycle?.create as CrmCapability | undefined,
       deleteRequires: t.lifecycle?.delete as CrmCapability | undefined,
+      attachRequires: t.lifecycle?.attach as CrmCapability | undefined,
     });
   }
 
@@ -665,7 +676,32 @@ export const CAPABILITIES: CapabilityDef[] = [
     /* What a sale leaves on the tracker row. The commission and the
        stock unit are the operation's other two writes and are not on
        this record, so nothing here claims them. */
-    effect: { table: 'crm_contacts', set: { status: 'customer' } },
+    /* A SALE IS NOT ONE COLUMN.
+
+       The deal takes the status, the price and the dates the sentence
+       supplied. The commission is computed from a rate this cannot see,
+       and the stock unit and every other deal against it are changed
+       too. The last three are declared as unpredictable rather than
+       guessed, so "mark it sold and export the result" refuses if it
+       would have to show any of them, instead of showing what they said
+       a moment ago. */
+    effect: {
+      table: 'crm_contacts',
+      set: {
+        status: 'customer',
+        sale_price: { arg: 'salePrice' },
+        dispatch_date: { arg: 'dispatchDate' },
+      },
+      opaque: ['commission', 'profit', 'profit_pct', 'order_date'],
+      /* The unit the sentence named. It goes sold, to that customer,
+         under that rep. The money on it is computed from a rate this
+         cannot see, so those columns are named rather than guessed. */
+      via: {
+        table: 'stock_trailers',
+        set: { status: 'sold', sales_price: { arg: 'salePrice' } },
+        opaque: ['profit', 'order_date', 'dispatch_date', 'customer', 'sales_rep'],
+      },
+    },
     /* A sale needs a price. Almost always the deal already carries one,
        which is why `from` is here: the operation reads it off the record
        and asks for nothing. A deal with no price anywhere is the one
@@ -860,7 +896,16 @@ export const CAPABILITIES: CapabilityDef[] = [
     /* Writing the start alone leaves a meeting that ends before it
        begins. The function moves the end by the same amount, and this
        is what a chained export sees. */
-    effect: { table: 'calendar_events', set: { start_at: { arg: 'start' } } },
+    /* Both ends move, and the end moves by however much the start did,
+       which is what keeps an hour long meeting an hour long. A file
+       built from a moved meeting shows both, or the programme refuses. */
+    effect: {
+      table: 'calendar_events',
+      set: {
+        start_at: { arg: 'start' },
+        end_at: { movedWith: { anchor: 'start_at', arg: 'start' } },
+      },
+    },
     /* Two ways to say when, and neither is required on its own: the
        reader supplies exactly one and the operation refuses if it gets
        neither. "Move it to Friday at 2pm" gives a moment; "move it to
@@ -934,7 +979,14 @@ export const CAPABILITIES: CapabilityDef[] = [
     id: 'record.attach',
     label: 'Attach a file to a record',
     operates: 'emit',
-    requires: 'crm.edit',
+    /* NO CAPABILITY OF ITS OWN, AND THAT IS THE POINT.
+
+       What it takes to attach is what it takes to write the record it
+       goes on: `crm.edit` for a customer, `stock.edit` for a trailer.
+       The entity declares it, the validator derives it per plan, and
+       migration 028 reads the same generated table. A flat `crm.edit`
+       here was the same answer only while the role bundles overlap, and
+       per-user grants are exactly what the admin panel is for. */
     confirm: true,
     /* A second run leaves a second copy on the record. */
     idempotent: false,

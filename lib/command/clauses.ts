@@ -36,6 +36,7 @@ import { DESTINATION_VERBS, FILE_VERBS } from './output';
 import { CREATE_WORDS, DELETE_WORDS } from './lifecycle';
 import { CLEAR_WORDS, MOVE_WORDS, SET_WORDS } from './mutate';
 import { FIND_VERBS } from './finder';
+import { BACK_WORDS } from './pointing';
 
 /** What joins two clauses. Order matters: longest first. */
 const JOINERS = [
@@ -104,10 +105,9 @@ const OPENERS = [
  * second clause was read against nothing and the whole sentence fell
  * back to one reading.
  */
-const BACK_REFERENCES = [
-  'them', 'these', 'those', 'it', 'that', 'the result', 'the results',
-  'the list', 'that list', 'the lot', 'him', 'her', 'they', 'he', 'she',
-];
+/* What a clause points back at. The words are `pointing.ts`, shared
+   with the screen reader and the create reader. */
+const BACK_REFERENCES = BACK_WORDS;
 
 export type Clause = {
   text: string;
