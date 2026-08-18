@@ -91,9 +91,18 @@ export async function POST(req: NextRequest) {
        and it is a property of the plan rather than of the words. */
     emit: (() => {
       const step = emitStep(planned.planning.plan);
-      return step && step.output.kind === 'file'
-        ? { format: step.output.format, to: step.to.kind }
-        : null;
+      if (!step) return null;
+      if (step.output.kind === 'file') {
+        return { format: step.output.format, to: step.to.kind };
+      }
+      /* THE CLIPBOARD IS REPORTED TOO, AND IS NOT A FILE.
+
+         Copying is a client effect: no server can write to somebody's
+         clipboard, so what comes back here is the destination and the
+         browser is what carries it out. Without this the bar answered
+         the question on screen and copied nothing, which is the same
+         gap as an action that opens a screen and calls it copying. */
+      return step.to.kind === 'clipboard' ? { format: null, to: 'clipboard' } : null;
     })(),
     preview: preview ?? null,
   });

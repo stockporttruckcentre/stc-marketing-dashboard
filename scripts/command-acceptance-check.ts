@@ -39,7 +39,7 @@ import { PROVIDER } from '../lib/crm/enrich';
 import { LUSHA_GATE, LUSHA_LOCKED } from '../lib/crm/permissions';
 import { FINDER } from '../lib/crm/finder';
 import { planCommand } from '../lib/command/plan';
-import { EMPTY_VOCABULARY } from '../lib/command/vocab';
+import { EMPTY_VOCABULARY, buildIndex } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
 
 /* -------------------------------------------------------------
@@ -4133,6 +4133,79 @@ test('a search happens once and what it finds is filed', async () => {
     FINDER.search = was;
     LUSHA_GATE.locked = wasLocked;
   }
+});
+
+/* =============================================================
+   38. The clipboard is a declared effect, not a navigation
+
+   No server can write to somebody's clipboard. The old answer to "copy
+   the navy hex" was an action that opened the brand kit and called that
+   copying. It is a destination now: the plan says where the answer
+   goes, the reader knows it changes nothing, and the browser carries it
+   out.
+   ============================================================= */
+
+test('copying is a read that declares where the answer goes', async () => {
+  const planning = planCommand('copy the sold trailers', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+    context: {},
+  });
+  ok('it plans', !!planning, 'not understood');
+  ok('and it is a question, not an instruction', planning?.kind === 'read', planning?.kind);
+
+  const emit = planning?.plan.steps.find((s) => s.op === 'emit');
+  ok('with the clipboard as its destination',
+    emit?.op === 'emit' && emit.to.kind === 'clipboard',
+    JSON.stringify(emit));
+  /* A copy produces no file, so claiming the export capability on it
+     would claim an effect the step does not have. */
+  ok('and no capability claimed for a file it does not make',
+    emit?.op === 'emit' && !emit.capability, JSON.stringify(emit));
+  ok('it is well formed', planning?.availability.representable === true,
+    JSON.stringify(planning?.problems));
+  /* A viewer may read, so a viewer may copy what they read. */
+  ok('and a viewer may do it', planning?.availability.permitted !== false,
+    JSON.stringify(planning?.availability.missingPermissions));
+});
+
+test('a copy of something unresolved is refused rather than half copied', async () => {
+  const planning = planCommand('copy the navy brand colour', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+    context: {},
+  });
+  ok('it refuses',
+    planning?.availability.representable === false,
+    JSON.stringify(planning?.problems));
+  ok('saying which word it could not place',
+    /navy/i.test(JSON.stringify(planning?.problems ?? [])),
+    JSON.stringify(planning?.problems));
+});
+
+test('the brand kit is a table, so its colours are answerable', async () => {
+  const vocabulary = buildIndex({
+    brand: { name: [{ value: 'Navy Primary', rows: 1 }, { value: 'STC Red', rows: 1 }] },
+  });
+  const planning = planCommand('copy the navy brand colour', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+    context: {}, vocabulary,
+  });
+  ok('it resolves the colour by name',
+    planning?.availability.representable === true, JSON.stringify(planning?.problems));
+  ok('against the brand assets rather than the trailers',
+    !!(planning?.select?.from && 'entity' in planning.select.from
+      && planning.select.from.entity === 'brand'),
+    JSON.stringify(planning?.select?.from));
+});
+
+test('a bare colour question is still about a trailer', async () => {
+  const planning = planCommand('how many blue trailers are in stock', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+    context: {},
+  });
+  ok('the brand kit did not take it',
+    !!(planning?.select?.from && 'entity' in planning.select.from
+      && planning.select.from.entity === 'trailers'),
+    JSON.stringify(planning?.select?.from));
 });
 
 /* ============================================================= */

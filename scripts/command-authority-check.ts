@@ -264,8 +264,12 @@ ok('the command bar offers a command only when the server calls it runnable',
 /* A file is offered on the same terms, and the bar does not decide what
    format a sentence asked for either. */
 ok('a download is offered only when the server planned one',
-  /const wantsFile = !!meaning\?\.emit && meaning\.runnable/.test(bar)
+  /const wantsFile = !!meaning\?\.emit && meaning\.emit\.to !== 'clipboard' && meaning\.runnable/.test(bar)
   && !/readOutput\(/.test(bar));
+/* And a copy on the same terms. The browser is the only thing that can
+   write to a clipboard, and it does so because the plan said to. */
+ok('a copy is offered only when the server planned one',
+  /const wantsCopy = meaning\?\.emit\?\.to === 'clipboard' && !!meaning\?\.runnable/.test(bar));
 /* And an instruction is offered on the same terms. The bar used to read
    the sentence itself with `parseEdit` and act on what it decided, which
    made the browser the semantic authority for every write. */

@@ -69,7 +69,7 @@ type Stage = 'idle' | 'running' | 'done' | 'answered' | 'confirming';
 type ServerMeaning = PlannedMeaning & {
   kind?: 'read' | 'mutate';
   /** A file, when the sentence asked for one. */
-  emit?: { format: string; to: string } | null;
+  emit?: { format: string | null; to: string } | null;
   mutation?: { fields: { label: string; requires: string }[] } | null;
   preview?: MutationPreview | null;
 };
@@ -464,10 +464,15 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const instructionReady = meaning?.kind === 'mutate' && meaning.runnable;
 
   /** It asked for a file rather than an answer on screen. */
-  const wantsFile = !!meaning?.emit && meaning.runnable;
+  const wantsFile = !!meaning?.emit && meaning.emit.to !== 'clipboard' && meaning.runnable;
+
+  /** It asked for the answer on the clipboard rather than on screen. */
+  const wantsCopy = meaning?.emit?.to === 'clipboard' && !!meaning?.runnable;
 
   const useQuery = !instructionReady && !wantsFile && meaning?.kind !== 'mutate' && !!meaning?.runnable
-    && readsOnly;
+    /* A copy is a question with one more thing done to the answer, so it
+       runs the query and then copies what came back. */
+    && (readsOnly || wantsCopy);
 
   /* Said out loud rather than left for the answer to imply. */
   const partial = meaning?.unresolved ?? [];
@@ -571,7 +576,66 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       return;
     }
     setAnswered(res);
+
+    /* A COPY IS A CLIENT EFFECT, AND THIS IS THE CLIENT.
+
+       No server can write to somebody's clipboard, so the plan declares
+       where the answer goes and the browser is what puts it there. The
+       old answer to "copy the navy hex" was an action that opened the
+       brand kit and called that copying. */
+    if (m.emit?.to === 'clipboard') {
+      const copied = await copyAnswer(res);
+      setOutcome(copied);
+    }
     setStage('answered');
+  }
+
+  /**
+   * The answer, on the clipboard, as text somebody can paste.
+   *
+   * One value goes across on its own, because "copy the navy hex" wants
+   * `#09163A` and not a table with one cell in it. Anything longer goes
+   * as tab separated rows, which is what a spreadsheet expects.
+   */
+  async function copyAnswer(res: any): Promise<Outcome> {
+    const rows: Record<string, unknown>[] = Array.isArray(res?.rows) ? res.rows : [];
+    const scalar = res?.answer ?? res?.value;
+
+    let text = '';
+    if (rows.length === 1 && Object.keys(rows[0]).length === 1) {
+      text = String(Object.values(rows[0])[0] ?? '');
+    } else if (rows.length) {
+      const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+      text = [
+        columns.join('\t'),
+        ...rows.map((r) => columns.map((c) => String(r[c] ?? '')).join('\t')),
+      ].join('\n');
+    } else if (scalar != null) {
+      text = String(scalar);
+    }
+
+    if (!text) {
+      return { ok: false, message: 'There was nothing there to copy.' };
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* Browsers refuse the clipboard outside a user gesture and in some
+         embedded contexts. Saying so is better than reporting a copy
+         that did not happen. */
+      return {
+        ok: false,
+        message: 'The browser refused clipboard access. The answer is below, ready to select.',
+      };
+    }
+
+    return {
+      ok: true,
+      message: rows.length > 1
+        ? `${rows.length.toLocaleString('en-GB')} rows copied.`
+        : `Copied: ${text.length > 60 ? `${text.slice(0, 60)}...` : text}`,
+    };
   }
 
   /**

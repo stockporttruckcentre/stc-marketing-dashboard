@@ -329,6 +329,52 @@ export const ENTITIES: EntitySpec[] = [
     hrefFor: () => '/dashboard/social',
   },
   {
+    /* THE BRAND KIT IS A TABLE, AND IT WAS ANSWERED BY A SCREEN.
+
+       `brand_assets` holds the logos, the fonts and the colours, and a
+       colour's hex is its `url`. "What is our navy hex" is a question
+       about a row, and the only answer it had was an action that opened
+       the brand kit and left somebody to find it and select it. */
+    id: 'brand',
+    table: 'brand_assets',
+    label: 'brand assets', labelOne: 'brand asset',
+    /* Deliberately qualified. "Colour" on its own is a column on a
+       trailer and "logo" is not, so the unqualified words are the ones
+       that could only mean this. */
+    nouns: ['brand asset', 'brand assets', 'brand colour', 'brand colours',
+            'brand color', 'brand colors', 'brand hex', 'brand kit',
+            'logo', 'logos', 'brand font', 'brand fonts'],
+    titleColumn: 'name',
+    subtitleColumns: ['type', 'category', 'url'],
+    dateColumn: 'created_at',
+    amounts: [],
+    filters: [
+      /* QUALIFIED WORDS ONLY.
+
+         "Colour" and "hex" on their own belong to a trailer: "what
+         colour is STC143580" is a question about a unit, and a bare
+         `colour` here made it a question about the brand kit. Every key
+         is a phrase that could only mean this table. */
+      { key: 'type', column: 'type', kind: 'enum', label: 'type',
+        vocabulary: {
+          logo: 'logo', logos: 'logo', emblem: 'logo', emblems: 'logo',
+          'brand font': 'font', 'brand fonts': 'font', typeface: 'font',
+          typefaces: 'font',
+          'brand colour': 'color', 'brand colours': 'color',
+          'brand color': 'color', 'brand colors': 'color',
+          'brand hex': 'color', swatch: 'color', swatches: 'color',
+          template: 'template', templates: 'template',
+        } },
+      { key: 'name', column: 'name', kind: 'text', label: 'name', freeText: true },
+      { key: 'category', column: 'category', kind: 'text', label: 'category', freeText: true },
+    ],
+    dimensions: [
+      { key: 'type', column: 'type', label: 'type', words: ['type', 'kind'] },
+      { key: 'category', column: 'category', label: 'category', words: ['category', 'group'] },
+    ],
+    hrefFor: () => '/dashboard/brand',
+  },
+  {
     /* WHAT THE MONTH IS SUPPOSED TO BRING IN.
        `revenue_targets` was reachable by one hand written intent that
        computed a gap in a route and by nothing else, so nobody could

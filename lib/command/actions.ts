@@ -550,9 +550,14 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'marketing.edit', verbs: REMOVE,
     objects: ['logo', 'asset', 'brand asset', 'font', 'template', 'swatch'] },
 
-  { id: 'brand.copyHex', label: 'Copy a brand colour', blurb: 'The hex, on your clipboard', kind: 'record',
+  /* Copying is a declared client effect now, not a path. `clipboard` is
+     a destination in the registry, the plan says the answer goes there,
+     and the browser is what puts it there. The path stays because
+     picking the action from the list is still a way of getting to the
+     screen; what changed is that typing it copies. */
+  { id: 'brand.copyHex', label: 'Copy a brand colour', blurb: 'The hex, on your clipboard', kind: 'data',
     capability: 'crm.view', path: '/dashboard/brand', verbs: ['copy', 'grab', 'get'],
-    objects: ['hex', 'the red', 'the navy', 'brand colour', 'colour code'],
+    objects: ['hex', 'brand hex', 'brand colour', 'colour code', 'swatch'],
     phrases: ['what is our red', 'what is the navy hex'] },
 
   /* ---------- industry news ---------- */

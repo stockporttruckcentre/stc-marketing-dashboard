@@ -255,6 +255,15 @@ export type Output =
 export type Destination =
   | { kind: 'display' }
   | { kind: 'download' }
+  /**
+   * On the clipboard.
+   *
+   * The one destination no server can reach. It is declared here rather
+   * than left as a navigation that opens a screen and calls itself
+   * copying: the plan says where the answer goes, and the browser is
+   * what puts it there.
+   */
+  | { kind: 'clipboard' }
   | { kind: 'share'; with: Expr[] }
   | { kind: 'email'; to: Expr[] }
   | { kind: 'attach'; to: Source };

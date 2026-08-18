@@ -74,6 +74,15 @@ export const FILE_VERBS = [
   'produce', 'generate', 'write out', 'print', 'output',
 ];
 
+/**
+ * "Copy X", "put X on the clipboard", "grab X".
+ *
+ * The trailing clipboard clause is optional because "copy the navy hex"
+ * is what anybody types and the clipboard is where copying puts things.
+ */
+const COPY_VERB =
+  /\b(?:copy|grab)\b(?:\s+(?:me|out))?|\bput\b(?=.*\bon (?:the |my )?clipboard\b)|\bon (?:the |my )?clipboard\b|\bto (?:the |my )?clipboard\b/i;
+
 /** Words that introduce the format rather than being part of it. */
 const INTRO = ['as', 'to', 'in', 'into', 'via'];
 
@@ -362,6 +371,37 @@ export function readOutput(text: string): ReadOutput | null {
       if (format) {
         rest = `${rest.slice(0, verbFormat.index)} ${verbFormat[0].replace(new RegExp(String.raw`\s*(?:${formatAlternation})(?:\s+(?:${tailAlternation}))?\b`, 'i'), '')} ${rest.slice(verbFormat.index + verbFormat[0].length)}`;
       }
+    }
+  }
+
+  /* ON THE CLIPBOARD.
+
+     Read before the rest of the destinations because it is the only one
+     with a verb of its own and no recipient: "copy the navy hex" names
+     nobody and goes nowhere anybody else can see. It is declared rather
+     than pretended, so the plan says the answer lands on the clipboard
+     and the browser is what puts it there.
+
+     Taken out first, so "copy the sold trailers" leaves an ordinary
+     question behind. */
+  const copying = COPY_VERB.exec(rest);
+  if (copying) {
+    const asked = `${rest.slice(0, copying.index)} ${rest.slice(copying.index + copying[0].length)}`
+      /* And the clipboard clause itself, wherever it sat. "Put the
+         trailers at Hyde on the clipboard" matched on the verb and left
+         the word behind, and the reader then reported that nothing in
+         the trailers matches "clipboard". */
+      .replace(/\b(?:on|to|onto|into)\s+(?:the\s+|my\s+)?clipboard\b/ig, ' ')
+      .replace(/\bclipboard\b/ig, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (asked.length >= 2) {
+      return {
+        output: { kind: 'rows' },
+        to: { kind: 'clipboard' },
+        format: format ?? 'xlsx',
+        label: 'copy on your clipboard',
+        rest: asked,
+      };
     }
   }
 

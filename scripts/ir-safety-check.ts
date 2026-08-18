@@ -761,9 +761,23 @@ for (const kind of Object.keys(DESTINATIONS) as (keyof typeof DESTINATIONS)[]) {
   /* Only the screen may, because only the screen can show the question
      alongside the answer. */
   if (d.allowsUnresolved) ok(`${kind} is read only`, d.effect === 'read', d.effect);
-  /* Anything that is not read only leaves something behind and needs a
-     capability naming who may do it. */
-  if (d.effect !== 'read') {
+  /* A CLIENT EFFECT LEAVES NOTHING BEHIND ANYWHERE A SERVER CAN SEE.
+
+     Copying puts what the screen was already showing into somebody's
+     paste buffer. Nothing is stored, nothing is sent, no record
+     changes, and there is no capability that could govern it beyond
+     the one that permitted reading the answer in the first place. It
+     is asserted separately rather than lumped in below, so "needs no
+     capability" is a stated property rather than an omission. */
+  if (d.effect === 'client') {
+    ok(`${kind} needs no capability of its own`, !d.capability, d.capability);
+    ok(`${kind} is not confirmed`, !d.confirm);
+    ok(`${kind} may not run on an unresolved request`, d.allowsUnresolved === false);
+  }
+
+  /* Anything that is not read only or client side leaves something
+     behind and needs a capability naming who may do it. */
+  if (d.effect !== 'read' && d.effect !== 'client') {
     ok(`${kind} names the capability that permits it`, !!d.capability);
     ok(`${kind} may not run on an unresolved request`, d.allowsUnresolved === false);
     const cap = d.capability ? CAPABILITIES.find((c) => c.id === d.capability) : undefined;

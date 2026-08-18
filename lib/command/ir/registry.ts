@@ -1230,7 +1230,8 @@ export const FILE_EMIT_CAPABILITY = 'rows.export';
    do. Nothing in the parser knows the word "email".
    ============================================================= */
 
-export type DestinationKind = 'display' | 'download' | 'share' | 'email' | 'attach';
+export type DestinationKind =
+  'display' | 'download' | 'clipboard' | 'share' | 'email' | 'attach';
 
 export type DestinationDef = {
   kind: DestinationKind;
@@ -1240,10 +1241,11 @@ export type DestinationDef = {
    *
    *   read      nothing leaves and nothing changes
    *   artefact  a file exists that did not exist before
+   *   client    something happens in the browser and nowhere else
    *   external  it leaves the application and cannot be recalled
    *   mutation  a record changes
    */
-  effect: 'read' | 'artefact' | 'external' | 'mutation';
+  effect: 'read' | 'artefact' | 'client' | 'external' | 'mutation';
   /** The capability an emit to here must name. Absent means read only. */
   capability?: string;
   /** A preview and an explicit yes before it happens. */
@@ -1265,6 +1267,26 @@ export const DESTINATIONS: Record<DestinationKind, DestinationDef> = {
     confirm: false,
     /* Allowed, but never as a completed command. See `completion`. */
     allowsUnresolved: true,
+  },
+  clipboard: {
+    kind: 'clipboard', label: 'On your clipboard', effect: 'client',
+    /* DECLARED, RATHER THAN PRETENDED.
+
+       "Copy the navy hex" is a question with one more thing done to the
+       answer, and the browser is the only place that can do it: no
+       server anywhere can write to somebody's clipboard. The old answer
+       was an action that opened the brand kit and called that copying,
+       which is navigation wearing the word.
+
+       So it is a destination with its own effect. The plan says the
+       answer goes on the clipboard, the reader knows it changes
+       nothing, and the browser carries it out. Nothing about it is a
+       write, so it needs no capability beyond reading what it copies
+       and no confirmation. */
+    confirm: false,
+    /* A partial answer copied is indistinguishable from a complete one
+       once it is in somebody's paste buffer. */
+    allowsUnresolved: false,
   },
   download: {
     kind: 'download', label: 'As a file to download', effect: 'artefact',

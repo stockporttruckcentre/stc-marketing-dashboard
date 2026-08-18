@@ -573,7 +573,15 @@ function planOneClause(
       from: { ref: 'rows', step: select.id },
       output: output.output,
       to: attachTo,
-      capability: to?.capability ?? FILE_EMIT_CAPABILITY,
+      /* A FILE IS WHAT NEEDS THE EXPORT CAPABILITY.
+
+         Not every destination produces one. A clipboard copy leaves the
+         browser holding what the screen was already showing, so naming
+         `rows.export` on it claims an effect the step does not have,
+         which is exactly what the validator says. */
+      ...(to?.capability
+        ? { capability: to.capability }
+        : output.output.kind === 'file' ? { capability: FILE_EMIT_CAPABILITY } : {}),
       /* Only a file is a thing a later step can pick up. A share
          produces access, which is not an object anybody can hold. */
       ...(output.output.kind === 'file' ? { produces: { kind: 'artefact' as const } } : {}),
@@ -588,8 +596,15 @@ function planOneClause(
      query route, which never previews and never confirms, so the whole
      sentence did nothing at all. A download changes nothing and stays a
      read. */
+  /* A SENTENCE THAT SENDS SOMETHING IS AN INSTRUCTION, AND A COPY IS
+     NOT SENDING.
+
+     Downloading and copying both leave the browser holding what the
+     screen was already showing. Nothing leaves the company and no
+     record changes, so neither is a write and neither previews. */
   const sends = plan.steps.some(
-    (s) => s.op === 'emit' && s.to.kind !== 'display' && s.to.kind !== 'download',
+    (s) => s.op === 'emit'
+      && s.to.kind !== 'display' && s.to.kind !== 'download' && s.to.kind !== 'clipboard',
   );
 
   /* "SHARE FLEET PROSPECTS WITH DAVE" IS A LIST, AND ONLY DATA KNOWS IT.
