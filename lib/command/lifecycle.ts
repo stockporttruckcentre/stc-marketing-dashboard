@@ -76,6 +76,17 @@ const FILLER = [
   'in', 'on', 'up', 'please', 'me', 'us', 'off', 'of',
 ];
 
+/**
+ * Words that point at a record rather than naming a new one.
+ *
+ * The same words `context.ts` reads a selection from. A name holding one
+ * of them is a sentence about something that already exists.
+ */
+const POINTING = new Set([
+  'this', 'that', 'these', 'those', 'them', 'it', 'they', 'their', 'theirs',
+  'him', 'her', 'his', 'hers', 'my', 'mine', 'our', 'ours', 'selected',
+]);
+
 /** Every word that names a thing rather than one of its columns. */
 const ENTITY_NOUNS = new Set(ENTITIES.flatMap((e) => e.nouns));
 
@@ -128,6 +139,15 @@ function nameFrom(text: string, noun: string, verb: string): string | null {
      is longer than any real company name in this database and shorter
      than any clause. */
   if (words.length > 6) return null;
+
+  /* A NAME DOES NOT POINT AT ANYTHING.
+
+     "Add their LinkedIn profile to this account" was read as creating a
+     customer called "their LinkedIn profile to this", which is a
+     sentence about a record already on the screen. A pointing word
+     inside a name means the sentence is about something that exists,
+     and this is not the reader for it. */
+  if (words.some((w) => POINTING.has(w.toLowerCase()))) return null;
 
   const name = words.join(' ').replace(/[.,:;]+$/, '').trim();
   return name.length >= 2 ? name : null;
