@@ -213,6 +213,10 @@ export async function findLushaCompanyDebug(companyName: string): Promise<{
  * find the highest-priority sales contact and enrich them.
  *  - search calls: free
  *  - one enrich call: 1 credit (only spent when a matching contact is found)
+ *
+ * At most ONE enrich call. The role groups are searched for free until
+ * one has somebody in it; buying that one contact ends the lookup
+ * whatever it returns.
  */
 export async function prospectingByCompanyId(companyId: string): Promise<any | null> {
   const roleGroups: string[][] = [
@@ -237,11 +241,18 @@ export async function prospectingByCompanyId(companyId: string): Promise<any | n
     const found = search.json?.data ?? search.json?.contacts ?? [];
     const ids: string[] = (Array.isArray(found) ? found : []).map((c: any) => c.id ?? c.contactId).filter(Boolean);
     if (!ids.length) continue;
+    /* ONE PURCHASED CALL, AND THEN STOP.
+
+       This used to `continue` to the next role group when an enrich
+       failed, which is a second credit for the same confirmation and a
+       third after that. The search above is free and may be repeated;
+       the enrich is not, so whatever it does is the end of this
+       lookup. */
     const enrich = await postJson(`${BASE}/prospecting/contact/enrich`, { contactIds: ids.slice(0, 1) });
-    if (!enrich.ok) continue;
+    if (!enrich.ok) return null;
     const enriched = enrich.json?.data ?? enrich.json?.contacts ?? null;
     const first = Array.isArray(enriched) ? enriched[0] : enriched;
-    if (first) return { data: first, _via: 'prospecting-by-domain', _role: group[0] };
+    return first ? { data: first, _via: 'prospecting-by-domain', _role: group[0] } : null;
   }
   return null;
 }

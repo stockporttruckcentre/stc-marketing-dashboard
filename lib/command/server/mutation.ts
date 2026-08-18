@@ -369,6 +369,9 @@ export async function previewMutation(
         }
         const description = await preparer.describe({
           subjects: unit.plan.subjects, args: unit.plan.args, context, store,
+          /* Nothing is bought at preview, so there is no purchase to be
+             idempotent about. */
+          confirmation: '',
         });
         if (!description.ok) {
           return { ok: false, reason: 'cannot execute', why: description.why };
@@ -621,6 +624,15 @@ export async function applyMutation(
   const outsideSaid: string[] = [];
   const outsidePrepared: string[] = [];
 
+  /* WHAT THIS CONFIRMATION IS.
+
+     The two hashes somebody agreed to, which are the same two on every
+     retry of the same confirmed command and different for any other.
+     An operation that spends money outside the database keys its
+     purchase on this, so retrying after a failed transaction reuses
+     what was already bought. */
+  const confirmation = `${req.previewPlanHash ?? ''}|${req.previewProgrammeHash ?? ''}`;
+
   if (resolved?.ok) {
     for (const unit of resolved.units) {
       if (unit.kind !== 'invoke') continue;
@@ -648,14 +660,14 @@ export async function applyMutation(
          this stops. */
       const now = await preparer.describe({
         subjects: unit.plan.subjects, args: unit.plan.args,
-        context: req.context ?? {}, store: req.store,
+        context: req.context ?? {}, store: req.store, confirmation,
       });
       if (!now.ok) return { ok: false, reason: 'refused', why: now.why };
       outsidePrepared.push(now.fingerprint);
 
       const ready = await preparer.run({
         subjects: unit.plan.subjects, args: unit.plan.args,
-        context: req.context ?? {}, store: req.store,
+        context: req.context ?? {}, store: req.store, confirmation,
       });
       /* Before the transaction, so there is nothing to undo. */
       if (!ready.ok) return { ok: false, reason: 'refused', why: ready.why };

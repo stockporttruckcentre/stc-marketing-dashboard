@@ -132,6 +132,17 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
 export const LUSHA_LOCKED = true;
 
 /**
+ * The same lock, as a value the runtime reads.
+ *
+ * A seam rather than an abstraction. The constant above is what the
+ * application ships with; this is what the enrichment path consults, so
+ * a check can lift the lock and prove the credit contract holds before
+ * anybody is able to spend a real credit. Production never writes to
+ * it.
+ */
+export const LUSHA_GATE = { locked: LUSHA_LOCKED };
+
+/**
  * The one place role becomes capability.
  *
  * When the admin panel lands it will store grants per user. Pass them in

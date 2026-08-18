@@ -2107,6 +2107,76 @@ DELETE FROM crm_contacts WHERE source = 'Spreadsheet import';
 DELETE FROM crm_lists WHERE name = 'TEST import list';
 
 -- =============================================================
+-- 15b. Paid work that is bought once
+--
+-- Migration 027. Lusha cannot join a transaction, so the purchase is
+-- recorded before it happens and consumed from the record. What this
+-- proves is the ledger's own contract: a key is claimed once, settled
+-- once, and returns what was bought to whoever bought it.
+-- =============================================================
+\echo '--- external attempts ---'
+
+DELETE FROM command_external_attempts WHERE key LIKE 'test-%';
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_external_begin('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
+  PERFORM assert('a new attempt is pending', out ->> 'state' = 'pending', out::TEXT);
+END
+$$;
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_external_begin('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
+  PERFORM assert('claiming it again finds the same one', out ->> 'state' = 'pending', out::TEXT);
+END
+$$;
+
+SELECT assert('and there is one row, not two',
+  (SELECT COUNT(*) FROM command_external_attempts WHERE key = 'test-key-1') = 1);
+
+SELECT command_external_finish('test-key-1', TRUE,
+  jsonb_build_object('fields', jsonb_build_object('phone', '0161 000 0001')), NULL);
+
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_external_begin('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email') INTO out;
+  PERFORM assert('a settled attempt comes back done', out ->> 'state' = 'done', out::TEXT);
+  PERFORM assert('with what was bought',
+    out -> 'result' -> 'fields' ->> 'phone' = '0161 000 0001', out::TEXT);
+END
+$$;
+
+-- Settling twice does not overwrite what was bought.
+SELECT command_external_finish('test-key-1', FALSE, NULL, 'a later failure');
+SELECT assert('a settled attempt stays settled',
+  (SELECT state FROM command_external_attempts WHERE key = 'test-key-1') = 'done',
+  (SELECT state FROM command_external_attempts WHERE key = 'test-key-1'));
+
+-- Somebody else's purchase is not yours to read or to settle.
+SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_external_begin('test-key-1', 'contact.enrich',
+    'a2222222-0000-0000-0000-000000000001', 'email');
+  PERFORM assert('somebody else cannot claim your attempt', FALSE, 'it succeeded');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('somebody else cannot claim your attempt',
+    SQLERRM LIKE '%belongs to somebody else%', SQLERRM);
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+DELETE FROM command_external_attempts WHERE key LIKE 'test-%';
+
+-- =============================================================
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'

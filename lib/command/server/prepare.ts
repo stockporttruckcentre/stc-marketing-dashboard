@@ -32,14 +32,15 @@
    and has no entry here is refused by name rather than silently doing
    nothing.
    ============================================================= */
-import { lookUpInLusha } from '@/lib/crm/enrich';
-import { LUSHA_LOCKED } from '@/lib/crm/permissions';
+import { PROVIDER, nextStrategy, type EnrichStrategy } from '@/lib/crm/enrich';
+import { LUSHA_GATE } from '@/lib/crm/permissions';
 import { readSheet } from '@/lib/import/parse';
 import { matchColumns } from '@/lib/import/match';
 import { buildPlan, countPlan, type ExistingRow } from '@/lib/import/plan';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
 import { fileDigest, type CommandContext } from '../context';
+import { createHash } from 'crypto';
 import type { Store, TransactionStep } from '../ir/store';
 
 export type PreparedOperation =
@@ -81,6 +82,14 @@ export type PrepareInput = {
    * duplicate for THIS person.
    */
   store: Store;
+  /**
+   * What this confirmation is, as one opaque string.
+   *
+   * The two hashes the apply request already carries. It is what makes a
+   * retry of the same confirmed command the same purchase rather than a
+   * second one.
+   */
+  confirmation: string;
 };
 
 export type Preparer = {
@@ -101,23 +110,47 @@ export type Preparer = {
  */
 const enrich: Preparer = {
   async describe({ subjects }) {
-    if (LUSHA_LOCKED) {
+    if (LUSHA_GATE.locked) {
       return {
         ok: false,
         why: 'Lusha is switched off for everybody at the moment, so no credit can be spent.',
       };
     }
+
+    /* WHAT THIS CONFIRMATION CAN COST, EXACTLY.
+
+       One purchased call per record, chosen before anything is spent.
+       A record with nothing to look up by costs nothing and is named,
+       rather than being counted and then refused. */
+    const planned = subjects.map((s) => ({
+      label: s.label,
+      strategy: nextStrategy(detailsOf(s.values)),
+    }));
+    const payable = planned.filter((p) => p.strategy);
+    if (!payable.length) {
+      return {
+        ok: false,
+        why: 'none of those records have an email address, a name and company, or a website '
+          + 'for Lusha to work from.',
+      };
+    }
+
+    const nothing = planned.filter((p) => !p.strategy).map((p) => p.label);
     return {
       ok: true,
-      count: subjects.length,
-      says: `Looks ${subjects.length} up in Lusha, which spends at most `
-        + `${subjects.length === 1 ? 'one credit' : `${subjects.length} credits`}, one per record.`,
-      fingerprint: subjects.map((s) => s.id).join(','),
+      count: payable.length,
+      says: `Spends at most ${payable.length === 1 ? 'one credit' : `${payable.length} credits`}, `
+        + `one per record: ${payable.map((p) => `${p.label} by ${p.strategy}`).join(', ')}.`
+        + (nothing.length
+          ? ` ${nothing.join(', ')} ${nothing.length === 1 ? 'has' : 'have'} nothing to look up by `
+            + 'and will be left alone.'
+          : ''),
+      fingerprint: payable.map((p) => `${p.label}:${p.strategy}`).join('|'),
     };
   },
 
-  async run({ subjects }) {
-    if (LUSHA_LOCKED) {
+  async run({ subjects, store, confirmation }) {
+    if (LUSHA_GATE.locked) {
       return {
         ok: false,
         why: 'Lusha is switched off for everybody at the moment, so no credit can be spent.',
@@ -128,16 +161,64 @@ const enrich: Preparer = {
     const found: string[] = [];
 
     for (const subject of subjects) {
-      const got = await lookUpInLusha({
-        email: subject.values.email as string | null,
-        companyName: subject.values.company_name as string | null,
-        contactName: subject.values.contact_name as string | null,
-        websiteUrl: subject.values.website as string | null,
-      });
-      if (!got.ok) return { ok: false, why: `${subject.label}: ${got.why}` };
+      const details = detailsOf(subject.values);
+      const strategy = nextStrategy(details);
+      if (!strategy) continue;
 
-      changes.push({ op: 'update' as const, table: 'crm_contacts', id: subject.id, set: got.fields });
-      found.push(`${subject.label} by ${got.strategy}`);
+      /* THE PURCHASE IS RECORDED BEFORE IT HAPPENS.
+
+         Lusha cannot join the transaction below. So the attempt is
+         claimed in its own transaction, the answer is stored as soon as
+         it arrives, and the programme consumes what is stored. If the
+         programme then fails, this same confirmation retried finds the
+         answer already bought and does not buy it again. */
+      const key = attemptKey(confirmation, 'contact.enrich', subject.id, strategy);
+      const claimed = await store.invoke({
+        capability: 'external.begin',
+        subjects: [],
+        args: {
+          key, capability: 'contact.enrich', subject: subject.id, strategy,
+        },
+      });
+      if (!claimed.ok) return { ok: false, why: claimed.why };
+
+      const before = (claimed.results?.[0] ?? {}) as {
+        state?: string; result?: Record<string, unknown>; why?: string;
+      };
+
+      let fields: Record<string, unknown> | null = null;
+      let via = strategy as string;
+
+      if (before.state === 'done' && before.result) {
+        /* Already paid for. This is the retry path, and it costs
+           nothing. */
+        fields = (before.result.fields ?? {}) as Record<string, unknown>;
+        via = String(before.result.strategy ?? strategy);
+      } else if (before.state === 'failed') {
+        return { ok: false, why: `${subject.label}: ${before.why ?? 'that lookup already failed'}` };
+      } else {
+        const got = await PROVIDER.lookUp({ ...details, strategy });
+        await store.invoke({
+          capability: 'external.finish',
+          subjects: [],
+          args: {
+            key,
+            ok: got.ok,
+            result: got.ok ? { fields: got.fields, strategy: got.strategy } : null,
+            why: got.ok ? null : got.why,
+          },
+        });
+        if (!got.ok) return { ok: false, why: `${subject.label}: ${got.why}` };
+        fields = got.fields;
+        via = got.strategy;
+      }
+
+      changes.push({ op: 'update' as const, table: 'crm_contacts', id: subject.id, set: fields });
+      found.push(`${subject.label} by ${via}`);
+    }
+
+    if (!changes.length) {
+      return { ok: false, why: 'there was nothing on those records for Lusha to work from.' };
     }
 
     return {
@@ -147,6 +228,32 @@ const enrich: Preparer = {
     };
   },
 };
+
+/** What a resolved subject holds, as the lookup wants it. */
+function detailsOf(values: Record<string, unknown>) {
+  return {
+    email: values.email as string | null,
+    companyName: values.company_name as string | null,
+    contactName: values.contact_name as string | null,
+    websiteUrl: values.website as string | null,
+  };
+}
+
+/**
+ * The idempotency key for one purchase.
+ *
+ * Server generated, from the confirmation the request already carries
+ * plus the record and the strategy. The same confirmed command retried
+ * is the same key and therefore the same purchase; a different sentence,
+ * customer or strategy is a different one, which it is.
+ */
+function attemptKey(
+  confirmation: string, capability: string, subject: string, strategy: EnrichStrategy,
+): string {
+  return createHash('sha256')
+    .update([confirmation, capability, subject, strategy].join('|'))
+    .digest('hex');
+}
 
 /* -------------------------------------------------------------
    Importing a file the browser is holding

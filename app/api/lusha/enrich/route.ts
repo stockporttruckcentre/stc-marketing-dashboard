@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { lushaLockResponse } from '@/lib/crm/lusha-gate';
-import { lookUpInLusha } from '@/lib/crm/enrich';
+import { lookUpInLusha, type EnrichStrategy } from '@/lib/crm/enrich';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,17 +39,30 @@ export async function POST(req: NextRequest) {
     list_id?: string;
     replace_id?: string;
     only_fields?: string[];
+    /** Which paid lookup to make. One, chosen before anything is spent. */
+    strategy?: EnrichStrategy;
   };
 
+  /* ONE PAID LOOKUP PER REQUEST.
+
+     The chain used to run email, then name and company, then
+     prospecting, all behind one click, and every one of those is a
+     purchased call. The strategy is chosen up front now and a miss says
+     which strategies remain, so trying another is another click and
+     another credit rather than a surprise on the invoice. */
   const found = await lookUpInLusha({
     email: body.email,
     companyName: body.company_name,
     contactName: body.contact_name,
     websiteUrl: body.website_url,
     onlyFields: body.only_fields,
+    strategy: body.strategy,
   });
   if (!found.ok) {
-    return NextResponse.json({ error: found.why, attempts: found.attempts }, { status: 404 });
+    return NextResponse.json({
+      error: found.why, attempts: found.attempts,
+      tried: found.tried, remaining: found.remaining,
+    }, { status: 404 });
   }
 
   let listId = body.list_id;
@@ -104,5 +117,6 @@ export async function POST(req: NextRequest) {
     enriched: found.fields,
     strategy: found.strategy,
     attempts: found.attempts,
+    remaining: found.remaining,
   });
 }

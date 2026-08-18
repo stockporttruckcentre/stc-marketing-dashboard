@@ -35,6 +35,8 @@ import { join } from 'node:path';
 import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
+import { PROVIDER } from '../lib/crm/enrich';
+import { LUSHA_GATE } from '../lib/crm/permissions';
 import { planCommand } from '../lib/command/plan';
 import { EMPTY_VOCABULARY } from '../lib/command/vocab';
 import type { UserRole } from '../lib/types';
@@ -2584,6 +2586,109 @@ test('the lock refuses the spend before anything is written', async () => {
   });
   ok('it refuses', !done.ok, 'it spent a credit');
   ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+/* =============================================================
+   27b. Paid work that is bought once and never lost
+
+   Lusha cannot join a PostgreSQL transaction. The lookup used to happen
+   and then the transaction that recorded it could fail, which spent a
+   credit and changed nothing, and a retry spent another for the same
+   answer. The purchase is now recorded before it happens and consumed
+   from the record, so a retry of the same confirmation reuses it.
+   ============================================================= */
+
+test('a failed transaction does not buy the same lookup twice', async () => {
+  const db = fakeDb({
+    crm_contacts: [
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead', email: 'sam@dawson.co.uk' },
+    ],
+  });
+  const withEnrich = [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'];
+  const text = 'enrich Dawson Group';
+
+  /* A provider that counts its purchased calls, and the lock lifted so
+     the contract can be proved before anybody can spend a real one. */
+  let calls = 0;
+  const real = PROVIDER.lookUp;
+  LUSHA_GATE.locked = false;
+  PROVIDER.lookUp = async () => {
+    calls += 1;
+    return {
+      ok: true,
+      fields: { contact_name: 'Sam Dawson', phone: '0161 000 0001', source: 'Lusha (email)' },
+      strategy: 'email', attempts: [], tried: 'email', remaining: [],
+      address: null, website: null,
+    };
+  };
+
+  try {
+    const planned = await planAndPreview({
+      text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), preview: true,
+    });
+    const preview = planned?.preview;
+    ok('it previews the one credit', preview?.ok === true && preview.count === 1,
+      preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+    if (!planned || !preview?.ok) return;
+
+    ok('and says so out loud',
+      /at most one credit/.test(preview.operations[0]?.says ?? ''),
+      preview.operations[0]?.says ?? '');
+
+    const confirmed = {
+      text, capabilities: withEnrich, vocabulary: async () => EMPTY_VOCABULARY,
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    };
+
+    /* The transaction fails after the credit has been spent. */
+    const breaking = postgrestStore(db.supabase);
+    const first = await applyMutation({
+      ...confirmed,
+      store: {
+        ...breaking,
+        perform: async () => ({ ok: false, why: 'the database fell over' }),
+      },
+    });
+    ok('the write fails', !first.ok, 'it should have failed');
+    ok('but the credit was spent', calls === 1, String(calls));
+    ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+
+    /* The same confirmation, retried. */
+    const second = await applyMutation({ ...confirmed, store: postgrestStore(db.supabase) });
+    ok('the retry goes through', second.ok, second.ok ? '' : second.why);
+    ok('and it did NOT buy the lookup again', calls === 1, String(calls));
+
+    const row = (db.tables.crm_contacts ?? [])[0];
+    ok('the stored answer was applied', row?.contact_name === 'Sam Dawson', String(row?.contact_name));
+  } finally {
+    PROVIDER.lookUp = real;
+    LUSHA_GATE.locked = true;
+  }
+});
+
+test('a record with nothing to look up by costs nothing and is named', async () => {
+  const db = fakeDb({
+    crm_contacts: [{ id: 'c1', company_name: 'Dawson Group', status: 'lead' }],
+  });
+  const withEnrich = [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'];
+
+  LUSHA_GATE.locked = false;
+  try {
+    const planned = await planAndPreview({
+      text: 'enrich Dawson Group', capabilities: withEnrich,
+      vocabulary: async () => EMPTY_VOCABULARY,
+      store: postgrestStore(db.supabase), preview: true,
+    });
+    const preview = planned?.preview;
+    ok('the preview refuses', preview?.ok === false, preview?.ok ? String(preview.count) : '');
+    if (preview && !preview.ok) {
+      ok('and says what is missing', /email address/.test(preview.why), preview.why);
+    }
+  } finally {
+    LUSHA_GATE.locked = true;
+  }
 });
 
 /* =============================================================

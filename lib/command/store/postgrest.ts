@@ -336,6 +336,26 @@ const FUNCTIONS: Record<string, { name: string; args: (c: Invocation) => Record<
       p_image: null,
     }),
   },
+  'external.begin': {
+    name: 'command_external_begin',
+    /* Not a business operation: a purchase ledger entry, claimed before
+       somebody else's service is called and settled when it answers. */
+    args: (c) => ({
+      p_key: c.args.key ?? null,
+      p_capability: c.args.capability ?? null,
+      p_subject: c.args.subject ?? null,
+      p_strategy: c.args.strategy ?? null,
+    }),
+  },
+  'external.finish': {
+    name: 'command_external_finish',
+    args: (c) => ({
+      p_key: c.args.key ?? null,
+      p_ok: c.args.ok ?? false,
+      p_result: c.args.result ?? null,
+      p_why: c.args.why ?? null,
+    }),
+  },
   'meeting.create': {
     name: 'command_create_meeting',
     args: (c) => ({
