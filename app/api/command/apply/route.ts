@@ -80,30 +80,44 @@ export async function POST(req: NextRequest) {
   });
 
   if (outcome.ok) {
-    /* THE FILE THE SAME SENTENCE ASKED FOR.
+    /* THE FILE THE SAME SENTENCE ASKED FOR, AS A FILE.
+
        "Create a list from them and export it to Excel" is one thing
        somebody confirmed, and this used to return the list and drop the
-       spreadsheet on the floor. The bytes come back with the outcome
-       rather than through a second request, because a second request
-       would re-plan the sentence against a database the first one had
-       already changed and could answer a different question.
+       spreadsheet on the floor. It comes back from the SAME request,
+       because a second one would re-plan the sentence against a
+       database the first had already changed and could answer a
+       different question.
 
-       Base64 in JSON rather than a binary body, so the outcome and the
-       artefact arrive together. An export is a few hundred kilobytes;
-       a selection too large for its format was refused before any of
-       this ran. */
+       As the response body, not as base64 inside JSON. A workbook of a
+       complete selection can be tens of megabytes, and base64 makes it
+       a third larger again, then the browser holds the JSON string, the
+       decoded binary string and the byte array at once. The export
+       system was deliberately made capable of complete selections of
+       any size; putting the result through a JSON string would put the
+       limit straight back.
+
+       What the command DID travels in the headers beside it. */
+    if (outcome.artefact) {
+      return new NextResponse(new Blob([outcome.artefact.bytes as unknown as BlobPart]), {
+        status: 200,
+        headers: {
+          'Content-Type': outcome.artefact.mime,
+          'Content-Disposition': `attachment; filename="${outcome.artefact.filename}"`,
+          'X-Command-Changed': String(outcome.changed),
+          'X-Command-Rows': String(outcome.artefactRows ?? 0),
+          /* Encoded, because a header is Latin-1 and a message can hold
+             a company name with anything in it. */
+          'X-Command-Message': encodeURIComponent(outcome.message),
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       changed: outcome.changed,
       message: outcome.message,
-      artefact: outcome.artefact
-        ? {
-            filename: outcome.artefact.filename,
-            mime: outcome.artefact.mime,
-            rows: outcome.artefactRows ?? 0,
-            base64: Buffer.from(outcome.artefact.bytes).toString('base64'),
-          }
-        : null,
     });
   }
 

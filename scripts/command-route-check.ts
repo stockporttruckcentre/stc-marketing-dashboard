@@ -9,15 +9,20 @@
    "create a list from them and export it to Excel" made the list and
    dropped the spreadsheet on the floor.
 
-   So this calls the route's own POST handler with a Request, reads the
-   Response, and then runs the CLIENT half of the boundary against that
-   body: the same decode the command bar does before it saves the file.
+   So this calls the route's own POST handler with a Request and reads
+   the Response the way the command bar reads it.
 
      text + two hashes
        -> POST /api/command/apply
-       -> Response JSON
-       -> the bar's own base64 decode
+       -> a binary body when there is a file, JSON when there is not
        -> bytes that open
+
+   THE FILE IS THE BODY, NOT A STRING INSIDE ONE.
+
+   A workbook of a complete selection can be tens of megabytes, and
+   base64 in JSON makes it a third larger again and then holds three
+   copies of it in the browser. The large case below exists so this is
+   not proving only that a two kilobyte workbook survives.
 
    WHAT IS STUBBED, AND WHY THAT IS STILL THE ROUTE.
 
@@ -112,14 +117,20 @@ const post = (url: string, body: unknown) =>
 /**
  * The client half of the boundary.
  *
- * Byte for byte what `CommandBar.bytesOf` does with the body, so a
- * change to the wire shape that the bar could not decode fails here.
+ * What the bar does with the response: a body that is not JSON is the
+ * file, and what the command did is in the headers.
  */
-function bytesOf(base64: string): Uint8Array {
-  const binary = Buffer.from(base64, 'base64').toString('binary');
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
+async function readArtefact(res: Response) {
+  const json = res.headers.get('Content-Type')?.includes('application/json') ?? false;
+  if (json) return null;
+  return {
+    filename: /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? '',
+    mime: res.headers.get('Content-Type') ?? '',
+    rows: Number(res.headers.get('X-Command-Rows') ?? 0),
+    changed: Number(res.headers.get('X-Command-Changed') ?? 0),
+    message: decodeURIComponent(res.headers.get('X-Command-Message') ?? ''),
+    bytes: new Uint8Array(await res.arrayBuffer()),
+  };
 }
 
 /* =============================================================
@@ -169,31 +180,69 @@ test('a confirmed programme returns the change AND the spreadsheet', async () =>
   }) as never);
 
   ok('the request succeeds', res.status === 200, String(res.status));
-  const body = await res.json() as {
-    ok: boolean; message?: string;
-    artefact?: { filename: string; mime: string; rows: number; base64: string } | null;
-  };
-
-  ok('the command ran', body.ok === true, JSON.stringify(body).slice(0, 200));
-  ok('the list was really made', (db.tables.crm_lists ?? []).length === 1,
-    JSON.stringify(db.tables.crm_lists));
 
   /* THE POINT OF THIS FILE. */
-  ok('and the file came back with it', !!body.artefact, body.message ?? 'no artefact');
-  if (!body.artefact) return;
-  ok('named as a spreadsheet', body.artefact.filename.endsWith('.xlsx'), body.artefact.filename);
-  ok('with the spreadsheet mime type',
-    /spreadsheetml/.test(body.artefact.mime), body.artefact.mime);
-  ok('holding the two customers the sentence found', body.artefact.rows === 2,
-    String(body.artefact.rows));
+  const file = await readArtefact(res);
+  ok('the response is the file, not JSON', !!file, 'it was JSON');
+  if (!file) return;
 
-  /* The client half: the bar decodes this and hands it to the browser. */
-  const bytes = bytesOf(body.artefact.base64);
-  ok('the bytes decode', bytes.length > 0, String(bytes.length));
-  /* A .xlsx is a zip, so it starts PK. A body the bar could not turn
-     back into a real file is the failure this check exists for. */
-  ok('and they are a real workbook',
-    bytes[0] === 0x50 && bytes[1] === 0x4b, `${bytes[0]},${bytes[1]}`);
+  ok('the list was really made', (db.tables.crm_lists ?? []).length === 1,
+    JSON.stringify(db.tables.crm_lists));
+  ok('named as a spreadsheet', file.filename.endsWith('.xlsx'), file.filename);
+  ok('with the spreadsheet mime type', /spreadsheetml/.test(file.mime), file.mime);
+  ok('holding the two customers the sentence found', file.rows === 2, String(file.rows));
+  ok('and it says what the command did',
+    /Make a list out of these records/.test(file.message), file.message);
+  /* A .xlsx is a zip, so it starts PK. */
+  ok('the bytes are a real workbook',
+    file.bytes[0] === 0x50 && file.bytes[1] === 0x4b,
+    `${file.bytes[0]},${file.bytes[1]}`);
+});
+
+test('a large export comes back whole, through the same route', async () => {
+  /* Eight thousand customers. Not a size anybody would call large, and
+     large enough that a base64 JSON round trip would be doing three
+     copies of a multi megabyte string. The export system was
+     deliberately made capable of complete selections; the boundary must
+     not put the limit back. */
+  const many: Row[] = [];
+  for (let i = 0; i < 8000; i++) {
+    many.push({
+      id: `b${i}`,
+      company_name: `Bulk Customer ${i} with a name long enough to make the file worth measuring`,
+      status: 'lead', location: 'Hyde', trailers: 30,
+      created_at: '2026-02-01', notes: 'a note of some length, repeated across every single row',
+    });
+  }
+  const db = fakeDb({ crm_contacts: many });
+  serve(db);
+
+  const text = 'find the customers in Hyde, create a list called Everybody from them '
+    + 'and export it to Excel';
+
+  const plan = await import('../app/api/command/plan/route');
+  const planned = await (await plan.POST(post('http://x/api/command/plan', {
+    text, preview: true,
+  }) as never)).json() as { hash: string; preview: { ok: true; programmeHash: string } };
+  ok('it previews', !!planned.preview?.programmeHash, JSON.stringify(planned).slice(0, 200));
+  if (!planned.preview?.programmeHash) return;
+
+  const apply = await import('../app/api/command/apply/route');
+  const res = await apply.POST(post('http://x/api/command/apply', {
+    text, planHash: planned.hash, programmeHash: planned.preview.programmeHash, confirm: true,
+  }) as never);
+
+  const file = await readArtefact(res);
+  ok('the response is the file', !!file, 'it was JSON');
+  if (!file) return;
+
+  ok('every customer is in it', file.rows === 8000, String(file.rows));
+  ok('and it is a real workbook of real size',
+    file.bytes[0] === 0x50 && file.bytes[1] === 0x4b && file.bytes.length > 200_000,
+    `${file.bytes.length} bytes`);
+  ok('the list was made over all of them',
+    db.tables.crm_contacts.every((r) => r.list_id === 'list1'),
+    String(db.tables.crm_contacts.filter((r) => r.list_id !== 'list1').length));
 });
 
 /* =============================================================

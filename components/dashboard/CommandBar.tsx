@@ -563,14 +563,6 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     URL.revokeObjectURL(url);
   }
 
-  /** Base64 out of a JSON body, as the bytes it stands for. */
-  function bytesOf(base64: string): ArrayBuffer {
-    const binary = atob(base64);
-    const out = new Uint8Array(new ArrayBuffer(binary.length));
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out.buffer;
-  }
-
   async function downloadArtefact(m: ServerMeaning) {
     setStage('running');
     const res = await fetch('/api/command/emit', {
@@ -680,7 +672,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   async function applyEdit(acknowledge?: number) {
     if (!meaning || !editPreview?.ok) return;
     setStage('running');
-    const res = await fetch('/api/command/apply', {
+    const sent = await fetch('/api/command/apply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
@@ -690,7 +682,39 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         acknowledge,
         context,
       }),
-    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+    }).catch(() => null);
+
+    if (!sent) {
+      setOutcome({ ok: false, message: 'That did not reach the server.' });
+      setStage('done');
+      return;
+    }
+
+    /* A CONFIRMED COMMAND CAN PRODUCE A FILE TOO.
+
+       "Create a list from them and export it to Excel" is one thing
+       somebody confirmed, and the file comes back from the same request
+       that made the change. It arrives as the response BODY rather than
+       as base64 in JSON, because a workbook of a complete selection can
+       be tens of megabytes and a JSON round trip would hold three
+       copies of it. What the command did is in the headers. */
+    if (!sent.headers.get('Content-Type')?.includes('application/json')) {
+      const blob = await sent.blob();
+      const name = /filename="([^"]+)"/.exec(sent.headers.get('Content-Disposition') ?? '')?.[1]
+        ?? 'export';
+      save(blob, name);
+
+      setEditPreview(null);
+      setOutcome({
+        ok: true,
+        message: decodeURIComponent(sent.headers.get('X-Command-Message') ?? '')
+          || `${name} downloaded.`,
+      });
+      setStage('done');
+      return;
+    }
+
+    const res = await sent.json().catch((e) => ({ ok: false, message: e.message }));
 
     /* The world moved between looking and agreeing. Show what it says
        now rather than an error about what it used to say. */
@@ -706,18 +730,6 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
       setStage('idle');
       return;
-    }
-
-    /* A CONFIRMED COMMAND CAN PRODUCE A FILE TOO.
-
-       "Create a list from them and export it to Excel" is one thing
-       somebody confirmed. The apply route carries the bytes back with
-       the outcome, so the file reaches the browser from the same
-       request that made the change rather than from a second one asking
-       the question again. */
-    if (res.ok && res.artefact?.base64) {
-      const file = res.artefact as { filename: string; mime: string; base64: string };
-      save(new Blob([bytesOf(file.base64)], { type: file.mime }), file.filename);
     }
 
     setEditPreview(null);

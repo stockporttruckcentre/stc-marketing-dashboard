@@ -95,10 +95,18 @@ const OPENERS = [
   .filter((w) => !NOT_A_CLAUSE_START.has(w))
   .filter((w) => w.length > 2);
 
-/** Words that mean "what the clause before produced". */
+/**
+ * Words that mean "what the clause before produced".
+ *
+ * Including the personal ones. A clause before this one can produce a
+ * PERSON as easily as a set of rows, and "change Dave to sales and
+ * export him to CSV" pointed back with a word this did not know, so the
+ * second clause was read against nothing and the whole sentence fell
+ * back to one reading.
+ */
 const BACK_REFERENCES = [
   'them', 'these', 'those', 'it', 'that', 'the result', 'the results',
-  'the list', 'that list', 'the lot',
+  'the list', 'that list', 'the lot', 'him', 'her', 'they', 'he', 'she',
 ];
 
 export type Clause = {

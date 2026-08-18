@@ -107,12 +107,12 @@ function personNamed(name: string): Cond {
     of: [
       {
         kind: 'cmp', op: 'contains',
-        left: { kind: 'field', of: { entity: 'profiles', field: 'full_name' } },
+        left: { kind: 'field', of: { entity: 'people', field: 'full_name' } },
         right: { kind: 'literal', value: name },
       },
       {
         kind: 'cmp', op: 'eq',
-        left: { kind: 'field', of: { entity: 'profiles', field: 'email' } },
+        left: { kind: 'field', of: { entity: 'people', field: 'email' } },
         right: { kind: 'literal', value: name },
       },
     ],
@@ -169,7 +169,7 @@ export function parseRoleChange(
 
   const person: Expr = {
     kind: 'reference',
-    entity: 'profiles',
+    entity: 'people',
     where: personNamed(who),
     select: 'id',
     /* Two people called Dave is a real possibility, and giving the
@@ -187,9 +187,9 @@ export function parseRoleChange(
       expect: 'one',
       subject: {
         op: 'select',
-        from: { entity: 'profiles' },
+        from: { entity: 'people' },
         where: personNamed(who),
-        produces: { kind: 'rows', entity: 'profiles' },
+        produces: { kind: 'rows', entity: 'people' },
       },
       args: {
         role: { kind: 'literal', value: wanted.role },
@@ -197,7 +197,7 @@ export function parseRoleChange(
            this performs, rather than only the write. */
         person,
       },
-      produces: { kind: 'record', entity: 'profiles' },
+      produces: { kind: 'record', entity: 'people' },
     },
     /* "Change Dave to admin" rather than "make Dave an admin", because
        the same wording has to read properly for all four roles and

@@ -95,6 +95,32 @@ BEGIN
       RAISE EXCEPTION 'a % of % must name a row', operation, target;
     END IF;
 
+    -- ---- what it takes to do it ------------------------------------
+    --
+    -- A PAYLOAD IS NOT A PERMISSION.
+    --
+    -- The allowlist above says which COLUMNS may be written, which is
+    -- the right question for an update and no question at all for a
+    -- delete: a delete writes nothing. Without this, anything that
+    -- could reach this function could remove any row it could see, and
+    -- the runtime's classification of the operation would be the only
+    -- thing standing in the way. Row level security is not the answer
+    -- either: it decides which rows, not which people may destroy one.
+    --
+    -- `command_entity_permissions` is generated from the same registry
+    -- the command bar reads, so the answer here and the answer there
+    -- are one answer. A table with no row in it cannot be created or
+    -- deleted through this function at all.
+    IF operation IN ('insert', 'delete') THEN
+      IF NOT command_may_lifecycle(
+        target, CASE operation WHEN 'insert' THEN 'create' ELSE 'delete' END
+      ) THEN
+        RAISE EXCEPTION
+          'you may not % rows of %; nothing has been changed',
+          CASE operation WHEN 'insert' THEN 'create' ELSE 'delete' END, target;
+      END IF;
+    END IF;
+
     -- ---- doing it --------------------------------------------------
     IF operation = 'update' THEN
       EXECUTE format(

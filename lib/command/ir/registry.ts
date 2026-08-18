@@ -89,6 +89,20 @@ export type EntityDef = {
   fields: FieldDef[];
   /** Capability required to read this entity at all. */
   readRequires?: CrmCapability;
+  /**
+   * What it takes to make one of these rows, or get rid of one.
+   *
+   * A property of the OPERATION and the entity, never of whichever
+   * column happens to identify the record. Deriving a deletion's
+   * permission from the writable entry for the title field made
+   * `crm.edit` enough to delete a customer, and the permission model
+   * distinguishes `crm.edit` from `crm.delete` on purpose.
+   *
+   * Absent means a sentence cannot create or delete one of these at
+   * all, which is the safe way round.
+   */
+  createRequires?: CrmCapability;
+  deleteRequires?: CrmCapability;
 };
 
 /* =============================================================
@@ -225,6 +239,20 @@ export type CapabilityDef = {
   /** Present when something actually performs it. Absent means declared only. */
   handler?: string;
   /**
+   * What it leaves on its subjects, for a step that reads the result.
+   *
+   * A programme's file is rendered before its transaction opens, so
+   * "mark these as sold and export the result" would otherwise export
+   * the rows as they were before the sale. Declared rather than
+   * inferred: a value may be a constant or one of the operation's own
+   * arguments, written `{ arg: 'role' }`.
+   *
+   * Absent means nothing downstream may claim to know what this leaves
+   * behind, which is the safe way round. A guess would be worse than the
+   * old rows, because at least those were true once.
+   */
+  effect?: { table: string; set: Record<string, unknown | { arg: string }> };
+  /**
    * What is missing, exactly, when there is no handler.
    *
    * "Nothing performs it yet" is true of a capability nobody has got to
@@ -338,6 +366,8 @@ export function entities(): EntityDef[] {
       defaultDateField: spec.dateColumn,
       fields: fieldsFor(spec.id, t, spec, writableByEntity.get(spec.id) ?? new Map()),
       readRequires: readRequiresFor(spec.table),
+      createRequires: t.lifecycle?.create as CrmCapability | undefined,
+      deleteRequires: t.lifecycle?.delete as CrmCapability | undefined,
     });
   }
 
@@ -363,6 +393,8 @@ export function entities(): EntityDef[] {
       subtitleFields: [],
       fields: fieldsFor(t.table, t, undefined, writableByEntity.get(t.table) ?? new Map()),
       readRequires: readRequiresFor(t.table),
+      createRequires: t.lifecycle?.create as CrmCapability | undefined,
+      deleteRequires: t.lifecycle?.delete as CrmCapability | undefined,
     });
   }
 
@@ -593,6 +625,10 @@ export const CAPABILITIES: CapabilityDef[] = [
        twice is not the same as running it once. */
     idempotent: false,
     handler: 'lib/crm/mark-sold.ts',
+    /* What a sale leaves on the tracker row. The commission and the
+       stock unit are the operation's other two writes and are not on
+       this record, so nothing here claims them. */
+    effect: { table: 'crm_contacts', set: { status: 'customer' } },
     /* A sale needs a price. Almost always the deal already carries one,
        which is why `from` is here: the operation reads it off the record
        and asks for nothing. A deal with no price anywhere is the one
@@ -640,7 +676,7 @@ export const CAPABILITIES: CapabilityDef[] = [
     id: 'user.setRole',
     label: 'Change what somebody is allowed to do',
     operates: 'invoke',
-    entities: ['profiles'],
+    entities: ['people'],
     /* The same capability the admin screen gates on, because it is the
        same operation. */
     requires: 'admin.users',
@@ -650,6 +686,7 @@ export const CAPABILITIES: CapabilityDef[] = [
        so this is not repeatable in the sense the unmet gate means. */
     idempotent: false,
     handler: 'supabase/migrations/018_command_set_role.sql',
+    effect: { table: 'profiles', set: { role: { arg: 'role' } } },
     inputs: [
       /* `from` is the column that already answers it, so the preview can
          say what somebody IS as well as what they are being made. */

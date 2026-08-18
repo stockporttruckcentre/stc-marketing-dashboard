@@ -95,7 +95,9 @@ export const DESTINATION_VERBS: {
 
 /** Words standing in for what the clause before produced. */
 const IT = ['it', 'this', 'that', 'them', 'these', 'those', 'the file', 'the list',
-            'the results', 'the result', 'a copy', 'copies', 'the lot'];
+            'the results', 'the result', 'a copy', 'copies', 'the lot',
+            /* A person is a result too. */
+            'him', 'her', 'they', 'he', 'she'];
 
 /**
  * How a recipient is named, as a lookup rather than as a row id.
@@ -109,13 +111,13 @@ function personNamed(name: string): Expr {
   const like: Cond = {
     kind: 'or',
     of: [
-      { kind: 'cmp', op: 'contains', left: { kind: 'field', of: { entity: 'profiles', field: 'full_name' } }, right: { kind: 'literal', value: name } },
-      { kind: 'cmp', op: 'eq', left: { kind: 'field', of: { entity: 'profiles', field: 'email' } }, right: { kind: 'literal', value: name } },
+      { kind: 'cmp', op: 'contains', left: { kind: 'field', of: { entity: 'people', field: 'full_name' } }, right: { kind: 'literal', value: name } },
+      { kind: 'cmp', op: 'eq', left: { kind: 'field', of: { entity: 'people', field: 'email' } }, right: { kind: 'literal', value: name } },
     ],
   };
   return {
     kind: 'reference',
-    entity: 'profiles',
+    entity: 'people',
     where: like,
     select: 'id',
     /* Two people called Dave is a real possibility here, and granting

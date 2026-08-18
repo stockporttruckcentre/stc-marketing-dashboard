@@ -40,11 +40,36 @@ export type ColumnSpec = {
   why?: string;
 };
 
+/**
+ * What it takes to make one of these rows, or get rid of one.
+ *
+ * DECLARED PER TABLE, BECAUSE IT IS A PROPERTY OF THE OPERATION.
+ *
+ * The lifecycle readers used to derive it from the writable dictionary
+ * entry for whichever column identifies the record, which for a contact
+ * is `company_name` and therefore `crm.edit`. `lib/crm/permissions.ts`
+ * distinguishes `crm.edit` from `crm.delete` deliberately, and deriving
+ * one from the other meant a marketer, who may edit every field on a
+ * customer and delete nothing, could have a deletion represented and
+ * permitted.
+ *
+ * The values are the ones the manual routes and the row policies
+ * already use, so the command bar asks for exactly what the screen asks
+ * for. A table with nothing here cannot be created or deleted from a
+ * sentence at all, which is the safe way round.
+ */
+export type LifecyclePermissions = {
+  create?: string;
+  delete?: string;
+};
+
 export type TableSpec = {
   table: string;
   /** What the rows are, in the words people use. */
   label: string;
   columns: ColumnSpec[];
+  /** What it takes to make one of these or get rid of one. */
+  lifecycle?: LifecyclePermissions;
 };
 
 const SYSTEM: ColumnSpec[] = [
@@ -56,6 +81,7 @@ const SYSTEM: ColumnSpec[] = [
 export const TABLES: TableSpec[] = [
   {
     table: 'crm_contacts', label: 'customers',
+    lifecycle: { create: 'crm.create', delete: 'crm.delete' },
     columns: [
       ...SYSTEM,
       { name: 'company_name', kind: 'text' },
@@ -106,6 +132,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'stock_trailers', label: 'trailers',
+    lifecycle: { create: 'stock.edit', delete: 'stock.edit' },
     columns: [
       ...SYSTEM,
       { name: 'status', kind: 'enum', values: ['new_build', 'in_stock', 'sales_order', 'sold', 'rental', 'scrap'] },
@@ -165,6 +192,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'social_posts', label: 'social posts',
+    lifecycle: { create: 'marketing.edit', delete: 'marketing.edit' },
     columns: [
       ...SYSTEM,
       { name: 'content', kind: 'longtext' },
@@ -180,6 +208,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'calendar_events', label: 'meetings',
+    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
     columns: [
       ...SYSTEM,
       { name: 'title', kind: 'text' },
@@ -214,6 +243,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'contact_addresses', label: 'addresses',
+    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
     columns: [
       { name: 'id', kind: 'system', writable: false, why: 'identifier' },
       { name: 'created_at', kind: 'system', writable: false, why: 'set on insert' },
@@ -230,6 +260,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'contact_notes', label: 'notes',
+    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
     columns: [
       { name: 'id', kind: 'system', writable: false, why: 'identifier' },
       { name: 'created_at', kind: 'system', writable: false, why: 'set on insert' },
@@ -241,6 +272,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'crm_lists', label: 'lists',
+    lifecycle: { create: 'crm.manageLists', delete: 'crm.manageLists' },
     columns: [
       ...SYSTEM,
       { name: 'name', kind: 'text' },

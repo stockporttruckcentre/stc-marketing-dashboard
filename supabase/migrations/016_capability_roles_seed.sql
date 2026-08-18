@@ -46,6 +46,42 @@ $fn$;
 REVOKE ALL ON FUNCTION command_may(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION command_may(TEXT) TO authenticated;
 
+-- What it takes to make one of a table's rows, or get rid of one.
+-- command_apply builds DELETE statements from a payload, and a payload
+-- is not a permission.
+CREATE TABLE IF NOT EXISTS command_entity_permissions (
+  table_name TEXT NOT NULL,
+  operation  TEXT NOT NULL CHECK (operation IN ('create', 'delete')),
+  capability TEXT NOT NULL,
+  PRIMARY KEY (table_name, operation)
+);
+
+ALTER TABLE command_entity_permissions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "command_entity_permissions_read" ON command_entity_permissions;
+CREATE POLICY "command_entity_permissions_read" ON command_entity_permissions
+  FOR SELECT USING (auth.role() = 'authenticated');
+
+-- May the caller create or delete a row of this table? A table with no
+-- row here cannot be created or deleted through the command runtime at
+-- all, which is the safe way round.
+CREATE OR REPLACE FUNCTION command_may_lifecycle(p_table TEXT, p_operation TEXT)
+RETURNS BOOLEAN
+LANGUAGE SQL
+SECURITY DEFINER
+STABLE
+AS $fn$
+  SELECT EXISTS (
+    SELECT 1 FROM command_entity_permissions e
+    WHERE e.table_name = p_table
+      AND e.operation = p_operation
+      AND command_may(e.capability)
+  )
+$fn$;
+
+REVOKE ALL ON FUNCTION command_may_lifecycle(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION command_may_lifecycle(TEXT, TEXT) TO authenticated;
+
 BEGIN;
 
 DELETE FROM command_capability_roles;
@@ -89,5 +125,23 @@ INSERT INTO command_capability_roles (capability, role) VALUES
   ('stock.edit', 'admin'),
   ('stock.edit', 'marketer'),
   ('stock.edit', 'sales');
+
+DELETE FROM command_entity_permissions;
+
+INSERT INTO command_entity_permissions (table_name, operation, capability) VALUES
+  ('calendar_events', 'create', 'crm.edit'),
+  ('calendar_events', 'delete', 'crm.edit'),
+  ('contact_addresses', 'create', 'crm.edit'),
+  ('contact_addresses', 'delete', 'crm.edit'),
+  ('contact_notes', 'create', 'crm.edit'),
+  ('contact_notes', 'delete', 'crm.edit'),
+  ('crm_contacts', 'create', 'crm.create'),
+  ('crm_contacts', 'delete', 'crm.delete'),
+  ('crm_lists', 'create', 'crm.manageLists'),
+  ('crm_lists', 'delete', 'crm.manageLists'),
+  ('social_posts', 'create', 'marketing.edit'),
+  ('social_posts', 'delete', 'marketing.edit'),
+  ('stock_trailers', 'create', 'stock.edit'),
+  ('stock_trailers', 'delete', 'stock.edit');
 
 COMMIT;

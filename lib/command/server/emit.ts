@@ -28,7 +28,7 @@
    ============================================================= */
 import type { CommandPlanning } from '../plan';
 import type { Store, TransactionStep } from '../ir/store';
-import type { Emit, Expr, Plan, Select } from '../ir/types';
+import type { Cond, Emit, Expr, Plan, Select } from '../ir/types';
 import { entity as entityDef } from '../ir/registry';
 import { runSelect, selectBehind } from '../ir/read';
 import { buildTable, type Artefact, type Table, type TableColumn } from '../render/table';
@@ -106,7 +106,7 @@ async function resolvePeople(
   | { ok: true; people: { id: string; label: string }[] }
   | { ok: false; why: string; candidates?: { id: string; label: string }[] }
 > {
-  const def = entityDef('profiles');
+  const def = entityDef('people');
   if (!def) return { ok: false, why: 'nothing here holds people' };
   const title = def.titleField ?? 'id';
 
@@ -207,6 +207,35 @@ function listStepBehind(plan: Plan, from: Emit['from']): string | null {
 }
 
 /**
+ * How many records are on a list, all of them.
+ *
+ * Paged rather than limited. A ceiling inside a check whose meaning is
+ * "the complete list" would let a list one row longer than the ceiling
+ * read as complete, which is the same class of mistake as an export
+ * that trims.
+ */
+async function countOn(
+  store: Store, table: string, list: string,
+): Promise<{ ok: true; total: number } | { ok: false; why: string }> {
+  const where: Cond = {
+    kind: 'cmp', op: 'eq',
+    left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
+    right: { kind: 'literal', value: list },
+  };
+
+  let total = 0;
+  let offset = 0;
+  const page = 1000;
+  for (;;) {
+    const read = await store.read({ table, columns: ['id'], where, limit: page, offset });
+    if (!read.ok) return { ok: false, why: read.why };
+    total += read.rows.length;
+    if (read.rows.length < page) return { ok: true, total };
+    offset += read.rows.length;
+  }
+}
+
+/**
  * Granting colleagues access to what a sentence selected.
  *
  * SHARING THE LIST IS NOT SHARING A HANDFUL OF ROWS ON IT.
@@ -274,27 +303,22 @@ async function prepareShare(
       };
     }
 
-    /* Every record on that list, so a narrower selection can be refused
-       here with a number in it rather than only by the database. */
-    const whole = await store.read({
-      table: def?.table ?? 'crm_contacts',
-      columns: ['id'],
-      where: {
-        kind: 'cmp', op: 'eq',
-        left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
-        right: { kind: 'literal', value: lists[0] },
-      },
-      limit: 100_000,
-    });
+    /* EVERY record on that list, paged until the pages stop coming.
+       A limit here would be an implementation cap inside a check whose
+       whole meaning is "the complete list", and a list one row longer
+       than the cap would read as complete and share everything on it.
+       The database checks it exactly as well; this exists so the
+       refusal has the real numbers in it. */
+    const whole = await countOn(store, def?.table ?? 'crm_contacts', lists[0]);
     if (!whole.ok) return { ok: false, reason: 'failed', why: whole.why };
 
-    if (whole.rows.length !== ids.length) {
+    if (whole.total !== ids.length) {
       return {
         ok: false,
         reason: 'unsupported',
         why: `sharing here grants a whole list, and that is ${ids.length} of the `
-          + `${whole.rows.length} records on it. Everybody it is shared with would get all `
-          + `${whole.rows.length}. Make a list of just these first, then share that.`,
+          + `${whole.total} records on it. Everybody it is shared with would get all `
+          + `${whole.total}. Make a list of just these first, then share that.`,
       };
     }
 

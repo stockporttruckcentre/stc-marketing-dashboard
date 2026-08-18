@@ -825,6 +825,20 @@ export function derivedRequirements(plan: Plan): Requirement[] {
         if (m.op === 'update') needCapability('record.updateField', `updates ${m.target.entity}`);
         if (m.op === 'create') needCapability('record.create', `creates a ${m.target.entity} record`);
         if (m.op === 'delete') needCapability('record.delete', `deletes from ${m.target.entity}`);
+
+        /* WHAT THE ENTITY SAYS IT TAKES, on top of the generic
+           capability for the shape of the step. Creating a customer is
+           `crm.create` and deleting one is `crm.delete`, and neither is
+           derivable from the columns: a delete writes none. Declared on
+           the entity, so an entity that declares nothing cannot be
+           created or deleted from a sentence at all. */
+        const def = entity(m.target.entity);
+        if (m.op === 'create') {
+          need('permission', def?.createRequires, `creates a ${m.target.entity} record`);
+        }
+        if (m.op === 'delete') {
+          need('permission', def?.deleteRequires, `deletes from ${m.target.entity}`);
+        }
         if (m.match) fromSource(m.match);
         for (const w of m.set ?? []) {
           if ('via' in (w.field as PathRef)) continue;

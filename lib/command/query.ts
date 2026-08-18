@@ -132,6 +132,13 @@ const GRAMMAR_WORDS = new Set([
   'each', 'every', 'per', 'split', 'grouped', 'broken', 'down', 'first', 'top',
   'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
   'twenty', 'thirty', 'forty', 'fifty', 'hundred', 'dozen', 'couple', 'handful',
+  /* Words that point at what a clause before produced. "Export the
+     result to CSV" and "export him to CSV" are pointing, not
+     describing, and reporting "nothing in the trailers matches result"
+     refused a programme that was understood perfectly well. The
+     pointing itself is read by the composer. */
+  'them', 'these', 'those', 'result', 'results', 'lot',
+  'him', 'her', 'his', 'hers', 'they', 'she',
 ]);
 
 /**

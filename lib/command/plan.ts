@@ -256,12 +256,17 @@ function planProgramme(
     if (!one) return null;
     planned.push({ planning: one, refersBack: clause.refersBack });
 
-    /* What this clause leaves behind, for the next one. */
+    /* What this clause leaves behind, for the next one.
+       An operation leaves its SUBJECT's entity, which is how "mark
+       these as sold and export the result" knows what the result is:
+       without it the second clause was read against nothing and the
+       whole sentence fell back to a single reading. */
     const last = one.plan.steps[one.plan.steps.length - 1];
     const entity = last && 'target' in last ? (last as { target: { entity: string } }).target.entity
       : last && last.op === 'select' && 'entity' in last.from ? last.from.entity
-        : one.select && 'entity' in one.select.from ? one.select.from.entity
-          : prior?.entity;
+        : last && last.op === 'invoke' ? entityBehind(last.subject) ?? prior?.entity
+          : one.select && 'entity' in one.select.from ? one.select.from.entity
+            : prior?.entity;
     if (entity) prior = { entity };
   }
 
@@ -329,6 +334,15 @@ function attachTarget(words: string[] | string): Select | null {
     };
   }
   return null;
+}
+
+/** The entity a source names, however it names it. */
+function entityBehind(source: unknown): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const s = source as { entity?: string; from?: { entity?: string }; op?: string };
+  if (s.entity) return s.entity;
+  if (s.op === 'select' && s.from?.entity) return s.from.entity;
+  return undefined;
 }
 
 function planOneClause(

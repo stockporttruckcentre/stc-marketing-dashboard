@@ -336,6 +336,37 @@ export const ENTITIES: EntitySpec[] = [
     ],
     hrefFor: () => '/dashboard/calendar',
   },
+  {
+    /* THE PEOPLE WHO USE THIS.
+       Addressable because a sentence can now change what one of them is
+       allowed to do, and a result that can be operated on has to be a
+       result that can be described: "change Dave to sales and export
+       him to CSV" had nowhere to read the second half from. It also
+       answers the ordinary questions nobody could ask before, like how
+       many administrators there are. */
+    id: 'people',
+    table: 'profiles',
+    label: 'people', labelOne: 'person',
+    nouns: ['person', 'people', 'colleague', 'colleagues', 'user', 'users',
+            'team member', 'team members', 'staff'],
+    titleColumn: 'full_name',
+    subtitleColumns: ['email', 'role'],
+    dateColumn: 'created_at',
+    amounts: [],
+    filters: [
+      { key: 'role', column: 'role', kind: 'enum', label: 'role',
+        vocabulary: {
+          admin: 'admin', admins: 'admin', administrator: 'admin', administrators: 'admin',
+          sales: 'sales', rep: 'sales', reps: 'sales',
+          marketer: 'marketer', marketers: 'marketer', marketing: 'marketer',
+          viewer: 'viewer', viewers: 'viewer', 'read only': 'viewer',
+        } },
+    ],
+    dimensions: [
+      { key: 'role', column: 'role', label: 'role', words: ['role', 'roles', 'access'] },
+    ],
+    hrefFor: () => '/dashboard/admin',
+  },
 ];
 
 /** Words that pick which number is being asked for. */

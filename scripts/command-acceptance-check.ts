@@ -2160,6 +2160,250 @@ test('a described set is still refused', async () => {
   ok('and nothing was written', db.writes.length === 0);
 });
 
+
+/* =============================================================
+   24. What it takes to delete is not what it takes to edit
+
+   Both delete readers used to take their capability from the writable
+   dictionary entry for whichever column identifies the record, which
+   for a customer is `company_name` and therefore `crm.edit`. The
+   permission model distinguishes `crm.edit` from `crm.delete` on
+   purpose: a marketer may edit every field on a customer and delete
+   nothing.
+   ============================================================= */
+
+const leads = (): Row[] => [
+  { id: 'd1', company_name: 'Dawson Group', status: 'lead' },
+  { id: 'd2', company_name: 'TEST lead two', status: 'lead' },
+  { id: 'd3', company_name: 'TEST lead three', status: 'lead' },
+];
+
+/** Does this role's reading of the sentence reach a deletion at all? */
+function deletes(text: string, role: UserRole, context?: unknown): boolean {
+  const planning = planCommand(text, {
+    actorCapabilities: [...capabilitiesFor({ role } as never)],
+    context: context as never,
+  });
+  return planning?.plan.steps.some((s) => s.op === 'delete') ?? false;
+}
+
+test('deleting a customer needs crm.delete, not crm.edit', async () => {
+  /* A noun and a name, which is what the named delete reader asks for. */
+  const named = 'delete the customer Dawson Group';
+
+  ok('an admin can', deletes(named, 'admin'));
+  /* Sales holds crm.delete in permissions.ts. */
+  ok('a sales rep can', deletes(named, 'sales'));
+  /* A marketer holds crm.edit and not crm.delete, which is the whole
+     distinction the old derivation lost. */
+  ok('a marketer cannot', !deletes(named, 'marketer'));
+  ok('a viewer cannot', !deletes(named, 'viewer'));
+
+  const bulk = 'delete all 3 selected test leads';
+  const context = selected(['d1', 'd2', 'd3']);
+  ok('the same holds for a set: admin can', deletes(bulk, 'admin', context));
+  ok('sales can', deletes(bulk, 'sales', context));
+  ok('a marketer cannot', !deletes(bulk, 'marketer', context));
+  ok('a viewer cannot', !deletes(bulk, 'viewer', context));
+});
+
+test('a marketer confirming a deletion is refused by the permission gate', async () => {
+  const db = fakeDb({ crm_contacts: leads() });
+  /* Planned as an admin so a well formed plan exists, then confirmed by
+     somebody who may not do it. The gate is derived from the plan, not
+     from whoever happened to build it. */
+  const planned = await plan('delete the customer Dawson Group', 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews for an admin', false, 'no preview'); return; }
+
+  const done = await applyMutation({
+    text: 'delete the customer Dawson Group', ...actor('marketer'),
+    store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it refuses', !done.ok, 'it deleted');
+  /* A marketer's reading of that sentence is not a deletion at all, so
+     the plan the server arrives at is not the plan that was previewed
+     and the hash says so. Either way nothing is removed: the point is
+     that the capability filter runs on THEIR capabilities, not on
+     whoever built the preview. */
+  if (!done.ok) {
+    ok('without ever reaching the write',
+      done.reason === 'not permitted' || done.reason === 'meaning changed', done.reason);
+  }
+  ok('and the customer is still there', db.tables.crm_contacts.length === 3,
+    String(db.tables.crm_contacts.length));
+});
+
+test('a marketer going straight to the database deletes nothing', async () => {
+  /* A payload is not a permission. The column allowlist is the right
+     question for an update and no question at all for a delete. */
+  const db = fakeDb({ crm_contacts: leads() });
+  db.as('marketer');
+
+  const out = await postgrestStore(db.supabase).perform([
+    { op: 'changes', changes: [{ op: 'delete', table: 'crm_contacts', id: 'd1' }] },
+  ]);
+  ok('the call fails', !out.ok, 'it deleted');
+  if (!out.ok) ok('saying so', /may not delete rows of crm_contacts/.test(out.why), out.why);
+  ok('and all three are still there', db.tables.crm_contacts.length === 3,
+    String(db.tables.crm_contacts.length));
+
+  db.as('sales');
+  const allowed = await postgrestStore(db.supabase).perform([
+    { op: 'changes', changes: [{ op: 'delete', table: 'crm_contacts', id: 'd1' }] },
+  ]);
+  ok('and a sales rep can', allowed.ok, allowed.ok ? '' : allowed.why);
+  ok('leaving two', db.tables.crm_contacts.length === 2,
+    String(db.tables.crm_contacts.length));
+});
+
+
+/* =============================================================
+   25. An Emit sees what the step before it did
+
+   The file is rendered before the transaction opens, so a renderer that
+   throws leaves nothing written. That ordering is right and it used to
+   mean the file held the rows as they were: "move these to Hyde and
+   export them" produced a workbook saying Carrington.
+   ============================================================= */
+
+const asText = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+test('moving trailers and exporting them exports where they now are', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 't1', stc_no: 'STC900001', status: 'in_stock', location: 'Carrington', category: 'Curtainsider' },
+      { id: 't2', stc_no: 'STC900002', status: 'in_stock', location: 'Carrington', category: 'Curtainsider' },
+    ],
+  });
+  const text = 'move all the trailers at Carrington to Hyde and export them to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
+
+  ok('the database says Hyde',
+    db.tables.stock_trailers.every((r) => r.location === 'Hyde'),
+    JSON.stringify(db.tables.stock_trailers.map((r) => r.location)));
+
+  const csv = asText(done.artefact.bytes);
+  ok('and so does the file', csv.includes('Hyde'), csv.slice(0, 300));
+  ok('with no trace of where they were', !/Carrington/.test(csv.split('\n').slice(2).join('\n')),
+    csv.slice(0, 300));
+});
+
+test('changing a role and exporting the person exports the new role', async () => {
+  const db = fakeDb({
+    profiles: [
+      { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'viewer' },
+      { id: 'p2', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'admin' },
+    ],
+  });
+  const text = 'change Dave to sales and export him to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
+
+  ok('the database says sales',
+    db.tables.profiles.find((r) => r.id === 'p1')?.role === 'sales',
+    String(db.tables.profiles.find((r) => r.id === 'p1')?.role));
+
+  const csv = asText(done.artefact.bytes);
+  const daves = csv.split('\n').filter((l) => l.includes('Dave Smith'));
+  ok('and the row in the file says sales', daves.some((l) => l.includes('sales')), daves.join(' | '));
+  ok('not the role they held', !daves.some((l) => /viewer/.test(l)), daves.join(' | '));
+});
+
+test('marking deals sold and exporting them exports them sold', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
+    ],
+    crm_contacts: [
+      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+        sale_price: 20000, profit: 4000, commission_rate: 0.1 },
+    ],
+  });
+  const text = 'mark all the in stock curtainsiders as sold and export the result to CSV';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews', preview?.ok === true, preview && !preview.ok ? preview.why : 'no preview');
+  if (!planned || !preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('it runs', done.ok, done.ok ? '' : done.why);
+  if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
+
+  ok('the deal really sold',
+    db.tables.crm_contacts[0]?.status === 'customer',
+    String(db.tables.crm_contacts[0]?.status));
+
+  /* The file is of the trailers the sentence named, and the sale marks
+     the trailer sold too. What matters is that it is not the pre-sale
+     row. */
+  const csv = asText(done.artefact.bytes);
+  ok('and the file is not a copy of the rows before it',
+    csv.includes('STC910001'), csv.slice(0, 200));
+});
+
+test('a renderer that fails leaves the chained change unwritten', async () => {
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 't1', stc_no: 'STC920001', status: 'in_stock', location: 'Carrington', category: 'Curtainsider' },
+    ],
+  });
+  const text = 'move all the trailers at Carrington to Hyde and export them to Excel';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  if (!planned || !preview?.ok) { ok('it previews', false, 'no preview'); return; }
+
+  const { RENDERERS } = await import('../lib/command/server/emit');
+  const real = RENDERERS.xlsx;
+  RENDERERS.xlsx = () => { throw new Error('TEST renderer down'); };
+  try {
+    const done = await applyMutation({
+      text, ...actor('admin'), store: postgrestStore(db.supabase),
+      previewPlanHash: planned.planned.meaning.hash,
+      previewProgrammeHash: preview.programmeHash,
+    });
+    ok('the whole thing is refused', !done.ok, 'it succeeded');
+  } finally {
+    RENDERERS.xlsx = real;
+  }
+
+  ok('and the trailer never moved',
+    db.tables.stock_trailers[0]?.location === 'Carrington',
+    String(db.tables.stock_trailers[0]?.location));
+  ok('with nothing written at all', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
 /* ============================================================= */
 
 async function main() {

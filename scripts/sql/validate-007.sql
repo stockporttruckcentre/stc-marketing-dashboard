@@ -15,6 +15,22 @@
 \pset pager off
 \pset tuples_only on
 
+/**
+ * A spare administrator, so the harness can demote its own user.
+ *
+ * Migration 019 refuses to let the last administrator stop being one,
+ * which is the point of it. Every section that needs the harness to
+ * BE something else calls this first.
+ */
+CREATE OR REPLACE FUNCTION keep_an_admin() RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO auth.users (id, email)
+  VALUES ('dddddddd-0000-0000-0000-00000000000d', 'spare@test.local')
+  ON CONFLICT DO NOTHING;
+  UPDATE profiles SET role = 'admin' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+END
+$$;
+
 CREATE OR REPLACE FUNCTION assert(what TEXT, cond BOOLEAN, got TEXT DEFAULT NULL)
 RETURNS VOID LANGUAGE plpgsql AS $$
 BEGIN
@@ -260,6 +276,9 @@ RESET ROLE;
 -- what it is about.
 SELECT set_config('request.jwt.claim.sub', '', FALSE);
 SELECT set_config('request.jwt.claim.role', '', FALSE);
+-- A spare administrator first: migration 019 will not let the last one
+-- stop being one, and this section needs this user to be a rep.
+SELECT keep_an_admin();
 UPDATE profiles SET role = 'sales' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
 
 -- Asserted, because a refused role change is silent and every
@@ -537,6 +556,11 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST buyer%';
 -- Creating and deleting, through the same door
 -- -------------------------------------------------------------
 \echo '--- lifecycle ---'
+
+-- Creating and deleting ask for a capability, so the harness has to say
+-- who it is. Without a claim `current_role_safe()` answers nobody, which
+-- is correct and useless.
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
 
 SELECT reset_fixtures();
 
@@ -1012,6 +1036,8 @@ SELECT reset_fixtures();
 
 -- The runtime's gate is irrelevant here: this is the function called
 -- directly, which is what PostgREST exposes.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
 UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
 SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
 
@@ -1133,12 +1159,9 @@ DELETE FROM crm_contacts WHERE company_name LIKE 'TEST perform%';
 SELECT reset_fixtures();
 
 -- A second admin, so the last-admin guard is not what is being tested.
-INSERT INTO auth.users (id, email) VALUES
-  ('dddddddd-0000-0000-0000-00000000000d', 'd@test.local')
-ON CONFLICT DO NOTHING;
+SELECT keep_an_admin();
 UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
 UPDATE profiles SET role = 'sales' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
-UPDATE profiles SET role = 'admin' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
 
 SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
 
@@ -1202,10 +1225,120 @@ SELECT assert('and they did not elevate themselves',
   (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002') = 'sales',
   (SELECT role FROM profiles WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002'));
 
+-- A direct UPDATE, going nowhere near command_set_role. The rule is on
+-- the table, so the path does not matter.
 SELECT set_config('request.jwt.claim.sub', '', FALSE);
+UPDATE profiles SET role = 'sales' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
+UPDATE profiles SET role = 'sales' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+
+DO $$
+BEGIN
+  UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  PERFORM assert('a direct update cannot remove the last administrator', FALSE, 'it updated');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a direct update cannot remove the last administrator',
+    SQLERRM LIKE '%only administrator%', SQLERRM);
+END
+$$;
+
+DO $$
+BEGIN
+  DELETE FROM profiles WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  PERFORM assert('nor can deleting their profile', FALSE, 'it deleted');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('nor can deleting their profile',
+    SQLERRM LIKE '%only administrator%', SQLERRM);
+END
+$$;
+
+SELECT assert('and there is still an administrator',
+  (SELECT COUNT(*) FROM profiles WHERE role = 'admin') = 1);
+
+-- Two administrators, one demotion. Allowed.
+UPDATE profiles SET role = 'admin' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+UPDATE profiles SET role = 'sales' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+SELECT assert('with two administrators one of them may step down',
+  (SELECT COUNT(*) FROM profiles WHERE role = 'admin') = 1);
 
 -- =============================================================
--- 11. The allowlist matches the registry
+-- 11. A payload is not a permission
+-- =============================================================
+\echo '--- deleting as the wrong role ---'
+
+SELECT reset_fixtures();
+
+INSERT INTO crm_contacts (id, company_name, status, source) VALUES
+  ('f1111111-0000-0000-0000-000000000001', 'TEST deletable', 'lead', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+-- A marketer holds crm.edit and not crm.delete. The column allowlist has
+-- nothing to say about a delete, which writes no columns at all.
+--
+-- The claim is cleared around every role flip, because migration 005's
+-- trigger refuses a role change from a non-admin and the harness is
+-- about to become one.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'marketer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_apply(
+    '[{"op":"delete","table":"crm_contacts","id":"f1111111-0000-0000-0000-000000000001"}]'::JSONB);
+  PERFORM assert('a marketer cannot delete a customer', FALSE, 'it deleted');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a marketer cannot delete a customer',
+    SQLERRM LIKE '%may not delete rows of crm_contacts%', SQLERRM);
+END
+$$;
+
+SELECT assert('and the customer is still there',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST deletable') = 1);
+
+-- Sales holds crm.delete.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+UPDATE profiles SET role = 'sales' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_apply(
+    '[{"op":"delete","table":"crm_contacts","id":"f1111111-0000-0000-0000-000000000001"}]'::JSONB);
+  PERFORM assert('a sales rep can delete a customer', TRUE);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a sales rep can delete a customer', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and it is gone',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST deletable') = 0);
+
+-- A viewer creating one.
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+UPDATE profiles SET role = 'viewer' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+SELECT set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-000000000001', FALSE);
+
+DO $$
+BEGIN
+  PERFORM command_apply(
+    '[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST viewer made this"}}]'::JSONB);
+  PERFORM assert('a viewer cannot create a customer', FALSE, 'it inserted');
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a viewer cannot create a customer',
+    SQLERRM LIKE '%may not create rows of crm_contacts%', SQLERRM);
+END
+$$;
+
+SELECT assert('and nothing was created',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST viewer made this') = 0);
+
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT keep_an_admin();
+UPDATE profiles SET role = 'admin' WHERE id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+-- =============================================================
+-- 12. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
 SELECT assert('the seed loaded',

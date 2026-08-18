@@ -23,12 +23,16 @@
 -- refuses a role change from anybody who is not an admin whatever route
 -- it arrives by.
 --
--- THE LAST ADMIN STAYS AN ADMIN.
+-- THE LAST ADMIN STAYS AN ADMIN, AND NOT BECAUSE OF THIS FUNCTION.
 --
 -- An administrator demoting themselves when they are the only one
 -- leaves a database nobody can administer, and no screen in this
--- application can put that back. Refused by name rather than by a
--- comment in a handbook.
+-- application can put that back. The check below is a friendly early
+-- refusal so the command bar can say something useful before it tries.
+-- It is NOT the guarantee: migration 019 puts the rule on the table
+-- itself, under an advisory lock, so it holds for every path into
+-- `profiles.role` and for two administrators demoting themselves at the
+-- same moment.
 --
 -- SECURITY INVOKER. The trigger and the row policies still apply.
 -- =============================================================
@@ -67,7 +71,9 @@ BEGIN
     RAISE EXCEPTION '% is already %', who, p_role;
   END IF;
 
-  -- The last administrator cannot stop being one.
+  -- The last administrator cannot stop being one. Said here so the
+  -- refusal is a sentence rather than a trigger error; enforced by the
+  -- trigger, which is where it is true.
   IF was = 'admin' AND p_role <> 'admin' THEN
     SELECT COUNT(*) INTO admins FROM profiles WHERE role = 'admin';
     IF admins <= 1 THEN

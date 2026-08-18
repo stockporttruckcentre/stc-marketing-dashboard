@@ -377,16 +377,22 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
   const target = writableEntityFor(found.id) ?? found.id;
 
   /* The capability to create is the capability to write the entity's
-     own title, which the writable dictionary already states. Nothing is
-     declared twice.
+     own title, which the writable dictionary already states.
 
      By table, not by entity id. `deals` and `contacts` are two ways of
      reading `crm_contacts`, and only one of them appears in the
      writable dictionary, so "create a new lead" found no field to take
-     a permission from and came back as a question. */
+     a column from and came back as a question. */
   const spec = writableFor(target, title);
   if (!spec) return null;
-  if (caps && !caps.has(spec.capability)) return null;
+
+  /* WHAT IT TAKES TO MAKE ONE, not what it takes to write its name.
+     Creating a customer is `crm.create`; writing `company_name` on one
+     that already exists is `crm.edit`, and a role can hold the second
+     without the first. */
+  const requires = entityDef(target)?.createRequires ?? def.createRequires;
+  if (!requires) return null;
+  if (caps && !caps.has(requires)) return null;
 
   const name = nameFrom(raw, found.noun, verb);
   if (!name) return null;
@@ -426,7 +432,7 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
     entity: target,
     step,
     summary: `Create ${def.labelOne} ${name}`,
-    requires: spec.capability,
+    requires,
     /* A verb, an entity and a name. Anything less does not get here. */
     confidence: 11,
   };
@@ -466,8 +472,8 @@ function readBulkDelete(
   const title = def?.titleField;
   if (!def) return null;
 
-  const spec = writableFor(from.entity, title ?? '');
-  const requires = spec?.capability ?? 'crm.delete';
+  const requires = def.deleteRequires;
+  if (!requires) return null;
   if (caps && !caps.has(requires)) return null;
 
   /* A number in the sentence has to be the number on the screen. */
@@ -524,8 +530,13 @@ function readDelete(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
   const title = def?.titleField;
   if (!def || !title) return null;
 
-  const spec = writableFor(entityId, title);
-  const requires = spec?.capability ?? 'crm.delete';
+  /* WHAT IT TAKES TO DELETE ONE, not what it takes to write its name.
+     This used to read the writable dictionary entry for the title
+     column, which for a customer is `company_name` and therefore
+     `crm.edit`. A marketer may edit every field on a customer and
+     delete nothing. */
+  const requires = def.deleteRequires;
+  if (!requires) return null;
   if (caps && !caps.has(requires)) return null;
 
   const name = reference ?? (found ? nameFrom(raw, found.noun, verb) : null);

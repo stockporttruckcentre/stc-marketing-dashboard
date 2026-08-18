@@ -12,11 +12,14 @@
    Whether the SQL works is a different question, answered against a real
    server by `scripts/sql/validate-007.sql`.
    ============================================================= */
-import { capabilityRoles, writableColumns } from '../generate-writable-columns';
+import { capabilityRoles, entityPermissions, writableColumns } from '../generate-writable-columns';
 import type { UserRole } from '../../lib/types';
 
 /** The same grants the database is seeded with, from the same source. */
 const CAPABILITY_ROLES = capabilityRoles();
+
+/** What it takes to make one of a table's rows, or get rid of one. */
+const LIFECYCLE = entityPermissions();
 
 
 /* =============================================================
@@ -510,6 +513,23 @@ export function fakeDb(tables: Record<string, Row[]>) {
       }
       if (op !== 'insert' && !c.id) {
         return { data: null, error: { message: `a ${op} of ${c.table} must name a row` } };
+      }
+      /* A payload is not a permission. The allowlist above says which
+         columns may be written, which is no question at all for a
+         delete: a delete writes nothing. */
+      if (op === 'insert' || op === 'delete') {
+        const wanted = LIFECYCLE.find(
+          (l) => l.table === c.table && l.operation === (op === 'insert' ? 'create' : 'delete'),
+        );
+        if (!wanted || !may(wanted.capability)) {
+          return {
+            data: null,
+            error: {
+              message: `you may not ${op === 'insert' ? 'create' : 'delete'} rows of ${c.table}; `
+                + 'nothing has been changed',
+            },
+          };
+        }
       }
       for (const col of Object.keys(c.set ?? {})) {
         if (!ALLOWED.has(`${c.table}.${col}`)) {

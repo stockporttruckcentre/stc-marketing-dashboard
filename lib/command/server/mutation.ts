@@ -45,6 +45,7 @@ import { WRITABLE_FIELDS, type WritableField } from '../fields';
 import { capability, destination } from '../ir/registry';
 import { nounFor, type FileFormat } from '../output';
 import { prepareDelivery, type Prepared } from './emit';
+import { postState } from '../ir/overlay';
 import type { Artefact } from '../render/table';
 
 /* -------------------------------------------------------------
@@ -502,14 +503,46 @@ export async function applyMutation(
      it writes. What comes back is a set of steps for the SAME
      transaction as the field writes and the operations, so a share that
      fails takes the list with it and a renderer that throws leaves the
-     database exactly as it was. */
+     database exactly as it was.
+
+     AND IT SEES THE PROGRAMME'S OWN CHANGES.
+
+     "Move these trailers to Hyde and export them to Excel" is one thing
+     somebody confirmed, and a file built from the rows as they stand
+     would hold the old depot. The resolved programme already knows
+     every change, because that is what makes the preview exact, so the
+     renderer reads through a lens that lays them over what comes back.
+     An Emit consuming an earlier effect sees the result of that
+     effect. */
   const outgoing = deliverySteps(planning.plan);
   const rendered = new Map<string, { artefact: Artefact; rows: number }>();
   const prepared: Prepared[] = [];
 
+  const resolved = outgoing.length
+    ? await resolveProgramme(planning.plan, {
+        store: req.store, policy: req.policy, args: invokeArgs(planning.plan),
+      })
+    : null;
+
+  const asItWillBe = resolved?.ok
+    ? postState(req.store, resolved.units.map((u) => (u.kind === 'invoke'
+      ? {
+          kind: 'invoke' as const,
+          capability: u.plan.capability,
+          subjects: u.plan.subjects.map((x) => x.id),
+          args: u.plan.args,
+        }
+      : { kind: 'changes' as const, changes: u.changes })))
+    : req.store;
+
   for (const step of outgoing) {
     const ready = await prepareDelivery(planning, step as Emit, {
-      store: req.store,
+      /* The rows as they will be. The record an attachment goes on and
+         the people a share names are looked up through the same lens,
+         which changes nothing for them: no programme in this
+         application moves a person or a stock unit and then attaches to
+         the row it moved. */
+      store: asItWillBe,
       actorName: req.actorName ?? 'the command bar',
       now: new Date(),
       produced: rendered,
