@@ -162,6 +162,13 @@ console.log(OFFENDERS.length
   ? `  ${OFFENDERS.length} production file(s) can still execute outside the canonical runtime:`
   : '  nothing in app/ or components/ executes outside the canonical runtime.');
 for (const o of OFFENDERS) console.log(`    ${o}`);
+/* A REPORT THAT CANNOT FAIL IS NOT A CHECK.
+
+   Everything else in this file is a measurement, and measurements
+   move. This one is an invariant: a second executor is the thing that
+   turned a canonical refusal into an execution, and it is easy to
+   write again by accident. */
+if (OFFENDERS.length) process.exitCode = 1;
 
 console.log(`\n  ${ACTIONS.length} actions declared.`);
 console.log(`  ${(byWiring.get('handler') ?? []).length} of them do the thing from the bar.`);

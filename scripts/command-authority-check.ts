@@ -298,6 +298,13 @@ ok('the stock screen imports through the shared atomic operation',
   /writeStock\(supabase,/.test(stock)
   && !/from\('stock_trailers'\)[\s\S]{0,60}\.insert\(withDefaults/.test(stock));
 
+/* And duplicating a unit, which the screen did in the browser: it built
+   the copy out of whatever the grid happened to be holding and inserted
+   it. Two implementations of "duplicate" copy different columns. */
+ok('the stock screen duplicates through the shared operation',
+  /command_duplicate_stock/.test(stock)
+  && !/from\('stock_trailers'\)\.insert\(rest\)/.test(stock));
+
 const finder = source('components/CompanyFinder.tsx');
 ok('the finder adds to the CRM through the shared import',
   /commitImport\(supabase,/.test(finder)
