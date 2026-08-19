@@ -47,5 +47,6 @@
 037_sale_projection
 038_duplicate_and_link
 039_rows_forward
+040_leads
 018_command_set_role
 019_last_admin
