@@ -8,7 +8,6 @@ Internal marketing dashboard for Stockport Truck Centre. Next.js 14 + Supabase +
 - **CRM** — AG Grid (sort, filter, inline edit, floating filters), Lusha email enrichment, CSV import / export.
 - **Social planner** — draft / pending review / approved / scheduled / posted workflow, admin approves.
 - **Company finder** — searches Lusha for companies near any of 6 depots, one-click add to CRM.
-- **Trailer sales** — AG Grid + card view, CSV sync from MD's Excel (upserts by external_id).
 - **Brand kit** — Supabase Storage uploads (logos, fonts, templates), colour swatches.
 - **Industry news** — pulls RSS from Commercial Motor, Fleet News, Transport Engineer.
 - **Lusha balance** — live in header, decremented server-side after each call.
@@ -80,7 +79,6 @@ app/
   api/
     lusha/{enrich,search,balance}  - proxies, key never reaches browser
     crm/import              - CSV → bulk insert with column auto-detection
-    trailers/sync           - CSV → upsert by external_id (MD Excel)
     news/fetch              - RSS fetcher
 components/                 - all dashboard widgets
 lib/
@@ -100,7 +98,7 @@ supabase/schema.sql         - tables, RLS, triggers, storage bucket, seed
 ## What's not included yet (the things to come back to)
 
 - Direct social posting to Facebook / LinkedIn (currently manual "Mark posted")
-- Automated nightly Excel-on-shared-drive watcher for trailers (CSV upload works now)
+- Automated nightly Excel-on-shared-drive watcher for trailers. The stock list imports a supplier file from the screen and from the command bar; there is no watcher
 - Email campaign sender from CRM segments
 - Industry news AI summaries
 - Mobile app

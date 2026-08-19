@@ -8,7 +8,8 @@ import type { UserRole } from '@/lib/types';
 
    `lib/crm/permissions.ts` has said what each role may do since the
    permission model went in. The command bar filters on it, and
-   /api/command/edit checks it per field. Almost nothing else did.
+   the command mutation path checks it per field. Almost nothing else
+   did.
 
    The comment left in mark-sold explains how that happened: "RLS handles
    ownership". For the rows a person owns, it does. What row level

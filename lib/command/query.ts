@@ -19,9 +19,25 @@ import {
   deFluff, readDepot, readPlaceAfterPreposition, readRep, readSize,
   STATE_PHRASES, STATE_LABEL, BODY_TYPES, isReservedWord,
 } from './lexicon';
+import { readGrammar, DERIVED, type Grammar, type How } from './grammar';
+import { findValues, EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
+import { columnNamed } from './attributes';
 
 export type PlanFilter = {
-  key: string; column: string; op: 'eq' | 'ilike' | 'gte' | 'lte' | 'anyOf'; value: string; label: string;
+  key: string; column: string;
+  op: 'eq' | 'ilike' | 'gte' | 'lte' | 'anyOf' | 'empty' | 'present';
+  value: string; label: string;
+  /**
+   * Where in the sentence the word that produced this filter sat.
+   *
+   * Negation needs it. "Everything except trailers that's available"
+   * inverts the trailers and leaves the availability alone, and the only
+   * thing that says which is which is where each word appeared relative
+   * to the word "except".
+   */
+  at?: number;
+  /** Match everything this filter does NOT describe. */
+  negate?: boolean;
   /**
    * For `anyOf`: match any of these words in any of these columns.
    *
@@ -44,7 +60,48 @@ export type QueryPlan = {
   filters: PlanFilter[];
   groupBy?: { column: string; label: string };
   range?: { from: string; to: string; label: string };
+  /**
+   * Which date the period is measured against.
+   *
+   * "Vehicles added between May and July" is about the day they arrived.
+   * The entity's default date is the day they left, so without this the
+   * question came back with everything still in the yard excluded, and
+   * nothing said why.
+   */
+  rangeColumn?: string;
+  /**
+   * The period is about when a sale happened, rather than about one
+   * column.
+   *
+   * Carried so the adapter can build the two branch condition the
+   * business means: dispatched in the period, or ordered in it and not
+   * dispatched at all.
+   */
+  rangeIsSaleDate?: boolean;
   scope: 'mine' | 'all';
+  /** Sort, from a superlative or an explicit ordering. */
+  order?: { column: string; direction: 'asc' | 'desc'; label: string };
+  /** How many rows to keep after sorting. */
+  limit?: number;
+  /**
+   * An attribute nothing stores. Stock age is a subtraction from the
+   * date a trailer arrived, and the answer is worked out on the rows
+   * rather than asked of the database.
+   */
+  derived?: { id: string; from: string; how: How; label: string };
+  /** Two values of one attribute, answered side by side. */
+  compare?: { column: string; label: string; values: string[] };
+  /**
+   * What the sentence asked for that this app cannot answer.
+   *
+   * "The highest mileage vehicle that isn't sold" is three requests, and
+   * two of them work. There is no mileage column here, so the ordering
+   * has nowhere to go, and quietly returning unsorted rows would look
+   * like an answer to the question that was asked. Saying which part
+   * went unanswered is the difference between a tool that is honest
+   * about its data and one that is confidently wrong about it.
+   */
+  unmet?: string[];
   /** Plain English summary, shown before it runs. */
   summary: string;
   confidence: number;
@@ -52,6 +109,37 @@ export type QueryPlan = {
 
 const MINE = /\b(my|mine|i|i've|i have|me)\b/i;
 const ALL = /\b(all|company|everyone|team|total|whole|across)\b/i;
+
+/**
+ * Words that hold a sentence together without naming anything.
+ *
+ * Only used to decide what counts as unaccounted for. A sentence that
+ * mentions a body type this app does not stock should say so; a
+ * sentence containing the word "have" should not, and reporting both
+ * the same way buries the one that matters under the one that does not.
+ */
+const GRAMMAR_WORDS = new Set([
+  'and', 'but', 'or', 'nor', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for',
+  'from', 'with', 'without', 'by', 'as', 'is', 'are', 'was', 'were', 'be', 'been',
+  'being', 'has', 'have', 'had', 'do', 'does', 'did', 'will', 'would', 'can',
+  'could', 'should', 'shall', 'may', 'might', 'must', 'get', 'got', 'give', 'take',
+  'that', 'which', 'who', 'whom', 'whose', 'what', 'when', 'where', 'why', 'how',
+  'this', 'these', 'those', 'there', 'here', 'then', 'than', 'ones', 'one',
+  'some', 'any', 'no', 'not', 'more', 'most', 'less', 'least', 'few', 'many', 'much',
+  'currently', 'right', 'now', 'still', 'yet', 'ever', 'never', 'also', 'too',
+  'please', 'show', 'give', 'find', 'list', 'tell', 'need', 'want', 'like',
+  'compare', 'versus', 'against', 'between', 'over', 'under', 'above', 'below',
+  'each', 'every', 'per', 'split', 'grouped', 'broken', 'down', 'first', 'top',
+  'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'twenty', 'thirty', 'forty', 'fifty', 'hundred', 'dozen', 'couple', 'handful',
+  /* Words that point at what a clause before produced. "Export the
+     result to CSV" and "export him to CSV" are pointing, not
+     describing, and reporting "nothing in the trailers matches result"
+     refused a programme that was understood perfectly well. The
+     pointing itself is read by the composer. */
+  'them', 'these', 'those', 'result', 'results', 'lot',
+  'him', 'her', 'his', 'hers', 'they', 'she',
+]);
 
 /**
  * Filters whose value is spread across several columns.
@@ -102,7 +190,11 @@ function pickMeasure(text: string): { measure: Measure; hit: string } {
  * Which thing is being asked about. Later mentions lose to earlier ones,
  * so "trailers sold to customers" is about trailers, not customers.
  */
-function pickEntity(text: string): { entity: EntitySpec; at: number; noun: string } | null {
+function pickEntity(
+  text: string,
+  vocabulary: VocabularyIndex,
+  grammar?: Grammar,
+): { entity: EntitySpec; at: number; noun: string; weak?: boolean } | null {
   const t = ` ${text.toLowerCase()} `;
   let best: { entity: EntitySpec; at: number; noun: string } | null = null;
   for (const e of ENTITIES) {
@@ -147,10 +239,147 @@ function pickEntity(text: string): { entity: EntitySpec; at: number; noun: strin
     if (!bestWord || at < bestWord.at) bestWord = { entity: es[0], at };
   }
   if (bestWord) return { entity: bestWord.entity, at: bestWord.at, noun: '' };
+
+  /* --- a computed attribute names the thing ---
+     "What's been sitting in Stockport longest" contains no noun for a
+     trailer, no vocabulary word, and a depot that three entities share.
+     What it does contain is a stock age, and only stock has one. An
+     operator that applies to exactly one entity has named it. */
+  const derive = grammar?.operations.find((o) => o.op === 'derive');
+  if (derive && derive.op === 'derive') {
+    const d = DERIVED.find((x) => x.id === derive.id);
+    if (d && d.on.length === 1) {
+      const e = ENTITIES.find((x) => x.id === d.on[0]);
+      if (e) return { entity: e, at: derive.at, noun: '' };
+    }
+  }
+
+  /* --- the data names the thing ---
+     "DAFs older than 2022 excluding anything at Warrington" contains no
+     noun for a trailer and no vocabulary word. It resolved to nothing at
+     all, and the only reason a person reads it as stock is that they
+     have seen DAF in the make column.
+
+     So ask the data. A word that appears in `stock_trailers.make` IS a
+     make, and a make only exists on trailers, which names the thing
+     without anybody listing a single manufacturer. Empty index, no
+     behaviour change: this is the last resort before giving up. */
+  const fromData = findValues(vocabulary, text);
+  if (fromData.length) {
+    const votes = new Map<string, { entity: EntitySpec; at: number; weight: number }>();
+    for (const v of fromData) {
+      // A word that is a value on four entities says nothing about which.
+      const distinct = new Set(v.hits.map((h) => h.entity));
+      if (distinct.size !== 1) continue;
+      const id = v.hits[0].entity;
+      const e = ENTITIES.find((x) => x.id === id);
+      if (!e) continue;
+      const prev = votes.get(id);
+      votes.set(id, {
+        entity: e,
+        at: Math.min(prev?.at ?? v.at, v.at),
+        weight: (prev?.weight ?? 0) + 1,
+      });
+    }
+    const ranked = [...votes.values()].sort((a, b) => b.weight - a.weight || a.at - b.at);
+    if (ranked.length) return { entity: ranked[0].entity, at: ranked[0].at, noun: '' };
+  }
+
+  /* --- one of our own yards names the thing ---
+     A depot is where stock sits. `location` exists on customers and
+     proposals too, but that is the customer's own town, so a sentence
+     naming Carrington and nothing else is about the yard at Carrington.
+
+     Weak, because it is an inference: the sentence said where and did
+     not say what. Anything else it contained that could not be placed
+     gets named in the summary rather than dropped, which is what stops
+     "how many 6x2s at Carrington" coming back as a confident count of
+     every trailer on that site. */
+  const depot = readDepot(text);
+  if (depot) {
+    const stock = ENTITIES.find((e) => e.id === 'trailers');
+    if (stock) return { entity: stock, at: t.indexOf(depot.toLowerCase()), noun: '', weak: true };
+  }
+
+  /* --- a breakdown names the thing ---
+     "Break it down by depot" says nothing this app holds except
+     `depot`, and only one entity is broken down by one. So the grouping
+     names the thing, weakly: `weak` is passed on so the caller knows the
+     entity was inferred from a dimension and nothing else, and can say
+     so if the sentence also contained words it could not place.
+
+     This was written for "how many 6x2s have we got by depot", which
+     was a bad example. There is no 6x2 in this business and no such
+     column, and the risk it created is real: without the flag, that
+     sentence returned a confident count of every trailer in the yard
+     with the part it could not understand quietly discarded. That is
+     the exact failure this engine is meant to stop. */
+  const byWord = t.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/);
+  if (byWord) {
+    const dimOwners = ENTITIES.filter((e) =>
+      e.dimensions.some((d) => d.words.includes(byWord[1]) || d.key === byWord[1]));
+    if (dimOwners.length === 1) {
+      return { entity: dimOwners[0], at: byWord.index ?? 0, noun: '', weak: true };
+    }
+  }
   return null;
 }
 
-export function parseQuery(input: string): QueryPlan | null {
+/* -------------------------------------------------------------
+   A year, said as a comparison rather than a range.
+
+     older than 2022     built in 2022 or before
+     newer than 2019     2019 or after
+     pre 2020            before 2020
+     2021 or newer       2021 or after
+
+   Years are not prices, and reading one as the other put "DAFs older
+   than 2022" into a price bracket. The four digits and the word in front
+   of them are what tell them apart.
+   ------------------------------------------------------------- */
+function readYear(text: string): { op: 'gte' | 'lte' | 'eq'; year: number; label: string } | null {
+  const t = text.toLowerCase();
+  const older = t.match(/\b(?:older than|before|earlier than|pre|prior to|up to)\s*-?\s*(\d{4})\b/);
+  if (older) return { op: 'lte', year: Number(older[1]), label: `${older[1]} or older` };
+
+  const newer = t.match(/\b(?:newer than|younger than|after|since|from)\s+(\d{4})\b/);
+  if (newer) return { op: 'gte', year: Number(newer[1]), label: `${newer[1]} or newer` };
+
+  const orNewer = t.match(/\b(\d{4})\s+(?:or newer|onwards|plus|and newer|and up)\b/);
+  if (orNewer) return { op: 'gte', year: Number(orNewer[1]), label: `${orNewer[1]} or newer` };
+
+  const orOlder = t.match(/\b(\d{4})\s+(?:or older|and older|and before|or earlier)\b/);
+  if (orOlder) return { op: 'lte', year: Number(orOlder[1]), label: `${orOlder[1]} or older` };
+
+  /* A bare year only counts next to a word that means a year. "£2019"
+     is money and "2019 trailers" is a count of them. */
+  const bare = t.match(/\b(?:year|reg|plate|model year|built|built in|from)\s+(\d{4})\b/)
+            ?? t.match(/\b(\d{4})\s+(?:plate|reg|model|build)\b/);
+  if (bare) {
+    const y = Number(bare[1]);
+    if (y >= 1980 && y <= new Date().getFullYear() + 2) {
+      return { op: 'eq', year: y, label: `${y}` };
+    }
+  }
+  return null;
+}
+
+export function parseQuery(
+  input: string,
+  /**
+   * The values the database holds, for whoever is asking.
+   *
+   * An argument rather than something this module looks up, because
+   * what a sentence means depends on it and different people can see
+   * different values. Two sentences read with two indexes are two
+   * independent reads with nothing shared between them, which is what
+   * lets one server plan for two people at once.
+   *
+   * Defaulting to the empty index makes "no vocabulary" a value
+   * somebody chose rather than a load they forgot.
+   */
+  vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
+): QueryPlan | null {
   const raw = input.trim();
   if (raw.length < 3) return null;
 
@@ -163,7 +392,16 @@ export function parseQuery(input: string): QueryPlan | null {
    */
   const text = deFluff(raw) || raw;
 
-  const picked = pickEntity(text);
+  /* The grammar reads first.
+     Superlatives, limits, negation, comparison, derived attributes and
+     emptiness are read off the ORIGINAL sentence, before politeness is
+     stripped and before anything decides which thing is being asked
+     about. They apply to whatever attribute turns up, which is what
+     makes them compose. */
+  const grammar = readGrammar(raw);
+  const ops = grammar.operations;
+
+  const picked = pickEntity(text, vocabulary, grammar);
   if (!picked) return null;
   const entity = picked.entity;
   const lower = text.toLowerCase();
@@ -173,11 +411,28 @@ export function parseQuery(input: string): QueryPlan | null {
   // "how many quoted proposals" loses the actual status.
   const entityNoun = picked.noun;
   // Nor is whatever follows "by": that is the grouping.
-  const groupWord = (lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/) ?? [])[1] ?? '';
+  const groupWord = (lower.match(
+    /\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+(?:\s+[a-z]+){0,2})/) ?? [])[1] ?? '';
+
+  /* Read the comparison first, because it decides what some of the
+     words below mean. "Turnover" is a word for adding money up and also
+     the name of a column, and "customers with turnover above £5 million"
+     is a list of customers rather than a total of their turnovers. The
+     figure is what tells them apart, so it has to be read first. */
+  const bracketPhrase = readBracket(text);
+  const inABracket = (w: string) => !!bracketPhrase
+    && `${(bracketPhrase.about ?? []).join(' ')} ${bracketPhrase.said ?? ''}`.includes(w);
 
   const { measure: rawMeasure, hit: measureHit } = pickMeasure(text);
   let measure = rawMeasure;
   let confidence = measureHit ? 8 : 4;
+
+  /* A measure word swallowed by a comparison was never a measure.
+     A count survives: "how many customers with turnover over £5m" is
+     still a count, and only the summing words are in question. */
+  if (measureHit && (measure === 'sum' || measure === 'avg') && inABracket(measureHit)) {
+    measure = 'list';
+  }
 
   /* Naming a number is asking for it.
      "Show me this month's profit" was coming back as a list of trailers,
@@ -186,9 +441,14 @@ export function parseQuery(input: string): QueryPlan | null {
      says "total" first. They name the figure they want: profit, revenue,
      commission, turnover. If the sentence names an amount and has not
      asked for a list of rows in so many words, it wants the amount. */
+  /* A figure inside a comparison is describing which rows, not which
+     number to add up. "Stock with refurb costs over £2,000" is a list of
+     trailers, and it came back as a total of their book values: the
+     right rows, the wrong question, and a number somebody would have
+     read out. */
   const namesAnAmount = entity.amounts.some((a) =>
-    a.words.some((w) => w !== groupWord && w.length >= 3
-      && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i').test(lower)));
+    a.words.some((w) => w !== groupWord && w.length >= 3 && !inABracket(w)
+      && new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower)));
   const asksForRows = /\b(list|which|show me the|rows|records|each|every one)\b/i.test(lower);
 
   if (measure === 'list' && namesAnAmount && !asksForRows) {
@@ -237,6 +497,7 @@ export function parseQuery(input: string): QueryPlan | null {
       filters.push({
         key: 'status', column: spec.column, op: 'eq', value: p.value,
         label: STATE_LABEL[p.value] ?? `${spec.label} ${w}`,
+        at: lower.indexOf(w), negate: grammar.negates(w),
       });
       consumed.push(w);
       confidence += 4;
@@ -274,9 +535,14 @@ export function parseQuery(input: string): QueryPlan | null {
             key: f.key, column: f.column, op: 'anyOf', value,
             columns: spread, values: synonyms,
             label: `${f.label} ${w}`,
+            at: lower.indexOf(w), negate: grammar.negates(w),
           });
         } else {
-          filters.push({ key: f.key, column: f.column, op: 'eq', value: f.vocabulary[w], label: `${f.label} ${w}` });
+          filters.push({
+            key: f.key, column: f.column, op: 'eq', value: f.vocabulary[w],
+            label: `${f.label} ${w}`,
+            at: lower.indexOf(w), negate: grammar.negates(w),
+          });
         }
         consumed.push(w);
         confidence += 4;
@@ -327,7 +593,11 @@ export function parseQuery(input: string): QueryPlan | null {
   if (locSpec && !filters.some((f) => f.column === locSpec.column)) {
     const place = readDepot(text) ?? readPlaceAfterPreposition(text);
     if (place) {
-      filters.push({ key: 'location', column: locSpec.column, op: 'ilike', value: place, label: `at ${place}` });
+      filters.push({
+        key: 'location', column: locSpec.column, op: 'ilike', value: place,
+        label: `at ${place}`, at: lower.indexOf(place.toLowerCase()),
+        negate: grammar.negates(place),
+      });
       consumed.push(place);
       confidence += 4;
     }
@@ -339,7 +609,12 @@ export function parseQuery(input: string): QueryPlan | null {
   const repSpec = entity.filters.find((f) => f.key === 'rep' || f.key === 'owner');
   if (repSpec && !filters.some((f) => f.column === repSpec.column)) {
     const who = readRep(text);
-    if (who) {
+    /* A name after "for" is usually the rep. "Average stock age for DAF
+       versus Volvo" is not: DAF is in the make column, and the data
+       saying so beats a preposition every time. */
+    const isSomethingElse = who && findValues(vocabulary, who).some((v) =>
+      v.hits.some((h) => h.entity === entity.id && h.column !== repSpec.column));
+    if (who && !isSomethingElse) {
       filters.push({ key: repSpec.key, column: repSpec.column, op: 'ilike', value: who, label: `by ${who}` });
       consumed.push(who);
       confidence += 4;
@@ -353,15 +628,33 @@ export function parseQuery(input: string): QueryPlan | null {
      column: whichever amount the sentence is about, or the price. */
   const bracket = readBracket(text);
   if (bracket && entity.amounts.length) {
-    const amt = entity.amounts.find((a) => a.words.some((w) => lower.includes(w))) ?? entity.amounts[0];
+    /* Which number the bracket is about. The amounts a person can group
+       by are only some of the columns holding a figure, so this asks
+       the shared resolver first: "refurb over £2k" is about refurb cost,
+       and reading it as the sale price answers a different question with
+       a plausible number. */
+    const named = (bracket.about ?? [])
+      .map((phrase) => columnNamed(entity, phrase))
+      .find((x): x is { column: string; label: string } => !!x) ?? null;
+    const amt = named
+      ?? entity.amounts.find((a) => a.words.some((w) => lower.includes(w)))
+      ?? entity.amounts[0];
+    /* A count of somebody's lorries is not a sum of money, and printing
+       it with a pound sign in front is how a fleet size gets read out as
+       a turnover. */
+    const isMoney = !/^(their trucks|their trailers|their vans|employees|fleet size|year)$/i
+      .test(amt.label);
+    const show = (n: number) => (isMoney ? money(n) : n.toLocaleString('en-GB'));
+
     if (bracket.min != null) {
       filters.push({ key: 'min', column: amt.column, op: 'gte', value: String(bracket.min),
-        label: `${amt.label} over ${money(bracket.min)}` });
+        label: `${amt.label} over ${show(bracket.min)}`, at: lower.indexOf(String(bracket.min)) });
     }
     if (bracket.max != null) {
       filters.push({ key: 'max', column: amt.column, op: 'lte', value: String(bracket.max),
-        label: `${amt.label} under ${money(bracket.max)}` });
+        label: `${amt.label} under ${show(bracket.max)}`, at: lower.indexOf(String(bracket.max)) });
     }
+    consumed.push(...(bracket.about ?? []), bracket.said ?? '');
     confidence += 4;
   }
 
@@ -378,6 +671,30 @@ export function parseQuery(input: string): QueryPlan | null {
   // Free-text filters take proper nouns: "how many Schmitz in Hyde".
   const entities = extract(text, tokenise(text));
   const freeSpecs = entity.filters.filter((f) => f.freeText);
+
+  /* --- the data says which column ---
+     Before the guessing below, because the guessing is guessing. A word
+     that appears in `make` is a make; it does not need a preposition in
+     front of it to prove it, and "DAFs older than 2022" has none.
+
+     This is also what stops a customer being read as a depot. The old
+     rule was that "in X" means a place, which is right until somebody
+     writes "trailers in Dawsongroup's colours". */
+  for (const found of findValues(vocabulary, text)) {
+    const hit = found.hits.find((h) => h.entity === entity.id);
+    if (!hit) continue;
+    if (filters.some((x) => x.column === hit.column)) continue;
+    if (consumed.some((c) => c.toLowerCase().includes(found.word))) continue;
+    const spec = entity.filters.find((f) => f.column === hit.column);
+    if (!spec) continue;
+    filters.push({
+      key: spec.key, column: hit.column, op: 'ilike', value: hit.value,
+      label: `${spec.label} ${hit.value}`,
+      at: found.at, negate: grammar.negates(found.word),
+    });
+    consumed.push(found.word);
+    confidence += 4;
+  }
   /* A word already used by a vocabulary phrase is spent.
      Matching on the whole phrase was not enough: "how many social posts
      are left to approve" consumed "left to approve" as the status, and
@@ -400,17 +717,76 @@ export function parseQuery(input: string): QueryPlan | null {
       if (!spec) spec = freeSpecs.find((f) => f.key === 'make') ?? freeSpecs[0];
       if (!spec) continue;
       if (filters.some((x) => x.column === spec!.column)) continue;
-      filters.push({ key: spec.key, column: spec.column, op: 'ilike', value: noun, label: `${spec.label} ${noun}` });
+      filters.push({
+        key: spec.key, column: spec.column, op: 'ilike', value: noun,
+        label: `${spec.label} ${noun}`,
+        at: lower.indexOf(noun.toLowerCase()), negate: grammar.negates(noun),
+      });
       confidence += 3;
+    }
+  }
+
+  /* --- which year ---
+     A year is not a price and not a row count. "DAFs older than 2022"
+     read 2022 as money until this existed, and answered with every DAF
+     under twenty two hundred pounds. */
+  const yearSpec = entity.id === 'trailers' ? 'year' : null;
+  const year = yearSpec ? readYear(text) : null;
+  if (year && yearSpec) {
+    filters.push({
+      key: 'year', column: yearSpec,
+      op: year.op === 'eq' ? 'eq' : year.op,
+      value: String(year.year), label: year.label,
+      at: lower.indexOf(String(year.year)), negate: grammar.negates(String(year.year)),
+    });
+    confidence += 4;
+  }
+
+  /* --- nothing in it ---
+     "Stock where price hasn't been entered" is a question about which
+     rows have none. Answering it with a total of the prices that are
+     there is wrong in a way that looks entirely reasonable, which is
+     how it survived until somebody checked one. */
+  const emptyOp = ops.find((o) => o.op === 'empty');
+  if (emptyOp && emptyOp.op === 'empty') {
+    /* Which attribute is empty: whichever the sentence names. When it
+       said so right after "with no", those words are the answer and
+       nothing else in the sentence gets a vote. */
+    const target = columnNamed(entity, emptyOp.hint ?? lower, !!emptyOp.hint);
+    if (target) {
+      filters.push({
+        key: 'empty', column: target.column,
+        op: emptyOp.filled ? 'present' : 'empty',
+        value: '', label: `${target.label} ${emptyOp.filled ? 'filled in' : 'empty'}`,
+        at: emptyOp.at,
+      });
+      confidence += 5;
+      /* A question about which rows are missing something is a question
+         about rows. Without this it came back as a total of the values
+         that were not missing, which is the opposite of what was asked. */
+      if (measure === 'sum' || measure === 'avg') { measure = 'list'; }
     }
   }
 
   // --- grouping -------------------------------------------------------
   let groupBy: QueryPlan['groupBy'];
-  const byMatch = lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+)/);
+  /* Up to three words after "by", longest first. A dimension is often
+     said in two: "by sales rep" and "by body type" both lost their
+     grouping entirely when only the first word was read, and the answer
+     came back as one number with no breakdown and nothing saying why. */
+  const byMatch = lower.match(/\b(?:by|per|split by|grouped by|broken down by)\s+([a-z]+(?:\s+[a-z]+){0,2})/);
   if (byMatch) {
-    const dim = entity.dimensions.find((d) => d.words.includes(byMatch[1]) || d.key === byMatch[1]);
-    if (dim) { groupBy = { column: dim.column, label: dim.label }; confidence += 5; }
+    const said = byMatch[1].split(/\s+/);
+    for (let take = said.length; take >= 1 && !groupBy; take--) {
+      const phrase = said.slice(0, take).join(' ');
+      const dim = entity.dimensions.find((d) => d.words.includes(phrase) || d.key === phrase)
+        // "sales rep" and "rep" are the same dimension said two ways.
+        ?? entity.dimensions.find((d) => d.words.some((w) => phrase.endsWith(` ${w}`)))
+        ?? (take === 1
+          ? entity.dimensions.find((d) => d.words.includes(phrase) || d.key === phrase)
+          : undefined);
+      if (dim) { groupBy = { column: dim.column, label: dim.label }; confidence += 5; }
+    }
   }
 
   /* --- period ---
@@ -426,28 +802,308 @@ export function parseQuery(input: string): QueryPlan | null {
     : undefined;
   if (range) confidence += 3;
 
+  /* Which date the period is about. The sentence usually says: added,
+     arrived, sold, dispatched, ordered. Falls back to the entity's own
+     default when it does not. */
+  /* Words that mean a sale happened, rather than naming a date column.
+     Grouped rather than listed for the usual reason: "sold", "sales"
+     and "sale" are one idea. */
+  const SALE_WORDS = ['sold', 'sale', 'sales', 'selling', 'commission', 'invoiced', 'won'];
+
+  const namedDate = range
+    ? entity.dates?.find((d) => d.words.some((w) => lower.includes(w)))?.column
+    : undefined;
+
+  /* A PERIOD ABOUT A SALE IS ABOUT THE SALE DATE.
+
+     "Sold in the last six months" and "sales this quarter" are about
+     when the sale happened, which this entity declares as two columns
+     and a rule. Naming a date explicitly still wins: "dispatched last
+     month" is about dispatch and nothing else. */
+  const aboutASale = !!entity.saleDate && !namedDate
+    && SALE_WORDS.some((w) => lower.includes(w));
+
+  const rangeColumn = range
+    ? (namedDate ?? (aboutASale ? entity.saleDate!.primary : entity.dateColumn))
+    : undefined;
+
   // --- whose ----------------------------------------------------------
   const scope: 'mine' | 'all' =
     MINE.test(text) ? 'mine' : ALL.test(text) ? 'all' : (entity.scope ?? 'all');
 
+  /* =============================================================
+     The operators, bound to this entity's own columns.
+
+     Everything above reads words and produces filters. Everything below
+     takes the operators the grammar found and attaches them to whatever
+     attribute this particular thing happens to have, which is why the
+     same six operators work on trailers, customers and posts without
+     any of them being mentioned by name.
+     ============================================================= */
+
+  // --- a computed attribute --------------------------------------------
+  const deriveOp = ops.find((o) => o.op === 'derive');
+  let derived: QueryPlan['derived'];
+  if (deriveOp && deriveOp.op === 'derive') {
+    const d = DERIVED_FOR(entity, deriveOp.id, deriveOp.from);
+    if (d) { derived = d; confidence += 4; }
+  }
+
+  // --- sorting ----------------------------------------------------------
+  const unmet: string[] = [];
+
+  /* --- words nothing accounted for ---
+     The failure this engine exists to stop is a confident answer to a
+     question that was not asked. Dropping a word somebody typed is
+     exactly that: "how many 6x2s at Carrington" comes back as every
+     trailer at Carrington, which is a real number, plausibly sized, and
+     the answer to something else.
+
+     So anything left over is named. Only content words count: the
+     filler, the entity noun, the measure words and everything the
+     grammar consumed have all done their job already, and listing them
+     would bury the one word that matters. */
+  {
+    const spent = new Set<string>([
+      ...consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
+      ...grammar.consumed.flatMap((c) => c.toLowerCase().split(/\s+/)),
+      ...entityNoun.split(/\s+/),
+      /* EVERY WORD THAT NAMES THIS ENTITY IS READ, NOT UNREAD.
+
+         Only the noun that matched was counted as spent, so a sentence
+         naming the same thing twice reported the second one as a word
+         nobody could place: "the brand colour hex" matched on "brand
+         colour" and then said nothing in the brand assets matches
+         "hex". People name a thing and then qualify it with another
+         name for the same thing, and neither is content. */
+      ...entity.nouns.filter((n) => lower.includes(n)).flatMap((n) => n.split(/\s+/)),
+      ...groupWord.split(/\s+/),
+      ...(measureHit ? measureHit.split(/\s+/) : []),
+      ...filters.flatMap((f) => `${f.label} ${f.value}`.toLowerCase().split(/\s+/)),
+      ...(range ? range.label.toLowerCase().split(/\s+/) : []),
+      ...(entity.dates ?? []).flatMap((d) =>
+        d.words.filter((w) => lower.includes(w)).flatMap((w) => w.split(/\s+/))),
+      ...entity.amounts.filter((a) => a.words.some((w) => lower.includes(w)))
+        .flatMap((a) => a.words.filter((w) => lower.includes(w))),
+    ].map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean));
+
+    const leftover = lower
+      /* A contraction is one word to a reader and two to a tokeniser.
+         Stripping the apostrophe out of "haven't" leaves "haven", which
+         is in no vocabulary anywhere and was reported as a word the
+         customers do not match. The negation itself is read by the
+         grammar, which has its own handling of the contracted forms;
+         this only stops the wreckage of one being named as content. */
+      .replace(/n[’']t\b/g, ' not ')
+      .replace(/[^a-z0-9£$€ ]+/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3)
+      .filter((w) => !GRAMMAR_WORDS.has(w))
+      .filter((w) => !isReservedWord(w))
+      /* A bare figure is never a leftover: it was either read or it was
+         not, and either way the word beside it carries the meaning. A
+         token that is digits AND letters is a different thing entirely.
+         "6x2" is somebody naming an axle configuration this business
+         does not stock, and it has to be said rather than swallowed. */
+      .filter((w) => !/^[£$€]?[\d.,]+[km]?$/.test(w))
+      .filter((w) => !spent.has(w) && !spent.has(w.replace(/s$/, '')))
+      // A plural or a stem of something already spent is spent too.
+      .filter((w) => ![...spent].some((s) =>
+        s.length >= 4 && (w.startsWith(s) || s.startsWith(w))));
+
+    for (const w of [...new Set(leftover)].slice(0, 3)) {
+      /* Reported, not punished. Docking confidence for a word nobody
+         could place pushed good plans under the threshold where an
+         action outranks them, so "available box trailers under £20k,
+         cheapest first" came back as Add a trailer. Saying what was not
+         understood is the fix; scoring the plan down as well was not. */
+      unmet.push(`nothing in the ${entity.label} matches "${w}"`);
+    }
+  }
+  const orderOp = ops.find((o) => o.op === 'order');
+  let order: QueryPlan['order'];
+  if (orderOp && orderOp.op === 'order') {
+    const column = bindOrder(entity, orderOp.wants, lower, derived, amountColumn);
+    if (!column) {
+      unmet.push(`nothing on a ${entity.labelOne} to sort "${orderOp.label}" by`);
+    }
+    if (column) {
+      /* A duration runs backwards against the date it comes from.
+         Longest in stock is the EARLIEST arrival date, and getting this
+         the wrong way round puts the newest trailer at the top of a
+         question about the oldest. */
+      const flip = derived?.how === 'days since' && column.column === derived.from;
+      order = {
+        column: column.column,
+        direction: flip ? (orderOp.direction === 'desc' ? 'asc' : 'desc') : orderOp.direction,
+        label: `${orderOp.label} by ${column.label}`,
+      };
+      confidence += 4;
+    }
+  }
+
+  // --- how many of them -------------------------------------------------
+  const limitOp = ops.find((o) => o.op === 'limit');
+  /* A limit without a sort is not a limit, it is an arbitrary handful.
+     "Show me 5 trailers" is fine; "the cheapest" without a price column
+     to sort on would otherwise return one row chosen by nothing. */
+  const limit = limitOp && limitOp.op === 'limit'
+    ? (order || !ops.some((o) => o.op === 'order') ? limitOp.n : undefined)
+    : undefined;
+  if (limit) confidence += 2;
+
+  // --- side by side -----------------------------------------------------
+  const compareOp = ops.find((o) => o.op === 'compare');
+  let compare: QueryPlan['compare'];
+  if (compareOp && compareOp.op === 'compare') {
+    /* Two values of one attribute. Which attribute is whichever one
+       holds both of them, so "DAF versus Volvo" compares makes and
+       "Carrington against Hyde" compares depots, with nothing written
+       down about either. */
+    const col = columnHolding(entity, vocabulary, compareOp.against);
+    if (col) {
+      compare = { column: col.column, label: col.label, values: col.values ?? compareOp.against };
+      /* Comparing IS grouping, on the attribute being compared. */
+      if (!groupBy) groupBy = { column: col.column, label: col.label };
+      confidence += 5;
+      /* The thing being compared is not also a filter.
+         Any filter on the compared column goes, not just one whose
+         value happens to match a side exactly. "Carrington versus
+         Bredbury" narrowed to Carrington and then compared Carrington
+         with itself, which produced two bars, one of them empty, and
+         nothing on screen said the second depot had been filtered out
+         of its own comparison. */
+      for (let i = filters.length - 1; i >= 0; i--) {
+        if (filters[i].column === col.column) filters.splice(i, 1);
+      }
+    }
+  }
+
   // --- readable summary ------------------------------------------------
+  const measured = derived ? derived.label : amountLabel;
   const verb = measure === 'count' ? 'Count'
-             : measure === 'sum' ? `Total ${amountLabel}`
-             : measure === 'avg' ? `Average ${amountLabel}`
+             : measure === 'sum' ? `Total ${measured}`
+             : measure === 'avg' ? `Average ${measured}`
              : 'List';
   const bits = [
     `${verb} of ${entity.label}`,
-    filters.length ? `where ${filters.map((f) => f.label).join(' and ')}` : '',
+    filters.length
+      ? `where ${filters.map((f) => `${f.negate ? 'not ' : ''}${f.label}`).join(' and ')}`
+      : '',
     groupBy ? `by ${groupBy.label}` : '',
+    compare ? `(${compare.values.join(' against ')})` : '',
     range ? (/^(past|last)/.test(range.label) ? `in the ${range.label}` : range.label) : '',
+    order ? `${order.label}` : '',
+    limit ? (limit === 1 ? 'top one' : `top ${limit}`) : '',
     scope === 'mine' ? '(yours)' : '',
   ].filter(Boolean);
 
   return {
-    entity, measure, amountColumn, amountLabel, filters, groupBy, range, scope,
+    entity, measure, amountColumn, amountLabel, filters, groupBy, range, rangeColumn,
+    rangeIsSaleDate: aboutASale, scope,
+    order, limit, derived, compare,
+    unmet: unmet.length ? unmet : undefined,
     summary: bits.join(' '),
     confidence,
   };
+}
+
+/* -------------------------------------------------------------
+   Binding an operator to a column.
+
+   The operator says what kind of thing it wants. The entity says which
+   of its columns are that kind. Neither knows about the other, which is
+   the whole reason "highest mileage" will work the day a mileage column
+   exists without a line being written here.
+   ------------------------------------------------------------- */
+function bindOrder(
+  entity: EntitySpec,
+  wants: 'money' | 'date' | 'duration' | 'any',
+  lower: string,
+  derived: QueryPlan['derived'],
+  amountColumn?: string,
+): { column: string; label: string } | null {
+  const namedAmount = entity.amounts.find((a) => a.words.some((w) => lower.includes(w)));
+  const namedDate = entity.dates?.find((d) => d.words.some((w) => lower.includes(w)));
+
+  if (wants === 'money') {
+    const a = namedAmount ?? entity.amounts.find((x) => x.key === 'price') ?? entity.amounts[0];
+    return a ? { column: a.column, label: a.label } : null;
+  }
+  if (wants === 'date') {
+    const d = namedDate
+      ?? entity.dates?.[0]
+      ?? (entity.dateColumn ? { column: entity.dateColumn, label: 'date' } : null);
+    return d ? { column: d.column, label: d.label } : null;
+  }
+  if (wants === 'duration') {
+    // A duration is an age, and an age is a date read backwards.
+    if (derived) return { column: derived.from, label: derived.label };
+    const d = namedDate ?? entity.dates?.[0];
+    return d ? { column: d.column, label: d.label } : null;
+  }
+  /* `any` means the sentence has to say. "Highest" on its own orders
+     nothing, because guessing which column somebody meant by "highest"
+     is exactly the kind of confident wrong answer this is here to
+     stop. */
+  if (namedAmount) return { column: namedAmount.column, label: namedAmount.label };
+  if (namedDate) return { column: namedDate.column, label: namedDate.label };
+  if (amountColumn) {
+    const a = entity.amounts.find((x) => x.column === amountColumn);
+    if (a) return { column: a.column, label: a.label };
+  }
+  return null;
+}
+
+/** The derived attribute, if this entity is one it applies to. */
+function DERIVED_FOR(entity: EntitySpec, id: string, from: string): QueryPlan['derived'] {
+  const d = DERIVED.find((x) => x.id === id);
+  if (!d || !d.on.includes(entity.id)) return undefined;
+  // The column it is computed from has to exist on this entity.
+  const known = entity.dates?.some((x) => x.column === from)
+    || entity.amounts.some((x) => x.column === from)
+    || entity.dateColumn === from;
+  if (!known) return undefined;
+  return { id: d.id, from: d.from, how: d.how, label: d.label };
+}
+
+/** Which column holds both of these values. */
+function columnHolding(
+  entity: EntitySpec,
+  vocabulary: VocabularyIndex,
+  values: string[],
+): { column: string; label: string; values?: string[] } | null {
+  // The data knows first: two makes are two rows in the make column.
+  const hits = values.map((v) => findValues(vocabulary, v));
+  if (hits.every((h) => h.length)) {
+    const shared = hits[0].flatMap((h) => h.hits)
+      .filter((a) => hits.slice(1).every((rest) =>
+        rest.flatMap((r) => r.hits).some((b) => b.column === a.column && b.entity === a.entity)))
+      .find((h) => h.entity === entity.id);
+    if (shared) {
+      const f = entity.filters.find((x) => x.column === shared.column);
+      /* Written back the way the column stores them, so a comparison
+         reads "DAF against Volvo" rather than repeating whatever
+         casing somebody typed in a hurry. */
+      const canonical = hits.map((h, i) =>
+        h.flatMap((x) => x.hits).find((x) => x.entity === entity.id && x.column === shared.column)
+          ?.value ?? values[i]);
+      return { column: shared.column, label: f?.label ?? shared.column, values: canonical };
+    }
+  }
+  // Otherwise a filter whose vocabulary claims both of them.
+  for (const f of entity.filters) {
+    if (!f.vocabulary) continue;
+    if (values.every((v) => f.vocabulary![v.toLowerCase()])) {
+      return { column: f.column, label: f.label };
+    }
+  }
+  /* Nothing in the data and nothing in the vocabulary. A free text
+     column is still a fair guess when both sides look like names, and
+     the summary says which column so a wrong one is visible. */
+  const free = entity.filters.find((f) => f.freeText && f.key === 'make')
+    ?? entity.filters.find((f) => f.freeText);
+  return free ? { column: free.column, label: free.label } : null;
 }
 
 /**
@@ -459,35 +1115,69 @@ export function parseQuery(input: string): QueryPlan | null {
  *   over 5k / more than 5k    no ceiling
  *   5k-10k                    the same, written the fast way
  */
-function readBracket(text: string): { min: number | null; max: number | null } | null {
+function readBracket(text: string): {
+  min: number | null; max: number | null;
+  /**
+   * The words around the figure that say WHICH number it is, both
+   * sides, because either can be the subject.
+   *
+   * "Refurb over £2k" puts it in front. "More than 30 trailers on their
+   * fleet" puts it behind, and taking the front unconditionally read
+   * that one as "customers with", resolved to nothing, and fell back to
+   * whichever amount happened to share a word with the sentence. The
+   * caller tries both and keeps the one that names a real column.
+   */
+  about?: string[];
+  /** The whole phrase, so nothing else reads it again. */
+  said?: string;
+} | null {
   const t = text.toLowerCase().replace(/,/g, '');
-  const num = String.raw`(?:£|\$|€)?\s*(\d+(?:\.\d+)?)\s*(k|m|grand)?`;
+
+  /* What the bracket is about, said either side of the comparison.
+     "refurb over £2k" puts it in front; "more than 20 trucks" puts it
+     behind. Both are common and reading only one of them meant half the
+     brackets landed on whichever column happened to be listed first. */
+  const CMP = String.raw`(?:over|above|more than|greater than|at least|north of|under|below|less than|fewer than|cheaper than|up to|no more than|max|between|from)`;
+  const ahead = t.match(new RegExp(String.raw`\b([a-z][a-z ]{2,24}?)\s+${CMP}\s+(?:£|\$|€)?\s*\d`));
+  const JOIN = String.raw`(?:and|but|or|with|at|in|on|by|that|who|which|for|from|to)`;
+  const behind = t.match(new RegExp(
+    String.raw`${CMP}\s+(?:£|\$|€)?\s*\d+(?:\.\d+)?\s*(?:k|m|grand|million|billion)?\s+((?!${JOIN}\b)[a-z][a-z ]{2,24}?)(?=\s+${JOIN}\b|\s*$)`));
+  /* Behind first. The words after a figure are the thing being measured
+     far more often than the words before it, which are usually the
+     noun for the rows. */
+  const about = [behind?.[1], ahead?.[1]]
+    .map((x) => x?.trim()).filter((x): x is string => !!x && x.length > 2);
+  const num = String.raw`(?:£|\$|€)?\s*(\d+(?:\.\d+)?)\s*(k|m|grand|million|billion)?\b`;
   const scale = (n: string, s?: string) => {
     const v = Number(n);
     if (!Number.isFinite(v)) return null;
     const suffix = (s ?? '').toLowerCase();
     if (suffix === 'k' || suffix === 'grand') return v * 1000;
-    if (suffix === 'm') return v * 1_000_000;
+    if (suffix === 'm' || suffix === 'million') return v * 1_000_000;
+    if (suffix === 'billion') return v * 1_000_000_000;
     return v;
   };
 
-  // The dash alternatives are escapes rather than the characters
-  // themselves, because people paste all three and the repo bans two of
-  // them on sight.
+  /* The dash alternatives are written as escapes rather than as the
+     characters themselves. People paste all three, the pattern has to
+     match all three, and the repo bans two of them on sight, so the
+     only way to have both is to spell them. */
   const DASH = String.raw`[-\u2013\u2014]`;
   const span = t.match(new RegExp(String.raw`\b(?:between|from)\s+${num}\s*(?:and|to|${DASH})\s*${num}`))
     ?? t.match(new RegExp(String.raw`\b${num}\s*(?:${DASH}|to)\s*${num}\b`));
   if (span) {
     const min = scale(span[1], span[2]);
     const max = scale(span[3], span[4]);
-    if (min != null && max != null) return { min: Math.min(min, max), max: Math.max(min, max) };
+    if (min != null && max != null) {
+      return { min: Math.min(min, max), max: Math.max(min, max), about, said: span[0] };
+    }
   }
 
   const under = t.match(new RegExp(String.raw`\b(?:under|below|less than|cheaper than|up to|no more than|max)\s+${num}`));
-  if (under) { const v = scale(under[1], under[2]); if (v != null) return { min: null, max: v }; }
+  if (under) { const v = scale(under[1], under[2]); if (v != null) return { min: null, max: v, about, said: under[0] }; }
 
   const over = t.match(new RegExp(String.raw`\b(?:over|above|more than|at least|north of|from)\s+${num}`));
-  if (over) { const v = scale(over[1], over[2]); if (v != null) return { min: v, max: null }; }
+  if (over) { const v = scale(over[1], over[2]); if (v != null) return { min: v, max: null, about, said: over[0] }; }
 
   return null;
 }
@@ -507,6 +1197,14 @@ export function planToPayload(p: QueryPlan) {
     groupBy: p.groupBy,
     range: p.range,
     scope: p.scope,
+    order: p.order,
+    limit: p.limit,
+    derived: p.derived,
+    compare: p.compare,
+    /* Which date the period applies to, when the sentence named one.
+       "Added between May and July" measures the arrival date, not the
+       dispatch date the entity uses by default. */
+    rangeColumn: p.rangeColumn,
     summary: p.summary,
   };
 }

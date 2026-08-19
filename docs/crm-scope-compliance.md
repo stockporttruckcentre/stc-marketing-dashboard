@@ -7,7 +7,8 @@ The source document is the record of what was asked for and is never edited.
 This file is where the answer lives. If the two disagree, the source is right
 about the requirement and this file is wrong about the status.
 
-Last audited after the prospect flag, DocuSign shortcut and Lusha lockout.
+Last audited after the command runtime work: the clarification path, the
+sale projection, and the five operations the screens had and the bar did not.
 
 ---
 
@@ -21,14 +22,14 @@ Last audited after the prospect flag, DocuSign shortcut and Lusha lockout.
 | 1.2 | "What to do next?" prompt after adding a new prospect | **Built** | `components/crm/NextActionPrompt.tsx`, fires on create. The options list is still the open question the meeting flagged |
 | 1.3 | Prospect vs existing customer flag driving split proposal pipelines | **Built** | Migration 004 adds `relationship`, set on the record next to status in the drawer and carried onto every proposal raised. The dashboard split is now possible; building that view is dashboard work |
 | 1.4 | DocuSign shortcut opening the DocuSign home page | **Built** | A DocuSign button in the drawer, on quoted, won and customer records only. Opens the home page and stops there, per the meeting: the CRM is behind the VPN so anything it generates is a file rather than something signable through a link |
-| 1.5 | Natural language search bar | **Built** | `lib/command/`, `components/dashboard/CommandBar.tsx`. In the global top bar on every page, alongside a contact lookup that replaced the old second search box |
+| 1.5 | Natural language search bar | **Built** | `lib/command/`, `components/dashboard/CommandBar.tsx`. In the global top bar on every page, alongside a contact lookup that replaced the old second search box. It answers questions and carries out instructions, previewing every write before it happens, and a sentence it understands but that is short of one value asks for that value rather than refusing |
 | 1.6 | Restricted role for Rama | **Partial** | `lib/crm/permissions.ts` expresses it as the `marketer` capability set: reads and edits, no lists, proposals, credits or deletes. The genuinely stock scoped version needs the admin panel, because it is scoped to a table rather than a verb |
 
 ### Changes to existing features
 
 | # | Item | Status | Where |
 |---|---|---|---|
-| 1.7 | Same account in both Trailer Sales and Maintenance without duplicating it | **Built** | Migration 003, `app/api/crm/link/route.ts`, "Same customer" in the drawer. Needs migration 003 run |
+| 1.7 | Same account in both Trailer Sales and Maintenance without duplicating it | **Built** | Migration 003, `app/api/crm/link/route.ts`, "Same customer" in the drawer. Reachable from the command bar too, as `contact.link`: "link these two customer records as the same account" asks which one is the main account rather than picking the first, and "link Dawson Maintenance to Dawson Group as the main account" says it in one breath. Needs migration 003 run |
 | 1.8 | Bi directional sync with the legacy Excel files during transition | **Blocked** | ITG server dependency |
 | 1.9 | Auto promote prospect to portfolio when Protean marks them active | **Blocked** | Protean feed, Wayne dependency |
 | 1.10 | Add stock form: stock number first, fewer fields | **Not built, wrong tab** | Belongs to Trailer Stock. Tracked as task 2 |
@@ -144,9 +145,12 @@ server or the admin panel. What is left is not CRM page work.
 2. **The split proposal view on the dashboard.** The flag exists and every
    proposal now carries it, so this is a dashboard query rather than a CRM
    change.
-3. **Import on the stock list and sales tracker.** The dialog, mapping,
-   duplicate check and review are shared; each tab needs its own dictionary,
-   validators and duplicate key.
+3. ~~**Import on the stock list and sales tracker.**~~ Built. The dialog,
+   mapping, duplicate check and review are shared, each tab has its own
+   dictionary, and the same import runs from the command bar with a file
+   attached: `rows.import` for customers and `stock.import` for units, both
+   in one transaction with the preview saying how many are new and how many
+   are duplicates of records already here.
 4. **Row level security for the capability model.** `lib/crm/permissions.ts`
    gates the interface and nothing else. The database does not know about any
    of it. That belongs with the admin panel.

@@ -1,22 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
+import { markSold } from '@/lib/crm/mark-sold';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Mark a tracker row as sold AND propagate to the linked stock_trailer.
+ * Mark a tracker row sold, and carry it through to the stock unit.
  *
- * Body: { tracker_id, sale_price, profit?, commission?, dispatch_date? }
+ * The operation itself is in `lib/crm/mark-sold.ts`, which calls the
+ * `command_mark_sold` function, so the command bar's `deal.markSold`
+ * capability runs exactly this and not a second version of it. Two
+ * implementations of a sale is how one of them ends up not cascading to
+ * the other reps.
  *
- * RLS handles ownership — the user can only update tracker rows in lists they own,
- * and stock_trailers updates are permitted for admin/marketer/sales.
+ * The three writes are one transaction. This route used to do them as
+ * three statements and report a partial failure, which left a deal
+ * marked won against a unit still showing as available.
+ *
+ * The comment this route used to carry said RLS handles ownership, and
+ * for the caller's own tracker row it does. It does not cover the two
+ * things the operation also does: flipping a stock trailer to sold, and
+ * reaching across into every other rep's tracker row for the same unit.
+ * Neither of those is a statement about a row somebody owns.
  */
 export async function POST(req: NextRequest) {
-  /* The comment below used to say RLS handles ownership, and for the
-     caller's own tracker row it does. It does not cover the two things
-     this route also does: flipping a stock trailer to sold, and reaching
-     across into every other rep's tracker row for the same unit. Neither
-     of those is a statement about a row somebody owns. */
   const gate = await requireCapability('stock.edit');
   if (!gate.ok) return gate.response;
   const { supabase, user } = gate;
@@ -30,67 +37,28 @@ export async function POST(req: NextRequest) {
   };
   if (!body.tracker_id) return NextResponse.json({ error: 'tracker_id required' }, { status: 400 });
 
-  // Read the tracker row
-  const { data: row, error: readErr } = await supabase
-    .from('crm_contacts').select('*').eq('id', body.tracker_id).single();
-  if (readErr || !row) return NextResponse.json({ error: readErr?.message || 'tracker row not found' }, { status: 404 });
+  const result = await markSold(supabase, user, {
+    trackerId: body.tracker_id,
+    salePrice: body.sale_price ?? null,
+    profit: body.profit ?? null,
+    commission: body.commission ?? null,
+    dispatchDate: body.dispatch_date ?? null,
+  });
 
-  // Compute commission if not provided (default 10% of profit)
-  const profit = body.profit ?? row.profit ?? null;
-  const rate = row.commission_rate ?? 0.10;
-  const commission = body.commission ?? (profit != null ? Number((Number(profit) * rate).toFixed(2)) : null);
-
-  // Get the user's display name for sales_rep on the stock_trailer
-  const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
-  const repName = (profile as any)?.full_name?.split(' ').map((p: string) => p[0]).join('') || (profile as any)?.full_name || 'Unknown';
-
-  // 1) Update the tracker row
-  const today = new Date().toISOString().slice(0, 10);
-  const trackerUpdate: any = {
-    status: 'customer',
-    sale_price: body.sale_price ?? row.sale_price,
-    profit,
-    commission,
-    order_date: row.order_date ?? today,
-  };
-  if (body.dispatch_date) trackerUpdate.dispatch_date = body.dispatch_date;
-  const { error: tErr } = await supabase.from('crm_contacts').update(trackerUpdate).eq('id', body.tracker_id);
-  if (tErr) return NextResponse.json({ error: `tracker update failed: ${tErr.message}` }, { status: 500 });
-
-  // 2) Cascade to stock_trailer if linked
-  let stockUpdated = false;
-  if (row.stock_trailer_id) {
-    const stockUpdate: any = {
-      status: 'sold',
-      customer: row.company_name,
-      sales_rep: repName,
-      sales_price: body.sale_price ?? row.sale_price,
-      profit,
-      order_date: trackerUpdate.order_date,
-    };
-    if (body.dispatch_date) stockUpdate.dispatch_date = body.dispatch_date;
-    const { error: sErr } = await supabase.from('stock_trailers').update(stockUpdate).eq('id', row.stock_trailer_id);
-    if (sErr) {
-      return NextResponse.json({ error: `tracker updated, but stock_trailer update failed: ${sErr.message}`, partial: true }, { status: 500 });
-    }
-    stockUpdated = true;
+  if (!result.ok) {
+    /* No partial status to report. The three writes are one
+       transaction, so nothing was changed. */
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.error.includes('not there') ? 404 : 500 },
+    );
   }
 
-  // 3) Cascade to OTHER reps' tracker rows linked to the same stock trailer (first-to-sell rule):
-  // their status becomes 'customer' too, but we do NOT touch their sale_price / commission /
-  // dispatch_date - those stay null since they didn't make the sale. This keeps the dataset
-  // honest: only the seller has commission; everyone else sees 'this is sold now'.
-  let cascadedOthers = 0;
-  if (row.stock_trailer_id) {
-    const { data: others, error: cErr } = await supabase
-      .from('crm_contacts')
-      .update({ status: 'customer' })
-      .eq('stock_trailer_id', row.stock_trailer_id)
-      .neq('id', body.tracker_id)
-      .not('status', 'eq', 'customer')
-      .select('id');
-    if (!cErr && others) cascadedOthers = others.length;
-  }
-
-  return NextResponse.json({ ok: true, commission, stockUpdated, stock_trailer_id: row.stock_trailer_id, cascadedOthers });
+  return NextResponse.json({
+    ok: true,
+    commission: result.commission,
+    stockUpdated: result.stockUpdated,
+    stock_trailer_id: result.stockTrailerId,
+    cascadedOthers: result.cascadedOthers,
+  });
 }

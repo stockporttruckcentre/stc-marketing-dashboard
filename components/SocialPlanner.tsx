@@ -5,8 +5,12 @@ import { Plus, Check, X, Calendar, Trash2, Upload, Eye, ThumbsUp, MessageCircle,
 import { createClient } from '@/lib/supabase/client';
 import type { SocialPost, PostStatus, Profile } from '@/lib/types';
 
-const PLATFORMS = ['Facebook', 'LinkedIn', 'Instagram', 'X'] as const;
-type Platform = typeof PLATFORMS[number];
+/* One list, shared with the sentence reader. Two copies would disagree
+   the first time somebody added a platform. */
+import { PLATFORMS, DEFAULT_PLATFORMS, createPost, type Platform } from '@/lib/social/posts';
+import { bucketStore, storeImage } from '@/lib/social/media';
+import { stagingKey } from '@/lib/command/files';
+import { fileDigest } from '@/lib/command/context';
 
 const STATUSES: { value: PostStatus | 'all'; label: string }[] = [
   { value: 'all',            label: 'All' },
@@ -130,8 +134,11 @@ function ComposeForm({ profile, onClose, onCreated }: { profile: Profile; onClos
   const [caption, setCaption] = useState('');
   const [hashtags, setHashtags] = useState('');
   const [scheduledDate, setScheduledDate] = useState(new Date().toISOString().slice(0, 10));
-  const [platforms, setPlatforms] = useState<Platform[]>(['Facebook', 'LinkedIn']);
+  const [platforms, setPlatforms] = useState<Platform[]>([...DEFAULT_PLATFORMS]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  /* One draft, one staging namespace. Stable for as long as the
+     composer is open, so re-picking a file does not litter the bucket. */
+  const [draftKey] = useState(() => Math.random().toString(36).slice(2));
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,37 +149,53 @@ function ComposeForm({ profile, onClose, onCreated }: { profile: Profile; onClos
     setPlatforms((ps) => ps.includes(p) ? ps.filter((x) => x !== p) : [...ps, p]);
   }
 
+  /* The same operation the command bar performs. The bucket, the key
+     rule and what counts as an image are `lib/social/media.ts`, so
+     neither caller has its own idea of any of them. */
   async function uploadImage(file: File) {
     setUploading(true); setError(null);
-    try {
-      const fileName = `post-${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const { error: upErr } = await supabase.storage.from('brand-assets').upload(fileName, file, { upsert: false });
-      if (upErr) throw upErr;
-      const { data: pub } = supabase.storage.from('brand-assets').getPublicUrl(fileName);
-      setImageUrl(pub.publicUrl);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setUploading(false);
-    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    /* The same deterministic key the command bar uses. There is no
+       confirmation here because the composer has not been confirmed
+       yet: what stands in for it is the draft the picture is being
+       attached to, so picking the same file twice in one draft reuses
+       the object rather than leaving the first on the bucket. */
+    const key = stagingKey({
+      confirmation: `composer:${draftKey}`,
+      digest: fileDigest(new TextDecoder('latin1').decode(bytes)),
+      operation: 'post.create',
+      name: file.name,
+    });
+    const stored = await storeImage(bucketStore(supabase), {
+      key, name: file.name, mime: file.type, bytes,
+    });
+    setUploading(false);
+    if (!stored.ok) { setError(stored.why); return; }
+    setImageUrl(stored.url);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null); setSubmitting(true);
     const tags = hashtags.split(/[,\s#]+/).map((s) => s.trim()).filter(Boolean);
-    const payload = {
+    if (!content.trim()) { setError('Content is required'); setSubmitting(false); return; }
+
+    /* The same operation the command bar performs. The author and the
+       status come from the profile inside it, rather than from here,
+       because a browser that chose its own status could put a post
+       straight to approved. */
+    const made = await createPost(supabase, {
       content: content.trim(),
+      platforms,
+      scheduledDate,
       caption: caption || null,
-      platform: platforms,
-      scheduled_date: scheduledDate,
       hashtags: tags,
-      image_url: imageUrl,
-      created_by: profile.full_name,
-      status: (isAdmin ? 'approved' : 'pending_review') as PostStatus,
-    };
-    if (!payload.content) { setError('Content is required'); setSubmitting(false); return; }
-    const { data, error } = await supabase.from('social_posts').insert(payload).select('*').single();
+      imageUrl,
+    });
+    if (!made.ok) { setSubmitting(false); setError(made.why); return; }
+
+    const { data, error } = await supabase
+      .from('social_posts').select('*').eq('id', made.id).single();
     setSubmitting(false);
     if (error) { setError(error.message); return; }
     onCreated(data as SocialPost);

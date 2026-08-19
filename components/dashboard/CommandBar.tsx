@@ -2,15 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles, Pencil } from 'lucide-react';
-import { parse, type ParseResult, type SlotSpec } from '@/lib/command/intents';
+import { Search, CornerDownLeft, Loader, Check, X, ArrowRight, Sparkles, Pencil, Paperclip } from 'lucide-react';
 import { type Suggestion } from '@/lib/command/features';
 import { suggestActions } from '@/lib/command/actions';
 import { composeSuggestions } from '@/lib/command/compose';
-import { parseEdit, composeEdits, type EditPlan } from '@/lib/command/mutate';
+import { composeEdits } from '@/lib/command/mutate';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
-import { parseQuery, planToPayload, type QueryPlan } from '@/lib/command/query';
+import { planCommand } from '@/lib/command/plan';
+import type { PlannedMeaning } from '@/lib/command/server/planner';
+import { completedWith, type MissingInput } from '@/lib/command/ir/validate';
+import type { MutationPreview } from '@/lib/command/server/mutation';
+import { buildIndex, EMPTY_VOCABULARY, type VocabularyIndex } from '@/lib/command/vocab';
+import {
+  currentSelection, onSelectionChange, currentOpenList, onOpenListChange,
+  type ScreenSelection, type ScreenList,
+} from '@/lib/command/selection';
+import type { CommandContext } from '@/lib/command/context';
 import { Label, Badge, Button } from '@/components/kit/primitives';
 
 /* =============================================================
@@ -37,26 +45,34 @@ export function readsOnlyText(text: string): boolean {
     .test(text);
 }
 
-type Candidate = { id: string; label: string; sub?: string; status?: string };
-type Stage = 'idle' | 'choosing' | 'asking' | 'ready' | 'running' | 'done' | 'answered' | 'confirming';
+/**
+ * Which query parameter each screen keeps its open record in.
+ *
+ * These are the parameters the screens already use, so nothing had to
+ * change for the bar to know what is open.
+ */
+const OPEN_RECORD: [string, string][] = [
+  ['contact', 'contacts'],
+  ['stock', 'trailers'],
+  ['event', 'meetings'],
+];
 
-/** What the server says a write is about to do, before it does it. */
-type EditPreview = {
-  recordId?: string;
-  recordIds?: string[];
-  recordLabel: string;
-  recordSub?: string;
-  fieldLabel: string;
-  before: string;
-  after: string;
-  unchanged?: boolean;
-  caution?: string | null;
-  /** Several records at once, or every record matching a description. */
-  bulk?: boolean;
-  count?: number;
-  /** Understood here, finished somewhere else. Nothing to save. */
-  handoff?: 'markSold';
-  link?: { href: string; label: string };
+type Stage = 'idle' | 'running' | 'done' | 'answered' | 'confirming' | 'asking';
+
+/**
+ * What the server says a write is about to do, before it does it.
+ *
+ * The server's own type, imported rather than restated. The bar used to
+ * describe the preview itself from a plan it had parsed in the browser,
+ * which meant the shape somebody was shown and the shape that would be
+ * written were two independent descriptions of one change.
+ */
+type ServerMeaning = PlannedMeaning & {
+  kind?: 'read' | 'mutate';
+  /** A file, when the sentence asked for one. */
+  emit?: { format: string | null; to: string } | null;
+  mutation?: { fields: { label: string; requires: string }[] } | null;
+  preview?: MutationPreview | null;
 };
 type Outcome = { ok: boolean; message: string; detail?: string; link?: { href: string; label: string } };
 
@@ -103,11 +119,6 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [stage, setStage] = useState<Stage>('idle');
-  const [result, setResult] = useState<ParseResult | null>(null);
-  const [slots, setSlots] = useState<Record<string, any>>({});
-  const [choices, setChoices] = useState<{ slot: string; label: string; candidates: Candidate[]; allowNew: boolean } | null>(null);
-  const [asking, setAsking] = useState<SlotSpec | null>(null);
-  const [answer, setAnswer] = useState('');
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [exampleIdx, setExampleIdx] = useState(0);
 
@@ -128,11 +139,41 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  /**
+   * What the data calls things, loaded once.
+   *
+   * "DAFs older than 2022" resolved to nothing, because no word in it
+   * named a thing the app holds and there was no way to know DAF is a
+   * make. A list of manufacturers in a file would have fixed that one
+   * sentence and gone stale on the next delivery. The make column
+   * already knows, so it is asked.
+   *
+   * Failure is silent on purpose. Without it the bar behaves exactly as
+   * it did before, so a slow or unavailable load costs coverage rather
+   * than the whole feature.
+   */
+  /* Held here rather than in the module it came from. The bar serves
+     one person, but an index that lives in a module is an index two
+     callers can disagree about, and there is no longer anywhere to put
+     one. */
+  const [vocabulary, setVocabularyIndex] = useState<VocabularyIndex>(EMPTY_VOCABULARY);
+  useEffect(() => {
+    let live = true;
+    fetch('/api/command/vocabulary')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!live || !j?.vocabulary) return;
+        setVocabularyIndex(buildIndex(j.vocabulary));
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+
   // A quick action button was pressed. Drop its phrasing in and hand the
   // user the caret so they finish the sentence.
   const seedWith = useCallback((phrase: string) => {
     setText(phrase);
-    setStage('idle'); setOutcome(null); setChoices(null); setAsking(null);
+    setStage('idle'); setOutcome(null);
     const el = inputRef.current;
     if (el) { el.focus(); requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length)); }
   }, []);
@@ -156,13 +197,15 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     return () => window.removeEventListener('stc:command', onSeed as EventListener);
   }, [seedWith]);
 
-  // Live understanding, so the bar shows it is following along. Two
-  // characters is enough: "cr" should already be offering something.
-  const parsed = useMemo(() => (text.trim().length >= 2 ? parse(text) : null), [text]);
-  // A bare noun like "stock" scores 3 on the nearest intent, which is not
-  // enough to present as a command. Below this it is a browse, not an
-  // instruction, and only the suggestions below should show.
-  const preview = parsed && parsed.confidence >= 6 ? parsed : null;
+  /* THERE IS NO SECOND READER.
+
+     This used to run a second parser on every keystroke, show what THAT
+     thought the sentence meant, and then execute it through a route of
+     its own whenever the canonical path had not produced a runnable
+     meaning. Two readers over one sentence is two answers to
+     what it means, and the one that ran was whichever happened to be
+     confident. What the bar shows and what it runs now both come from
+     the server's canonical plan, and a sentence it refuses is refused. */
   // Everything the app can do, ranked against what has been typed. This is
   // what stops a bare word like "meeting" hitting a dead end.
   const caps = useMemo(() => capabilitiesFor({ role }), [role]);
@@ -183,7 +226,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
       .map((h) => ({
       kind: 'action' as const,
       label: h.action.label,
-      sub: h.action.blurb,
+      /* WHAT IT WILL ACTUALLY DO, SAID IN THE SUGGESTION.
+
+         An action that opens a screen opens a screen; one that seeds
+         the bar puts a sentence in it for you to finish. Both were shown
+         identically, so half the list looked like things that would
+         happen on Enter and did not. */
+      sub: h.runnable ? h.action.blurb : `${h.action.blurb}. Fills the bar in for you`,
       path: h.action.seed ? undefined : h.action.path,
       phrase: h.action.seed,
       score: h.score,
@@ -205,19 +254,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * failed search for an action called Export, it is somebody asking
    * what they can export, and the answer is hundreds of real sentences.
    */
-  /**
-   * An instruction, as opposed to a question.
-   *
-   * "Add £1k refurb value to STC143980" used to be read as a question
-   * about trailers and answered with a list, which looks like it worked
-   * and is not. An instruction that names its record, its field and its
-   * value beats every question the same words could be read as.
-   */
-  const edit = useMemo(
-    () => (text.trim().length >= 4 ? parseEdit(text, caps) : null),
-    [text, caps],
-  );
-  const editReady = !!edit && edit.missing.length === 0 && edit.confidence >= 10;
+  /* An instruction, as opposed to a question, is decided by the server.
+
+     This used to call the instruction reader in the browser and act on
+     what it said, which made the browser the semantic authority for
+     writes while the server was the semantic authority for reads. The
+     same sentence could be an instruction here and a question there,
+     because the two sides load the vocabulary at different moments.
+     `planCommand` decides it now, and `kind` is what comes back. */
 
   /**
    * Half a sentence is not a failure.
@@ -281,12 +325,14 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     return () => { cancelled = true; clearTimeout(t); };
   }, [text, stage]);
 
-  const suggestions = useMemo(() => {
+  const candidates = useMemo(() => {
     // Actions first, then screens the action list did not already cover,
     // then matching records. Deduped on where they lead, so "stock" does
     // not offer the stock list twice.
     const seen = new Set<string>();
     const out: Suggestion[] = [];
+
+
     // Composed questions outrank bare actions, because "Export customers
     // at Carrington" is a better answer to "export" than an entry called
     // Export a list that then asks which list.
@@ -301,7 +347,105 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
   // A composed question: count / total / average / list of anything in the
   // dictionary. This is what covers the hundreds of phrasings that no
   // hand-written intent list ever would.
-  const plan = useMemo(() => (text.trim().length >= 3 ? parseQuery(text) : null), [text]);
+  /* A local read, for deciding whether a half typed sentence is worth
+     asking the server about. Planned with the actor's capabilities, so
+     a command somebody may not run is not offered as one: an action
+     that appears and then refuses teaches people the bar is
+     unreliable. This is a filter on what to ask, never the answer. */
+  /* A FILE SOMEBODY ATTACHED, WHICH IS CONTEXT LIKE A SELECTION.
+
+     The browser is the only place that has it, so it goes up with the
+     sentence and the server decides what it means. Read as text here
+     because a spreadsheet is text: nothing is parsed, mapped or
+     validated in the browser. */
+  const [attached, setAttached] = useState<
+    { name: string; mime: string; size: number; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const takeFile = useCallback(async (file: File) => {
+    const body = await file.text();
+    setAttached({
+      name: file.name,
+      mime: file.type || 'text/csv',
+      size: file.size,
+      text: body,
+    });
+  }, []);
+
+  const local = useMemo(
+    () => (text.trim().length >= 3
+      ? planCommand(text, {
+          actorCapabilities: caps,
+          vocabulary,
+          context: attached ? { file: attached } : undefined,
+        })
+      : null),
+    [text, caps, vocabulary, attached]);
+
+  /* WHAT THE SCREEN HAS, SO "THESE" MEANS SOMETHING.
+
+     The record from the page's own URL, which is where every screen in
+     this application already keeps it, and the selection from whichever
+     grid published one. Both go up with the sentence and neither is
+     trusted on the way back: the server reads every id through the
+     caller's own session. */
+  const [selection, setSelection] = useState<ScreenSelection | null>(currentSelection());
+  useEffect(() => onSelectionChange(setSelection), []);
+
+  /* Which working list the screen is showing. A different fact from the
+     selection: a CRM screen with nothing ticked still has a list open. */
+  const [openList, setOpenList] = useState<ScreenList | null>(currentOpenList());
+  useEffect(() => onOpenListChange(setOpenList), []);
+
+  const context = useMemo<CommandContext>(() => {
+    const out: CommandContext = {};
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const open = OPEN_RECORD.find(([key]) => params.get(key));
+      if (open) {
+        const id = params.get(open[0]);
+        if (id) out.record = { entity: open[1], id };
+      }
+    }
+    if (selection) out.selection = selection;
+    if (openList) out.list = openList;
+    if (attached) out.file = attached;
+    return out;
+    /* Recomputed when the selection changes or the page does. The bar
+       reads the URL directly, so a screen that opens a record without a
+       navigation is picked up on the next keystroke rather than never. */
+  }, [selection, openList, text, attached]);
+
+  /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
+     The two sides do not know the same things. The live vocabulary is
+     what makes a word a make or a customer, and the browser and the
+     server load it at different moments, so the same sentence can
+     honestly mean two things. The one that counts is the one the server
+     will act on, and it arrives with a hash of its meaning. */
+  const [meaning, setMeaning] = useState<ServerMeaning | null>(null);
+
+  const worthAsking = !!local
+    && local.presentation.confidence >= 8
+    && local.availability.representable
+    && local.availability.executable
+    && local.availability.permitted !== false;
+
+  useEffect(() => {
+    if (!worthAsking) { setMeaning(null); return; }
+    let live = true;
+    /* Typing is faster than a round trip. Ask about the sentence that
+       stopped changing, not every keystroke on the way to it. */
+    const timer = setTimeout(() => {
+      fetch('/api/command/plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, context }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (live) setMeaning(j?.ok && j.understood ? j : null); })
+        .catch(() => { if (live) setMeaning(null); });
+    }, 180);
+    return () => { live = false; clearTimeout(timer); };
+  }, [text, worthAsking, context]);
   // An instruction always beats a question: "create trailer STC1" must not
   // be answered as "count trailers". Otherwise a confident query wins.
   /* Words that can only be a read.
@@ -315,87 +459,62 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
   // An instruction outranks the question its words could also be, and a
   // question outranks a browse. A read verb outranks a write intent.
-  const useQuery = !editReady && !!plan && plan.confidence >= 8
-    && (readsOnly || !preview?.intent?.writes);
+  /* Offered only when the server says it is runnable. `runnable` is
+     every gate at once, decided in one place rather than in each
+     caller's own idea of what "can I run this" means: well formed,
+     permitted for this person, something performs it, and not refused. */
+  /** The server read it as an instruction and will carry it out. */
+  const instructionReady = meaning?.kind === 'mutate' && meaning.runnable;
+
+  /** It asked for a file rather than an answer on screen. */
+  const wantsFile = !!meaning?.emit && meaning.emit.to !== 'clipboard' && meaning.runnable;
+
+  /** It asked for the answer on the clipboard rather than on screen. */
+  const wantsCopy = meaning?.emit?.to === 'clipboard' && !!meaning?.runnable;
+
+  const useQuery = !instructionReady && !wantsFile && meaning?.kind !== 'mutate' && !!meaning?.runnable
+    /* A copy is a question with one more thing done to the answer, so it
+       runs the query and then copies what came back. */
+    && (readsOnly || wantsCopy);
+
+  /* Said out loud rather than left for the answer to imply. */
+  const partial = meaning?.unresolved ?? [];
+
+  /**
+   * What the sentence still needs, as questions.
+   *
+   * The server's, from the capability's own declared inputs. The bar
+   * neither invents a question nor decides an answer: it puts the
+   * question, and puts the answer back into the sentence.
+   */
+  const asking: MissingInput[] = (meaning?.completion === 'incomplete'
+    ? meaning.missing ?? [] : []);
+
+  /* A SYNONYM REWRITE OF A SENTENCE THAT IS ALREADY UNDERSTOOD IS NOT A
+     SUGGESTION.
+
+     "Schedule a call with Dawson next Friday" is understood and short
+     of a time. Offering "book a call with Dawson next Friday" beside it
+     offers the same operation with the same value missing, which reads
+     as the bar not having understood the first one. Anything that plans
+     to the same question is dropped; anything that plans to a complete
+     sentence, or to a different question, is a real next step and
+     stays. */
+  const suggestions = useMemo(() => candidates.filter((s) => {
+    if (!asking.length || !s.phrase) return true;
+    const its = planCommand(s.phrase, { actorCapabilities: caps, vocabulary, context });
+    return !(its?.completion.kind === 'incomplete'
+      && its.completion.missing.some((m) => m.ask === asking[0].ask));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }), [candidates, meaning, caps, vocabulary, context]);
   const [answered, setAnswered] = useState<any | null>(null);
-  const [editPreview, setEditPreview] = useState<EditPreview | null>(null);
-  const [editChoices, setEditChoices] = useState<Candidate[] | null>(null);
+  const [editPreview, setEditPreview] = useState<MutationPreview | null>(null);
   const [cursor, setCursor] = useState(-1);
   useEffect(() => { setCursor(-1); }, [text]);
 
   const reset = useCallback(() => {
-    setStage('idle'); setResult(null); setSlots({}); setChoices(null);
-    setAsking(null); setAnswer(''); setOutcome(null); setText(''); setAnswered(null);
-    setEditPreview(null); setEditChoices(null);
-  }, []);
-
-  /** Walk forward: resolve references, then ask for anything still missing. */
-  const advance = useCallback(async (parsed: ParseResult, current: Record<string, any>) => {
-    if (!parsed.intent) return;
-
-    // Anything still missing that we cannot infer?
-    const stillMissing = parsed.intent.slots.filter(
-      (s) => s.required && (current[s.key] == null || current[s.key] === ''),
-    );
-
-    // Resolve references against the database first.
-    const needsResolve = parsed.filled.some((f) => f.needsResolve) || current.stockNo;
-    if (needsResolve && !current.__resolved) {
-      const res = await fetch('/api/command/resolve', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intentId: parsed.intent.id, slots: current }),
-      }).then((r) => r.json());
-
-      const next: Record<string, any> = { ...current, __resolved: true };
-
-      if (res.stockNo?.exists && parsed.intent.id === 'create_stock_trailer') {
-        setOutcome({
-          ok: false,
-          message: `${res.stockNo.value} is already in the stock list.`,
-          detail: [res.stockNo.record?.make, res.stockNo.record?.model].filter(Boolean).join(' ') || undefined,
-          link: { href: `/dashboard/sales?stock=${res.stockNo.record.id}`, label: 'Open it' },
-        });
-        setStage('done');
-        return;
-      }
-
-      if (res.contact) {
-        if (res.contact.resolved) {
-          next.contactId = res.contact.resolved.id;
-          next.contactLabel = res.contact.resolved.company_name;
-        } else if (res.contact.candidates?.length > 1) {
-          setSlots(next); setResult(parsed);
-          setChoices({
-            slot: 'contact',
-            label: `Which ${res.contact.term}?`,
-            candidates: res.contact.candidates,
-            allowNew: true,
-          });
-          setStage('choosing');
-          return;
-        } else if (res.contact.none) {
-          setSlots(next); setResult(parsed);
-          setChoices({
-            slot: 'contact',
-            label: `Nothing in the CRM matches "${res.contact.term}".`,
-            candidates: [],
-            allowNew: true,
-          });
-          setStage('choosing');
-          return;
-        }
-      }
-      return advance(parsed, next);
-    }
-
-    if (stillMissing.length) {
-      setSlots(current); setResult(parsed);
-      setAsking(stillMissing[0]); setAnswer('');
-      setStage('asking');
-      return;
-    }
-
-    setSlots(current); setResult(parsed); setStage('ready');
+    setStage('idle'); setOutcome(null); setText(''); setAnswered(null);
+    setEditPreview(null); setAttached(null);
   }, []);
 
   function takeSuggestion(s: Suggestion) {
@@ -408,145 +527,341 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     }
   }
 
-  async function runQuery(p: QueryPlan) {
+  /**
+   * Run the reading that was shown.
+   *
+   * The sentence and the hash of the meaning go up; nothing else. The
+   * server replans from the text in the same environment it previewed
+   * in, and the hash is how it knows whether the reading it arrives at
+   * is the one somebody agreed to. A client cannot send a plan, so
+   * there is nothing here to hand craft.
+   */
+  /**
+   * The file the sentence asked for.
+   *
+   * The same sentence and the same hash go up. What comes back is the
+   * file itself rather than a link to one, so nothing is stored and
+   * there is no bucket with somebody's customer list sitting in it.
+   */
+  /**
+   * Put a file in front of the person who asked for it.
+   *
+   * One place, because a command that writes AND produces a file now
+   * comes back through the apply route, and a second copy of this would
+   * be the one that stopped working.
+   */
+  function save(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadArtefact(m: ServerMeaning) {
+    setStage('running');
+    const res = await fetch('/api/command/emit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, hash: m.hash, context }),
+    }).catch(() => null);
+
+    if (!res || !res.ok) {
+      const why = await res?.json().catch(() => null);
+      setOutcome({ ok: false, message: why?.error ?? 'That file did not come back.' });
+      setStage('done');
+      return;
+    }
+
+    const blob = await res.blob();
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1]
+      ?? 'export';
+    save(blob, name);
+
+    const rows = Number(res.headers.get('X-Command-Rows') ?? 0);
+    setOutcome({
+      ok: true,
+      message: `${name} downloaded, ${rows.toLocaleString('en-GB')} ${rows === 1 ? 'row' : 'rows'}.`,
+    });
+    setStage('done');
+  }
+
+  async function runQuery(m: ServerMeaning) {
     setStage('running');
     const res = await fetch('/api/command/query', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(planToPayload(p)),
+      body: JSON.stringify({ text, hash: m.hash, context }),
     }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+
+    /* The words mean something else now, because the data moved under
+       them. Show the new reading rather than the answer to a question
+       nobody asked, and let them press Enter on what it says now. */
+    if (!res.ok && res.restated) {
+      setMeaning(res);
+      setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
+      setStage('idle');
+      return;
+    }
     if (!res.ok) {
       setOutcome({ ok: false, message: res.error ?? 'That query did not run.' });
       setStage('done');
       return;
     }
     setAnswered(res);
+
+    /* A COPY IS A CLIENT EFFECT, AND THIS IS THE CLIENT.
+
+       No server can write to somebody's clipboard, so the plan declares
+       where the answer goes and the browser is what puts it there. The
+       old answer to "copy the navy hex" was an action that opened the
+       brand kit and called that copying. */
+    if (m.emit?.to === 'clipboard') {
+      const copied = await copyAnswer(res);
+      setOutcome(copied);
+    }
     setStage('answered');
+  }
+
+  /**
+   * The answer, on the clipboard, as text somebody can paste.
+   *
+   * One value goes across on its own, because "copy the navy hex" wants
+   * `#09163A` and not a table with one cell in it. Anything longer goes
+   * as tab separated rows, which is what a spreadsheet expects.
+   */
+  async function copyAnswer(res: any): Promise<Outcome> {
+    const rows: Record<string, unknown>[] = Array.isArray(res?.rows) ? res.rows : [];
+    const scalar = res?.answer ?? res?.value;
+
+    let text = '';
+    if (rows.length === 1 && Object.keys(rows[0]).length === 1) {
+      text = String(Object.values(rows[0])[0] ?? '');
+    } else if (rows.length) {
+      const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+      text = [
+        columns.join('\t'),
+        ...rows.map((r) => columns.map((c) => String(r[c] ?? '')).join('\t')),
+      ].join('\n');
+    } else if (scalar != null) {
+      text = String(scalar);
+    }
+
+    if (!text) {
+      return { ok: false, message: 'There was nothing there to copy.' };
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* Browsers refuse the clipboard outside a user gesture and in some
+         embedded contexts. Saying so is better than reporting a copy
+         that did not happen. */
+      return {
+        ok: false,
+        message: 'The browser refused clipboard access. The answer is below, ready to select.',
+      };
+    }
+
+    return {
+      ok: true,
+      message: rows.length > 1
+        ? `${rows.length.toLocaleString('en-GB')} rows copied.`
+        : `Copied: ${text.length > 60 ? `${text.slice(0, 60)}...` : text}`,
+    };
   }
 
   /**
    * Ask the server what the instruction would do, without doing it.
    *
-   * Nothing is written on this pass. The record is matched, the current
-   * value comes back beside the proposed one, and only a deliberate
-   * confirm sends the change. A bar that edits a record the moment you
-   * press Enter is a bar people stop trusting with real data.
+   * The same planning endpoint that produced the reading, asked one
+   * level deeper: `preview` makes it resolve the rows and report exactly
+   * what each one holds now beside what it would hold. Nothing is
+   * written on this pass, and the sentence is all that goes up.
+   *
+   * Deliberately not asked for on every keystroke. Resolving reads rows,
+   * and a bar that queries the database for every letter typed is a bar
+   * somebody turns off.
    */
-  async function previewEdit(p: EditPlan, recordId?: string) {
+  async function previewInstruction(said: string = text) {
     setStage('running');
-    const res = await fetch('/api/command/edit', {
+    const res = await fetch('/api/command/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        entity: p.entity, fieldKey: p.field.key, op: p.op, value: p.value,
-        targets: p.targets.map((t) => (t.kind === 'filter'
-          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
-          : { kind: t.kind, text: t.text })),
-        recordId, handoff: p.handoff,
-      }),
-    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+      body: JSON.stringify({ text: said, preview: true, context }),
+    }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
 
-    if (res.needsChoice) {
-      setEditChoices(res.candidates ?? []);
-      setStage('confirming');
-      return;
-    }
-    if (!res.ok) {
-      setOutcome({ ok: false, message: res.message ?? 'That change did not go through.' });
+    if (!res?.ok || !res.understood) {
+      setOutcome({ ok: false, message: 'I could not make anything of that.' });
       setStage('done');
       return;
     }
-    setEditChoices(null);
-    setEditPreview(res as EditPreview);
+
+    setMeaning(res as ServerMeaning);
+
+    /* STILL SHORT OF SOMETHING, SO ASK AGAIN.
+
+       A sentence can be missing two things, and answering one of them
+       leaves the other. The server decides that, from the same
+       capability inputs it decided the first question from, and this
+       loops until it says the sentence is whole. */
+    if (res.completion === 'incomplete' && (res.missing ?? []).length) {
+      setStage('asking');
+      return;
+    }
+    const p = res.preview as MutationPreview | null;
+
+    if (!p) {
+      setOutcome({ ok: false, message: 'That is not an instruction I can carry out.' });
+      setStage('done');
+      return;
+    }
+    if (!p.ok) {
+      /* An ambiguity is a question with several answers, and the bar
+         does not answer it on somebody's behalf. The candidates are
+         shown so the next sentence can name one of them. */
+      setEditPreview(p);
+      setStage('confirming');
+      return;
+    }
+
+    setEditPreview(p);
     setStage('confirming');
   }
 
-  /** The second pass, which is the one that writes. */
-  async function applyEdit() {
-    if (!edit || !editPreview) return;
+  /**
+   * The answer to what it asked, put back into the sentence.
+   *
+   * Not posted as a field and a value. The raw text stays the one
+   * authority on what was meant: the answer is added to it in the
+   * words the capability declares, and the server plans the whole
+   * sentence again from scratch. That is the same path the first
+   * press of Enter took, so there is no second way in.
+   */
+  function answerAsked(m: MissingInput, said: string) {
+    const clean = said.trim();
+    if (!clean) return;
+    const completed = completedWith(text, m, clean);
+    setText(completed);
+    previewInstruction(completed);
+  }
+
+  /**
+   * The second pass, which is the one that writes.
+   *
+   * The sentence and two fingerprints. No record ids, no values, no
+   * plan: the server plans and resolves again from the text, and the
+   * fingerprints only decide whether what it arrives at is what was
+   * shown here.
+   */
+  async function applyEdit(acknowledge?: number) {
+    if (!meaning || !editPreview?.ok) return;
     setStage('running');
-    const res = await fetch('/api/command/edit', {
+    const sent = await fetch('/api/command/apply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        entity: edit.entity, fieldKey: edit.field.key, op: edit.op, value: edit.value,
-        // A bulk change is defined by its description, not by ids, so the
-        // targets go back up rather than the rows they matched.
-        targets: edit.targets.map((t) => (t.kind === 'filter'
-          ? { kind: 'filter', column: t.column, value: t.value, label: t.text }
-          : { kind: t.kind, text: t.text })),
-        recordIds: editPreview.recordIds, recordId: editPreview.recordId,
+        text,
+        planHash: meaning.hash,
+        programmeHash: editPreview.programmeHash,
         confirm: true,
+        acknowledge,
+        context,
       }),
-    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
+    }).catch(() => null);
+
+    if (!sent) {
+      setOutcome({ ok: false, message: 'That did not reach the server.' });
+      setStage('done');
+      return;
+    }
+
+    /* A CONFIRMED COMMAND CAN PRODUCE A FILE TOO.
+
+       "Create a list from them and export it to Excel" is one thing
+       somebody confirmed, and the file comes back from the same request
+       that made the change. It arrives as the response BODY rather than
+       as base64 in JSON, because a workbook of a complete selection can
+       be tens of megabytes and a JSON round trip would hold three
+       copies of it. What the command did is in the headers. */
+    if (!sent.headers.get('Content-Type')?.includes('application/json')) {
+      const blob = await sent.blob();
+      const name = /filename="([^"]+)"/.exec(sent.headers.get('Content-Disposition') ?? '')?.[1]
+        ?? 'export';
+      save(blob, name);
+
+      setEditPreview(null);
+      setOutcome({
+        ok: true,
+        message: decodeURIComponent(sent.headers.get('X-Command-Message') ?? '')
+          || `${name} downloaded.`,
+      });
+      setStage('done');
+      return;
+    }
+
+    const res = await sent.json().catch((e) => ({ ok: false, message: e.message }));
+
+    /* The world moved between looking and agreeing. Show what it says
+       now rather than an error about what it used to say. */
+    if (!res.ok && res.preview) {
+      setEditPreview(res.preview as MutationPreview);
+      setOutcome({ ok: false, message: res.message ?? 'Those records have changed. Check it and confirm again.' });
+      setStage('confirming');
+      return;
+    }
+    if (!res.ok && res.restated) {
+      setMeaning(res.restated as ServerMeaning);
+      setEditPreview(null);
+      setOutcome({ ok: false, message: 'What that means has changed. Check the reading and press Enter again.' });
+      setStage('idle');
+      return;
+    }
+
     setEditPreview(null);
     setOutcome(res);
     setStage('done');
   }
 
   async function submit() {
-    // An instruction first. "Add £1k refurb to STC143980" is not a
-    // question about trailers, however much it reads like one.
-    if (editReady && edit) return previewEdit(edit);
-    if (useQuery && plan) return runQuery(plan);
-    const parsed = parse(text);
-    if (!parsed.intent) {
-      setOutcome({
-        ok: false,
-        message: 'I could not tell what you wanted there.',
-        detail: 'Try naming the thing and the action, like "schedule a call for Dawson on Friday".',
-      });
-      setStage('done');
-      return;
-    }
-    const initial: Record<string, any> = {};
-    for (const f of parsed.filled) initial[f.key] = f.value;
-    if (parsed.entities.range) initial.rangeLabel = parsed.entities.range.label;
-    await advance(parsed, initial);
-  }
+    /* UNDERSTOOD AND SHORT OF A VALUE IS A QUESTION, NOT A FAILURE.
 
-  async function run() {
-    if (!result?.intent) return;
-    setStage('running');
-    const res = await fetch('/api/command/execute', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ intentId: result.intent.id, slots }),
-    }).then((r) => r.json()).catch((e) => ({ ok: false, message: e.message }));
-    setOutcome(res);
+       "Create a LinkedIn post" is read perfectly and has no content on
+       it. The server says which value is missing and what to ask, and
+       the answer is added to the sentence rather than posted as a
+       field: what runs is the raw text, planned again from the
+       beginning. Nothing is written on this path. */
+    if (asking.length) { setStage('asking'); return; }
+
+    /* An instruction first. "Add £1k refurb to STC143980" is not a
+       question about trailers, however much it reads like one. Which it
+       is was decided by the server, not here. */
+    if (instructionReady) return previewInstruction();
+    if (wantsFile && meaning) return downloadArtefact(meaning);
+    if (useQuery && meaning) return runQuery(meaning);
+
+    /* A SENTENCE THE CANONICAL PLANNER DOES NOT UNDERSTAND IS NOT
+       UNDERSTOOD.
+
+       There is nowhere else for it to go. Handing it to a second parser
+       that might decide it means something else is how a refusal became
+       an execution, and it is the one thing this architecture exists to
+       stop. */
+    setOutcome({
+      ok: false,
+      message: meaning?.blocked?.length
+        ? meaning.blocked.join('; ')
+        : 'I could not tell what you wanted there.',
+      detail: meaning?.unresolved?.length
+        ? `I did not read: ${meaning.unresolved.join(', ')}`
+        : 'Try naming the thing and the action, like "book a call with Dawson on Friday at 10".',
+    });
     setStage('done');
   }
 
-  function pickCandidate(c: Candidate | null) {
-    if (!choices || !result) return;
-    const next = { ...slots };
-    if (c) {
-      next.contactId = c.id;
-      next.contactLabel = c.label;
-    } else {
-      // "Add it as new" keeps whatever they typed as the name.
-      next.contactId = null;
-      next.createContact = true;
-    }
-    setChoices(null);
-    advance(result, next);
-  }
-
-  function answerSlot() {
-    if (!asking || !result) return;
-    const v = answer.trim();
-    if (!v) return;
-    const next = { ...slots, [asking.key]: v, __resolved: false };
-    if (asking.key === 'contact') next.contactLabel = v;
-    setAsking(null);
-    advance(result, next);
-  }
-
-  const understood = preview?.intent ?? result?.intent ?? null;
 
   const bar = variant === 'bar';
   /** Is there anything below the input worth floating? */
   const hasPanel =
     (stage === 'idle' && text.trim().length >= 2) ||
-    stage === 'choosing' || stage === 'asking' || stage === 'ready' ||
     stage === 'running' || stage === 'done' || stage === 'answered' ||
-    stage === 'confirming';
+    stage === 'confirming' || stage === 'asking';
 
   return (
     <div className="kit" style={{
@@ -566,7 +881,9 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
            in a 52px bar it read as a search box somebody bolted on. */
         height: bar ? 38 : 52,
       }}>
-        <Search size={bar ? 15 : 17} style={{ color: understood ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
+        {/* The magnifier lights up when the SERVER has made something of
+            the sentence, which is the only reading that counts. */}
+        <Search size={bar ? 15 : 17} style={{ color: meaning ? 'var(--accent)' : 'var(--text-subtle)', flexShrink: 0 }} />
         <input
           ref={inputRef}
           value={text}
@@ -589,6 +906,54 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
             fontFamily: 'var(--inter)', fontSize: bar ? 13.5 : 14.5, letterSpacing: '-0.01em',
           }}
         />
+        {/* A SPREADSHEET, ATTACHED TO THE SENTENCE.
+
+            Nothing is read from it here beyond its text. What its
+            columns are, which rows are usable and what gets written are
+            decided on the server, against the same dictionary the import
+            screen uses. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv,text/plain"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) takeFile(f);
+            e.target.value = '';
+          }}
+        />
+        {attached ? (
+          <button
+            onClick={() => setAttached(null)}
+            title={`${attached.name}, attached. Click to take it off.`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+              border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+              background: 'var(--surface-sunken)', color: 'var(--text-muted)',
+              padding: '2px 7px', fontFamily: 'var(--inter)', fontSize: 11.5,
+              cursor: 'pointer', maxWidth: 180,
+            }}
+          >
+            <Paperclip size={11} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {attached.name}
+            </span>
+            <X size={11} />
+          </button>
+        ) : (
+          <button
+            onClick={() => fileRef.current?.click()}
+            aria-label="Attach a spreadsheet"
+            title="Attach a spreadsheet"
+            style={{
+              border: 'none', background: 'transparent', color: 'var(--text-subtle)',
+              cursor: 'pointer', display: 'flex', flexShrink: 0,
+            }}
+          >
+            <Paperclip size={bar ? 13 : 15} />
+          </button>
+        )}
         {text && (
           <button onClick={reset} aria-label="Clear"
             style={{ border: 'none', background: 'transparent', color: 'var(--text-subtle)', cursor: 'pointer', display: 'flex' }}>
@@ -617,7 +982,28 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
-            {editReady && edit && (
+            {/* UNDERSTOOD, AND WAITING ON ONE THING.
+
+                Shown in place of the reading, because what somebody
+                needs at this point is the question rather than a list
+                of other sentences they could have typed. */}
+            {asking.length > 0 && meaning && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{asking[0].ask}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
+              </div>
+            )}
+            {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -626,13 +1012,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Pencil size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to check it
                 </span>
               </div>
             )}
-            {useQuery && plan && (
+            {useQuery && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -641,34 +1027,19 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                  {meaning.summary}
+                </span>
+                {partial.length > 0 && (
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    answers part of that
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to answer
                 </span>
               </div>
             )}
-            {!useQuery && preview?.intent && !(readsOnly && preview.intent.writes) && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                padding: '9px 14px', background: 'var(--surface-sunken)',
-                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
-                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
-                outlineOffset: -2,
-              }}>
-                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
-                {preview.filled.map((f) => (
-                  <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
-                ))}
-                {preview.missing.map((m) => (
-                  <Badge key={m.key} tone="warning">{m.label}?</Badge>
-                ))}
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
-                  <CornerDownLeft size={12} /> to run
-                </span>
-              </div>
-            )}
-
             {suggestions.map((s, i) => (
               <button
                 key={`${s.kind}-${s.label}`}
@@ -693,7 +1064,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
               </button>
             ))}
 
-            {!preview?.intent && suggestions.length === 0 && (
+            {suggestions.length === 0 && (
               <div style={{ padding: '11px 14px' }}>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
                   Nothing matches that yet. Things that work:
@@ -714,84 +1085,6 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           </div>
         )}
 
-        {/* disambiguation */}
-        {stage === 'choosing' && choices && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{choices.label}</Label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-              {choices.candidates.map((c) => (
-                <button key={c.id} onClick={() => pickCandidate(c)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                    border: '1px solid var(--border)', background: 'var(--surface)',
-                    color: 'var(--text)', cursor: 'pointer', fontSize: 13,
-                  }}>
-                  <span style={{ fontWeight: 600, flex: 1 }}>{c.label}</span>
-                  {c.sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{c.sub}</span>}
-                  {c.status && <Badge tone="neutral">{c.status}</Badge>}
-                </button>
-              ))}
-              {choices.allowNew && (
-                <button onClick={() => pickCandidate(null)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
-                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                    border: '1px dashed var(--border-strong)', background: 'transparent',
-                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
-                  }}>
-                  Add it as a new record instead
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* one question at a time */}
-        {stage === 'asking' && asking && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{asking.ask}</Label>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <input
-                autoFocus value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); answerSlot(); } }}
-                placeholder={asking.label}
-                style={{
-                  flex: 1, height: 32, padding: '0 10px', borderRadius: 'var(--r)',
-                  border: '1px solid var(--border-strong)', background: 'var(--surface)',
-                  color: 'var(--text)', fontSize: 13, fontFamily: 'var(--inter)',
-                }}
-              />
-              <Button variant="primary" onClick={answerSlot} disabled={!answer.trim()}>Continue</Button>
-              <Button variant="ghost" onClick={reset}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {/* confirm before writing */}
-        {stage === 'ready' && result?.intent && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>About to {result.intent.title.toLowerCase()}</Label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 12px' }}>
-              {result.intent.slots.map((s) => {
-                const v = slots[s.key === 'contact' ? (slots.contactLabel ? 'contactLabel' : 'contact') : s.key];
-                if (v == null || v === '') return null;
-                const display = typeof v === 'object'
-                  ? (v.amount ? `£${Number(v.amount).toLocaleString()}${v.per === 'unit' ? ' per unit' : ''}` : JSON.stringify(v))
-                  : String(v);
-                return <Badge key={s.key} tone="info">{s.label}: {display}</Badge>;
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Button variant={result.intent.writes ? 'accent' : 'primary'} onClick={run}>
-                {result.intent.writes ? 'Confirm' : 'Run'} <ArrowRight size={13} />
-              </Button>
-              <Button variant="ghost" onClick={reset}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
         {stage === 'running' && (
           <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
             <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
@@ -801,85 +1094,30 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
         {/* the answer to a question */}
         {stage === 'answered' && answered && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{answered.summary}</Label>
+          <Answer
+            answered={answered}
+            onGo={(href) => router.push(href)}
+            onReset={reset}
+          />
+        )}
 
-            {answered.kind === 'number' && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-                }}>
-                  {answered.money
-                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
-                    : Number(answered.value).toLocaleString()}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {answered.money
-                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
-                    : answered.entity}
-                </span>
-              </div>
-            )}
-
-            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {answered.sample.map((s: any) => (
-                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
-                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
-                  </div>
-                ))}
-                {answered.value > answered.sample.length && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-                    and {answered.value - answered.sample.length} more
-                  </div>
-                )}
-              </div>
-            )}
-
-            {answered.kind === 'grouped' && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(() => {
-                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
-                  return answered.groups.map((g: any) => {
-                    const v = answered.measure === 'count' ? g.count : g.total;
-                    return (
-                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
-                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
-                        </div>
-                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {answered.measure === 'count' ? v.toLocaleString()
-                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
-                        </span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
-                See them <ArrowRight size={12} />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
-            </div>
-          </div>
+        {/* understood, and short of something only they can supply */}
+        {stage === 'asking' && asking.length > 0 && (
+          <Asking
+            missing={asking[0]}
+            summary={meaning?.summary ?? 'That'}
+            onAnswer={(said) => answerAsked(asking[0], said)}
+            onCancel={reset}
+          />
         )}
 
         {/* what it is about to change, before it changes it */}
         {stage === 'confirming' && (
           <EditConfirm
             preview={editPreview}
-            candidates={editChoices}
-            summary={edit?.summary ?? 'This change'}
-            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            summary={meaning?.summary ?? 'This change'}
             onApply={applyEdit}
             onCancel={reset}
-            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -918,7 +1156,28 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
         {/* what it thinks you meant, and everything else it could be */}
         {stage === 'idle' && text.trim().length >= 2 && (
           <div style={{ borderTop: '1px solid var(--border)' }}>
-            {editReady && edit && (
+            {/* UNDERSTOOD, AND WAITING ON ONE THING.
+
+                Shown in place of the reading, because what somebody
+                needs at this point is the question rather than a list
+                of other sentences they could have typed. */}
+            {asking.length > 0 && meaning && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '9px 14px', background: 'var(--surface-sunken)',
+                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
+                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
+                outlineOffset: -2,
+              }}>
+                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{asking[0].ask}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                  <CornerDownLeft size={12} /> to answer
+                </span>
+              </div>
+            )}
+            {instructionReady && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -927,13 +1186,13 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Pencil size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{edit.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{meaning.summary}</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to check it
                 </span>
               </div>
             )}
-            {useQuery && plan && (
+            {useQuery && meaning && (
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                 padding: '9px 14px', background: 'var(--surface-sunken)',
@@ -942,34 +1201,19 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
                 outlineOffset: -2,
               }}>
                 <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{plan.summary}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                  {meaning.summary}
+                </span>
+                {partial.length > 0 && (
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    answers part of that
+                  </span>
+                )}
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
                   <CornerDownLeft size={12} /> to answer
                 </span>
               </div>
             )}
-            {!useQuery && preview?.intent && !(readsOnly && preview.intent.writes) && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                padding: '9px 14px', background: 'var(--surface-sunken)',
-                borderBottom: suggestions.length ? '1px solid var(--border)' : 'none',
-                outline: cursor === -1 && suggestions.length ? '2px solid var(--focus)' : 'none',
-                outlineOffset: -2,
-              }}>
-                <Sparkles size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{preview.intent.title}</span>
-                {preview.filled.map((f) => (
-                  <Badge key={f.key} tone="info">{f.label}: {f.display}</Badge>
-                ))}
-                {preview.missing.map((m) => (
-                  <Badge key={m.key} tone="warning">{m.label}?</Badge>
-                ))}
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-subtle)' }}>
-                  <CornerDownLeft size={12} /> to run
-                </span>
-              </div>
-            )}
-
             {suggestions.map((s, i) => (
               <button
                 key={`${s.kind}-${s.label}`}
@@ -994,7 +1238,7 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
               </button>
             ))}
 
-            {!preview?.intent && suggestions.length === 0 && (
+            {suggestions.length === 0 && (
               <div style={{ padding: '11px 14px' }}>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 7 }}>
                   Nothing matches that yet. Things that work:
@@ -1015,84 +1259,6 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           </div>
         )}
 
-        {/* disambiguation */}
-        {stage === 'choosing' && choices && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{choices.label}</Label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-              {choices.candidates.map((c) => (
-                <button key={c.id} onClick={() => pickCandidate(c)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                    border: '1px solid var(--border)', background: 'var(--surface)',
-                    color: 'var(--text)', cursor: 'pointer', fontSize: 13,
-                  }}>
-                  <span style={{ fontWeight: 600, flex: 1 }}>{c.label}</span>
-                  {c.sub && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{c.sub}</span>}
-                  {c.status && <Badge tone="neutral">{c.status}</Badge>}
-                </button>
-              ))}
-              {choices.allowNew && (
-                <button onClick={() => pickCandidate(null)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
-                    minHeight: 36, padding: '6px 10px', borderRadius: 'var(--r)',
-                    border: '1px dashed var(--border-strong)', background: 'transparent',
-                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13,
-                  }}>
-                  Add it as a new record instead
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* one question at a time */}
-        {stage === 'asking' && asking && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{asking.ask}</Label>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <input
-                autoFocus value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); answerSlot(); } }}
-                placeholder={asking.label}
-                style={{
-                  flex: 1, height: 32, padding: '0 10px', borderRadius: 'var(--r)',
-                  border: '1px solid var(--border-strong)', background: 'var(--surface)',
-                  color: 'var(--text)', fontSize: 13, fontFamily: 'var(--inter)',
-                }}
-              />
-              <Button variant="primary" onClick={answerSlot} disabled={!answer.trim()}>Continue</Button>
-              <Button variant="ghost" onClick={reset}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {/* confirm before writing */}
-        {stage === 'ready' && result?.intent && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>About to {result.intent.title.toLowerCase()}</Label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0 12px' }}>
-              {result.intent.slots.map((s) => {
-                const v = slots[s.key === 'contact' ? (slots.contactLabel ? 'contactLabel' : 'contact') : s.key];
-                if (v == null || v === '') return null;
-                const display = typeof v === 'object'
-                  ? (v.amount ? `£${Number(v.amount).toLocaleString()}${v.per === 'unit' ? ' per unit' : ''}` : JSON.stringify(v))
-                  : String(v);
-                return <Badge key={s.key} tone="info">{s.label}: {display}</Badge>;
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Button variant={result.intent.writes ? 'accent' : 'primary'} onClick={run}>
-                {result.intent.writes ? 'Confirm' : 'Run'} <ArrowRight size={13} />
-              </Button>
-              <Button variant="ghost" onClick={reset}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
         {stage === 'running' && (
           <div style={{ borderTop: '1px solid var(--border)', padding: 14, display: 'flex', alignItems: 'center', gap: 9 }}>
             <Loader size={14} className="spin" style={{ color: 'var(--accent)' }} />
@@ -1102,85 +1268,30 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 
         {/* the answer to a question */}
         {stage === 'answered' && answered && (
-          <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-            <Label>{answered.summary}</Label>
+          <Answer
+            answered={answered}
+            onGo={(href) => router.push(href)}
+            onReset={reset}
+          />
+        )}
 
-            {answered.kind === 'number' && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                  letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-                }}>
-                  {answered.money
-                    ? new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(answered.value)
-                    : Number(answered.value).toLocaleString()}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {answered.money
-                    ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
-                    : answered.entity}
-                </span>
-              </div>
-            )}
-
-            {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {answered.sample.map((s: any) => (
-                  <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                    <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
-                    <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
-                  </div>
-                ))}
-                {answered.value > answered.sample.length && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
-                    and {answered.value - answered.sample.length} more
-                  </div>
-                )}
-              </div>
-            )}
-
-            {answered.kind === 'grouped' && (
-              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(() => {
-                  const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
-                  return answered.groups.map((g: any) => {
-                    const v = answered.measure === 'count' ? g.count : g.total;
-                    return (
-                      <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
-                        <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
-                        </div>
-                        <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                          {answered.measure === 'count' ? v.toLocaleString()
-                            : new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(v)}
-                        </span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <Button variant="primary" size="sm" onClick={() => router.push(answered.listHref ?? answered.href ?? '/dashboard')}>
-                See them <ArrowRight size={12} />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={reset}>Ask something else</Button>
-            </div>
-          </div>
+        {/* understood, and short of something only they can supply */}
+        {stage === 'asking' && asking.length > 0 && (
+          <Asking
+            missing={asking[0]}
+            summary={meaning?.summary ?? 'That'}
+            onAnswer={(said) => answerAsked(asking[0], said)}
+            onCancel={reset}
+          />
         )}
 
         {/* what it is about to change, before it changes it */}
         {stage === 'confirming' && (
           <EditConfirm
             preview={editPreview}
-            candidates={editChoices}
-            summary={edit?.summary ?? 'This change'}
-            onPick={(id) => { if (edit) previewEdit(edit, id); }}
+            summary={meaning?.summary ?? 'This change'}
             onApply={applyEdit}
             onCancel={reset}
-            onGo={(href) => { router.push(href); reset(); }}
           />
         )}
 
@@ -1217,53 +1328,272 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
 }
 
 /* =============================================================
-   The confirmation before a write.
+   The answer.
 
-   Shown for every field edit, without exception. It names the record it
-   matched, the field, and the value before and after, because the record
-   was found from a partial name and the person typing has no other way
-   to know which row it landed on.
-
-   Where more than one record matched, it asks instead of guessing. A bar
-   that picks the first Dawson and writes to it is a bar that eventually
-   writes to the wrong Dawson.
+   One copy. There were two, byte for byte, because the bar renders in
+   two places and the block was pasted rather than lifted. Adding a
+   result shape meant remembering to add it twice, and the one nobody
+   remembered would look like the feature had not been built.
    ============================================================= */
-function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, onGo }: {
-  preview: EditPreview | null;
-  candidates: Candidate[] | null;
-  summary: string;
-  onPick: (id: string) => void;
-  onApply: () => void;
-  onCancel: () => void;
+function Answer({ answered, onGo, onReset }: {
+  answered: any;
   onGo: (href: string) => void;
+  onReset: () => void;
 }) {
-  if (candidates) {
-    return (
-      <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>
-          Which one?
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-          {summary} needs one record, and more than one matched.
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {candidates.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => onPick(c.id)}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1,
-                textAlign: 'left', width: '100%', padding: '8px 10px',
-                border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
-                background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
-                fontFamily: 'var(--inter)',
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</span>
-              {c.sub && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.sub}</span>}
-            </button>
+  const gbp = (v: number) => new Intl.NumberFormat('en-GB', {
+    style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
+  }).format(v);
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', padding: 14 }}>
+      <Label>{answered.summary}</Label>
+
+      {/* What was asked for and could not be answered here. The server
+          sends this with the answer, and an answer that carries any of
+          it is not the question having been answered. */}
+      {(answered.unresolved ?? []).length > 0 && (
+        <div style={{
+          marginTop: 8, fontSize: 12, color: 'var(--text-muted)',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          <span style={{ fontWeight: 600 }}>This answers part of what you asked.</span>
+          {answered.unresolved.map((u: string) => (
+            <span key={u}>Could not do this part: {u}</span>
           ))}
         </div>
+      )}
+
+      {answered.kind === 'number' && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+          <span style={{
+            fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
+            letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+          }}>
+            {answered.money ? gbp(answered.value)
+              : `${Number(answered.value).toLocaleString()}${answered.unit ? ` ${answered.unit}` : ''}`}
+          </span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            {answered.money || answered.unit
+              ? `${answered.amountLabel ?? ''} across ${answered.rowCount} ${answered.entity}`
+              : answered.entity}
+          </span>
+        </div>
+      )}
+
+      {answered.kind === 'number' && (answered.sample ?? []).length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {answered.sample.map((s: any) => (
+            <div key={s.id} style={{ fontSize: 12.5, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+              <span style={{ color: 'var(--text)', fontWeight: 500 }}>{s.title}</span>
+              <span style={{ color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</span>
+            </div>
+          ))}
+          {answered.value > answered.sample.length && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+              and {answered.value - answered.sample.length} more
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* A few rows in a stated order. "The five cheapest" is a list of
+          five, and answering it with the number five is a different
+          question. */}
+      {answered.kind === 'rows' && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {(answered.rows ?? []).map((r: any) => (
+            <div key={r.id} style={{
+              display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10,
+              alignItems: 'baseline', fontSize: 12.5,
+            }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--text)', fontWeight: 500 }}>{r.title}</span>
+                <span style={{ color: 'var(--text-subtle)', marginLeft: 8 }}>{r.sub}</span>
+              </span>
+              <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                {r.figure == null ? <span style={{ color: 'var(--text-subtle)' }}>—</span>
+                  : r.money ? gbp(Number(r.figure))
+                  : Number(r.figure).toLocaleString()}
+              </span>
+            </div>
+          ))}
+          {answered.total > (answered.rows ?? []).length && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+              {answered.orderLabel ? `${answered.orderLabel}, ` : ''}
+              out of {answered.total.toLocaleString()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {answered.kind === 'grouped' && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {(() => {
+            const top = Math.max(...answered.groups.map((g: any) => answered.measure === 'count' ? g.count : g.total), 1);
+            return answered.groups.map((g: any) => {
+              const v = answered.measure === 'count' ? g.count : g.total;
+              return (
+                <div key={g.key} style={{ display: 'grid', gridTemplateColumns: '132px minmax(60px,1fr) 74px', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.key}</span>
+                  <div style={{ height: 5, borderRadius: 'var(--r-full)', background: 'var(--bg-subtle)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${(v / top) * 100}%`, background: 'var(--accent)', borderRadius: 'var(--r-full)' }} />
+                  </div>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                    {answered.measure === 'count' ? v.toLocaleString()
+                      : answered.money === false ? Math.round(v).toLocaleString()
+                      : gbp(v)}
+                  </span>
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <Button variant="primary" size="sm" onClick={() => onGo(answered.listHref ?? answered.href ?? '/dashboard')}>
+          See them <ArrowRight size={12} />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onReset}>Ask something else</Button>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================
+   The confirmation before a write.
+
+   Shown for every change, without exception, from the server's own
+   description of what it is about to do. It names each record it
+   matched and what that record holds now beside what it would hold,
+   because the rows were found from a partial name or a description and
+   the person typing has no other way to know which ones it landed on.
+
+   PER ROW, NOT ONE SHARED LINE.
+
+   A bulk change usually starts from different values. "They were
+   outstanding" was true when the only thing a bulk instruction could
+   narrow on was the column it was writing, and became a lie the moment
+   it could narrow on anything else. Eleven rows holding eleven numbers
+   get eleven lines, and one line only when they genuinely agree.
+
+   WHERE SEVERAL RECORDS MATCHED A SENTENCE ABOUT ONE, IT ASKS.
+
+   It does not offer to pick one. The only thing that reaches the server
+   is the sentence, so resolving an ambiguity here would mean the browser
+   deciding which record a command is about, which is the decision this
+   whole path exists to keep on the server. What it does instead is show
+   what matched, so the next sentence can name one of them.
+   ============================================================= */
+/* =============================================================
+   The question, when a sentence was understood and left something out.
+
+   "Create a LinkedIn post" is not a sentence nobody can read. It is
+   `post.create` waiting for its content, and the old answer, "I could
+   not tell what you wanted there", taught somebody the bar could not do
+   a thing it does.
+
+   WHAT THIS DOES NOT DO.
+
+   Send a field and a value. The answer is added to the raw sentence in
+   the words the capability declares, and the server plans the whole
+   thing again from that text. The browser stays a place where a
+   sentence is typed and a reading is shown, which is what stops a
+   second authority on meaning growing here.
+
+   Nothing has been written when this is on screen, and nothing is
+   written by answering: the completed sentence goes through the same
+   preview and the same confirmation as the first one.
+   ============================================================= */
+function Asking({ missing, summary, onAnswer, onCancel }: {
+  missing: MissingInput;
+  summary: string;
+  onAnswer: (said: string) => void;
+  onCancel: () => void;
+}) {
+  const [said, setSaid] = useState('');
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); }, [missing.key]);
+
+  return (
+    <div style={{
+      borderTop: '1px solid var(--border)', padding: 14,
+      borderLeft: '2px solid var(--accent)',
+    }}>
+      <Label>{summary}</Label>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', margin: '6px 0 2px' }}>
+        {missing.ask}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 9 }}>
+        Nothing has been done yet. This is added to what you typed.
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          ref={ref}
+          value={said}
+          onChange={(e) => setSaid(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && said.trim()) { e.preventDefault(); onAnswer(said); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          }}
+          placeholder={missing.label}
+          style={{
+            flex: 1, minWidth: 0, height: 32, padding: '0 10px',
+            border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+            background: 'var(--bg)', color: 'var(--text)',
+            fontSize: 13, fontFamily: 'var(--inter)',
+          }}
+        />
+        <Button variant="primary" size="sm" disabled={!said.trim()} onClick={() => onAnswer(said)}>
+          Carry on <ArrowRight size={12} />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
+
+function EditConfirm({ preview, summary, onApply, onCancel }: {
+  preview: MutationPreview | null;
+  summary: string;
+  /** The count, for a deletion. Absent for everything else. */
+  onApply: (acknowledge?: number) => void;
+  onCancel: () => void;
+}) {
+  const [typed, setTyped] = useState('');
+  if (!preview) return null;
+
+  if (!preview.ok) {
+    const candidates = preview.candidates ?? preview.referenceCandidates ?? [];
+    return (
+      <div style={{
+        borderTop: '1px solid var(--border)', padding: 14,
+        borderLeft: '2px solid var(--warning)',
+      }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>
+          {candidates.length ? 'Which one?' : 'Nothing was changed'}
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: candidates.length ? 10 : 0 }}>
+          {preview.why}
+        </div>
+        {candidates.length > 0 && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {candidates.slice(0, 8).map((c) => (
+                <div key={c.id} style={{
+                  padding: '7px 10px', border: '1px solid var(--border)',
+                  borderRadius: 'var(--r-sm)', background: 'var(--surface)',
+                  fontSize: 13, color: 'var(--text)',
+                }}>
+                  {c.label}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 8, lineHeight: 1.5 }}>
+              Say which one and press Enter again.
+            </div>
+          </>
+        )}
         <div style={{ marginTop: 10 }}>
           <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
         </div>
@@ -1271,7 +1601,9 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, 
     );
   }
 
-  if (!preview) return null;
+  const fields = preview.fields.map((f) => f.label).join(' and ');
+  const shown = preview.uniform ? preview.rows.slice(0, 1) : preview.rows;
+  const more = preview.count - preview.rows.length;
 
   return (
     <div style={{
@@ -1282,57 +1614,110 @@ function EditConfirm({ preview, candidates, summary, onPick, onApply, onCancel, 
         <Pencil size={15} style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
-            {preview.recordLabel}
+            {summary}
           </div>
-          {preview.recordSub && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{preview.recordSub}</div>
-          )}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            {fields} on {preview.count} {preview.count === 1 ? 'record' : 'records'}
+            {preview.uniform && preview.count > 1 ? ', all the same' : ''}
+          </div>
 
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            display: 'flex', flexDirection: 'column', gap: 1,
             marginTop: 10, padding: '8px 10px',
             background: 'var(--surface-sunken)', border: '1px solid var(--border)',
             borderRadius: 'var(--r-sm)',
           }}>
-            <Label>{preview.fieldLabel}</Label>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
-              {preview.before}
-            </span>
-            <ArrowRight size={13} style={{ color: 'var(--text-subtle)' }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{preview.after}</span>
+            {shown.map((r, i) => (
+              <div key={`${r.label}-${i}`} style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                padding: '2px 0',
+              }}>
+                {!preview.uniform && <Label>{r.label}</Label>}
+                <span style={{ fontSize: 13, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                  {r.before}
+                </span>
+                <ArrowRight size={13} style={{ color: 'var(--text-subtle)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{r.after}</span>
+              </div>
+            ))}
+            {more > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', paddingTop: 4 }}>
+                and {more} more
+              </div>
+            )}
           </div>
 
-          {preview.unchanged && (
+          {/* WHAT AN OPERATION OUTSIDE THE DATABASE SAYS IT WILL DO.
+
+              For an import this is the only account anybody gets before
+              agreeing to it: how many customers, what is being left out,
+              and what the columns were read as. The last one is the part
+              the old import never showed and the part that goes wrong. */}
+          {preview.operations.filter((o) => o.says).map((o) => (
+            <div key={o.capability} style={{
+              fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.55,
+            }}>
+              {o.says}
+            </div>
+          ))}
+
+          {preview.rows.length > 0 && preview.rows.every((r) => r.before === r.after) && (
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
               That is what it already says, so nothing would change.
             </div>
           )}
-          {preview.caution && (
-            <div style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 8, lineHeight: 1.5 }}>
-              {preview.caution}
+          {preview.cautions.map((c) => (
+            <div key={c} style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 8, lineHeight: 1.5 }}>
+              {c}
+            </div>
+          ))}
+
+          {/* A DELETION IS AGREED TO BY NUMBER.
+
+              Everything else here can be put back by typing the old
+              value in. Removing records cannot, so the same keystroke
+              that confirms a price change must not confirm this: the
+              number has to be typed, and the server checks it against
+              the set as it stands rather than against this preview. */}
+          {preview.severity === 'destructive' ? (
+            <>
+              <div style={{ fontSize: 12.5, color: 'var(--danger, var(--warning))', marginTop: 10, lineHeight: 1.5 }}>
+                This removes {preview.count} {preview.count === 1 ? 'record' : 'records'} and
+                there is no undo. Type {preview.count} to confirm.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+                <input
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  inputMode="numeric"
+                  aria-label={`Type ${preview.count} to confirm`}
+                  style={{
+                    width: 72, padding: '6px 8px', fontSize: 13,
+                    border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                    background: 'var(--surface)', color: 'var(--text)',
+                  }}
+                />
+                <Button
+                  variant="primary" size="sm"
+                  disabled={Number(typed) !== preview.count}
+                  onClick={() => onApply(preview.count)}
+                >
+                  <Check size={12} /> Delete {preview.count}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <Button variant="primary" size="sm" onClick={() => onApply()}>
+                <Check size={12} /> {preview.count > 1 ? `Change all ${preview.count}` : 'Save it'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
             </div>
           )}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            {/* Selling is understood here and finished on the stock
-                list, where the price and the commission line are. A
-                Save button that quietly changed a status column would
-                leave the tracker out of step with the yard. */}
-            {preview.handoff === 'markSold'
-              ? (
-                <Button variant="primary" size="sm" onClick={() => onGo(preview.link?.href ?? '/dashboard/sales')}>
-                  {preview.link?.label ?? 'Open the trailer'} <ArrowRight size={12} />
-                </Button>
-              )
-              : (
-                <Button variant="primary" size="sm" onClick={onApply}>
-                  <Check size={12} /> {preview.bulk ? `Change all ${preview.count}` : 'Save it'}
-                </Button>
-              )}
-            <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-          </div>
         </div>
       </div>
     </div>
   );
 }
+

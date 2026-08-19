@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { publishSelection } from '@/lib/command/selection';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent } from 'ag-grid-community';
 import { useRouter } from 'next/navigation';
@@ -9,6 +10,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { STOCK_TRAILERS } from '@/lib/import/dictionary';
+import { commitStockImport as writeStock, prepareStock } from '@/lib/import/stock';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
 
 type StatusTab = 'all' | StockStatus;
@@ -201,16 +203,27 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
    * here they are the right shape for the columns, so this only inserts
    * and reloads.
    */
+  /* The import is one operation, in `lib/import/stock.ts`, which the
+     command bar reaches too. It used to be an insert straight from here,
+     which put the allowlist and the permission in code somebody can edit
+     in a console and had no answer for a failure halfway down a
+     supplier's file. */
   async function commitStockImport(records: Record<string, any>[]) {
-    const withDefaults = records.map((r) => ({ status: 'in_stock', ...r }));
-    const { error, count } = await supabase.from('stock_trailers')
-      .insert(withDefaults, { count: 'exact' });
-    if (error) return { inserted: 0, error: error.message };
+    const { records: ready, refused } = prepareStock(records);
+    if (!ready.length) {
+      return { inserted: 0, error: 'none of those rows had a stock number to identify them by' };
+    }
+
+    const done = await writeStock(supabase, ready);
+    if (!done.ok) return { inserted: 0, error: done.why };
+
     const { data } = await supabase.from('stock_trailers').select('*')
       .order('updated_at', { ascending: false });
     setRows((data ?? []) as StockTrailer[]);
-    setMessage(`Imported ${count ?? withDefaults.length} trailers`);
-    return { inserted: count ?? withDefaults.length };
+    setMessage(refused
+      ? `Imported ${done.inserted} trailers. ${refused} had no stock number and were left out.`
+      : `Imported ${done.inserted} trailers`);
+    return { inserted: done.inserted };
   }
 
   async function bulkDelete() {
@@ -225,11 +238,21 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     gridRef.current?.api.deselectAll();
   }
 
+  /* ONE OPERATION, TWO WAYS IN.
+     This built the copy here, out of the row the grid happened to be
+     holding, and inserted it. The command bar can duplicate a unit too,
+     and two implementations of "duplicate" is how they end up copying
+     different columns: this one copied whatever the grid had loaded.
+     `command_duplicate_stock` is the operation now, and this is one
+     caller of it. Migration 038. */
   async function duplicateRow(row: StockTrailer) {
-    const { id, created_at, updated_at, ...rest } = row;
-    const { data, error } = await supabase.from('stock_trailers').insert(rest).select('*').single();
+    const { data, error } = await supabase.rpc('command_duplicate_stock', { p_ids: [row.id] });
     if (error) { setMessage(error.message); return; }
-    setRows(r => [data as StockTrailer, ...r]);
+    const made = (data as { id?: string } | null)?.id;
+    if (made) {
+      const { data: fresh } = await supabase.from('stock_trailers').select('*').eq('id', made).single();
+      if (fresh) setRows(r => [fresh as StockTrailer, ...r]);
+    }
     setMessage(`Duplicated ${row.stc_no || row.chassis_number || 'row'}`);
   }
 
@@ -398,7 +421,14 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
           getRowId={(p) => p.data.id}
           onRowDoubleClicked={(e) => setEditing(e.data ? { row: e.data } : null)}
           onCellContextMenu={onCellContextMenu}
-          onSelectionChanged={(e) => setSelectedCount(e.api.getSelectedRows().length)}
+          onSelectionChanged={(e) => {
+            const rows = e.api.getSelectedRows();
+            setSelectedCount(rows.length);
+            /* Told to the command bar, so "move these to Bredbury" means
+               the ones ticked here. Ids only, and the server reads every
+               one of them back through the caller's own session. */
+            publishSelection({ entity: 'trailers', ids: rows.map((r: any) => String(r.id)) });
+          }}
         />
       </div>
 

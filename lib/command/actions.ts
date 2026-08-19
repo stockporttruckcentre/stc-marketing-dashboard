@@ -77,7 +77,12 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.crm', label: 'CRM pipeline', blurb: 'Contacts, lists and accounts', kind: 'navigate',
     path: '/dashboard/crm', verbs: GO,
-    objects: ['crm', 'contacts', 'customers', 'clients', 'companies', 'accounts', 'pipeline', 'prospects', 'address book'] },
+    /* NOT "companies". `lib/command/finder.ts` is explicit that a
+       company is one we do NOT have: "show me 20 customers near Hyde"
+       is this screen and "show me 20 companies near Hyde" is the
+       finder, one word apart. Claiming the word here sent every
+       prospecting sentence to the account list. */
+    objects: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'pipeline', 'prospects', 'address book'] },
 
   { id: 'nav.tracker', label: 'Sales tracker', blurb: 'Your own deals and commission', kind: 'navigate',
     path: '/dashboard/leads', verbs: GO,
@@ -101,7 +106,7 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.finder', label: 'Company finder', blurb: 'Prospecting near a depot', kind: 'navigate',
     path: '/dashboard/finder', verbs: GO,
-    objects: ['finder', 'company finder', 'lusha', 'prospecting', 'find companies', 'lead search', 'new business', 'search companies', 'cold leads'] },
+    objects: ['finder', 'companies', 'company', 'firms', 'businesses', 'hauliers', 'company finder', 'lusha', 'prospecting', 'find companies', 'lead search', 'new business', 'search companies', 'cold leads'] },
 
   { id: 'nav.social', label: 'Social planner', blurb: 'Posts, approvals and schedule', kind: 'navigate',
     path: '/dashboard/social', verbs: GO, capability: 'marketing.edit',
@@ -209,7 +214,16 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'data.import', label: 'Import a spreadsheet', blurb: 'With a mapping and duplicate check', kind: 'data',
     capability: 'crm.import', verbs: PUSH,
-    objects: ['spreadsheet', 'csv', 'excel', 'file', 'contacts', 'stock', 'data', 'sheet'] },
+    objects: ['spreadsheet', 'csv', 'excel', 'file', 'contacts', 'customers', 'data', 'sheet'] },
+
+  /* Stock is a different file onto a different list, gated on a
+     different capability. A marketer may load stock and may not import
+     customers, and one entry claiming both would offer whichever one
+     they cannot do. */
+  { id: 'stock.import', label: 'Load a stock file', blurb: 'A supplier list onto the stock screen', kind: 'data',
+    capability: 'stock.edit', verbs: [...PUSH, 'sync', 'resync'],
+    objects: ['stock', 'stock list', 'stock file', 'supplier list', 'trailers', 'units', 'inventory'],
+    phrases: ['sync the stock list', 'load the supplier spreadsheet'] },
 
   { id: 'data.enrich', label: 'Enrich from Lusha', blurb: 'Fill in missing contact details', kind: 'data',
     capability: 'crm.enrich', verbs: ['enrich', 'lookup', 'look up', 'find details for', 'fill in'],
@@ -239,9 +253,20 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['admin', 'administrator', 'role', 'access', 'permissions', 'sales', 'viewer', 'read only', 'restricted'],
     phrases: ['elevate to admin', 'make them an admin', 'give them access', 'take their access away'] },
 
-  { id: 'admin.addUser', label: 'Add a user', blurb: 'Somebody new on the system', kind: 'admin',
+  /* NOBODY IS ADDED FROM INSIDE THIS APPLICATION.
+
+     People arrive by signing up, which is Supabase auth and not a
+     screen here, and an administrator then promotes them: the team
+     screen says so in its own subtitle. There is no invite control, no
+     admin API call and nothing holding a service role key to make one
+     with, so there is no manual operation for a sentence to match.
+
+     The entry stays, because the question is a real one and the team
+     screen is the honest answer to it. What changed is the label: it
+     said "add a user" and opened a screen that cannot. */
+  { id: 'admin.addUser', label: 'See who has signed up', blurb: 'People join by signing up, then you promote them', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: MAKE,
-    objects: ['user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
+    objects: ['user', 'new user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
 
   { id: 'admin.dashboard', label: 'Set somebody’s dashboard', blurb: 'Rep, exec or support view', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: [...CHANGE, 'give'],
@@ -541,15 +566,23 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'marketing.edit', verbs: REMOVE,
     objects: ['logo', 'asset', 'brand asset', 'font', 'template', 'swatch'] },
 
-  { id: 'brand.copyHex', label: 'Copy a brand colour', blurb: 'The hex, on your clipboard', kind: 'record',
+  /* Copying is a declared client effect now, not a path. `clipboard` is
+     a destination in the registry, the plan says the answer goes there,
+     and the browser is what puts it there. The path stays because
+     picking the action from the list is still a way of getting to the
+     screen; what changed is that typing it copies. */
+  { id: 'brand.copyHex', label: 'Copy a brand colour', blurb: 'The hex, on your clipboard', kind: 'data',
     capability: 'crm.view', path: '/dashboard/brand', verbs: ['copy', 'grab', 'get'],
-    objects: ['hex', 'the red', 'the navy', 'brand colour', 'colour code'],
+    objects: ['hex', 'brand hex', 'brand colour', 'colour code', 'swatch'],
     phrases: ['what is our red', 'what is the navy hex'] },
 
   /* ---------- industry news ---------- */
 
+  /* It sweeps every story past the cutoff before it adds anything, so
+     it is gated where the button is gated. It used to say `crm.view`,
+     which offered a viewer a refresh the database would refuse. */
   { id: 'news.refresh', label: 'Refresh the news', blurb: 'Pull the feeds again', kind: 'data',
-    capability: 'crm.view', path: '/dashboard/news', verbs: ['refresh', 'update', 'reload', 'pull', 'fetch', 'sync'],
+    capability: 'marketing.edit', path: '/dashboard/news', verbs: ['refresh', 'update', 'reload', 'pull', 'fetch', 'sync'],
     objects: ['news', 'the feeds', 'headlines', 'industry news', 'the articles'] },
 
   { id: 'news.source', label: 'Filter news by source', blurb: 'One publication at a time', kind: 'navigate',
@@ -580,6 +613,16 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.view', path: '/dashboard/finder', verbs: ['find', 'search', 'look for', 'prospect', 'hunt'],
     objects: ['companies near', 'hauliers in', 'prospects near', 'firms around', 'businesses in'],
     phrases: ['who is near carrington', 'find hauliers around bredbury'] },
+
+  /* Opening the screen is free and gated on crm.view above. Running the
+     search is not: it reads somebody else's database and is charged
+     for, so it needs what every other paid Lusha call needs, and the
+     rollout lock hides it from everybody until that lifts. */
+  { id: 'finder.run', label: 'Search for companies near a depot', blurb: 'A paid Lusha search, previewed first', kind: 'data',
+    capability: 'crm.enrich', verbs: ['find', 'search for', 'look for', 'prospect for'],
+    objects: ['waste companies near', 'hauliers within', 'construction firms near',
+              'companies within miles of', 'firms near the depot'],
+    phrases: ['find waste companies within 20 miles of hyde'] },
 
   { id: 'finder.add', label: 'Add a find to the CRM', blurb: 'One company onto a list', kind: 'record',
     capability: 'crm.create', verbs: MAKE,
@@ -814,7 +857,35 @@ export const ACTIONS: CommandActionSpec[] = [
 const fold = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-export type ActionHit = { action: CommandActionSpec; score: number; matched: string };
+export type ActionHit = {
+  action: CommandActionSpec;
+  score: number;
+  matched: string;
+  /**
+   * Does anything in this application carry it out?
+   *
+   * An action with a `path` opens a screen and the screen does the
+   * work, so it is carried out by definition. An action with neither a
+   * path nor a seed is a label with nothing behind it, and offering it
+   * as something to press Enter on teaches people the tool is
+   * unreliable. This is the difference between a registry entry and a
+   * capability, and the bar shows it rather than hiding it: a suggestion
+   * that only seeds the bar says so.
+   */
+  runnable: boolean;
+};
+
+/**
+ * Is there anything behind this action, or only a label?
+ *
+ * A screen counts: navigation is a real outcome and the screen does the
+ * work. A seed counts as far as it goes, which is putting a sentence in
+ * the bar for somebody to finish, and the caller is told which of the
+ * two it is rather than being left to find out by pressing Enter.
+ */
+export function actionRunnable(a: CommandActionSpec): boolean {
+  return !!a.path;
+}
 
 /**
  * Actions matching what has been typed, best first, with anything the
@@ -845,8 +916,25 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
       if (q.includes(fold(p))) take(100, p);
     }
 
-    const objectHit = (a.objects ?? []).find((o) => q.includes(fold(o)));
-    const verbHit = (a.verbs ?? []).find((v) => q.includes(fold(v)));
+    /* WHOLE WORDS, NOT SUBSTRINGS.
+
+       "Add Jane as a new user" was offered New social post, level with
+       the Team screen, because the post action lists "ad" among its
+       objects and "add" contains it. A word that happens to sit inside
+       another word is not that word, and a bar that offers to write a
+       social post to somebody adding a colleague has told them it does
+       not understand the sentence.
+
+       The plural is matched too, because "post" and "posts" are the
+       same object and the half typed case is what the prefix rule
+       below is for. */
+    const said = ` ${q} `;
+    const has = (w: string) => {
+      const word = fold(w);
+      return said.includes(` ${word} `) || said.includes(` ${word}s `);
+    };
+    const objectHit = (a.objects ?? []).find(has);
+    const verbHit = (a.verbs ?? []).find(has);
 
     // Word order does not matter. "open the stock list" and "stock list,
     // open it" are the same instruction.
@@ -865,7 +953,14 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
       if (prefix) take(35, prefix);
     }
 
-    if (best) hits.push({ action: a, score: (best as { score: number }).score, matched: (best as { matched: string }).matched });
+    if (best) {
+      hits.push({
+        action: a,
+        score: (best as { score: number }).score,
+        matched: (best as { matched: string }).matched,
+        runnable: actionRunnable(a),
+      });
+    }
   }
 
   return hits

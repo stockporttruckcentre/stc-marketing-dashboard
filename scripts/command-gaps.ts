@@ -20,15 +20,23 @@
 
      npm run check:gaps
    ============================================================= */
-import { parseQuery } from '../lib/command/query';
+import { parseQuery as readQuery } from '../lib/command/query';
 import { parseEdit } from '../lib/command/mutate';
 import { parseSelection } from '../lib/command/select';
 import { ENTITIES } from '../lib/command/schema';
 import { WRITABLE_FIELDS } from '../lib/command/fields';
 import { TABLES } from '../lib/command/columns';
 import { capabilitiesFor } from '../lib/crm/permissions';
+import { loadSampleVocabulary } from './sample-vocabulary';
 
 const caps = capabilitiesFor({ role: 'admin' });
+
+/* The bar learns makes, depots and customers from the database. A check
+   has none, so it gets a sample of what those columns hold. */
+/* The fixture, as a value. `parseQuery` takes the index it should read
+   with, so this binds it once rather than installing it anywhere. */
+const VOCABULARY = loadSampleVocabulary();
+const parseQuery = (text: string) => readQuery(text, VOCABULARY);
 
 type Gap = { sentence: string; why: string; group: string };
 const gaps: Gap[] = [];

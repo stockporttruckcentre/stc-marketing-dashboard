@@ -1,0 +1,1293 @@
+/* =============================================================
+   The one place raw command text becomes a plan.
+
+   Before this, the bar parsed a sentence and then made every decision
+   from the `QueryPlan` that came back: whether to run it, what to show,
+   what to post to the server. The IR existed beside that arrangement
+   and nothing consulted it.
+
+   Now there is one path:
+
+     raw text -> normalise -> reader -> canonical Plan
+
+   `parseQuery` is still underneath and is untouched. It is a READER
+   here, not an authority: its output crosses into the canonical IR
+   immediately and nothing past this function sees a `QueryPlan` again.
+   When the reader is rewritten to emit IR directly, this signature does
+   not change and neither does anything that calls it.
+
+   That ordering matters. Moving the application onto the IR and
+   rewriting the parser in one change would mean two things could have
+   caused any difference in behaviour.
+
+   WHAT COMES BACK, AND WHY ALL OF IT.
+
+   A caller needs more than the plan. It needs to know whether the plan
+   answers the whole question, what permissions it implies, whether it
+   has to be confirmed first, and whether this application can carry it
+   out at all. Those were four separate judgements made in four places,
+   each with its own idea of the answer. They are computed here, once,
+   from the plan.
+   ============================================================= */
+import { parseQuery, type QueryPlan } from './query';
+import { parseEdit, readRecordRefs, type EditPlan } from './mutate';
+import { readOutput } from './output';
+import { parseLifecycle } from './lifecycle';
+import { parseRoleChange } from './roles';
+import { parseOperation } from './operations';
+import { parseMeeting } from './meetings';
+import { parsePost } from './posts';
+import { parseImport } from './import';
+import { parseShareList } from './sharing';
+import { parseFinder } from './finder';
+import { placeIn } from '@/lib/crm/finder';
+import { ENTITIES } from './schema';
+import { refersBack, splitClauses, type Clause } from './clauses';
+import { composeProgramme } from './programme';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
+import type { VocabularyIndex } from './vocab';
+import { adaptQueryPlan } from './ir/adapt';
+import { adaptEditPlan } from './ir/adapt-edit';
+import type { CrmCapabilities, CrmCapability } from '@/lib/crm/permissions';
+import {
+  validate, completion, derivedRequirements, needsConfirmation,
+  type Problem, type Requirement, type Completion,
+} from './ir/validate';
+import { executability, selectToQueryPayload, type QueryPayload, type Unavailable } from './ir/execute';
+import {
+  capability as capabilityDef, destination, entity as entityDef, FILE_EMIT_CAPABILITY,
+} from './ir/registry';
+import type { Cond, Emit, Expr, Invoke, Plan, Select } from './ir/types';
+
+/* =============================================================
+   Availability
+
+   Three different questions that were one word. A capability can be
+   expressible, allowed, and still impossible.
+   ============================================================= */
+
+export type Availability = {
+  /** The plan is well formed. Nothing about the actor is involved. */
+  representable: boolean;
+  /**
+   * The actor holds every permission the plan derives.
+   *
+   * `null` when nobody said who the actor is, which is the case in the
+   * browser: the bar can narrow what it offers, but the answer that
+   * counts is the server's. A null here must never be read as a yes.
+   */
+  permitted: boolean | null;
+  /** Missing permissions, when the actor is known. */
+  missingPermissions: string[];
+  /**
+   * Something in this application actually performs every step.
+   *
+   * False for a plan that emails a result, because no handler exists.
+   * A capability with no handler is representable and can be permitted
+   * and is still not something the bar can carry out, and offering it
+   * anyway teaches people the tool is unreliable.
+   */
+  executable: boolean;
+  unavailable: Unavailable[];
+};
+
+export type CommandPlanning = {
+  /** Exactly what was typed. */
+  text: string;
+  /**
+   * A question or an instruction.
+   *
+   * Decided here, once, and never again by anybody downstream. The bar
+   * used to decide it for itself by calling the instruction reader
+   * directly, which meant the semantic authority for a write lived in
+   * the browser while the semantic authority for a read lived on the
+   * server. Two authorities for one sentence is one too many.
+   */
+  kind: 'read' | 'mutate';
+  /** The canonical plan. The single semantic authority. */
+  plan: Plan;
+  /**
+   * The plan's one select, for the read path.
+   *
+   * Present when the plan is a single read, which is every plan this
+   * slice produces. Absent once the readers emit multi step plans.
+   */
+  select: Select | null;
+  problems: Problem[];
+  completion: Completion;
+  requirements: Requirement[];
+  /** Permission atoms only, which is what a gate compares against. */
+  permissions: string[];
+  confirm: boolean;
+  availability: Availability;
+  /**
+   * Wording, carried beside the meaning and never used to decide
+   * anything. Confidence is a reader's report on itself, which is why
+   * it is not in the IR: a plan is right or it is not, and a number
+   * saying how sure something felt is not a semantic property.
+   */
+  presentation: {
+    summary: string;
+    confidence: number;
+    amountLabel: string | null;
+    groupLabel: string | null;
+    orderLabel: string | null;
+    derivedLabel: string | null;
+    /**
+     * What kind of file this clause asked for, when it asked for one.
+     *
+     * Carried separately from the summary so a clause that consumes an
+     * earlier result can be described without the selection it no longer
+     * makes. "Export it to Excel" plans a select and an emit; the
+     * composer throws the select away, and a summary still saying "list
+     * of customers" would tell somebody the file holds every customer.
+     */
+    outputLabel?: string | null;
+  };
+};
+
+/* ------------------------------------------------------------- */
+
+function availabilityOf(plan: Plan, actor?: Iterable<string>): Availability {
+  const problems = validate(plan);
+  const representable = !problems.some((p) => p.severity === 'fatal');
+  const { executable, missing } = executability(plan);
+
+  const wanted = derivedRequirements(plan)
+    .filter((r) => r.kind === 'permission')
+    .map((r) => r.id);
+
+  let permitted: boolean | null = null;
+  let missingPermissions: string[] = [];
+  if (actor) {
+    const held = new Set(actor);
+    missingPermissions = [...new Set(wanted.filter((w) => !held.has(w)))];
+    permitted = missingPermissions.length === 0;
+  }
+
+  return { representable, permitted, missingPermissions, executable, unavailable: missing };
+}
+
+/**
+ * Plan a sentence.
+ *
+ * `null` when no reader could make anything of it, which is different
+ * from a plan that is refused: the first means the words said nothing
+ * this application recognises, the second means they said something it
+ * will not do.
+ *
+ * THE VOCABULARY IS AN INPUT, NOT AMBIENT STATE.
+ *
+ * What a sentence means depends on what the database holds, and some of
+ * what it holds is visible to one person and not another. While that
+ * lived in a module global, the answer to "what does this mean"
+ * depended on who had last refreshed a cache, which on a shared server
+ * was somebody else.
+ *
+ * It is now an argument, passed straight through to the reader. There
+ * is no installation step and nothing shared between two calls, so two
+ * sentences read with two different indexes are two independent reads
+ * and the order they happen in cannot matter.
+ *
+ * Omitting it means the empty index, which is a choice somebody made
+ * rather than a load they forgot.
+ */
+export type PlanOptions = {
+  actorCapabilities?: Iterable<string>;
+  vocabulary?: VocabularyIndex;
+  /**
+   * What the screen the sentence was typed on has open or selected.
+   *
+   * Part of the meaning, so it goes into the plan and therefore into
+   * the plan hash: "move these to Bredbury" with two trailers selected
+   * and with three is not the same command. Absent means the sentence
+   * cannot point at anything, which is a refusal rather than a licence.
+   */
+  context?: CommandContext;
+  /**
+   * What the clause before this one produced.
+   *
+   * Only the ENTITY, never the rows: which rows is decided at execution
+   * by the `ResultRef` the composer wires in. This is what lets "export
+   * it to Excel" know it is about customers without the words saying
+   * so, in exactly the way the screen's selection does for "export
+   * these".
+   */
+  priorResult?: { entity: string };
+};
+
+export function planCommand(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  /* SEVERAL CLAUSES ARE ONE PROGRAMME, NOT SEVERAL COMMANDS.
+
+     "Find the customers ..., create a list from them and export it to
+     Excel" is one thing somebody wants, and reading it as three
+     commands loses the only part that matters: "them" and "it" are the
+     result of the clause before. Split first, plan each clause with the
+     readers that were already there, and wire the pointing back with a
+     `ResultRef`. A sentence with one clause, which is nearly all of
+     them, goes straight past this. */
+  const clauses = splitClauses(text);
+  if (clauses.length > 1) {
+    const programme = planProgramme(clauses, opts);
+    if (programme) return programme;
+  }
+
+  return planOneClause(text, opts);
+}
+
+/**
+ * Every clause, planned and wired together.
+ *
+ * `null` when any clause is not understood, because half a programme is
+ * not a programme: running the clauses that parsed would create a list
+ * and not export it, and say it had done both.
+ */
+function planProgramme(
+  clauses: Clause[],
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  const planned: { planning: CommandPlanning; refersBack: boolean }[] = [];
+
+  let prior: { entity: string } | undefined;
+
+  for (const clause of clauses) {
+    const one = planOneClause(clause.text, {
+      ...opts,
+      /* Only where the clause actually points back. A clause that names
+         its own subject is planned as though it stood alone. */
+      priorResult: clause.refersBack ? prior : undefined,
+    });
+    if (!one) return null;
+    planned.push({ planning: one, refersBack: clause.refersBack });
+
+    /* What this clause leaves behind, for the next one.
+       An operation leaves its SUBJECT's entity, which is how "mark
+       these as sold and export the result" knows what the result is:
+       without it the second clause was read against nothing and the
+       whole sentence fell back to a single reading. */
+    const last = one.plan.steps[one.plan.steps.length - 1];
+    const entity = last && 'target' in last ? (last as { target: { entity: string } }).target.entity
+      : last && last.op === 'select' && 'entity' in last.from ? last.from.entity
+        : last && last.op === 'invoke'
+          /* The records it RAN ON, where it ran on any: "mark these as
+             sold and export the result" is about the units. An
+             operation that makes rows has no subject at all, and what
+             it leaves behind is what it says it produces: the finder
+             hands the next clause the companies it found. */
+          ? entityBehind(last.subject) ?? entityOfProduces(last.produces) ?? prior?.entity
+          : one.select && 'entity' in one.select.from ? one.select.from.entity
+            : prior?.entity;
+    if (entity) prior = { entity };
+  }
+
+  const composed = composeProgramme(planned);
+  if (!composed) return null;
+
+  const plan = composed.plan;
+  const writes = plan.steps.some((s) => s.op !== 'select');
+
+  return {
+    text: clauses.map((c) => c.text).join(', '),
+    kind: writes ? 'mutate' : 'read',
+    plan,
+    /* A programme's rows come from its own first step, not from one
+       select somebody can point a compatibility layer at. */
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts?.actorCapabilities),
+    presentation: {
+      summary: composed.summary,
+      /* The least confident clause decides. A programme is only as well
+         understood as its worst part. */
+      confidence: Math.min(...planned.map((p) => p.planning.presentation.confidence)),
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * The record an attachment goes on, as a selection of one.
+ *
+ * Every entity whose title column the words match, tried in registry
+ * order. Nothing is named here: an entity added to the registry with a
+ * reference-shaped title column can be attached to without this
+ * changing.
+ */
+function attachTarget(
+  words: string[] | string, context: CommandContext = EMPTY_CONTEXT,
+): Select | null {
+  const text = Array.isArray(words) ? words.join(' ') : words;
+
+  /* THE RECORD IN FRONT OF YOU.
+
+     "Attach it to this customer" names a record exactly and names it
+     with a word. The screen sends what it has open, and this resolves
+     it the same way every other reader does, which is also what makes
+     the permission derivable: what it takes to attach depends on what
+     it is attached to, and until now a pointed-at target had no entity
+     at all. */
+  const pointed = readContextReference(text);
+  const fromScreen = pointed ? resolveContext(pointed, context) : null;
+  if (fromScreen) {
+    return {
+      op: 'select',
+      from: { entity: fromScreen.entity },
+      where: fromScreen.match,
+      produces: { kind: 'rows', entity: fromScreen.entity },
+    };
+  }
+
+  const refs = readRecordRefs(text);
+  const named = [...refs.stc, ...refs.coded][0];
+  if (!named) return null;
+
+  for (const spec of ENTITIES) {
+    const def = entityDef(spec.id);
+    const title = def?.titleField;
+    if (!title) continue;
+    /* A stock reference is a stock reference wherever it appears, and
+       the title column is what carries it. */
+    if (!/^(stc_no|chassis_number|reference)$/.test(title)) continue;
+    return {
+      op: 'select',
+      from: { entity: spec.id },
+      where: {
+        kind: 'cmp', op: 'eq',
+        left: { kind: 'field', of: { entity: spec.id, field: title } },
+        right: { kind: 'literal', value: named },
+      },
+      produces: { kind: 'rows', entity: spec.id },
+    };
+  }
+  return null;
+}
+
+/** The entity a step says it produces, where the shape has one. */
+function entityOfProduces(p: unknown): string | undefined {
+  if (!p || typeof p !== 'object') return undefined;
+  const kind = (p as { kind?: string }).kind;
+  if (kind !== 'rows' && kind !== 'record' && kind !== 'series') return undefined;
+  return (p as { entity?: string }).entity;
+}
+
+/** The entity a source names, however it names it. */
+function entityBehind(source: unknown): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const s = source as { entity?: string; from?: { entity?: string }; op?: string };
+  if (s.entity) return s.entity;
+  if (s.op === 'select' && s.from?.entity) return s.from.entity;
+  return undefined;
+}
+
+function planOneClause(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  /* A COMPLETE READING BEATS AN INCOMPLETE ONE, WHOEVER PRODUCED IT.
+
+     A reader can now come back with "I know what this is and it is
+     short of a value": "create a LinkedIn post" is `post.create`
+     without its content, "add another site to this customer" is
+     `contact.addAddress` without its address. That is a far better
+     answer than the readers below would give, and it is not better than
+     a reading with nothing missing at all.
+
+     "Add a note to this site" has an operation's verb and an
+     operation's object word in it and is a field write. So an
+     incomplete reading is held rather than returned, the readers under
+     it get their turn, and the held one comes back only if none of them
+     read the whole sentence. Order stays exactly as it was for every
+     sentence that was complete before. */
+  let waiting: CommandPlanning | null = null;
+  const settled = (p: CommandPlanning | null): CommandPlanning | null => {
+    if (!p) return null;
+    if (p.completion.kind !== 'incomplete') return p;
+    waiting ??= p;
+    return null;
+  };
+
+  /* A DECLARED OPERATION IS THE MOST SPECIFIC READING THERE IS.
+
+     It takes a verb, a word saying WHICH operation, and records it can
+     actually resolve, so it fires on very little and is right when it
+     does. It goes first because the readers under it are all more
+     general: "send STC143580 to my tracker" looks like sending
+     something to somebody called "my tracker", "raise a proposal for
+     Dawson Group" contains a create word, and "put these on the
+     tracker" contains a move word. Each of those would do a third of
+     the job and say it had done all of it. */
+  /* A POST SOMEBODY HAS ALREADY WRITTEN IS THE MOST SPECIFIC READING
+     THERE IS.
+
+     Before the operations, because a post's own words are not the
+     sentence's grammar: "create a LinkedIn post saying "Our Haydock
+     depot is open Saturday"" contains the word depot, and the operation
+     reader read it as adding a site to a customer called "is open
+     Saturday". Content in quotes belongs to whatever asked for it. */
+  const written = settled(readPost(text, opts));
+  if (written) return written;
+
+  /* SHARING A LIST SOMEBODY NAMED IS NOT A DESTINATION CLAUSE.
+
+     "Share Fleet Prospects with Dave" looks like an output clause and
+     is not one: it names no records and points at nothing. Read as a
+     destination it meant "every trailer, shared with Dave", because
+     the list name was dropped and the entity fell back. It goes before
+     the output reader for exactly that reason. */
+  const sharing = readShareList(text, opts);
+  if (sharing) return sharing;
+
+  /* LOOKING FOR COMPANIES WE DO NOT HAVE.
+
+     Before the operations, because "find hauliers near Haydock" has a
+     verb and a noun that half the readers below would take. It is also
+     the only reader here whose sentence reaches somebody else's paid
+     service, which is why it insists on a place rather than filling one
+     in the way the screen does. */
+  const finding = settled(readFinder(text, opts));
+  if (finding) return finding;
+
+  const operation = settled(readOperation(text, opts));
+  if (operation) return operation;
+
+  /* SENDING IS AN INSTRUCTION TOO, AND IT IS THE ONE THAT WAS MEANT.
+
+     "Email the sold trailers to Dave as a PDF" starts with a word that
+     is also a column on a customer, so the field reader took it and
+     wrote Dave's name into an email address. A destination clause with
+     its verb at the front of the sentence is not a field write, and
+     deciding that here rather than teaching the field reader about
+     destinations keeps each reader doing one thing. */
+  const sending = readOutput(text);
+  const outbound = sending && sending.to.kind !== 'download' && sending.to.kind !== 'display';
+
+  /* AN INSTRUCTION WINS OVER THE QUESTION ITS WORDS COULD ALSO BE.
+
+     "Add £1k refurb to STC143980" is a sentence about trailers, and
+     answering it with a count looks like it worked. So the instruction
+     reader goes first, exactly as it did in the bar, and what changes is
+     only that the decision now happens here where the server can make
+     it too. */
+  const write = outbound ? null : readInstruction(text, opts);
+  if (write) return write;
+
+  /* Making a record and getting rid of one, which are the other two
+     ways a row's life changes. Read after a field write, because
+     "delete the customer on STC143580" empties a column and the
+     instruction reader is the one that knows that. */
+  /* A ROLE CHANGE BEFORE ANYTHING ELSE READS IT AS SOMETHING TAMER.
+
+     "Make Dave an admin" contains a create word, and the lifecycle
+     reader would otherwise read it as making a record called "Dave an
+     admin". It is also the most dangerous write here, so it is decided
+     by the reader that knows what it is rather than by whichever reader
+     happens to match first. */
+  const role = outbound ? null : readRoleChange(text, opts);
+  if (role) return role;
+
+  /* A MEETING IS NAMED BY WHEN IT IS, NOT BY WHAT IT IS CALLED.
+
+     "Cancel Friday's site visit" has a delete word in it and no record
+     name at all, so the lifecycle reader made a meeting called
+     "Friday's site" and matched nothing. Meetings get their own reader
+     because their reference is compositional: a day, a time and what
+     the meeting is about, in any order and any of them absent. */
+  const meeting = outbound ? null : readMeeting(text, opts);
+  if (meeting) return meeting;
+
+  /* A FILE ON THE REQUEST IS A FILE SOMEBODY MEANT TO IMPORT.
+
+     "Import this" says nothing about customers, and with a spreadsheet
+     attached it is not ambiguous at all. Read before the lifecycle
+     reader, because "load these customers in" contains create words. */
+  const importing = outbound ? null : readImport(text, opts);
+  if (importing) return importing;
+
+  const lifecycle = outbound ? null : readLifecycle(text, opts);
+  if (lifecycle) return lifecycle;
+
+  /* A CLAUSE THAT TAKES ITS RECORDS FROM THE CLAUSE BEFORE.
+
+     "Reject this post and send it back to draft" says the same thing
+     twice, and the second half names no record. Read here rather than
+     with the other writes above, because the readers in between have
+     better claims on some of those sentences: "put them on Fleet
+     Prospects" is a list, and read as a write it is a column called
+     relationship set to the word "prospect". */
+  const carried = outbound ? null : readInstruction(text, opts, true);
+  if (carried) return carried;
+
+  /* WHAT COMES OUT IS NOT PART OF THE QUESTION.
+
+     "Export the sold trailers as a Word document" is one selection and
+     one output, and the reader below has no idea what a Word document
+     is: it reported "word" and "document" as words it could not match,
+     and "to Excel" ended up inside a filter. The clause comes off
+     first, and what is left is an ordinary question. */
+  const output = sending;
+  const asked0 = output ? output.rest : text;
+
+  /* "SHARE IT WITH DAVE" IS ALL DESTINATION AND NO QUESTION.
+
+     Taking the destination clause out leaves nothing, and nothing names
+     no entity. The word that pointed at what is being sent is the only
+     part of that sentence which says what it is about, so it is put
+     back in front of whatever is left before the entity is worked out. */
+  const pointing = output?.pointer ? `${output.pointer} ${asked0}`.trim() : asked0;
+
+  /* "EXPORT THESE TO EXCEL" NAMES NO ENTITY, AND DOES NOT NEED TO.
+
+     The screen named it when somebody ticked the rows. The reader has
+     nothing to work with in the word "these", so the entity comes from
+     the context and the sentence is read again with it, which is how
+     one word ends up meaning a selection of forty customers. */
+  const pointedFirst = readContextReference(pointing);
+  /* "THIS LIST" IS THE LIST ON THE SCREEN.
+
+     A working list is not a record and not a selection, so the pointing
+     reader had nothing to resolve and "export this list as a CSV" named
+     no entity at all. What is on a CRM list is customers, and the
+     screen sends which list it is showing, so the sentence narrows to
+     that list by its id exactly as a selection narrows to its rows. */
+  const openList = pointsAtOpenList(pointing) ? opts?.context?.list ?? null : null;
+  /* And the words that named it come out, the way every other clause
+     does. "This CRM list" left "crm" behind, and the reader reported
+     that nothing in the customers matches it. */
+  const asked = openList ? asked0.replace(LIST_PHRASE, ' ').replace(/\s+/g, ' ').trim() : asked0;
+
+  const pointedEntity = (pointedFirst
+    ? resolveContext(pointedFirst, opts?.context ?? EMPTY_CONTEXT)?.entity
+    : undefined)
+    ?? (openList ? 'contacts' : undefined)
+    /* Or whatever the clause before produced. "Export it to Excel"
+       names no entity and does not need to. */
+    ?? (refersBack(pointing) ? opts?.priorResult?.entity : undefined);
+
+  const read: QueryPlan | null = parseQuery(asked, opts?.vocabulary)
+    ?? (pointedEntity ? parseQuery(`${asked} ${nounFor(pointedEntity)}`, opts?.vocabulary) : null);
+  if (!read) return waiting;
+
+  const { plan, select } = adaptQueryPlan(read);
+
+  /* A QUESTION CAN POINT AT THE SCREEN TOO.
+
+     "Export these to Excel" is a selection of exactly the rows somebody
+     ticked, and narrowing it any other way would produce a file that
+     does not hold what they were looking at. The condition is over ids
+     and is added to whatever else the sentence said, so "export these
+     that are still in stock" narrows twice. */
+  const pointed = pointedFirst;
+  const fromScreen = pointed
+    ? resolveContext(
+        pointed, opts?.context ?? EMPTY_CONTEXT,
+        'entity' in select.from ? select.from.entity : undefined,
+      )
+    : null;
+  if (fromScreen) {
+    select.where = select.where
+      ? { kind: 'and', of: [select.where, fromScreen.match] }
+      : fromScreen.match;
+  }
+
+  /* And the same for the list the screen is showing. By its id, because
+     a list renamed while somebody was looking at it is still the list
+     they were looking at. */
+  if (openList && 'entity' in select.from && select.from.entity === 'contacts') {
+    const onList: Cond = {
+      kind: 'cmp', op: 'eq',
+      left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
+      right: { kind: 'literal', value: openList.id },
+    };
+    select.where = select.where ? { kind: 'and', of: [select.where, onList] } : onList;
+  }
+
+  /* One emit step, over the result of the select. Not a copy of the
+     select: the file has to be built from exactly the rows the question
+     described, and a second description of them is a second answer. */
+  if (output && select.id) {
+    /* WHERE IT GOES DECIDES WHICH PERMISSION NAMES IT.
+
+       The step used to carry `rows.export` whatever the destination was,
+       so "share the customer list with Dave" claimed to be permitted by
+       the export capability. Building the file still requires
+       `rows.export`, and `derivedRequirements` derives that from the
+       output being a file, separately and in addition. */
+    const to = destination(output.to.kind);
+
+    /* Attaching names a record, and until the entity is known the
+       reader cannot say which. It is resolved here, against the same
+       reference reader every instruction uses, so "attach it to
+       STC143580" reaches a real row rather than a blank entity. */
+    let attachTo = output.to;
+    if (output.to.kind === 'attach') {
+      const target = attachTarget(output.recipients?.[0] ?? '', opts?.context ?? EMPTY_CONTEXT);
+      if (target) attachTo = { kind: 'attach', to: target };
+      else {
+        plan.unmet.push({
+          part: 'destination',
+          why: `nothing here matches the record to attach it to`,
+        });
+      }
+    }
+
+    const emit: Emit = {
+      op: 'emit',
+      id: 'e1',
+      from: { ref: 'rows', step: select.id },
+      output: output.output,
+      to: attachTo,
+      /* A FILE IS WHAT NEEDS THE EXPORT CAPABILITY.
+
+         Not every destination produces one. A clipboard copy leaves the
+         browser holding what the screen was already showing, so naming
+         `rows.export` on it claims an effect the step does not have,
+         which is exactly what the validator says. */
+      ...(to?.capability
+        ? { capability: to.capability }
+        : output.output.kind === 'file' ? { capability: FILE_EMIT_CAPABILITY } : {}),
+      /* Only a file is a thing a later step can pick up. A share
+         produces access, which is not an object anybody can hold. */
+      ...(output.output.kind === 'file' ? { produces: { kind: 'artefact' as const } } : {}),
+    };
+    plan.steps.push(emit);
+  }
+
+  /* A SENTENCE THAT SENDS SOMETHING IS AN INSTRUCTION.
+
+     "Share the Fleet Prospects list with Dave" is a selection and a
+     grant, and the grant is a write. Read as a question it went to the
+     query route, which never previews and never confirms, so the whole
+     sentence did nothing at all. A download changes nothing and stays a
+     read. */
+  /* A SENTENCE THAT SENDS SOMETHING IS AN INSTRUCTION, AND A COPY IS
+     NOT SENDING.
+
+     Downloading and copying both leave the browser holding what the
+     screen was already showing. Nothing leaves the company and no
+     record changes, so neither is a write and neither previews. */
+  const sends = plan.steps.some(
+    (s) => s.op === 'emit'
+      && s.to.kind !== 'display' && s.to.kind !== 'download' && s.to.kind !== 'clipboard',
+  );
+
+  /* "SHARE FLEET PROSPECTS WITH DAVE" IS A LIST, AND ONLY DATA KNOWS IT.
+
+     A list name and a described set cannot be told apart by grammar.
+     "Fleet Prospects" reads as a query, because "prospects" is what a
+     customer is called and "fleet" is what a trailer is called, and
+     "the sold trailers" reads as one for real reasons. Deciding by a
+     rule would get one of them wrong.
+
+     So the general reader goes first and this only takes what it could
+     not make sense of. A share whose selection does not hold together
+     is exactly the shape "share <a name> with <somebody>" produces, and
+     a list is the only thing in this application that name could be.
+     If there is no list called that, the database says so by name and
+     writes nothing. */
+  const namedNothing = sends
+    && plan.steps.some((s) => s.op === 'emit' && s.to.kind === 'share')
+    /* Narrowed nothing and pointed at nothing. "Share the sold trailers
+       with Dave" describes a set and gets the honest refusal about what
+       sharing grants; this is the other case, where the words
+       contributed no condition at all because they were a name. */
+    && !select?.where
+    && !fromScreen;
+  if (namedNothing) {
+    const named = readShareList(text, opts, true);
+    if (named) return named;
+  }
+
+  /* And the question reader's own answer, unless something above read
+     the sentence better. A held reading is an operation that was
+     understood and is short of a value; this is a set of rows with
+     words in the sentence it could not account for. The question was
+     the fallback all along. */
+  const asQuestion = completion(plan);
+  if (waiting && asQuestion.kind !== 'complete') return waiting;
+
+  return {
+    text,
+    kind: sends ? 'mutate' : 'read',
+    plan,
+    select,
+    problems: validate(plan),
+    completion: asQuestion,
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts?.actorCapabilities),
+    presentation: {
+      summary: [
+        fromScreen ? `${read.summary}, ${fromScreen.label}` : read.summary,
+        output ? `as ${/^[aeiou]/i.test(output.label) ? 'an' : 'a'} ${output.label}` : null,
+      ].filter(Boolean).join(', '),
+      confidence: read.confidence,
+      amountLabel: read.amountLabel ?? null,
+      groupLabel: read.groupBy?.label ?? null,
+      orderLabel: read.order?.label ?? null,
+      derivedLabel: read.derived?.label ?? null,
+      outputLabel: output?.label ?? null,
+    },
+  };
+}
+
+/**
+ * The instruction reader, if this sentence is one.
+ *
+ * The threshold is the one the bar has always used: nothing missing, and
+ * confident enough to act on. A half instruction is somebody part way
+ * through a sentence, and treating it as a refused mutation would take
+ * the words away from the question engine for anybody who was about to
+ * ask about the same column.
+ *
+ * `parseEdit` needs the actor because a field nobody may write is not a
+ * field this sentence can be about. Passing no actor means no
+ * instruction is read at all, which is the safe direction: the bar
+ * always knows who it is, and a caller that does not should not be
+ * planning writes.
+ */
+function readInstruction(
+  text: string,
+  opts?: PlanOptions,
+  /**
+   * Read a clause that takes its records from the clause before.
+   *
+   * Off by default, and tried once every other reader has had its turn.
+   * A clause pointing back is not less certain for not repeating the
+   * records, so the bar comes down by what naming them is worth; but a
+   * bar that low would also let "put them on Fleet Prospects" through
+   * as a change to a column called relationship, and that clause has a
+   * better reading further down. Held back rather than weakened.
+   */
+  pointing = false,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+  if (text.trim().length < 4) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const edit: EditPlan | null = parseEdit(
+    text, caps, opts.vocabulary, opts.context ?? EMPTY_CONTEXT,
+    /* What a clause with no noun of its own is about: what the clause
+       before was about, or what the screen has open. Only on the last
+       chance pass, because it widens what the field reader will match
+       and the readers in between have better claims on some of those
+       sentences. */
+    pointing ? opts.priorResult?.entity ?? opts.context?.record?.entity : undefined,
+  );
+  if (!edit) return null;
+
+  /* A CLAUSE THAT POINTS BACK IS NOT MISSING ITS RECORDS.
+
+     "Reject this post and send it back to draft" says the same thing
+     twice, which is how people talk: the second half describes the
+     STATE the first half puts it in. Read alone it names no record, so
+     the instruction reader declined and the clause fell through to the
+     question engine, which took "send" and "back" as words it could not
+     match and refused the whole sentence.
+
+     The records are the ones the clause before produced, and the
+     composer wires them in: a write is a step that can consume, and its
+     own match is replaced by the earlier rows. So a target is only
+     missing here when there is no clause in front of this one. */
+  const pointsBack = pointing && !!opts.priorResult && edit.missing.includes('target');
+  const missing = pointsBack
+    ? edit.missing.filter((m) => m !== 'target')
+    : edit.missing;
+
+  /* AND IT IS NOT LESS SURE FOR NOT REPEATING THEM.
+
+     Confidence pays two points for a record the sentence names. A
+     clause that points back has its records from the clause before,
+     which is at least as certain as a name typed into this half, so the
+     bar it has to clear comes down by exactly those two points rather
+     than the score being invented upwards. */
+  const bar = pointsBack ? INSTRUCTION_THRESHOLD - 2 : INSTRUCTION_THRESHOLD;
+  if (missing.length > 0 || edit.confidence < bar) return null;
+
+  const { plan } = adaptEditPlan(edit, { rowsFromEarlier: pointsBack });
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: edit.summary,
+      confidence: edit.confidence,
+      amountLabel: null,
+      groupLabel: null,
+      orderLabel: null,
+      derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Does the sentence point at the working list the screen is showing?
+ *
+ * A different fact from a selection: a CRM screen with nothing ticked
+ * still has a list open, and "export this list" is about every customer
+ * on it rather than about any rows somebody ticked.
+ */
+/* Two spellings of one pattern, because a global regex carries state
+   between calls and a shared one would answer differently on every
+   other sentence. */
+const LIST_PHRASE = /\b(?:this|that|the current|the open|my)\s+(?:crm\s+)?list\b/ig;
+const A_LIST_PHRASE = /\b(?:this|that|the current|the open|my)\s+(?:crm\s+)?list\b/i;
+
+function pointsAtOpenList(text: string): boolean {
+  return A_LIST_PHRASE.test(text);
+}
+
+/** The plainest noun for an entity, so a pointing word can be read. */
+function nounFor(entityId: string): string {
+  return ENTITIES.find((e) => e.id === entityId)?.nouns[1]
+    ?? ENTITIES.find((e) => e.id === entityId)?.nouns[0]
+    ?? '';
+}
+
+/**
+ * Creating a record, or deleting one.
+ *
+ * The same shape as every other planning result, so nothing downstream
+ * knows there are three readers rather than one.
+ */
+/**
+ * A role change, if this sentence is one.
+ *
+ * Before the lifecycle reader, because "make Dave an admin" contains a
+ * create word and would otherwise be read as making a record called
+ * "Dave an admin".
+ */
+/**
+ * A declared business operation, if this sentence asks for one.
+ *
+ * Before the lifecycle and instruction readers, because "raise a
+ * proposal for Dawson Group" contains a create word and "send these to
+ * my tracker" contains a move word, and both would otherwise be read as
+ * something tamer than they are.
+ */
+function readOperation(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseOperation(text, caps, opts.context ?? EMPTY_CONTEXT, opts.priorResult);
+  if (!read) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Anything a sentence asks of a meeting.
+ *
+ * Cancelling, moving and inviting, all of which name the meeting the way
+ * people name meetings rather than by a title nobody types.
+ */
+function readMeeting(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseMeeting(text, caps, opts.context ?? EMPTY_CONTEXT);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * A social post the sentence already contains.
+ *
+ * Only where the words are there. Everything else about writing a post
+ * is visual, and the composer is the right answer to it.
+ */
+function readPost(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parsePost(text, caps);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Companies that are not customers yet.
+ *
+ * The slot reader is the one the finder screen's own suggestions use,
+ * so a sentence means the same thing whether it opens the screen or
+ * runs the search. What is different here is the place: the screen
+ * fills a missing one in with Hyde so it opens somewhere, and
+ * searching a place nobody named would answer a question nobody
+ * asked against a shared daily quota.
+ *
+ * So a sentence that named none is planned without one and comes back
+ * asking where. It is understood; it is short of a value; nothing runs
+ * and nothing is guessed.
+ */
+function readFinder(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const cap = capabilityDef('crm.findCompanies');
+  if (!cap?.requires || !cap.handler) return null;
+  if (!caps.has(cap.requires as never)) return null;
+
+  const read = parseFinder(text, caps);
+  if (!read) return null;
+
+  const place = read.slots.place ? placeIn(read.slots.place.value) : null;
+
+  /* WHAT THE THRESHOLD IS FOR, AND WHAT IT IS NOT FOR.
+
+     It separates an instruction from a browse, because a browse that
+     ran would search a place nobody named against a shared daily
+     quota. A sentence that named a place is one or the other and still
+     has to clear it.
+
+     A sentence that named none cannot run at all now: the plan comes
+     back short of a required input, which is a question, and a
+     question costs nothing. So what it has to clear instead is that it
+     was addressed to the finder rather than typed at it. A find verb
+     is what says so: "find waste companies" is an instruction missing
+     its where, and "waste companies" on its own is somebody starting
+     to type. */
+  if (place) {
+    if (read.confidence < INSTRUCTION_THRESHOLD) return null;
+  } else if (!read.said) {
+    return null;
+  }
+
+  const args: Record<string, Expr> = {
+    count: { kind: 'literal', value: read.limit },
+  };
+  if (place) {
+    args.place = { kind: 'literal', value: place.said };
+    args.city = { kind: 'literal', value: place.city };
+  }
+  if (read.slots.radius != null) args.radius = { kind: 'literal', value: read.slots.radius };
+  if (read.slots.industry) {
+    args.industry = { kind: 'literal', value: read.slots.industry.id };
+    args.industryLabel = { kind: 'literal', value: read.slots.industry.label };
+  }
+  if (read.slots.employees) {
+    args.minEmployees = { kind: 'literal', value: read.slots.employees.min };
+    args.maxEmployees = { kind: 'literal', value: read.slots.employees.max };
+  }
+  const list = listForFinder(text);
+  if (list) args.list = { kind: 'literal', value: list };
+
+  const step: Invoke = {
+    op: 'invoke',
+    id: 'f1',
+    capability: 'crm.findCompanies',
+    args,
+    produces: { kind: 'rows', entity: 'contacts' },
+  };
+  const plan: Plan = { steps: [step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: place
+        ? `${read.summary}${list ? `, onto the ${list} list` : ''}`
+        : `Find ${read.limit} ${read.slots.industry
+          ? read.slots.industry.label.toLowerCase() : 'companies'}`,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * Where the companies it finds should go.
+ *
+ * A sentence has no screen to pick from, so what it finds goes on a
+ * list. Naming none means the global list every customer starts on,
+ * which is where the import puts them too.
+ */
+function listForFinder(raw: string): string | null {
+  const said = raw.match(/\b(?:onto|into|on|to|for)\s+(?:the\s+)?(.{2,60}?)\s*\blist\b/i)?.[1]
+    ?? raw.match(/\blist\s+(?:called|named)\s+(.{2,60}?)\s*[.;]?\s*$/i)?.[1];
+  const name = said?.trim().replace(/[.,;]+$/, '');
+  if (!name) return null;
+  if (/^(?:crm|database|system|this|that)$/i.test(name)) return null;
+  return name.length >= 2 ? name : null;
+}
+
+/**
+ * A list somebody named, shared with people they named.
+ *
+ * Not the destination reader. Sharing here is list membership, so a
+ * named list needs no records at all, and requiring a selection made
+ * somebody tick every row on a list before they could share the list.
+ */
+function readShareList(
+  text: string,
+  opts?: PlanOptions,
+  bareName = false,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseShareList(text, caps, opts.context ?? EMPTY_CONTEXT, { bareName });
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * A spreadsheet the request is carrying.
+ *
+ * Only when there is one. "Import the customers" with nothing attached
+ * is somebody about to attach one, and the import screen is the right
+ * answer to it.
+ */
+function readImport(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseImport(text, caps, opts.context ?? EMPTY_CONTEXT);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+function readRoleChange(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseRoleChange(text, caps);
+  if (!read) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+function readLifecycle(
+  text: string,
+  opts?: PlanOptions,
+): CommandPlanning | null {
+  if (!opts?.actorCapabilities) return null;
+
+  const caps = new Set(opts.actorCapabilities) as CrmCapabilities;
+  const read = parseLifecycle(text, caps, opts.context ?? EMPTY_CONTEXT, opts.priorResult);
+  if (!read || read.confidence < INSTRUCTION_THRESHOLD) return null;
+
+  const plan: Plan = { steps: [read.step], unmet: [] };
+
+  return {
+    text,
+    kind: 'mutate',
+    plan,
+    select: null,
+    problems: validate(plan),
+    completion: completion(plan),
+    requirements: derivedRequirements(plan),
+    permissions: [...new Set(
+      derivedRequirements(plan).filter((r) => r.kind === 'permission').map((r) => r.id),
+    )],
+    confirm: needsConfirmation(plan),
+    availability: availabilityOf(plan, opts.actorCapabilities),
+    presentation: {
+      summary: read.summary,
+      confidence: read.confidence,
+      amountLabel: null, groupLabel: null, orderLabel: null, derivedLabel: null,
+    },
+  };
+}
+
+/**
+ * How sure the instruction reader has to be before a sentence is an
+ * instruction rather than a question.
+ *
+ * Named rather than typed inline in two places, because the bar and the
+ * server disagreeing about this number is the same class of bug as them
+ * disagreeing about the vocabulary.
+ */
+const INSTRUCTION_THRESHOLD = 10;
+
+/**
+ * The wire body for the existing read executor.
+ *
+ * Built from the canonical `Select`, never from the reader's output.
+ * That is the whole point of the direction: the compatibility layer
+ * reads the IR, so a difference between what the IR says and what the
+ * executor runs is impossible rather than merely unlikely.
+ */
+export function planningToQueryPayload(p: CommandPlanning): QueryPayload | null {
+  if (!p.select) return null;
+  return selectToQueryPayload(p.select, {
+    summary: p.presentation.summary,
+    amountLabel: p.presentation.amountLabel,
+    groupLabel: p.presentation.groupLabel,
+    orderLabel: p.presentation.orderLabel,
+    derivedLabel: p.presentation.derivedLabel,
+  });
+}

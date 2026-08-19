@@ -11,6 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { SALES_TRACKER } from '@/lib/import/dictionary';
+import { trackerFromCrm } from '@/lib/crm/tracker-operations';
 import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
 
 // Tracker has 3 tabs that group the existing CRM statuses
@@ -247,37 +248,24 @@ export function SalesTracker({
     setEditingRow(data as CRMContact);
   }
 
+  /* The same operation the command bar performs. This used to insert
+     from the browser with the list id the screen was holding, so the
+     payload decided whose tracker gained a deal. Migration 033 decides
+     it from who is asking. */
   async function importFromCrm(sourceContact: CRMContact, newSide: 'trailer_sales' | 'maintenance' = 'trailer_sales', what: string | null = null) {
-    // Copy the row's data into a NEW row in the tracker list (preserves the source contact)
-    const today = new Date().toISOString().slice(0, 10);
-    const { data, error } = await supabase.from('crm_contacts').insert({
-      list_id: list.id,
-      company_name: sourceContact.company_name,
-      contact_name: sourceContact.contact_name,
-      email: sourceContact.email,
-      phone: sourceContact.phone,
-      source: sourceContact.source || 'Imported from CRM',
-      status: sourceContact.status === 'lost' ? 'lost' : sourceContact.status === 'customer' ? 'customer' : 'lead',
-      side: newSide,
-      what: newSide === 'maintenance' ? what : null,
-      address: sourceContact.address,
-      links: sourceContact.links,
-      location: sourceContact.location,
-      employee_count: sourceContact.employee_count,
-      turnover: sourceContact.turnover,
-      trucks: sourceContact.trucks,
-      trailers: sourceContact.trailers,
-      vans: sourceContact.vans,
-      assigned_to: sourceContact.assigned_to,
-      notes: sourceContact.notes,
-      date_of_enquiry: today,
-    }).select('*').single();
-    if (error) { setMessage(error.message); return; }
+    const done = await trackerFromCrm(supabase, {
+      contacts: [sourceContact.id], side: newSide, what,
+    });
+    if (!done.ok) { setMessage(done.why); return; }
+
+    const { data } = await supabase.from('crm_contacts').select('*').eq('id', done.rowId).single();
+    if (!data) { setMessage('That went on the tracker but did not come back.'); return; }
     setRows(r => [data as CRMContact, ...r]);
     setSide(newSide);
     setShowNewLead(false);
     setEditingRow(data as CRMContact);
   }
+
 
   return (
     <div>

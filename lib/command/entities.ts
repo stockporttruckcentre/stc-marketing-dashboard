@@ -143,7 +143,80 @@ function parseRange(text: string): { from: Date; to: Date; label: string } | nul
     const to = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
     return { from, to, label: 'last month' };
   }
+
+  /* --- quarters ---
+     Said as often as months and previously read as nothing at all, so
+     "profit this quarter" answered for all time. */
+  const q = t.match(/\bq([1-4])\b(?:\s+(\d{4}))?/);
+  if (q) {
+    const y = q[2] ? Number(q[2]) : now.getFullYear();
+    const m = (Number(q[1]) - 1) * 3;
+    return { from: new Date(y, m, 1), to: new Date(y, m + 3, 0, 23, 59, 59), label: `Q${q[1]} ${y}` };
+  }
+  if (/\bthis quarter\b/.test(t)) {
+    const m = Math.floor(now.getMonth() / 3) * 3;
+    return { from: new Date(now.getFullYear(), m, 1), to: now, label: 'this quarter' };
+  }
+  if (/\blast quarter\b|\bprevious quarter\b/.test(t)) {
+    const m = Math.floor(now.getMonth() / 3) * 3 - 3;
+    const from = new Date(now.getFullYear(), m, 1);
+    return { from, to: new Date(from.getFullYear(), from.getMonth() + 3, 0, 23, 59, 59), label: 'last quarter' };
+  }
+
+  /* --- months by name ---
+     "Added between May and July" and "sold in March". A month name is a
+     period the same way "last week" is, and reading it as a customer
+     called May is how "vehicles added between May and July" came back
+     with every vehicle ever. Runs last so a relative phrase always
+     wins. */
+  const span = t.match(new RegExp(
+    String.raw`\b(?:between|from)\s+(${MONTHS_RE})\b[a-z ]*?\s(?:and|to|until|till)\s+(${MONTHS_RE})\b(?:\s+(\d{4}))?`));
+  if (span) {
+    const a = monthIndex(span[1]);
+    const b = monthIndex(span[2]);
+    if (a != null && b != null) {
+      const y = span[3] ? Number(span[3]) : now.getFullYear();
+      // A span that runs backwards crossed a new year: November to February.
+      const endYear = b < a ? y + 1 : y;
+      return {
+        from: new Date(y, a, 1),
+        to: new Date(endYear, b + 1, 0, 23, 59, 59),
+        label: `${MONTH_NAMES[a]} to ${MONTH_NAMES[b]}`,
+      };
+    }
+  }
+  const one = t.match(new RegExp(String.raw`\b(?:in|during|for|through)\s+(${MONTHS_RE})\b(?:\s+(\d{4}))?`));
+  if (one) {
+    const m = monthIndex(one[1]);
+    if (m != null) {
+      const y = one[2] ? Number(one[2]) : now.getFullYear();
+      return {
+        from: new Date(y, m, 1),
+        to: new Date(y, m + 1, 0, 23, 59, 59),
+        label: `${MONTH_NAMES[m]}${one[2] ? ` ${y}` : ''}`,
+      };
+    }
+  }
   return null;
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+                     'July', 'August', 'September', 'October', 'November', 'December'];
+/* Full names and the three letter forms, which is how anybody types
+   them in a hurry. September gets "sept" as well as "sep". */
+const MONTHS_RE = [
+  ...MONTH_NAMES.map((m) => m.toLowerCase()),
+  ...MONTH_NAMES.map((m) => m.slice(0, 3).toLowerCase()),
+  'sept',
+].join('|');
+
+function monthIndex(word: string): number | null {
+  const w = word.toLowerCase();
+  const full = MONTH_NAMES.findIndex((m) => m.toLowerCase() === w);
+  if (full >= 0) return full;
+  if (w === 'sept') return 8;
+  const short = MONTH_NAMES.findIndex((m) => m.slice(0, 3).toLowerCase() === w);
+  return short >= 0 ? short : null;
 }
 
 export function extract(input: string, tokens: Token[]): Extracted {

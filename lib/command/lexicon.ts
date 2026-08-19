@@ -272,6 +272,17 @@ const RESERVED = new Set([
   'trailer', 'trailers', 'unit', 'units', 'vehicle', 'vehicles', 'customer',
   'customers', 'deal', 'deals', 'order', 'orders', 'hire', 'rental', 'storage',
   'site', 'depot', 'yard', 'stockport truck centre', 'stc',
+  /* Time words. A preposition runs straight into a period constantly,
+     and "trailers booked in between May and July" was answered for a
+     depot called Between, in a month called May, with the range thrown
+     away. Months and the words that bracket them are never places. */
+  'between', 'during', 'through', 'until', 'till', 'since', 'before', 'after',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'quarter', 'ytd', 'q1', 'q2', 'q3', 'q4',
+
   /* Narrowing words. "How much revenue did we make from just trailer
      sales today" read "just" as the rep who sold them, and answered for
      a person who does not exist. Anything that qualifies a noun rather

@@ -57,6 +57,27 @@ export type EntitySpec = {
   hrefFor?: (row: any) => string;
   dateColumn?: string;
   /**
+   * When a sale happened, for entities that have sales.
+   *
+   * Two columns and a rule rather than one column, because that is what
+   * the business means: the date it went out, or the date it was
+   * ordered when it has not gone out yet. Declared once here so nothing
+   * downstream has to choose, and absent on entities where a sale is
+   * not a thing that happens.
+   */
+  saleDate?: { primary: string; fallback: string };
+  /**
+   * Every date a person can order by or ask about, not only the one
+   * periods are measured against.
+   *
+   * "Show vehicles added between May and July, newest first" needs the
+   * date it ARRIVED, and the period column is the date it left. One
+   * dateColumn could not tell them apart, so "newest first" sorted the
+   * stock list by the day each trailer was dispatched, which for
+   * anything still in the yard is empty.
+   */
+  dates?: { key: string; column: string; label: string; words: string[] }[];
+  /**
    * Nouns that name the thing AND narrow it. "how many leads" means
    * status=lead, whereas "how many customers" just means all of them.
    */
@@ -90,11 +111,40 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'stc_no',
     subtitleColumns: ['make', 'model', 'category', 'location'],
     dateColumn: 'dispatch_date',
+    /* WHEN A SALE HAPPENED, SAID ONCE.
+
+       The sales tracker has always read it as `dispatch_date ||
+       order_date`: a unit that has gone out is dated by when it went,
+       and one that is sold and not yet dispatched is dated by when it
+       was ordered. Anything reading only `dispatch_date` misses every
+       sale still waiting to go out, which at any moment is most of the
+       recent ones.
+
+       Declared here so the question reader, the exporter and any
+       commission figure consume the same meaning instead of each
+       choosing a column. */
+    saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
+    dates: [
+      { key: 'received', column: 'received_date', label: 'date in',
+        words: ['added', 'arrived', 'came in', 'received', 'booked in', 'landed', 'in stock since', 'taken in'] },
+      { key: 'dispatched', column: 'dispatch_date', label: 'date out',
+        words: ['dispatched', 'delivered', 'went out', 'left', 'collected', 'shipped'] },
+      { key: 'ordered', column: 'order_date', label: 'order date',
+        words: ['ordered', 'order date', 'placed'] },
+      { key: 'mot', column: 'mot_date', label: 'MOT date', words: ['mot', 'test', 'tested'] },
+      { key: 'expected', column: 'expected_delivery', label: 'expected delivery',
+        words: ['expected', 'due in', 'due to arrive', 'eta'] },
+    ],
     amounts: [
       { key: 'price', column: 'sales_price', label: 'sale price', words: ['worth', 'value', 'revenue', 'price', 'sales', 'turnover', 'income'] },
       { key: 'profit', column: 'profit', label: 'profit', words: ['profit', 'margin', 'gross'] },
       { key: 'nbv', column: 'nbv', label: 'book value', words: ['nbv', 'book value', 'cost'] },
       { key: 'retail', column: 'retail_price', label: 'retail price', words: ['retail'] },
+      /* Refurb is money the business talks about constantly and it was
+         not here, so "trailers with refurb over £2k" put the £2k on the
+         sale price and read the word "refurb" as a customer's name. */
+      { key: 'refurb', column: 'refurb_costs', label: 'refurb cost',
+        words: ['refurb', 'refurb cost', 'refurb costs', 'refurbishment', 'rework'] },
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: STOCK_STATUS },
@@ -146,6 +196,17 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'company_name',
     subtitleColumns: ['contact_name', 'status', 'location'],
     dateColumn: 'date_of_enquiry',
+    /* The same rule on the tracker side, where the commission lives. */
+    saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
+    dates: [
+      { key: 'enquiry', column: 'date_of_enquiry', label: 'enquiry date',
+        words: ['enquired', 'enquiry', 'came in', 'raised', 'opened'] },
+      { key: 'contact', column: 'last_contact', label: 'last contact',
+        words: ['contacted', 'spoke', 'spoken', 'touched', 'heard from', 'chased'] },
+      { key: 'ordered', column: 'order_date', label: 'order date', words: ['ordered', 'placed'] },
+      { key: 'dispatched', column: 'dispatch_date', label: 'date out',
+        words: ['dispatched', 'delivered', 'went out'] },
+    ],
     scope: 'mine',
     amounts: [
       { key: 'estimated', column: 'estimated_value', label: 'estimated value', words: ['worth', 'value', 'pipeline', 'estimated'] },
@@ -189,18 +250,45 @@ export const ENTITIES: EntitySpec[] = [
     titleColumn: 'company_name',
     subtitleColumns: ['contact_name', 'email', 'phone'],
     dateColumn: 'created_at',
+    dates: [
+      { key: 'added', column: 'created_at', label: 'date added',
+        words: ['added', 'created', 'joined', 'onboarded'] },
+      { key: 'contact', column: 'last_contact', label: 'last contact',
+        words: ['contacted', 'spoke', 'spoken', 'heard from', 'chased'] },
+    ],
     amounts: [
-      { key: 'fleet', column: 'fleet_size', label: 'fleet size', words: ['fleet', 'vehicles', 'size'] },
+      { key: 'fleet', column: 'fleet_size', label: 'fleet size', words: ['fleet', 'fleet size', 'vehicles'] },
       { key: 'turnover', column: 'turnover', label: 'turnover', words: ['turnover'] },
       { key: 'employees', column: 'employee_count', label: 'employees', words: ['employees', 'staff', 'headcount'] },
+      /* A customer's own vehicles, counted by type. These are numbers on
+         a CRM record, not vehicles this business stocks: "customers with
+         more than 20 trucks" is a fleet question and there is no truck
+         anywhere in the stock list. */
+      { key: 'their_trucks', column: 'trucks', label: 'their trucks', words: ['trucks', 'tractor units'] },
+      /* On a customer, "trailers" is a count of the ones THEY run. The
+         word also names the stock list, so it only reaches this column
+         once the sentence has already resolved to a customer. */
+      { key: 'their_trailers', column: 'trailers', label: 'their trailers',
+        words: ['their trailers', 'trailers on their fleet', 'trailers on fleet', 'trailers'] },
+      { key: 'their_vans', column: 'vans', label: 'their vans', words: ['vans'] },
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: DEAL_STATUS },
+      /* THE CUSTOMER'S OWN NAME.
+         The tracker reading of this table has had one all along and the
+         CRM reading had not, so "find Dawson Group" resolved to a list
+         of every customer: the sentence named a record and the answer
+         was everybody. It is also what makes a company name in the live
+         vocabulary able to name the entity on its own. */
+      { key: 'customer', column: 'company_name', kind: 'text', label: 'customer', freeText: true },
+      { key: 'contact', column: 'contact_name', kind: 'text', label: 'contact', freeText: true },
       { key: 'location', column: 'location', kind: 'text', label: 'location', freeText: true },
       { key: 'assigned', column: 'assigned_to', kind: 'text', label: 'assigned to', freeText: true },
     ],
     dimensions: [
       { key: 'status', column: 'status', label: 'status', words: ['status', 'stage'] },
+      { key: 'customer', column: 'company_name', label: 'customer',
+        words: ['customer', 'company', 'client', 'account'] },
       { key: 'location', column: 'location', label: 'location', words: ['location', 'area', 'town', 'city'] },
       { key: 'assigned', column: 'assigned_to', label: 'owner', words: ['rep', 'owner', 'assigned'] },
     ],
@@ -241,10 +329,89 @@ export const ENTITIES: EntitySpec[] = [
     hrefFor: () => '/dashboard/social',
   },
   {
+    /* THE BRAND KIT IS A TABLE, AND IT WAS ANSWERED BY A SCREEN.
+
+       `brand_assets` holds the logos, the fonts and the colours, and a
+       colour's hex is its `url`. "What is our navy hex" is a question
+       about a row, and the only answer it had was an action that opened
+       the brand kit and left somebody to find it and select it. */
+    id: 'brand',
+    table: 'brand_assets',
+    label: 'brand assets', labelOne: 'brand asset',
+    /* Deliberately qualified. "Colour" on its own is a column on a
+       trailer and "logo" is not, so the unqualified words are the ones
+       that could only mean this. */
+    nouns: ['brand asset', 'brand assets', 'brand colour', 'brand colours',
+            'brand color', 'brand colors', 'brand hex', 'brand kit',
+            'logo', 'logos', 'brand font', 'brand fonts',
+            /* A hex is a hex. Nothing else in this application calls
+               anything one, so the word can stand on its own where
+               "colour" cannot. */
+            'hex', 'hexes', 'hex code', 'hex codes', 'colour code', 'color code'],
+    titleColumn: 'name',
+    subtitleColumns: ['type', 'category', 'url'],
+    dateColumn: 'created_at',
+    amounts: [],
+    filters: [
+      /* QUALIFIED WORDS ONLY.
+
+         "Colour" and "hex" on their own belong to a trailer: "what
+         colour is STC143580" is a question about a unit, and a bare
+         `colour` here made it a question about the brand kit. Every key
+         is a phrase that could only mean this table. */
+      { key: 'type', column: 'type', kind: 'enum', label: 'type',
+        vocabulary: {
+          logo: 'logo', logos: 'logo', emblem: 'logo', emblems: 'logo',
+          'brand font': 'font', 'brand fonts': 'font', typeface: 'font',
+          typefaces: 'font',
+          'brand colour': 'color', 'brand colours': 'color',
+          'brand color': 'color', 'brand colors': 'color',
+          'brand hex': 'color', swatch: 'color', swatches: 'color',
+          template: 'template', templates: 'template',
+        } },
+      { key: 'name', column: 'name', kind: 'text', label: 'name', freeText: true },
+      { key: 'category', column: 'category', kind: 'text', label: 'category', freeText: true },
+    ],
+    dimensions: [
+      { key: 'type', column: 'type', label: 'type', words: ['type', 'kind'] },
+      { key: 'category', column: 'category', label: 'category', words: ['category', 'group'] },
+    ],
+    hrefFor: () => '/dashboard/brand',
+  },
+  {
+    /* WHAT THE MONTH IS SUPPOSED TO BRING IN.
+       `revenue_targets` was reachable by one hand written intent that
+       computed a gap in a route and by nothing else, so nobody could
+       ask what the target actually was. It is an ordinary table with a
+       month and an amount on it, and it is answered like one. */
+    id: 'targets',
+    table: 'revenue_targets',
+    label: 'targets', labelOne: 'target',
+    nouns: ['target', 'targets', 'budget', 'budgets', 'quota', 'quotas'],
+    titleColumn: 'period_month',
+    subtitleColumns: ['target_amount'],
+    dateColumn: 'period_month',
+    amounts: [
+      { key: 'target', column: 'target_amount', label: 'target',
+        words: ['target', 'budget', 'quota', 'goal'] },
+    ],
+    filters: [],
+    dimensions: [
+      { key: 'month', column: 'period_month', label: 'month', words: ['month', 'period'] },
+    ],
+    hrefFor: () => '/dashboard/analytics',
+  },
+  {
     id: 'meetings',
     table: 'calendar_events',
     label: 'meetings', labelOne: 'meeting',
-    nouns: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments', 'visit', 'visits', 'diary'],
+    /* An invitation is a meeting seen from the other side. "Suggest
+       Friday at 2pm instead for this invitation" is about the same row
+       as "for this meeting", and without the word the sentence pointed
+       at nothing. */
+    nouns: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments',
+            'visit', 'visits', 'site visit', 'site visits', 'diary',
+            'invitation', 'invitations', 'invite', 'invites'],
     titleColumn: 'title',
     subtitleColumns: ['start_at'],
     dateColumn: 'start_at',
@@ -257,6 +424,37 @@ export const ENTITIES: EntitySpec[] = [
       { key: 'visibility', column: 'visibility', label: 'visibility', words: ['visibility'] },
     ],
     hrefFor: () => '/dashboard/calendar',
+  },
+  {
+    /* THE PEOPLE WHO USE THIS.
+       Addressable because a sentence can now change what one of them is
+       allowed to do, and a result that can be operated on has to be a
+       result that can be described: "change Dave to sales and export
+       him to CSV" had nowhere to read the second half from. It also
+       answers the ordinary questions nobody could ask before, like how
+       many administrators there are. */
+    id: 'people',
+    table: 'profiles',
+    label: 'people', labelOne: 'person',
+    nouns: ['person', 'people', 'colleague', 'colleagues', 'user', 'users',
+            'team member', 'team members', 'staff'],
+    titleColumn: 'full_name',
+    subtitleColumns: ['email', 'role'],
+    dateColumn: 'created_at',
+    amounts: [],
+    filters: [
+      { key: 'role', column: 'role', kind: 'enum', label: 'role',
+        vocabulary: {
+          admin: 'admin', admins: 'admin', administrator: 'admin', administrators: 'admin',
+          sales: 'sales', rep: 'sales', reps: 'sales',
+          marketer: 'marketer', marketers: 'marketer', marketing: 'marketer',
+          viewer: 'viewer', viewers: 'viewer', 'read only': 'viewer',
+        } },
+    ],
+    dimensions: [
+      { key: 'role', column: 'role', label: 'role', words: ['role', 'roles', 'access'] },
+    ],
+    hrefFor: () => '/dashboard/admin',
   },
 ];
 

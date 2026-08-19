@@ -1,0 +1,824 @@
+/* =============================================================
+   Carrying out a whole plan, or none of it.
+
+   A canonical Plan is a program. It may hold a select, two updates, an
+   invoke and an emit, and a command is only carried out when every one
+   of them is. The version this replaces called `plan.steps.find(...)`
+   and executed the first mutation it came across, which meant a plan
+   with two updates in it silently performed one and reported success.
+
+   THE SHAPE, AND WHY IT EXTENDS.
+
+     1  PLAN      every effect step is listed, in order. A step this
+                  cannot completely carry out refuses the whole plan
+                  rather than the plan running without it.
+     2  RESOLVE   every step is resolved BEFORE anything is written, so
+                  the preview describes the whole command.
+     3  POLICY    how much this is allowed to change, which is
+                  configuration and not a property of the language.
+     4  APPLY     every change from every step, in ONE transaction.
+
+   `Select -> Update -> Update -> Invoke -> Emit` needs no new shape for
+   this: a select is not an effect and resolves as a step's `match`, two
+   updates are two units in the same programme, and an invoke and an
+   emit become units whose apply is a capability handler rather than a
+   table write. What is missing today is the handlers, not the design,
+   and each is a `Unit` kind with a `resolve` and an `apply`.
+
+   ATOMICITY IS THE DATABASE'S JOB, AND IT COVERS THE WHOLE PROGRAMME.
+
+   Several PostgREST calls are several transactions, so a plan whose
+   third statement fails has already changed the CRM twice. Undoing that
+   from here means writing compensating updates that can themselves
+   fail, which is a worse version of the same problem. So every database
+   effect one programme has goes to one `command_perform` call, which is
+   one function, which is one transaction: it commits entirely or it
+   leaves nothing behind.
+
+   That includes the effects that used to run afterwards. Sharing a list
+   and attaching a file are database writes, and running them after the
+   transaction had committed meant a share that failed left a list
+   nobody asked for and reported success with a note about the rest not
+   happening.
+
+   That function validates every table and column against an allowlist
+   held in the database and generated from this registry, so a crafted
+   payload cannot reach a column the command bar was never meant to
+   write, even if something upstream of it is wrong.
+   ============================================================= */
+import { createHash } from 'crypto';
+import type { Mutate, Plan, Step } from './types';
+import { entity as entityDef, capability } from './registry';
+import { evaluate, type EvalContext } from './evaluate';
+import { resolveMutation, resolutionHash, type Resolution, type ResolvedReference } from './resolve';
+import type { Change, ProjectOutcome, ProjectedRow, Store, TransactionStep } from './store';
+import { resolveInvoke, type InvokePlan } from './invoke';
+import { dependencesAmong, overlappingRows } from './dependence';
+import { postState, type PlannedEffect } from './overlay';
+
+/* -------------------------------------------------------------
+   Which steps have an effect
+   ------------------------------------------------------------- */
+
+/**
+ * Every step that changes something or sends something.
+ *
+ * A select changes nothing and is not one. An emit to the screen
+ * changes nothing either; an emit anywhere else does.
+ */
+export function effectSteps(plan: Plan): Step[] {
+  return plan.steps.filter((s) => {
+    if (s.op === 'create' || s.op === 'update' || s.op === 'delete') return true;
+    if (s.op === 'invoke') return true;
+    if (s.op === 'emit') return s.to.kind !== 'display';
+    return false;
+  });
+}
+
+/**
+ * The steps that produce something and hand it over.
+ *
+ * Some of them are database writes and go into the same transaction as
+ * everything else: a share is a row in `crm_list_members` and an
+ * attachment is a row in `record_attachments`. A download is not a
+ * database effect at all, and the FILE for either is rendered before
+ * the transaction opens, so a renderer that throws leaves nothing
+ * written.
+ */
+export function deliverySteps(plan: Plan): Step[] {
+  return plan.steps.filter((s) => s.op === 'emit' && s.to.kind !== 'display');
+}
+
+/**
+ * The effects this file resolves for itself.
+ *
+ * Deliveries are resolved by the emit layer, which is the only thing
+ * that can render a file, and arrive back through `ExecuteOptions.
+ * deliveries` as steps in the same transaction.
+ */
+function transactionalSteps(plan: Plan): Step[] {
+  return effectSteps(plan).filter((s) => s.op !== 'emit');
+}
+
+/** What the executor can carry out today. Everything else refuses. */
+function executableKind(s: Step): { ok: true } | { ok: false; why: string } {
+  if (s.op === 'update' || s.op === 'create' || s.op === 'delete') return { ok: true };
+  if (s.op === 'invoke') {
+    const cap = capability(s.capability);
+    if (!cap?.handler) return { ok: false, why: `nothing performs ${s.capability} yet` };
+    return { ok: true };
+  }
+  return { ok: false, why: `nothing here performs an ${s.op} yet` };
+}
+
+/* -------------------------------------------------------------
+   A resolved programme
+   ------------------------------------------------------------- */
+
+export type { Change } from './store';
+
+export type UpdateUnit = {
+  stepId: string;
+  /**
+   * Which way a row's life is changing.
+   *
+   * One shape for all three, because the preview, the overlap check and
+   * the transaction are the same for each: a create resolves nothing
+   * because there is no row yet, and a delete resolves rows and sets no
+   * columns, and both of those are properties of the change rather than
+   * reasons for a second code path.
+   */
+  kind: 'update' | 'create' | 'delete';
+  entity: string;
+  table: string;
+  resolution: Extract<Resolution, { ok: true }> | null;
+  /** What the preview shows, and exactly what will be written. */
+  changes: Change[];
+  /**
+   * The same effect, as a later step in this programme will see it.
+   *
+   * Only different for a create: the database issues the real id, so
+   * what gets written carries none and what gets predicted carries a
+   * stand-in. Absent means `changes` is already both.
+   */
+  staged?: Change[];
+  /** Row label to before and after, for the preview. */
+  preview: { id: string; label: string; before: Record<string, unknown>; after: Record<string, unknown> }[];
+};
+
+/**
+ * A business operation, resolved to the records it will run on.
+ *
+ * Separate from an update because it is not one. Nothing about it is a
+ * column and a value: it is a job the database performs, and the only
+ * things this layer decides are which records and whether the operation
+ * has what it needs.
+ */
+export type InvokeUnit = {
+  stepId: string;
+  kind: 'invoke';
+  plan: InvokePlan;
+  /**
+   * Exactly what it will leave behind, from the operation itself.
+   *
+   * Present for a capability that declares `projects` when the store
+   * can answer. It is what a later step in the same programme reads,
+   * and what the preview shows: a sale's commission is arithmetic this
+   * layer cannot do and must not copy, so it is asked for rather than
+   * declared unknowable.
+   */
+  projection?: ProjectedRow[];
+};
+
+export type Unit = UpdateUnit | InvokeUnit;
+
+/**
+ * A stand-in id for a row that does not exist yet.
+ *
+ * Derived rather than random, because the preview and the confirmation
+ * resolve the same programme independently and a random id would make
+ * their hashes differ every time. Shaped like a UUID so anything reading
+ * it sees an id, and never written: the database issues the real one.
+ */
+function plannedId(stepId: string, set: Record<string, unknown>): string {
+  const h = createHash('sha256').update(`${stepId}|${JSON.stringify(set)}`).digest('hex');
+  return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join('-');
+}
+
+/**
+ * One resolved unit, as the predictive reader wants it.
+ *
+ * The same shape `mutation.ts` builds for the preview, in one place so
+ * the sequential resolution above and the preview below cannot come to
+ * different conclusions about what a step is going to do.
+ */
+/**
+ * The rows each step so far resolved to, by step id.
+ *
+ * A create's row does not exist yet and has no id to give, so it is
+ * absent here and a step naming it is refused rather than resolved
+ * against nothing. What a create produces is handed forward inside the
+ * transaction instead, by `command_perform`.
+ */
+function resolvedSoFar(units: Unit[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const u of units) {
+    if (u.kind === 'invoke') {
+      out.set(u.stepId, u.plan.subjects.map((s) => s.id));
+    } else if (u.kind !== 'create') {
+      out.set(u.stepId, u.changes.map((c) => String(c.id ?? '')).filter(Boolean));
+    }
+  }
+  return out;
+}
+
+export function stagedEffect(u: Unit): PlannedEffect {
+  /* AN EXACT ANSWER BEATS A DESCRIBED ONE.
+
+     The registry's `effect` is what this application can say about an
+     operation from the outside, and for a sale that includes columns it
+     declares unpredictable. A projection is the operation's own answer
+     about the same rows, so where there is one it is used instead, as
+     ordinary column values: the predictive reader then treats a sale
+     exactly as it treats a field write, because at that point it is
+     one. */
+  if (u.kind === 'invoke' && u.projection?.length) {
+    return {
+      kind: 'changes',
+      changes: u.projection.map((r) => ({
+        op: 'update' as const, table: r.table, id: r.id, set: r.set,
+      })),
+    };
+  }
+  return u.kind === 'invoke'
+    ? {
+        kind: 'invoke',
+        capability: u.plan.capability,
+        subjects: u.plan.subjects.map((x) => x.id),
+        /* The records the sentence named, when the operation runs on
+           different ones. A sale names units and sells deals. */
+        via: u.plan.subjects.map((x) => x.viaId).filter((x): x is string => !!x),
+        args: u.plan.args,
+      }
+    : { kind: 'changes', changes: u.staged ?? u.changes };
+}
+
+export type Programme =
+  | {
+      ok: true; units: Unit[]; changes: Change[]; hash: string;
+      /**
+       * Two steps landing on the same row.
+       *
+       * Not a refusal any more: the steps run in order, so the later
+       * change wins and the order is the sentence's. It is still worth
+       * saying before it happens.
+       */
+      twiceTouched?: string;
+    }
+  | {
+      ok: false;
+      reason: 'nothing to do' | 'cannot execute' | 'dependent steps' | 'unresolved'
+        | 'blocked by policy' | 'incomplete' | 'ambiguous';
+      why: string;
+      /** Where a sentence naming one record found several. */
+      candidates?: { id: string; label: string }[];
+      /** The step that stopped it, when one did. */
+      stepId?: string;
+      /** The resolution that failed, so the caller can ask the question it raises. */
+      resolution?: Resolution;
+    };
+
+/**
+ * How much this is allowed to change.
+ *
+ * Execution policy, not language. A command over a thousand records is
+ * representable and may be permitted; whether it runs without a further
+ * word is a decision for whoever configures this, and a plan blocked
+ * here is blocked with `blocked by policy` rather than being reported
+ * as something the application could not understand.
+ *
+ * No default. A caller that says nothing gets no ceiling, because a
+ * number invented here would become the answer by accident.
+ */
+export type ExecutionPolicy = {
+  /** Refuse above this many rows in one command. Absent means no ceiling. */
+  maxRows?: number;
+  /** Require a stronger confirmation above this many. Absent means never. */
+  confirmAbove?: number;
+};
+
+export type OrchestrateOptions = {
+  store: Store;
+  /**
+   * Values a business operation needs that the records do not hold.
+   *
+   * Read out of the sentence by the reader and passed through, so this
+   * layer never invents one. See `CapabilityDef.inputs`.
+   */
+  args?: Record<string, unknown>;
+  policy?: ExecutionPolicy;
+  now?: string;
+  readCap?: number;
+};
+
+/* -------------------------------------------------------------
+   Resolving the whole plan
+   ------------------------------------------------------------- */
+
+export async function resolveProgramme(
+  plan: Plan, opts: OrchestrateOptions,
+): Promise<Programme> {
+  /* Everything that goes into the transaction. A file this programme
+     also produces is built afterwards, by the emit executor, from the
+     rows as they stand once the change has committed. */
+  const effects = transactionalSteps(plan);
+  if (!effects.length) {
+    /* A PROGRAMME CAN HAVE AN EFFECT AND NO TRANSACTION.
+
+       "Export the sold curtainsiders as a PDF and attach it to
+       STC143580" writes no column and performs no operation from here:
+       it produces a file and leaves it on a record, which happens after
+       the transaction that does not exist. Refusing it as "this plan
+       changes nothing" was reading the absence of a transaction as the
+       absence of an effect, and an attachment on a customer record is
+       plainly an effect. */
+    if (deliverySteps(plan).length) {
+      return { ok: true, units: [], changes: [], hash: programmeHash([]) };
+    }
+    return { ok: false, reason: 'nothing to do', why: 'this plan changes nothing' };
+  }
+
+  /* Every step, before any of them. A plan containing one thing this
+     can do and one it cannot is refused whole: running the half it
+     understands is the failure the whole architecture exists to stop. */
+  for (const s of effects) {
+    const can = executableKind(s);
+    if (!can.ok) {
+      return { ok: false, reason: 'cannot execute', why: can.why, stepId: s.id };
+    }
+    if (!s.id) {
+      return { ok: false, reason: 'cannot execute', why: 'a step with no id cannot be resolved or reported on' };
+    }
+  }
+
+  /* A DEPENDENCE IS AN ORDER, NOT AN ERROR.
+
+     Everything below used to compute each step's changes from the rows
+     as they stand NOW and hand them all over together, so a step meant
+     to run after another would read the old value, write a number that
+     was never true, and report success. Refusing every dependence was
+     the safe answer to that, and it also refused the thing anybody
+     would actually type: "assign Dawson to Dave and raise a proposal
+     for it" is one intention.
+
+     Resolution is sequential now. Each step is resolved against the
+     rows as the steps before it will leave them, through the same
+     predictive reader the preview uses. So a dependence on an EARLIER
+     step is ordinary and expected. What is still refused:
+
+       a dependence on a LATER step, which no ordering can satisfy
+       a dependence on a column nothing can predict, which the
+         predictive reader itself reports when the read is attempted
+
+     The second is not decided here. It is decided where it is known, by
+     `postState` refusing to answer a read it cannot answer honestly. */
+  const order = new Map(effects.map((s, i) => [s.id ?? `#${i}`, i]));
+  for (const d of dependencesAmong(effects)) {
+    const at = order.get(d.stepId) ?? -1;
+    const on = order.get(d.needs) ?? -1;
+    if (on < at) continue;
+    return {
+      ok: false,
+      reason: 'dependent steps',
+      why: on === at
+        ? `"${d.stepId}" depends on itself: ${d.why}.`
+        : `"${d.stepId}" needs "${d.needs}", which comes after it: ${d.why}. `
+          + 'Ask for them the other way round.',
+      stepId: d.stepId,
+    };
+  }
+
+  /* ONE TRANSACTION HOLDS BOTH KINDS OF THING.
+
+     It did not always. `command_apply` took column writes and
+     `command_invoke_one` took operations, and there was no way to put
+     both in one commit, so a plan holding both was refused rather than
+     run as two: two transactions is exactly the promise a preview does
+     not make.
+
+     `command_perform` was built for this. It takes an ordered list of
+     change sets and operations, runs them in that order inside one
+     PostgreSQL function, and lets a later step name what an earlier one
+     produced. The restriction that stood in front of it outlived the
+     reason for it by several migrations. */
+
+  const now = opts.now ?? new Date().toISOString().slice(0, 10);
+  const units: Unit[] = [];
+
+  for (const s of effects) {
+    /* THE ROWS AS THE STEPS BEFORE THIS ONE WILL LEAVE THEM.
+
+       Rebuilt for every step rather than once, because each resolution
+       adds to what the next one sees. A step that reads a column an
+       earlier step wrote gets the value it is about to have; a step
+       that reads a column nothing can predict is refused by the reader
+       itself, before anything is written. */
+    const asItWillBe = units.length
+      ? postState(opts.store, units.map(stagedEffect))
+      : opts.store;
+    const stepStore = asItWillBe;
+
+    /* A business operation, resolved to the records it will run on.
+       Nothing about it is a column and a value, so it does not go
+       through the mutation resolver at all. */
+    if (s.op === 'invoke') {
+      const resolved = await resolveInvoke(plan, s, { store: stepStore, args: opts.args });
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          reason: resolved.reason === 'incomplete' ? 'incomplete'
+            : resolved.reason === 'ambiguous' ? 'ambiguous' : 'unresolved',
+          why: resolved.why,
+          candidates: resolved.candidates,
+          stepId: s.id,
+        };
+      }
+      /* WHAT IT WILL LEAVE BEHIND, ASKED OF THE OPERATION ITSELF.
+
+         Only where the capability says its result is knowable and the
+         store can answer. A projection reads and writes nothing, so
+         this is as safe on the preview pass as it is on the
+         confirmation, and it is the same call on both. */
+      const projected = await projectionOf(resolved.plan, opts.store);
+      if (projected && !projected.ok) {
+        return {
+          ok: false, reason: 'unresolved', why: projected.why, stepId: s.id,
+        };
+      }
+
+      units.push({
+        stepId: s.id ?? '?', kind: 'invoke', plan: resolved.plan,
+        ...(projected?.ok ? { projection: projected.rows } : {}),
+      });
+      continue;
+    }
+
+    /* A row that does not exist yet has nothing to resolve. Everything
+       an insert needs is in the step: the columns and their values. */
+    if (s.op === 'create') {
+      const step = s as Mutate & { id: string };
+      const def = entityDef(step.target.entity);
+      if (!def) {
+        return { ok: false, reason: 'cannot execute', why: `nothing here holds ${step.target.entity}`, stepId: step.id };
+      }
+
+      const set: Record<string, unknown> = {};
+      const ctx: EvalContext = { row: {}, references: new Map(), now };
+      for (const [i, a] of (step.set ?? []).entries()) {
+        const value = evaluate(a.to, ctx, `set[${i}].to`);
+        if (!value.ok) {
+          return { ok: false, reason: 'unresolved', why: value.why, stepId: step.id };
+        }
+        set[a.field.field] = value.value;
+      }
+      if (!Object.keys(set).length) {
+        return { ok: false, reason: 'incomplete', why: 'that says nothing about the record to create', stepId: step.id };
+      }
+
+      /* WHERE THE ROW WILL BE, BEFORE IT IS ANYWHERE.
+
+         A later step in the same programme can name what this makes.
+         The database gives the real id on insert, so this carries a
+         stand-in derived from the step and the values it is writing:
+         the same resolution twice produces the same one, which is what
+         keeps the programme hash stable between the preview and the
+         confirmation, and it is never sent to the database. It exists
+         so a predicted read can hold the row at all. */
+      const standIn = plannedId(step.id, set);
+
+      units.push({
+        stepId: step.id, kind: 'create', entity: step.target.entity, table: def.table,
+        changes: [{ op: 'insert', table: def.table, set }],
+        /* The staged row for anything reading ahead. Separate from the
+           change, because the change is what the database is told and
+           this is what the programme predicts. */
+        staged: [{ op: 'insert' as const, table: def.table, id: standIn, set }],
+        preview: [{ id: '', label: 'a new record', before: {}, after: set }],
+        resolution: null,
+      });
+      continue;
+    }
+
+    const step = s as Mutate & { id: string };
+    const resolution = await resolveMutation(plan, {
+      store: stepStore, stepId: step.id, readCap: opts.readCap,
+      /* What every step before this one resolved to, so this one can be
+         about those rows rather than repeating their condition. */
+      resolvedIds: resolvedSoFar(units),
+    });
+    if (!resolution.ok) {
+      return { ok: false, reason: 'unresolved', why: resolution.why, stepId: step.id, resolution };
+    }
+
+    const def = entityDef(step.target.entity);
+    if (!def) {
+      return { ok: false, reason: 'cannot execute', why: `nothing here holds ${step.target.entity}`, stepId: step.id };
+    }
+
+    const references = new Map<string, unknown>(
+      resolution.references.map((r: ResolvedReference) => [r.at, r.value]),
+    );
+
+    const changes: Change[] = [];
+    const preview: UpdateUnit['preview'] = [];
+
+    for (const row of resolution.rows) {
+      const set: Record<string, unknown> = {};
+      const ctx: EvalContext = { row: row.before, references, now };
+
+      for (const [i, a] of (step.set ?? []).entries()) {
+        const value = evaluate(a.to, ctx, `set[${i}].to`);
+        if (!value.ok) {
+          return {
+            ok: false,
+            reason: 'unresolved',
+            why: `${row.label}: ${value.why}`,
+            stepId: step.id,
+          };
+        }
+        if (a.mode === 'append') {
+          const existing = row.before[a.field.field];
+          set[a.field.field] = existing ? `${String(existing)}\n${String(value.value)}` : String(value.value);
+        } else {
+          set[a.field.field] = value.value;
+        }
+      }
+
+      changes.push(step.op === 'delete'
+        ? { op: 'delete', table: def.table, id: row.id }
+        : { table: def.table, id: row.id, set });
+      preview.push({ id: row.id, label: row.label, before: row.before, after: set });
+    }
+
+    units.push({
+      stepId: step.id, kind: step.op === 'delete' ? 'delete' : 'update',
+      entity: step.target.entity,
+      table: def.table, resolution, changes, preview,
+    });
+  }
+
+  /* TWO CHANGES TO ONE ROW ARE TWO CHANGES TO ONE ROW, IN ORDER.
+
+     This used to be refused, and the reason it gave was true at the
+     time: the changes went over as one unordered batch and nothing said
+     which won. They are ordered now, the later one wins, and the order
+     is the one in the sentence, which is the same rule everything else
+     here follows. "Put the price up on STC143580 and set its book value
+     to the new price" is one intention and used to come back as a
+     complaint about itself.
+
+     `overlappingRows` is still asked, and what it finds is reported as
+     a caution on the preview rather than as a refusal, because two
+     changes landing on one row is worth SEEING before it happens.
+     Finding it and saying nothing would be the other mistake. */
+  const overlap = overlappingRows(units.filter((u): u is UpdateUnit => u.kind !== 'invoke'));
+
+  const changes = units.flatMap((u) => (u.kind === 'invoke' ? [] : u.changes));
+
+  const operated = units.reduce((n, u) => n + (u.kind === 'invoke' ? u.plan.subjects.length : 0), 0);
+
+  const max = opts.policy?.maxRows;
+  if (max != null && changes.length + operated > max) {
+    return {
+      ok: false,
+      reason: 'blocked by policy',
+      why: `that would change ${(changes.length + operated).toLocaleString('en-GB')} records, and this is configured to stop above ${max.toLocaleString('en-GB')}`,
+    };
+  }
+
+  return {
+    ok: true, units, changes,
+    /* Said out loud on the preview: two of these steps land on the same
+       row, and the later one wins. */
+    twiceTouched: overlap
+      ? `"${overlap.stepId}" and "${overlap.needs}" ${overlap.why}, so the later one wins`
+      : undefined,
+    hash: programmeHash(units),
+  };
+}
+
+/**
+ * One fingerprint for the whole programme.
+ *
+ * Every step's resolution, in step order, so a plan whose second
+ * mutation drifts is refused as surely as one whose first does.
+ */
+/**
+ * The operation's own account of what it will do, where there is one.
+ *
+ * `null` when the capability does not claim its result is knowable, or
+ * when the store cannot answer. Both of those mean the registry's
+ * description stands, which for a sale means the columns it cannot work
+ * out are declared unknowable and a command asking to show them
+ * afterwards is refused rather than answered with the values from
+ * before. That is the old behaviour and it is still the right one when
+ * nothing better is available.
+ */
+async function projectionOf(
+  plan: InvokePlan, store: Store,
+): Promise<ProjectOutcome | null> {
+  const cap = capability(plan.capability);
+  if (!cap?.projects || !store.project) return null;
+  return store.project({
+    capability: plan.capability,
+    subjects: plan.subjects.map((s) => s.id),
+    args: plan.args,
+  });
+}
+
+export function programmeHash(units: Unit[]): string {
+  const updates = units.filter((u): u is UpdateUnit => u.kind !== 'invoke');
+  const invokes = units.filter((u): u is InvokeUnit => u.kind === 'invoke');
+
+  return resolutionHash(
+    [
+      /* A create resolves nothing, so it contributes the values it is
+         about to write instead. Two identical creates in one plan are
+         genuinely identical and hash the same, which is right: nothing
+         about the world decides what a new row will hold. */
+      ...updates.flatMap((u) => (u.resolution
+        ? u.resolution.rows.map((r) => ({ ...r, id: `${u.stepId}:${r.id}` }))
+        : u.changes.map((c, i) => ({
+            id: `${u.stepId}:new:${i}`,
+            label: 'a new record',
+            before: (c.set ?? {}) as Record<string, unknown>,
+          })))),
+      /* An operation's subjects go in as rows, with the values it read
+         off them. A deal whose price changed between the preview and
+         the confirmation is drift for the same reason a trailer whose
+         price changed is: the number that would be written is not the
+         number somebody was shown. */
+      ...invokes.flatMap((u) => u.plan.subjects.map((sub) => ({
+        id: `${u.stepId}:${sub.id}`,
+        label: sub.label,
+        before: sub.values,
+      }))),
+    ],
+    updates.flatMap((u) => (u.resolution?.references ?? []).map((r) => ({ ...r, at: `${u.stepId}:${r.at}` }))),
+    [
+      ...updates.flatMap((u) => (u.resolution?.fields ?? []).map((f) => `${u.stepId}:${f}`)),
+      ...invokes.flatMap((u) => [
+        `${u.stepId}:${u.plan.capability}`,
+        ...Object.entries(u.plan.args).map(([k, v]) => `${u.stepId}:arg:${k}=${String(v)}`),
+        /* AND EXACTLY WHAT IT SAID IT WOULD DO.
+
+           A sale whose profit moved between the preview and the
+           confirmation projects a different commission, which changes
+           this hash, which means a fresh preview rather than a write.
+           Without it, drift in a value the operation COMPUTES would be
+           invisible to a check that only watches the values it reads. */
+        ...(u.projection ?? []).map(
+          (r) => `${u.stepId}:will:${r.table}:${r.id}=${JSON.stringify(r.set)}`),
+      ]),
+    ],
+  );
+}
+
+/* -------------------------------------------------------------
+   Carrying it out
+   ------------------------------------------------------------- */
+
+export type ExecuteResult =
+  | {
+      ok: true; changed: number; changes: Change[]; hash: string;
+      /** What each step reported, in order, as the database returned it. */
+      results?: unknown[];
+    }
+  | { ok: false; reason: 'drift'; why: string; programme: Programme }
+  | { ok: false; reason: 'refused' | 'failed'; why: string; programme?: Programme };
+
+export type ExecuteOptions = OrchestrateOptions & {
+  /** The fingerprint the preview was built from. */
+  agreedHash: string;
+  /**
+   * Everything else this programme does to the database, appended to the
+   * same transaction.
+   *
+   * Sharing a list and attaching a file are database effects and used to
+   * run after the transaction had already committed, so a share that
+   * failed left a list nobody asked for and reported success with a
+   * sentence about the rest not happening. They arrive here instead.
+   *
+   * A callback rather than a list, because a step that shares the list
+   * an earlier step CREATED has to name that step's position, and the
+   * positions are not known until the resolved units are laid out.
+   */
+  deliveries?: (indexOf: (planStepId: string) => number | null) => TransactionStep[];
+  /**
+   * What each operation outside the database contributed, by plan step.
+   *
+   * The caller runs those preparers, because they are the half that
+   * cannot be in a transaction. Where their work lands in the
+   * transaction is this layer's business, and it is where the step
+   * itself is: a later clause about the rows a search made has to come
+   * after the step that makes them.
+   */
+  prepared?: Map<string, TransactionStep[]>;
+};
+
+/**
+ * The resolved programme, as the ordered database effects it is.
+ *
+ * Field writes go in as one `changes` step because `command_apply`
+ * already takes the whole set; operations go in one at a time in plan
+ * order. `indexOf` says where a plan step landed, so a later step can
+ * refer to what it produced.
+ */
+function transactionFor(
+  units: Unit[],
+  /**
+   * What each operation whose work happens outside the database
+   * contributes, by the plan step it belongs to.
+   *
+   * In PLACE, not at the end. A search that makes twenty customers and
+   * a clause that puts them on a list are one ordered programme, and
+   * appending the search's own work after everything else would put the
+   * rows on the list before the rows existed.
+   */
+  prepared: Map<string, TransactionStep[]> = new Map(),
+): {
+  steps: TransactionStep[];
+  indexOf: (planStepId: string) => number | null;
+} {
+  const steps: TransactionStep[] = [];
+  const at = new Map<string, number>();
+
+  const changes = units
+    .filter((u): u is UpdateUnit => u.kind !== 'invoke')
+    .flatMap((u) => u.changes);
+  if (changes.length) {
+    for (const u of units) if (u.kind !== 'invoke') at.set(u.stepId, steps.length);
+    steps.push({ op: 'changes', changes });
+  }
+
+  for (const u of units) {
+    if (u.kind !== 'invoke') continue;
+    /* An operation whose work happens outside the database contributes
+       CHANGES rather than an invoke, and the caller has already
+       prepared them. Sending its capability to `command_perform` would
+       ask the database to do something it has never heard of. */
+    if (capability(u.plan.capability)?.prepares) {
+      const its = prepared.get(u.stepId) ?? [];
+      if (its.length) {
+        /* Where it landed, so a later step can name what it produced. */
+        at.set(u.stepId, steps.length);
+        steps.push(...its);
+      }
+      continue;
+    }
+    at.set(u.stepId, steps.length);
+    steps.push({
+      op: 'invoke',
+      capability: u.plan.capability,
+      /* THE ROWS THE STEP IN FRONT IS ABOUT TO MAKE.
+
+         Named as a position in this transaction rather than as ids,
+         because the ids do not exist until it runs. `command_perform`
+         resolves it against what that step returned, and a reference to
+         a set standing in a list is spliced into it. */
+      subjects: u.plan.fromStep && at.has(u.plan.fromStep)
+        ? [{ $from: { step: at.get(u.plan.fromStep) as number, key: 'ids' } }]
+        : u.plan.subjects.map((s) => s.id),
+      args: u.plan.args,
+    });
+  }
+
+  return { steps, indexOf: (id) => at.get(id) ?? null };
+}
+
+/**
+ * Resolve again, check nothing moved, then write everything at once.
+ *
+ * The caller's copy of the programme is never trusted: it is a
+ * fingerprint to compare against, not a set of rows to write.
+ */
+export async function executeProgramme(
+  plan: Plan, opts: ExecuteOptions,
+): Promise<ExecuteResult> {
+  const fresh = await resolveProgramme(plan, opts);
+  if (!fresh.ok) {
+    return fresh.reason === 'unresolved' || fresh.reason === 'nothing to do'
+      ? { ok: false, reason: 'drift', why: fresh.why, programme: fresh }
+      : { ok: false, reason: 'refused', why: fresh.why, programme: fresh };
+  }
+  if (fresh.hash !== opts.agreedHash) {
+    return {
+      ok: false,
+      reason: 'drift',
+      why: 'those records have changed since you looked at them',
+      programme: fresh,
+    };
+  }
+
+  /* ONE CALL, FOR THE WHOLE PROGRAMME.
+
+     Every database effect it has, in order, through `command_perform`,
+     which is one plpgsql function and therefore one transaction. Handing
+     them over a kind at a time is what made a share that failed leave a
+     list behind, and it is not something this layer can put right
+     afterwards: a compensating delete can fail too. */
+  const laid = transactionFor(fresh.units, opts.prepared);
+  const steps = [...laid.steps, ...(opts.deliveries?.(laid.indexOf) ?? [])];
+
+  if (!steps.length) {
+    return { ok: true, changed: 0, changes: [], hash: fresh.hash };
+  }
+
+  const done = await opts.store.perform(steps);
+  if (!done.ok) return { ok: false, reason: 'failed', why: done.why, programme: fresh };
+
+  return {
+    ok: true, changed: done.changed, changes: fresh.changes,
+    hash: fresh.hash, results: done.results,
+  };
+}

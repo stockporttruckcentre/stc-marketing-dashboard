@@ -29,7 +29,7 @@ that is a statement about a role, not about a row.
 | `/api/crm/link` | `crm_contacts` | None. Rewrites `parent_customer_id` on arbitrary contact ids. |
 | `/api/crm/follow-up` | `dashboard_actions`, `crm_contacts` | None. On failure it silently stamps `last_contact` on any contact id passed in. |
 | `/api/tracker/send-from-stock` | `crm_contacts` | None. |
-| `/api/trailers/sync` | `trailer_sales` | None, and no row-count cap. |
+| ~~`/api/trailers/sync`~~ | `trailer_sales` | Deleted. It was an authenticated unbounded upsert into a table nothing reads, with no caller anywhere and no external contract: the only thing that ever called it was a component removed in 93388fc, and the guard reads a session cookie, so no external system could have called it at all. |
 | `/api/news/fetch` | `news_items` | None. **Any signed-in user can trigger a DELETE of every 'Road Transport' row and everything older than the cutoff.** |
 | `/api/lusha/enrich` | `crm_contacts`, `contact_addresses` | Only the global `LUSHA_LOCKED` switch. The per-user `crm.enrich` capability is never checked, so lifting the switch grants it to everybody at once, which is the opposite of what the meeting asked for. |
 | `/api/admin/seed-demo` | seven tables | Admin is checked **only** when `email` names another account. A viewer seeding or wiping themselves passes with no role check, and the `stc_no LIKE 'DEMO-%'` delete is not scoped to the caller. |

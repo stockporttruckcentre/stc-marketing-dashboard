@@ -40,11 +40,46 @@ export type ColumnSpec = {
   why?: string;
 };
 
+/**
+ * What it takes to make one of these rows, or get rid of one.
+ *
+ * DECLARED PER TABLE, BECAUSE IT IS A PROPERTY OF THE OPERATION.
+ *
+ * The lifecycle readers used to derive it from the writable dictionary
+ * entry for whichever column identifies the record, which for a contact
+ * is `company_name` and therefore `crm.edit`. `lib/crm/permissions.ts`
+ * distinguishes `crm.edit` from `crm.delete` deliberately, and deriving
+ * one from the other meant a marketer, who may edit every field on a
+ * customer and delete nothing, could have a deletion represented and
+ * permitted.
+ *
+ * The values are the ones the manual routes and the row policies
+ * already use, so the command bar asks for exactly what the screen asks
+ * for. A table with nothing here cannot be created or deleted from a
+ * sentence at all, which is the safe way round.
+ */
+export type LifecyclePermissions = {
+  create?: string;
+  delete?: string;
+  /**
+   * What it takes to hang a file off one of these rows.
+   *
+   * A property of the target, not of attaching: a condition report goes
+   * on a trailer under `stock.edit` and a signed proposal goes on a
+   * customer under `crm.edit`, and somebody may hold one and not the
+   * other. Migration 014 already derived it this way; declaring it here
+   * is what lets the planner give the same answer.
+   */
+  attach?: string;
+};
+
 export type TableSpec = {
   table: string;
   /** What the rows are, in the words people use. */
   label: string;
   columns: ColumnSpec[];
+  /** What it takes to make one of these or get rid of one. */
+  lifecycle?: LifecyclePermissions;
 };
 
 const SYSTEM: ColumnSpec[] = [
@@ -56,6 +91,7 @@ const SYSTEM: ColumnSpec[] = [
 export const TABLES: TableSpec[] = [
   {
     table: 'crm_contacts', label: 'customers',
+    lifecycle: { create: 'crm.create', delete: 'crm.delete', attach: 'crm.edit' },
     columns: [
       ...SYSTEM,
       { name: 'company_name', kind: 'text' },
@@ -106,6 +142,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'stock_trailers', label: 'trailers',
+    lifecycle: { create: 'stock.edit', delete: 'stock.edit', attach: 'stock.edit' },
     columns: [
       ...SYSTEM,
       { name: 'status', kind: 'enum', values: ['new_build', 'in_stock', 'sales_order', 'sold', 'rental', 'scrap'] },
@@ -165,6 +202,12 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'social_posts', label: 'social posts',
+    /* No generic create. A post's author is not writable and the column
+       is NOT NULL, so an insert built out of writable columns alone
+       cannot be accepted by the database. Writing one is `post.create`,
+       which fills the author and the status in from the profile the way
+       the composer does. Deleting one is still ordinary. */
+    lifecycle: { delete: 'marketing.edit' },
     columns: [
       ...SYSTEM,
       { name: 'content', kind: 'longtext' },
@@ -180,6 +223,11 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'calendar_events', label: 'meetings',
+    /* Booking a meeting and cancelling one are both `crm.delegate`,
+       which is what the calendar screen and every writable column on
+       this table already gate on. It was `crm.edit`, so a marketer who
+       may not book a meeting could cancel one. */
+    lifecycle: { create: 'crm.delegate', delete: 'crm.delegate' },
     columns: [
       ...SYSTEM,
       { name: 'title', kind: 'text' },
@@ -214,6 +262,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'contact_addresses', label: 'addresses',
+    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
     columns: [
       { name: 'id', kind: 'system', writable: false, why: 'identifier' },
       { name: 'created_at', kind: 'system', writable: false, why: 'set on insert' },
@@ -230,6 +279,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'contact_notes', label: 'notes',
+    lifecycle: { create: 'crm.edit', delete: 'crm.edit' },
     columns: [
       { name: 'id', kind: 'system', writable: false, why: 'identifier' },
       { name: 'created_at', kind: 'system', writable: false, why: 'set on insert' },
@@ -241,6 +291,7 @@ export const TABLES: TableSpec[] = [
   },
   {
     table: 'crm_lists', label: 'lists',
+    lifecycle: { create: 'crm.manageLists', delete: 'crm.manageLists' },
     columns: [
       ...SYSTEM,
       { name: 'name', kind: 'text' },
@@ -386,6 +437,16 @@ export const TABLES: TableSpec[] = [
       { name: 'balance', kind: 'number', writable: false, why: 'spent by searching, not typed' },
     ],
   },
+  /* NOTHING WRITES THIS TABLE ANY MORE.
+
+     `schema.sql` marks `trailer_sales` as replaced by `stock_trailers`,
+     and the last thing that wrote it was /api/trailers/sync, which is
+     deleted: its only caller was a component removed in 93388fc, and no
+     external system could have called it because the guard reads a
+     session cookie. It stays described here because the table is still
+     in the database, and it is addressable by nothing: there is no
+     entity for it in `schema.ts`, so no column of it reaches the
+     writable allowlist. */
   {
     table: 'trailer_sales', label: 'legacy listings',
     columns: [

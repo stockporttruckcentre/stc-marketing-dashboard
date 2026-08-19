@@ -90,6 +90,9 @@ export type CrmCapabilities = Set<CrmCapability>;
  * version the meeting asked for needs the admin panel, because it is
  * scoped to stock rather than to a verb.
  */
+/** Every role there is, in one place, so a sweep cannot miss one. */
+export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
+
 const BY_ROLE: Record<UserRole, CrmCapability[]> = {
   admin: [
     'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.create',
@@ -127,6 +130,27 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
  * can turn it on for the people who should have it without a deploy.
  */
 export const LUSHA_LOCKED = true;
+
+/**
+ * The same lock, as a value the runtime reads.
+ *
+ * A seam rather than an abstraction. The constant above is what the
+ * application ships with; this is what the enrichment path consults, so
+ * a check can lift the lock and prove the credit contract holds before
+ * anybody is able to spend a real credit. Production never writes to
+ * it.
+ */
+export const LUSHA_GATE = { locked: LUSHA_LOCKED };
+
+/**
+ * What the rollout lock withholds from everybody, by name.
+ *
+ * So a report can tell the difference between a sentence this
+ * application cannot carry out and one it can carry out and is
+ * switched off. Derived from the lock rather than written down twice:
+ * lifting the lock empties this list.
+ */
+export const WITHHELD: CrmCapability[] = LUSHA_LOCKED ? ['crm.enrich'] : [];
 
 /**
  * The one place role becomes capability.

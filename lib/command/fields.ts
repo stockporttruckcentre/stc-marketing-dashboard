@@ -48,6 +48,22 @@ export type WritableField = {
    * than overwrite what is already there.
    */
   arithmetic?: boolean;
+  /**
+   * May this be emptied?
+   *
+   * ABSENT MEANS NO. "Clear the status on STC143980" is not a thing the
+   * database will accept, because `stock_trailers.status` is NOT NULL,
+   * and a command that offers to do it fails at the last moment with a
+   * constraint error nobody can act on.
+   *
+   * Marked from the NOT NULL constraints in `supabase/schema.sql` and
+   * the migrations, and `npm run check:fields` verifies it in both
+   * directions: nothing marked clearable is NOT NULL, and no nullable
+   * writable column is silently left unmarked. A field whose column
+   * nobody has checked stays unclearable, which costs a command rather
+   * than costing data.
+   */
+  clearable?: boolean;
   /** Shown under the confirmation when the change deserves a word. */
   caution?: string;
 };
@@ -79,6 +95,13 @@ const POST_STATUS: Record<string, string> = {
   unreviewed: 'pending_review', 'not approved': 'pending_review',
   approved: 'approved', 'signed off': 'approved', ok: 'approved',
   approve: 'approved', approving: 'approved', 'sign off': 'approved',
+  /* The two buttons on the planner that had no words. A post goes for
+     approval and comes back from it, and both were reachable by
+     clicking and by nothing anybody could type. */
+  submit: 'pending_review', submitted: 'pending_review',
+  'for review': 'pending_review', 'send for approval': 'pending_review',
+  reject: 'draft', rejected: 'draft', 'send back': 'draft', 'sent back': 'draft',
+  'back to draft': 'draft', 'knock back': 'draft',
   scheduled: 'scheduled', queued: 'scheduled',
   posted: 'posted', published: 'posted', live: 'posted',
 };
@@ -101,102 +124,116 @@ const YES_NO: Record<string, string> = {
    Trailers.
    ------------------------------------------------------------- */
 export const TRAILER_FIELDS: WritableField[] = [
-  { key: 'refurb_costs', label: 'Refurb cost', kind: 'money', entity: 'trailers', arithmetic: true,
+  { key: 'refurb_costs', label: 'Refurb cost', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
     aliases: ['refurb cost', 'refurb costs', 'refurb value', 'refurb spend', 'refurbishment cost',
               'refurbishment', 'rectification cost', 'rectification', 'prep cost', 'prep costs',
               'prep', 'refurb'] },
-  { key: 'refurb_costs_at_sale', label: 'Refurb at sale', kind: 'money', entity: 'trailers', arithmetic: true,
+  { key: 'refurb_costs_at_sale', label: 'Refurb at sale', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
     aliases: ['refurb at sale', 'refurb cost at sale', 'refurb costs at sale', 'sale refurb',
               'refurb on sale', 'post sale refurb'] },
-  { key: 'nbv', label: 'Book value', kind: 'money', entity: 'trailers', arithmetic: true,
+  { key: 'nbv', label: 'Book value', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
     aliases: ['nbv', 'net book value', 'book value', 'book price', 'cost price', 'cost'] },
-  { key: 'sales_price', label: 'Sale price', kind: 'money', entity: 'trailers', arithmetic: true,
+  { key: 'sales_price', label: 'Sale price', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
     /* Not "sold price": new builds carry a separate sold_price column
        and this one is the sale price on everything else. */
     aliases: ['sale price', 'sales price', 'sold for', 'selling price', 'invoice value'] },
-  { key: 'retail_price', label: 'Retail price', kind: 'money', entity: 'trailers', arithmetic: true,
+  { key: 'retail_price', label: 'Retail price', kind: 'money', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
-    aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price', 'ticket price'] },
-  { key: 'location', label: 'Location', kind: 'text', entity: 'trailers',
+    /* "PRICE", ON ITS OWN, IS THE ASKING PRICE.
+
+       A unit in stock has several money columns and one of them is what
+       it is advertised at. "Put the price up by 500" is somebody
+       repricing a unit on the yard, and every other price on the row is
+       about a sale that has already happened: the sale price and what
+       it sold for are records of the past, and the book value is what
+       it cost us.
+
+       The longer aliases still win, because the field reader takes the
+       longest match: "add 500 to the sale price" is the sale price and
+       "the book price" is the book value. This only claims the word
+       when nothing more specific was said. */
+    aliases: ['retail price', 'retail', 'list price', 'asking price', 'advertised price',
+              'ticket price', 'price'] },
+  { key: 'location', label: 'Location', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit',
     aliases: ['location', 'depot', 'site', 'yard', 'where it is', 'parked at', 'stored at', 'based at'] },
   { key: 'status', label: 'Status', kind: 'enum', entity: 'trailers', vocabulary: STOCK_STATUS,
     capability: 'stock.edit',
     aliases: ['status', 'state', 'stage'],
     caution: 'Marking a trailer sold goes through the sales tracker, so the commission line is raised with it.' },
-  { key: 'category', label: 'Category', kind: 'enum', entity: 'trailers', vocabulary: BODY_TYPES,
+  { key: 'category', label: 'Category', kind: 'enum', entity: 'trailers', clearable: true, vocabulary: BODY_TYPES,
     capability: 'stock.edit',
     aliases: ['category', 'body type', 'body', 'trailer type', 'type'] },
-  { key: 'make', label: 'Make', kind: 'text', entity: 'trailers',
+  { key: 'make', label: 'Make', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['make', 'manufacturer', 'brand', 'built by'] },
-  { key: 'model', label: 'Model', kind: 'text', entity: 'trailers',
+  { key: 'model', label: 'Model', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['model', 'spec'] },
-  { key: 'year', label: 'Year', kind: 'number', entity: 'trailers',
+  { key: 'year', label: 'Year', kind: 'number', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['year', 'year of manufacture', 'build year', 'age'] },
-  { key: 'colour', label: 'Colour', kind: 'text', entity: 'trailers',
+  { key: 'colour', label: 'Colour', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['colour', 'color', 'paint'] },
-  { key: 'chassis_number', label: 'Chassis number', kind: 'text', entity: 'trailers',
+  { key: 'chassis_number', label: 'Chassis number', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['chassis number', 'chassis no', 'chassis', 'vin'] },
   /* A unit arrives on chassis and gets its stock number later, so this
      is written against a record found by chassis rather than by the
      number being set. mutate.ts knows to read the STC reference as the
      value here rather than as the record. */
-  { key: 'stc_no', label: 'Stock number', kind: 'text', entity: 'trailers',
+  { key: 'stc_no', label: 'Stock number', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit',
     aliases: ['stock number', 'stock no', 'stc number', 'stc no', 'stocknumber', 'unit number'] },
-  { key: 'ministry_no', label: 'Ministry number', kind: 'text', entity: 'trailers',
+  { key: 'ministry_no', label: 'Ministry number', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['ministry number', 'ministry no', 'ministry'] },
-  { key: 'mot_date', label: 'MOT', kind: 'date', entity: 'trailers',
+  { key: 'mot_date', label: 'MOT', kind: 'date', entity: 'trailers', clearable: true,
     capability: 'stock.edit',
     aliases: ['mot', 'mot date', 'mot expiry', 'mot due', 'test date', 'plating'] },
-  { key: 'customer', label: 'Customer', kind: 'text', entity: 'trailers',
+  { key: 'customer', label: 'Customer', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['customer', 'buyer', 'client', 'sold to', 'going to'] },
-  { key: 'sales_rep', label: 'Sales rep', kind: 'text', entity: 'trailers',
+  { key: 'sales_rep', label: 'Sales rep', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['rep', 'sales rep', 'salesman', 'seller', 'handled by'] },
-  { key: 'supplier', label: 'Supplier', kind: 'text', entity: 'trailers',
+  { key: 'supplier', label: 'Supplier', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['supplier', 'bought from', 'came from', 'source'] },
-  { key: 'door_type', label: 'Door type', kind: 'text', entity: 'trailers',
+  { key: 'door_type', label: 'Door type', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['door type', 'doors', 'door'] },
-  { key: 'axle_type', label: 'Axle type', kind: 'text', entity: 'trailers',
+  { key: 'axle_type', label: 'Axle type', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['axle type', 'axles', 'axle', 'running gear'] },
-  { key: 'side_aperture', label: 'Side aperture', kind: 'text', entity: 'trailers',
+  { key: 'side_aperture', label: 'Side aperture', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['side aperture', 'aperture', 'internal height', 'side height'] },
-  { key: 'tread_depths', label: 'Tread depths', kind: 'text', entity: 'trailers',
+  { key: 'tread_depths', label: 'Tread depths', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['tread depths', 'tread depth', 'tread', 'tyres', 'tyre depths'] },
-  { key: 'new_or_used', label: 'New or used', kind: 'enum', entity: 'trailers',
+  { key: 'new_or_used', label: 'New or used', kind: 'enum', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['new or used', 'condition'],
     vocabulary: { new: 'New', used: 'Used', secondhand: 'Used', 'second hand': 'Used' } },
-  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'trailers',
+  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['order date', 'ordered on', 'date ordered'] },
-  { key: 'dispatch_date', label: 'Dispatch date', kind: 'date', entity: 'trailers',
+  { key: 'dispatch_date', label: 'Dispatch date', kind: 'date', entity: 'trailers', clearable: true,
     capability: 'stock.edit',
     aliases: ['dispatch date', 'despatch date', 'dispatched on', 'delivery date', 'delivered on'] },
-  { key: 'expected_delivery', label: 'Expected delivery', kind: 'date', entity: 'trailers',
+  { key: 'expected_delivery', label: 'Expected delivery', kind: 'date', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['expected delivery', 'due date', 'eta', 'expected'] },
-  { key: 'deposit_received', label: 'Deposit received', kind: 'enum', entity: 'trailers',
+  { key: 'deposit_received', label: 'Deposit received', kind: 'enum', entity: 'trailers', clearable: true,
     capability: 'stock.edit', vocabulary: YES_NO, aliases: ['deposit received', 'deposit'] },
-  { key: 'paid_in_full', label: 'Paid in full', kind: 'enum', entity: 'trailers',
+  { key: 'paid_in_full', label: 'Paid in full', kind: 'enum', entity: 'trailers', clearable: true,
     capability: 'stock.edit', vocabulary: YES_NO,
     aliases: ['paid in full', 'paid in', 'fully paid', 'payment'] },
-  { key: 'signed_order', label: 'Signed order', kind: 'enum', entity: 'trailers',
+  { key: 'signed_order', label: 'Signed order', kind: 'enum', entity: 'trailers', clearable: true,
     capability: 'stock.edit', vocabulary: YES_NO, aliases: ['signed order', 'signed'] },
-  { key: 'quote_no', label: 'Quote number', kind: 'text', entity: 'trailers',
+  { key: 'quote_no', label: 'Quote number', kind: 'text', entity: 'trailers', clearable: true,
     capability: 'stock.edit', aliases: ['quote number', 'quote no', 'quote ref', 'quote'] },
-  { key: 'description', label: 'Description', kind: 'longtext', entity: 'trailers', arithmetic: true,
+  { key: 'description', label: 'Description', kind: 'longtext', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit', aliases: ['description', 'spec description', 'details', 'write up'] },
-  { key: 'refurb_update', label: 'Refurb update', kind: 'longtext', entity: 'trailers', arithmetic: true,
+  { key: 'refurb_update', label: 'Refurb update', kind: 'longtext', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit',
     aliases: ['refurb update', 'refurb progress', 'refurb note', 'refurb notes'] },
-  { key: 'refurb_done', label: 'Refurb done', kind: 'longtext', entity: 'trailers', arithmetic: true,
+  { key: 'refurb_done', label: 'Refurb done', kind: 'longtext', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit', aliases: ['refurb done', 'work done', 'refurb completed'] },
   /* Not "comment" or "comments": stock_trailers has a comments column of
      its own, and the curated alias was quietly stealing it, so the real
      column could not be written at all. */
-  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'trailers', arithmetic: true,
+  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'trailers', clearable: true, arithmetic: true,
     capability: 'stock.edit', aliases: ['note', 'notes', 'remark', 'general notes'] },
 ];
 
@@ -206,70 +243,68 @@ export const TRAILER_FIELDS: WritableField[] = [
 export const CONTACT_FIELDS: WritableField[] = [
   { key: 'status', label: 'Status', kind: 'enum', entity: 'contacts', vocabulary: DEAL_STATUS,
     capability: 'crm.edit', aliases: ['status', 'stage', 'state'] },
-  { key: 'assigned_to', label: 'Owner', kind: 'text', entity: 'contacts',
+  { key: 'assigned_to', label: 'Owner', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.assign',
     /* Not "account manager": that is its own column on the maintenance
        side and this one is the CRM owner. Two different people, often. */
     aliases: ['owner', 'assigned to', 'assigned', 'rep', 'handler', 'looked after by'] },
-  { key: 'contact_name', label: 'Contact name', kind: 'text', entity: 'contacts',
+  { key: 'contact_name', label: 'Contact name', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['contact name', 'contact', 'name', 'who to ask for'] },
-  { key: 'email', label: 'Email', kind: 'text', entity: 'contacts',
+  { key: 'email', label: 'Email', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['email', 'email address', 'e mail'] },
   /* "number" is not one of these. It used to be, and "add stock number
      STC150001 to C734105" was filed as a phone number, on the wrong
      record, with a chassis number for a value. An alias that vague
      claims every sentence with a digit in it. */
-  { key: 'phone', label: 'Phone', kind: 'text', entity: 'contacts',
+  { key: 'phone', label: 'Phone', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit',
     aliases: ['phone', 'phone number', 'telephone', 'telephone number', 'mobile',
               'mobile number', 'landline', 'tel', 'contact number'] },
-  { key: 'location', label: 'Location', kind: 'text', entity: 'contacts',
+  { key: 'location', label: 'Location', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['location', 'town', 'city', 'area', 'region', 'based in'] },
-  { key: 'address', label: 'Address', kind: 'text', entity: 'contacts',
+  { key: 'address', label: 'Address', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['address', 'postal address', 'street'] },
-  { key: 'fleet_size', label: 'Fleet size', kind: 'number', entity: 'contacts', arithmetic: true,
-    capability: 'crm.edit', aliases: ['fleet size', 'fleet'] },
-  { key: 'trucks', label: 'Trucks', kind: 'number', entity: 'contacts', arithmetic: true,
+  { key: 'trucks', label: 'Trucks', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['trucks', 'tractor units', 'units'] },
-  { key: 'trailers', label: 'Trailers', kind: 'number', entity: 'contacts', arithmetic: true,
+  { key: 'trailers', label: 'Trailers', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['trailers on fleet', 'their trailers', 'trailer count'] },
-  { key: 'vans', label: 'Vans', kind: 'number', entity: 'contacts', arithmetic: true,
+  { key: 'vans', label: 'Vans', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['vans'] },
-  { key: 'employee_count', label: 'Employees', kind: 'number', entity: 'contacts', arithmetic: true,
+  { key: 'employee_count', label: 'Employees', kind: 'number', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['employees', 'headcount', 'staff', 'employee count'] },
-  { key: 'turnover', label: 'Turnover', kind: 'money', entity: 'contacts', arithmetic: true,
+  { key: 'turnover', label: 'Turnover', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['turnover', 'annual turnover', 'revenue'] },
-  { key: 'estimated_value', label: 'Estimated value', kind: 'money', entity: 'contacts', arithmetic: true,
+  { key: 'estimated_value', label: 'Estimated value', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit',
     aliases: ['estimated value', 'deal value', 'opportunity value', 'pipeline value', 'estimate', 'worth'] },
-  { key: 'sale_price', label: 'Sale price', kind: 'money', entity: 'contacts', arithmetic: true,
+  { key: 'sale_price', label: 'Sale price', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['sale price', 'sold for', 'invoiced', 'invoice value'] },
-  { key: 'commission_rate', label: 'Commission rate', kind: 'number', entity: 'contacts',
+  { key: 'commission_rate', label: 'Commission rate', kind: 'number', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['commission rate', 'commission percentage', 'comm rate'] },
-  { key: 'next_action', label: 'Next action', kind: 'text', entity: 'contacts',
+  { key: 'next_action', label: 'Next action', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.edit',
     /* Not the bare "action": crm_contacts has an action column beside
        this one, and taking the word here made that column unreachable. */
     aliases: ['next action', 'next step', 'follow up', 'to do', 'chase'] },
-  { key: 'last_contact', label: 'Last contact', kind: 'date', entity: 'contacts',
+  { key: 'last_contact', label: 'Last contact', kind: 'date', entity: 'contacts', clearable: true,
     capability: 'crm.edit',
     aliases: ['last contact', 'last contacted', 'last spoke', 'last called', 'contacted on'] },
-  { key: 'date_of_enquiry', label: 'Enquiry date', kind: 'date', entity: 'contacts',
+  { key: 'date_of_enquiry', label: 'Enquiry date', kind: 'date', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['enquiry date', 'date of enquiry', 'enquired on', 'came in on'] },
-  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'contacts',
+  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['order date', 'ordered on'] },
   { key: 'source', label: 'Source', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['source', 'came from', 'lead source', 'found via'] },
-  { key: 'side', label: 'Side', kind: 'enum', entity: 'contacts',
+  { key: 'side', label: 'Side', kind: 'enum', entity: 'contacts', clearable: true,
     capability: 'crm.edit', aliases: ['side', 'division', 'part of the business'],
     vocabulary: { sales: 'trailer_sales', 'trailer sales': 'trailer_sales',
                   maintenance: 'maintenance', service: 'maintenance', workshop: 'maintenance' } },
   { key: 'relationship', label: 'Relationship', kind: 'enum', entity: 'contacts',
     capability: 'crm.edit', aliases: ['relationship', 'prospect or customer', 'existing customer'],
     vocabulary: { prospect: 'prospect', new: 'prospect', existing: 'existing', current: 'existing' } },
-  { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'contacts', arithmetic: true,
+  { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['requirement', 'what they want', 'their requirement', 'looking for'] },
-  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', arithmetic: true,
+  { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['note', 'notes', 'remark', 'latest update'] },
 ];
 
@@ -288,7 +323,7 @@ export const POST_FIELDS: WritableField[] = [
   { key: 'scheduled_date', label: 'Scheduled date', kind: 'date', entity: 'posts',
     capability: 'marketing.edit',
     aliases: ['scheduled date', 'schedule date', 'post date', 'publish date', 'going out on'] },
-  { key: 'caption', label: 'Caption', kind: 'longtext', entity: 'posts', arithmetic: true,
+  { key: 'caption', label: 'Caption', kind: 'longtext', entity: 'posts', clearable: true, arithmetic: true,
     capability: 'marketing.edit', aliases: ['caption', 'post caption'] },
 ];
 
@@ -357,6 +392,27 @@ function titleCase(s: string): string {
  * offered for a table with no route behind it would appear and then
  * refuse, which is the thing this whole file exists to prevent.
  */
+/**
+ * Writable columns the database will not accept as empty.
+ *
+ * Read off the NOT NULL constraints in `supabase/schema.sql` and the
+ * migrations. `npm run check:fields` parses that SQL and fails if this
+ * disagrees with it in either direction, so it is a copy that cannot go
+ * stale quietly. Everything absent from here is clearable; anything
+ * this application cannot see is not writable in the first place.
+ */
+export const NOT_NULL_COLUMNS = new Set<string>([
+  'trailers.status',
+  'contacts.company_name', 'contacts.source', 'contacts.status',
+  'posts.content', 'posts.platform', 'posts.scheduled_date',
+  'posts.status', 'posts.created_by',
+  'meetings.title', 'meetings.start_at', 'meetings.all_day',
+  /* Added by migrations rather than by schema.sql, which is exactly the
+     pair `check:fields` caught the first time it ran. */
+  'contacts.relationship',
+  'meetings.visibility',
+]);
+
 function generateTail(): WritableField[] {
   const curated = new Set(
     [...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS].map((f) => `${f.entity}.${f.key}`),
@@ -406,6 +462,7 @@ function generateTail(): WritableField[] {
         vocabulary,
         capability,
         arithmetic: kind === 'money' || kind === 'number' || kind === 'longtext',
+        clearable: !NOT_NULL_COLUMNS.has(`${entity}.${col.name}`),
       });
     }
   }
@@ -414,9 +471,31 @@ function generateTail(): WritableField[] {
 
 export const GENERATED_FIELDS: WritableField[] = generateTail();
 
-export const WRITABLE_FIELDS: WritableField[] = [
+/**
+ * Every field the bar may write.
+ *
+ * Filtered through `columns.ts` on the way out, because the two lists
+ * disagreed and nothing said so. `crm_contacts.fleet_size` is declared
+ * there as "derived from trucks, trailers and vans by a trigger" and
+ * was curated here as an editable number, so "set the fleet size on
+ * Dawson to 40" was a sentence this application would read, accept and
+ * write, and a trigger would then overwrite. The canonical validator
+ * caught it, which is what a second opinion is for.
+ *
+ * A curated entry naming a column `columns.ts` calls unwritable is a
+ * mistake in the curation, so it is dropped rather than trusted.
+ */
+function onlyWritableColumns(fields: WritableField[]): WritableField[] {
+  return fields.filter((f) => {
+    const table = TABLES.find((t) => t.table === ENTITY_TABLE[f.entity]);
+    const col = table?.columns.find((c) => c.name === f.key);
+    return !!col && col.writable !== false;
+  });
+}
+
+export const WRITABLE_FIELDS: WritableField[] = onlyWritableColumns([
   ...TRAILER_FIELDS, ...CONTACT_FIELDS, ...POST_FIELDS, ...GENERATED_FIELDS,
-];
+]);
 
 /** Every field this person is allowed to write, for the checks and the empty state. */
 export function writableFor(caps: Set<CrmCapability>): WritableField[] {

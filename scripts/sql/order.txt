@@ -1,0 +1,51 @@
+# The order the command runtime's migrations have to be applied in.
+#
+# Not numeric order. Three of them depend on something a later number
+# creates, and running them by name leaves a database that looks
+# migrated and refuses half the commands:
+#
+#   009 before 007   `schema.sql` calls `is_list_member_safe` in a policy
+#   016 before 011   the lifecycle checks read the capability seed
+#   018 and 019 last they change roles, and 019's trigger has to see the
+#                    final shape of `command_set_role`
+#
+# One list, read by `build-test-db.sh` and by `bundle-migrations.sh`, so
+# the database a check builds and the file somebody pastes into a
+# Supabase SQL editor cannot be two different orders.
+#
+# Everything here is CREATE OR REPLACE, CREATE TABLE IF NOT EXISTS or an
+# idempotent seed, so applying the whole list to a database that already
+# has some of it is safe and is the intended way to catch one up.
+009_list_visibility_recursion
+007_command_apply
+008_writable_columns_seed
+010_command_invoke
+016_capability_roles_seed
+011_command_apply_lifecycle
+012_command_create_list
+013_command_share_list
+014_command_attachments
+015_command_add_to_list
+017_command_perform
+020_command_tracker_operations
+021_command_meetings
+022_command_social_posts
+023_command_import
+024_command_calendar
+025_owner_authority
+026_import_list_authority
+027_external_attempts
+028_attach_permission
+029_customer_details
+030_command_news
+031_command_stock_import
+032_command_share_named_list
+033_command_tracker_from_crm
+034_external_claim
+035_orphaned_uploads
+036_apply_returns_ids
+037_sale_projection
+038_duplicate_and_link
+039_rows_forward
+018_command_set_role
+019_last_admin

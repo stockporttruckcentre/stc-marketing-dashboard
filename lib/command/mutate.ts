@@ -31,23 +31,21 @@
    about to change is a trap.
    ============================================================= */
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from './fields';
+import { parseQuery } from './query';
+import { condForFilters } from './ir/conditions';
+import { capability, entity as entityDef } from './ir/registry';
+import type { Cardinality, Cond } from './ir/types';
+import type { ColumnKind } from './columns';
+import { EMPTY_VOCABULARY, type VocabularyIndex } from './vocab';
+import {
+  EMPTY_CONTEXT, readContextReference, resolveContext, type CommandContext,
+} from './context';
 import { DEPOTS, isReservedWord } from './lexicon';
 import { distance } from './normalise';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
 
 export type EditOp = 'set' | 'add' | 'subtract' | 'clear';
 
-export type EditTarget =
-  /** One record, named by its stock number or its company name. */
-  | { kind: 'stock'; text: string; label: string }
-  | { kind: 'company'; text: string; label: string }
-  /**
-   * Every record matching a description, for the instructions people
-   * give in bulk: "mark all outstanding social posts as approved". The
-   * confirmation counts them before anything is written, because "all"
-   * is a word worth being sure about.
-   */
-  | { kind: 'filter'; text: string; label: string; column: string; value: string };
 
 export type EditPlan = {
   entity: WritableEntity;
@@ -56,14 +54,29 @@ export type EditPlan = {
   /** Null for a clear, and null while the value is still missing. */
   value: string | number | null;
   valueLabel: string;
-  /** The first record named. Kept for the single record case. */
-  target: EditTarget | null;
   /**
-   * Every record named. "Mark STC143580 and 144504 as sold" is two
-   * units, and answering it for one of them is a bug that looks like it
-   * worked.
+   * Which rows, in the canonical condition language.
+   *
+   * The same `Cond` a question produces, from the same machinery. There
+   * used to be a separate `EditTarget` union here with its own reader,
+   * and it could express less than the read side could: `readBulkTarget`
+   * narrowed on one enum on the field being written, so an instruction
+   * could say "all the outstanding ones" and could not say "at Hyde".
+   * Deleting it did not lose a feature, it removed a ceiling.
    */
-  targets: EditTarget[];
+  match: Cond | null;
+  /**
+   * How many rows the SENTENCE named, never how many matched.
+   *
+   * `many` only where the words say every match. A company name that
+   * turns out to fit forty accounts is an ambiguity to raise, not
+   * permission to write forty.
+   */
+  expect: Cardinality;
+  /** The rows in words, for the preview. */
+  matchLabel: string;
+  /** Each record the sentence named, for a preview that lists them. */
+  named: string[];
   /**
    * Some instructions are understood here and carried out somewhere
    * else. Selling raises a commission line on a tracker and needs a
@@ -71,6 +84,15 @@ export type EditPlan = {
    * named rather than writing a status column behind its back.
    */
   handoff?: 'markSold';
+  /**
+   * Values a business operation needs, read out of the sentence.
+   *
+   * Filled from the capability's own declared `inputs` rather than from
+   * anything written down here, so "mark STC143580 as sold for £24,995"
+   * carries the price without this file knowing what a sale is. See
+   * `CapabilityDef.inputs`.
+   */
+  args?: Record<string, string | number | null>;
   /** What still has to be supplied before this can run. */
   missing: ('target' | 'value')[];
   /** Plain English, shown before anything happens. */
@@ -100,17 +122,38 @@ const SUB_WORDS = [
    set, so a reduction of a hundred became a refurb cost of a hundred.
    These match the verb with its object in the way people write it. */
 const SPLIT_SUB = /\b(take|knock|shave|chop|cut|trim)\b[^.]{0,20}?\b(off|away|out)\b/i;
+
+/* WHICH WAY A NUMBER IS GOING.
+
+   One idea, said in whichever order English feels like: "put the price
+   up by 500", "up the price by 500", "take it down 500", "drop the
+   retail price by 500". The direction word is the whole of the meaning
+   and the verb in front of it is decoration, so these match on the
+   direction and allow anything in between.
+
+   Only consulted for a column that can count. */
+const LOWER = /\b(down|lower|drop|dropped|reduce|reduced|decrease|knock)\b/i;
+const RAISE = /\b(up|higher|raise|raised|increase|increased|bump|bumped)\b/i;
 const SPLIT_ADD = /\b(put|stick|add|chuck|whack|bung)\b[^.]{0,20}?\b(on|onto|to)\b/i;
 
 /** Replace it outright. */
-const SET_WORDS = [
+export const SET_WORDS = [
   'set', 'change', 'update', 'amend', 'correct', 'make', 'switch', 'move', 'put', 'mark',
   'record', 'enter', 'assign', 'give', 'is', 'are', 'to', 'should be', 'equals', 'now',
 ];
 
 /** Empty it. */
-const CLEAR_WORDS = [
+export const CLEAR_WORDS = [
   'clear', 'blank', 'wipe', 'empty', 'unset', 'reset', 'remove the', 'delete the', 'take out',
+  /* GIVING SOMETHING UP IS EMPTYING A COLUMN.
+
+     "Take this account off me", "unassign it", "put it back in the
+     unassigned pool". Nobody says "clear the owner", and every one of
+     these was read as something else: "take ... off" is the shape of a
+     subtraction, so a text column came out as a reduction of nothing.
+     A clear outranks the split subtraction, which is what makes these
+     land. */
+  'unassign', 'unassigned', 'off me', 'off my', 'remove me from', 'release',
 ];
 
 /**
@@ -320,26 +363,155 @@ export function readRecordRefs(text: string): { stc: string[]; coded: string[]; 
    ------------------------------------------------------------- */
 
 /** Verbs that mean "put it somewhere", which name the location field without saying it. */
-const MOVE_WORDS = ['move', 'relocate', 'shift', 'transfer', 'park', 'parked', 'store',
+export const MOVE_WORDS = ['move', 'relocate', 'shift', 'transfer', 'park', 'parked', 'store',
                     'stored', 'send', 'put', 'stick', 'place', 'drop', 'bring'];
 
 /** The field being written, longest alias first so "refurb at sale" beats "refurb". */
-function findField(text: string, caps?: CrmCapabilities): { field: WritableField; alias: string } | null {
+function findField(
+  text: string, caps?: CrmCapabilities, assumed?: string,
+): { field: WritableField; alias: string } | null {
   /* Anything after a colon is the value, not the field. Without this
      cut, "add a note to Dawson: chasing tyre quote" was filed under
      Tread depths, because "tyres" is one of its words and it is a longer
      match than "note". */
   const beforeColon = text.split(':')[0];
   const t = soften(beforeColon);
+
+  /* WHAT THEY BECOME NAMES THE FIELD.
+
+     "Mark all the in stock curtainsiders as sold" was filed as a change
+     to the CATEGORY, set to Curtainsider, on every trailer in stock. The
+     alias loop below matched "curtainsiders" against the category field
+     and returned before anything looked at the word after "as", and
+     "curtainsiders" is the longer match, so it won on length as well.
+
+     The half after "as" is where the rows are going, so a state word in
+     it names the column being written. The half before it describes the
+     rows and must not. */
+  const destination = soften(splitOnAs(beforeColon).destination);
+  const destinationState = (): { field: WritableField; alias: string } | null => {
+    if (!destination.trim() || !MARK_WORDS.some((w) => fuzzyContains(t, w))) return null;
+    let hit: { field: WritableField; alias: string } | null = null;
+    for (const f of WRITABLE_FIELDS) {
+      if (f.kind !== 'enum' || !f.vocabulary) continue;
+      if (caps && !caps.has(f.capability)) continue;
+      /* The entity comes from the whole sentence, since that is where
+         the noun is. Only the VALUE has to be in the destination. */
+      if (!mentionsEntity(t, f.entity, assumed)) continue;
+      for (const word of Object.keys(f.vocabulary)) {
+        if (!fuzzyContains(destination, word)) continue;
+        if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
+      }
+    }
+    return hit;
+  };
+
   let best: { field: WritableField; alias: string } | null = null;
   for (const f of WRITABLE_FIELDS) {
     if (caps && !caps.has(f.capability)) continue;
     for (const a of f.aliases) {
       if (!t.includes(` ${a} `) && !t.includes(` ${a}s `) && !fuzzyContains(t, a)) continue;
+      /* A word somebody is POINTING at is the thing, not a column of
+         it. "Add a note to this customer" was filed as a change to a
+         trailer's customer column, because "customer" is a longer alias
+         than "note" and nothing looked at the word in front of it. */
+      if (pointedAt(t, a)) continue;
       if (!best || a.length > best.alias.length) best = { field: f, alias: a };
     }
   }
-  if (best) return best;
+  /* An alias that is also one of its own field's VALUES is describing
+     the rows, not naming the column.
+
+     "Curtainsiders" is an alias of the category field and also a
+     category, so "mark all the in stock curtainsiders as sold" matched
+     it, and matched it more strongly than anything else because it is a
+     long word. The instruction became: set the category to Curtainsider
+     on every trailer in stock.
+
+     "Paid in full" is an alias of its field and not a value of it, so
+     "set paid in full on STC143980 to yes" is a sentence that genuinely
+     names its column and keeps it. */
+  if (best) {
+    const alias = best.alias;
+    /* Two ways an alias can be describing the rows or the price rather
+       than naming the column being written.
+
+       It is also one of its own field's VALUES. "Curtainsiders" is an
+       alias of the category field and also a category, so "mark all the
+       in stock curtainsiders as sold" set the category to Curtainsider
+       on every trailer in stock.
+
+       It is inside the half that says what the rows BECOME. "Mark
+       STC143580 as sold for £24,995" is a sale at a price, and the
+       price words are in the destination alongside the state, so the
+       sentence came out as a change to the sale price with the sale
+       itself dropped. "Set paid in full on STC143980 to yes" keeps its
+       column, because that alias is in the half describing the record. */
+    const namesAValue = !!best.field.vocabulary
+      && Object.keys(best.field.vocabulary).some((w) => w === alias || w.startsWith(alias));
+    const aliasIsInDestination = destination.includes(` ${alias} `);
+
+    /* AN ALIAS THAT OPENS THE SENTENCE IS THE VERB.
+
+       "Make" is the trailer's manufacturer column and it is also how
+       people say "set". "Make this meeting private" matched the column,
+       could find no value for it, and came back as nothing at all. A
+       marking verb at the front of a sentence is what somebody is doing,
+       not what they are naming. */
+    const opensAsVerb = MARK_WORDS.includes(alias)
+      && soften(beforeColon).trimStart().startsWith(`${alias} `);
+
+    if (namesAValue || aliasIsInDestination || opensAsVerb) {
+      const destinationField = destinationState();
+      if (destinationField && destinationField.field.key !== best.field.key) return destinationField;
+
+      /* With no destination half there is still a state in there. Same
+         rule as the block below, reached earlier because an alias
+         happened to match the verb. */
+      if (opensAsVerb) {
+        let hit: { field: WritableField; alias: string } | null = null;
+        for (const f of WRITABLE_FIELDS) {
+          if (f.kind !== 'enum' || !f.vocabulary) continue;
+          if (caps && !caps.has(f.capability)) continue;
+          if (!mentionsEntity(t, f.entity, assumed)) continue;
+          for (const word of Object.keys(f.vocabulary)) {
+            if (!fuzzyContains(t, word)) continue;
+            if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
+          }
+        }
+        if (hit) return hit;
+      }
+    }
+    return best;
+  }
+
+  /* OWNERSHIP IS NEVER SAID BY NAMING THE COLUMN.
+
+     "Take this account off me", "unassign it", "put it back in the
+     unassigned pool", "hand it over to Dave". One field, and not one of
+     those sentences contains the words "assigned to". They came back as
+     nothing at all, which is worse than a refusal: the account stayed
+     in somebody's name and the bar said it had not understood.
+
+     The same shape as the depot rule below: a word that can only be
+     about this field names it. */
+  const owning = OWNER_WORDS.some((w) => fuzzyContains(t, w))
+    /* "Give it to Dave", "hand this over to Sam". English puts the
+       record in the middle of the verb, which is why this is a shape
+       rather than a phrase. Not when the sentence opens by asking for
+       something: "give me a list of customers" is a question. */
+    || (GIVE_TO.test(t) && !/^\s*(?:give|show|send|get) me\b/i.test(beforeColon));
+  if (owning) {
+    const owner = WRITABLE_FIELDS.find(
+      (f) => f.key === 'assigned_to' && f.entity === 'contacts');
+    if (owner && (!caps || caps.has(owner.capability))) {
+      /* The field's own name, which is NOT in the sentence. The alias
+         is stripped out before the operation is read, and reporting the
+         words that carried the meaning would take "off me" out and
+         leave a set with no value. */
+      return { field: owner, alias: 'owner' };
+    }
+  }
 
   /* Some sentences name the field by naming the value. "Move STC143980
      to Carrington" never says the word location, and asking somebody to
@@ -360,12 +532,16 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
      Which entity, from which vocabulary owns the word. Longest match
      wins so "pending review" is not read as "review". */
   if (MARK_WORDS.some((w) => fuzzyContains(t, w))) {
+    /* The destination half first, for the same reason as above. */
+    const destinationField = destinationState();
+    if (destinationField) return destinationField;
+
     let hit: { field: WritableField; alias: string } | null = null;
     for (const f of WRITABLE_FIELDS) {
       if (f.kind !== 'enum' || !f.vocabulary) continue;
       if (caps && !caps.has(f.capability)) continue;
       // Only where the sentence is plausibly about this entity.
-      if (!mentionsEntity(t, f.entity)) continue;
+      if (!mentionsEntity(t, f.entity, assumed)) continue;
       for (const word of Object.keys(f.vocabulary)) {
         if (!fuzzyContains(t, word)) continue;
         if (!hit || word.length > hit.alias.length) hit = { field: f, alias: word };
@@ -376,6 +552,40 @@ function findField(text: string, caps?: CrmCapabilities): { field: WritableField
   return null;
 }
 
+/**
+ * Words that can only be about who an account belongs to.
+ *
+ * Both directions, because taking an account on and giving one up are
+ * the same column. Deliberately not "assign" on its own: that is
+ * already an alias of the field and is handled where every other alias
+ * is, and listing it here would take sentences off the reader that
+ * knows how to find the person's name in them.
+ */
+/**
+ * A word that points, with or without a noun behind it.
+ *
+ * Only consulted once the column is known and the screen has a record
+ * of that column's own entity open, which is what makes the missing
+ * noun safe to supply.
+ */
+const POINTS_AT_SOMETHING = /\b(?:this|that|it|these|those|here)\b/i;
+
+const GIVE_TO = /\b(?:give|giving|hand|handing|pass|passing|allocate|allocating|transfer|transferring)\b[^.]{0,24}?\bto\b/i;
+
+const OWNER_WORDS = [
+  'unassign', 'unassigned', 'off me', 'off my', 'remove me from',
+  'my portfolio', 'my accounts', 'my list', 'my patch',
+  'hand over', 'handover', 'hand it over', 'pass it to', 'take it on',
+  'take this on', 'pick it up', 'release',
+];
+
+/** Words that point at what is on the screen rather than at a column. */
+const POINTING = ['this', 'that', 'these', 'those', 'the current', 'the open'];
+
+function pointedAt(softened: string, alias: string): boolean {
+  return POINTING.some((p) => softened.includes(` ${p} ${alias} `));
+}
+
 /** Marking verbs, which is what turns a state word into an instruction. */
 const MARK_WORDS = [
   'mark', 'set', 'make', 'flag', 'change', 'move', 'switch', 'update', 'put',
@@ -384,6 +594,18 @@ const MARK_WORDS = [
      were falling through to the query engine and being answered as
      questions. */
   'sell', 'sold', 'approve', 'approving', 'sign off', 'publish', 'schedule', 'scrap',
+  /* The other two things that happen to a post. Both are buttons on the
+     planner and neither had a word. */
+  'submit', 'reject', 'send back', 'knock back',
+  /* "SEND THIS POST FOR APPROVAL" IS WHAT PEOPLE SAY.
+
+     "Submit" already worked and nobody uses it. The verb and the state
+     word sit at opposite ends of the sentence, so the phrase is not
+     contiguous and cannot be listed as one: it is the bare verb, and
+     what makes it a mark rather than a share is that a state word
+     follows it. `send X to somebody` is a destination clause and is
+     read before this, so the two do not compete. */
+  'send',
 ];
 
 /** Words that say which table a sentence is about. */
@@ -396,15 +618,31 @@ const ENTITY_WORDS: Record<WritableEntity, string[]> = {
              'visit', 'visits', 'diary', 'event', 'events'],
 };
 
-function mentionsEntity(softened: string, entity: WritableEntity): boolean {
+function mentionsEntity(
+  softened: string, entity: WritableEntity, assumed?: string,
+): boolean {
   if (ENTITY_WORDS[entity].some((w) => softened.includes(` ${w} `))) return true;
   // A stock reference names a trailer without using any of those words.
   if (entity === 'trailers') return /\bstc[\s\-_]?\d{3,8}\b/i.test(softened);
-  return false;
+  /* OR THE SENTENCE IS ABOUT WHAT IS IN FRONT OF THEM.
+
+     "Send it back to draft" names a state and no noun, because the noun
+     was in the clause before or is on the screen. Without this the
+     state hunt below had no entity to look in and the sentence came
+     back as nothing at all, which is how "reject this post and send it
+     back to draft" refused a sentence whose first half it had already
+     understood. */
+  return assumed === entity;
 }
 
-/** set, add, subtract or clear, from the words around it. */
-function findOp(text: string): { op: EditOp; word: string } {
+/**
+ * set, add, subtract or clear, from the words around it.
+ *
+ * `kind` is the column's, because a direction only means arithmetic on
+ * a column that can count. "Put the notes down as chasing the tyre
+ * quote" is not a reduction of anything.
+ */
+function findOp(text: string, kind?: ColumnKind): { op: EditOp; word: string } {
   const t = soften(text);
   const longest = (words: string[]) => {
     let hit = '';
@@ -421,6 +659,25 @@ function findOp(text: string): { op: EditOp; word: string } {
   /* A split verb outranks whatever single word the contiguous lists
      found, because "take 100 off" ends up matching the bare "to" in the
      set list and quietly becomes a set. */
+  /* WHICH WAY, WHERE THE SENTENCE SAYS WHICH WAY.
+
+     "Put the price up by 500" and "put the price down by 500" are the
+     same sentence with one word changed, and both came out as an
+     addition: the shape below matched "put ... on STC143580", where the
+     "on" is the RECORD rather than the arithmetic. So the direction is
+     read first, from the word that carries it, and only on a column
+     that can count.
+
+     Lowering wins where both appear, because "put it up for sale and
+     knock 500 off" is a reduction and reading it the other way puts the
+     price up. */
+  if (kind === 'money' || kind === 'number') {
+    const down = LOWER.exec(t);
+    if (down && !clear) return { op: 'subtract', word: down[1] };
+    const up = RAISE.exec(t);
+    if (up && !clear) return { op: 'add', word: up[1] };
+  }
+
   const splitSub = SPLIT_SUB.exec(t);
   if (splitSub && !clear) return { op: 'subtract', word: splitSub[1] };
   const splitAdd = SPLIT_ADD.exec(t);
@@ -441,30 +698,58 @@ function findOp(text: string): { op: EditOp; word: string } {
  * stock number. Taken from after the preposition, with the field words
  * and anything reserved stripped, because "add a note to Dawson" means
  * the company and "add a note to the record" means nothing at all.
+ *
+ * `value` is what the sentence is going to write, and it is here to
+ * settle the one word English uses for both jobs. "On", "for" and
+ * "against" name the record. "To" usually introduces the new value, so
+ * it is only read as the record when nothing else was, and when what it
+ * captured turns out to BE the value it is not the record either:
+ *
+ *   assign Dawson Group to Dave
+ *
+ * came back as a change to a customer called Dave, with the owner set
+ * to Dave, at a confidence high enough to act on. The company is in the
+ * other half of the sentence, which is where this looks next.
  */
-function findCompany(original: string, fieldAlias: string): string | null {
+function findCompany(
+  original: string, fieldAlias: string, value: string | number | null, opWord: string,
+): string | null {
   const cleaned = original
     .split(':')[0]
     .replace(new RegExp(fieldAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  /* The capture has to stop before the value, or "change the owner on
-     Dawson Group to Dave" files the change against a company called
-     Dawson Group Dave. "on", "for" and "against" name the record; "to"
-     usually introduces the new value, so it is only read as the record
-     when nothing else did. */
   const STOP = String.raw`(?=\s+(?:to|and|with|as|is|are|=|from)\b|[:,;]|$)`;
-  const m =
-    cleaned.match(new RegExp(String.raw`\b(?:on|for|against)\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))
-    ?? cleaned.match(new RegExp(String.raw`\bto\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'));
-  const raw = (m?.[1] ?? '').trim().replace(/[.,:;]+$/, '');
-  if (!raw) return null;
-  const words = raw.split(/\s+/).filter((w) => !NOT_A_VALUE.has(lower(w)));
-  if (!words.length) return null;
-  if (words.every((w) => isReservedWord(w))) return null;
-  const name = words.join(' ');
-  return name.length >= 2 ? name : null;
+  const tidy = (raw: string): string | null => {
+    const trimmed = raw.trim().replace(/[.,:;]+$/, '');
+    if (!trimmed) return null;
+    const words = trimmed.split(/\s+/)
+      .filter((w) => !NOT_A_VALUE.has(lower(w)))
+      .filter((w) => !opWord || lower(w) !== lower(opWord));
+    if (!words.length) return null;
+    if (words.every((w) => isReservedWord(w))) return null;
+    const name = words.join(' ');
+    return name.length >= 2 ? name : null;
+  };
+
+  const named = tidy(
+    cleaned.match(new RegExp(String.raw`\b(?:on|for|against)\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))?.[1] ?? '',
+  );
+  if (named) return named;
+
+  const afterTo = tidy(
+    cleaned.match(new RegExp(String.raw`\bto\s+([A-Za-z0-9&'.\- ]{2,60}?)${STOP}`, 'i'))?.[1] ?? '',
+  );
+  const isTheValue = afterTo != null && value != null
+    && lower(afterTo) === lower(String(value));
+  if (afterTo && !isTheValue) return afterTo;
+
+  /* The half before the word that introduced the value. "Assign Dawson
+     Group to Dave" says who it is about first and what it becomes
+     second, which is the ordinary way round for a verb that takes both. */
+  if (isTheValue) return tidy(cleaned.split(/\s+\b(?:to|as|into)\b\s+/i)[0] ?? '');
+  return null;
 }
 
 /**
@@ -475,11 +760,30 @@ function findCompany(original: string, fieldAlias: string): string | null {
  * has already typed. Missing the amount is a question worth asking.
  * Missing the whole instruction is not.
  */
-export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | null {
+export function parseEdit(
+  input: string,
+  caps?: CrmCapabilities,
+  vocabulary: VocabularyIndex = EMPTY_VOCABULARY,
+  context: CommandContext = EMPTY_CONTEXT,
+  /**
+   * The entity a clause is about when it does not say.
+   *
+   * "Send it back to draft" is the second half of a sentence and names
+   * no noun. The caller knows what the first half was about, or what
+   * the screen has open, and passes it. It only ever WIDENS what can be
+   * read: a sentence naming its own entity is unaffected.
+   */
+  assume?: string,
+): EditPlan | null {
   const raw = input.trim();
   if (raw.length < 4) return null;
 
-  const field = findField(raw, caps);
+  /* The caller decides, and only ever for a clause every other reader
+     has already declined. Reading it off the context here would widen
+     every sentence typed on a screen with a record open: "put them on
+     Fleet Prospects" is a list, and read against an open customer it is
+     a column called relationship set to the word "prospect". */
+  const field = findField(raw, caps, assume);
   if (!field) return null;
 
   // A question is not an instruction. "How much is the refurb on STC1"
@@ -504,7 +808,25 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
     if (twin) spec = twin;
   }
 
-  const { op: rawOp, word: opWord } = findOp(raw);
+  /* WITHOUT THE FIELD'S OWN NAME IN IT.
+
+     "Clear the refurb update on STC143580" was read as a SET with no
+     value, because "update" is one of the words that means set and it
+     is longer than "clear", and it is in the sentence only because it
+     is half the field's name. A verb inside the column's own name is
+     not a verb. */
+  /* AND WITHOUT THE RECORD IT NAMES.
+
+     "Put the retail price up by 500 on STC143580" was read as an
+     ADDITION for the right reason and the wrong one: the shape that
+     detects "put ... on" matched the "on" in front of the stock number.
+     The same sentence with "down" in it came out as an addition too. A
+     record reference is not a verb either. */
+  const withoutRefs = refs.raws.reduce((so, r) => so.replace(r, ' '), raw);
+  const { op: rawOp, word: opWord } = findOp(
+    withoutRefs.replace(new RegExp(field.alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' '),
+    spec.kind,
+  );
 
   /* The value hunt runs on the sentence with the record reference and
      the field name taken out. Without that, "add 1k refurb to STC143980"
@@ -561,7 +883,19 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
         const fromVerb = Object.keys(vocab)
           .filter((w) => fuzzyContains(opener, w))
           .sort((a, b) => b.length - a.length)[0] ?? '';
-        const hit = pick(destination) || fromVerb || pick(subject);
+        /* A FIELD ALIAS THAT IS ALSO A STATE WORD TAKES THE VALUE WITH IT.
+
+           `status` on a post is aliased "approval", and the value hunt
+           runs on the sentence with the field's aliases removed. "Send
+           this post for approval" therefore became "send this post
+           for", and the state it named had been deleted by the step
+           that worked out which column it was about. Falling back to
+           the sentence as typed costs nothing: the vocabulary is state
+           words, and a state word in the original is still the state
+           the sentence named. */
+        const asTyped = splitOnAs(raw);
+        const hit = pick(destination) || fromVerb || pick(subject)
+          || pick(asTyped.destination) || pick(asTyped.subject);
         if (hit) { value = vocab[hit]; valueLabel = String(vocab[hit]).replace(/_/g, ' '); }
         break;
       }
@@ -595,9 +929,24 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
     valueLabel = formatMoney(value);
   }
 
+  /* TAKING SOMETHING OFF A COLUMN THAT CANNOT COUNT IS EMPTYING IT.
+
+     "Take the owner off this account" came out as setting the owner to
+     the word "off": the verb reads as a subtraction, a name cannot be
+     subtracted from, and turning that into a set left the preposition
+     standing where the value should be. Nothing can be taken off a name
+     except the name, so this is a clear, and a clear on a column that
+     may not be emptied is refused by the rule that already exists for
+     that. */
+  if (op === 'subtract' && spec.kind !== 'money' && spec.kind !== 'number') {
+    op = spec.clearable ? 'clear' : 'set';
+    /* The preposition is not a value. A clear writes nothing, and
+       leaving "off" here would put it in the preview. */
+    if (op === 'clear') { value = null; valueLabel = ''; }
+  }
+
   // Adding to something that cannot be added to is just setting it.
   if ((op === 'add' || op === 'subtract') && !spec.arithmetic) op = 'set';
-  if (op === 'subtract' && spec.kind !== 'money' && spec.kind !== 'number') op = 'set';
 
   /* Which records. All of them, because "mark STC143580 and 144504 as
      sold" is two units and doing one of them silently is a bug that
@@ -607,28 +956,79 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
      anyway, or when the sentence already named a record properly. That
      is what stops "set refurb 143980 on STC1" reading the amount as a
      second trailer. */
-  const asTarget = (t: string): EditTarget => ({ kind: 'stock', text: t, label: t });
-  let targets: EditTarget[] = [];
+  let named: string[] = [];
 
   if (stcNoField) {
-    targets = [...refs.coded, ...refs.bare].map(asTarget);
+    named = [...refs.coded, ...refs.bare];
   } else {
-    targets = refs.stc.map(asTarget);
+    named = [...refs.stc];
     const numeric = spec.kind === 'money' || spec.kind === 'number';
-    if (!numeric || targets.length) {
-      for (const b of refs.bare) if (!targets.some((t) => t.text.endsWith(b))) targets.push(asTarget(b));
-      if (!numeric) for (const c of refs.coded) targets.push(asTarget(c));
+    if (!numeric || named.length) {
+      for (const b of refs.bare) if (!named.some((t) => t.endsWith(b))) named.push(b);
+      if (!numeric) for (const c of refs.coded) named.push(c);
     }
-    if (!targets.length && spec.entity === 'contacts') {
-      const name = findCompany(raw, field.alias);
-      if (name) targets = [{ kind: 'company', text: name, label: name }];
-    }
-    if (!targets.length) {
-      const bulk = readBulkTarget(raw, spec, String(value ?? ''));
-      if (bulk) targets = [bulk];
+    if (!named.length && spec.entity === 'contacts') {
+      const name = findCompany(raw, field.alias, value, opWord);
+      if (name) named = [name];
     }
   }
-  const target = targets[0] ?? null;
+
+  /* THE SAME CONDITION MACHINERY A QUESTION USES.
+     A named record is a loose match on the entity's own title. A
+     described set goes through `parseQuery`, which is the reader that
+     already knows what "available curtainsiders at Hyde" means, and its
+     filters become a `Cond` through the one function that turns filters
+     into conditions. `readBulkTarget` is gone: it read one enum on the
+     field being written and nothing else. */
+  const title = entityDef(spec.entity)?.titleField ?? null;
+  let match: Cond | null = null;
+  let expect: Cardinality = 'one';
+  let matchLabel = '';
+
+  if (named.length && title) {
+    const conds: Cond[] = named.map((t) => ({
+      kind: 'cmp', op: 'contains',
+      left: { kind: 'field', of: { entity: spec.entity, field: title } },
+      right: { kind: 'literal', value: t },
+    }));
+    match = conds.length === 1 ? conds[0] : { kind: 'or', of: conds };
+    matchLabel = named.join(' and ');
+  } else if (!named.length) {
+    /* WHAT IS ON THE SCREEN, WHEN THE SENTENCE POINTS AT IT.
+
+       "Add a note to this customer" and "move these to Bredbury" are
+       about records the person is looking at, and the screen sends what
+       it has. It resolves to ids and nothing else, so a context that
+       resolved to a name could never match a record nobody was looking
+       at. Read before the described set, because "these" is not a
+       description of anything. */
+    const pointed = readContextReference(raw)
+      /* A POINTING WORD WITH NO NOUN, WHEN THE FIELD SAYS WHICH NOUN.
+
+         "Put this back in the unassigned pool" points at something and
+         never says what. On its own that is not enough, which is why
+         `readContextReference` wants a noun: "set this to Bredbury" is
+         a sentence with a missing value rather than one about a
+         trailer. Here the column has already been identified, so the
+         entity is known, and the screen has a record of exactly that
+         kind open. That is the noun, in the only place it could be. */
+      ?? (context.record?.entity === spec.entity && POINTS_AT_SOMETHING.test(raw)
+        ? { kind: 'record' as const, words: 'this', expect: 'one' as const }
+        : null);
+    const fromScreen = pointed ? resolveContext(pointed, context, spec.entity) : null;
+    if (fromScreen) {
+      match = fromScreen.match;
+      expect = fromScreen.expect;
+      matchLabel = fromScreen.label;
+    } else {
+      const described = readDescribedSet(raw, spec, value, vocabulary);
+      if (described) {
+        match = described.match;
+        expect = 'many';
+        matchLabel = described.label;
+      }
+    }
+  }
 
   /* Selling is understood here and carried out elsewhere. It needs a
      price and it raises a commission line on somebody's tracker, so the
@@ -636,10 +1036,22 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
      status column. */
   const handoff = spec.key === 'status' && spec.entity === 'trailers' && value === 'sold'
     ? ('markSold' as const) : undefined;
-  if (handoff && !targets.length) return null;
+  if (handoff && !match) return null;
+
+  /* WHAT THE OPERATION NEEDS, IF THE SENTENCE SAID IT.
+
+     The capability declares its inputs and this looks for each one in
+     the words, using the readers that were already here for field
+     values. Nothing about a sale is written here: "mark STC143580 as
+     sold for £24,995" carries a price because the capability says a
+     sale takes one, and an operation added later is read the same way
+     without this file changing. */
+  const args = handoff
+    ? readCapabilityInputs(withoutReferences(raw, named), HANDOFF_CAPABILITY[handoff])
+    : undefined;
 
   const missing: ('target' | 'value')[] = [];
-  if (!target) missing.push('target');
+  if (!match) missing.push('target');
   if (op !== 'clear' && value == null) missing.push('value');
 
   /* A bare field name with nothing else said is somebody starting a
@@ -654,54 +1066,136 @@ export function parseEdit(input: string, caps?: CrmCapabilities): EditPlan | nul
     op,
     value,
     valueLabel,
-    target,
-    targets,
+    match,
+    expect,
+    matchLabel,
+    named,
     handoff,
+    ...(args && Object.keys(args).length ? { args } : {}),
     missing,
     summary: handoff
-      ? `Mark ${targets.map((t) => t.label).join(' and ')} sold`
-      : describe(spec, op, valueLabel, target, targets),
-    confidence: confidenceOf(spec, op, value, target, opWord),
+      ? `Mark ${matchLabel} sold`
+      : describe(spec, op, valueLabel, matchLabel),
+    confidence: confidenceOf(
+      spec, op, value,
+      { named: named.length, stock: refs.stc.length > 0, described: !named.length && !!match },
+      /* The verb that made this an instruction, whichever list it came
+         from. "Approve all the outstanding social posts" has no set,
+         add, subtract or clear word in it, so it scored as though
+         nobody had said what to do, came one point under the threshold
+         that decides instruction from question, and was answered with a
+         list of posts. */
+      opWord || (MARK_WORDS.find((w) => fuzzyContains(soften(raw), w)) ?? ''),
+    ),
   };
 }
 
 /**
- * "All the outstanding ones", rather than a named record.
+ * The sentence with the records it names taken out.
  *
- * Only fires on a word that genuinely means every match, and only when
- * the sentence also says which ones. "Mark all outstanding social posts
- * as approved" narrows to the ones awaiting approval; "approve
- * everything" names no subset and is refused, because a bar that acts on
- * a whole table from four words is a bar that ruins somebody's afternoon.
- *
- * Nothing is written on the strength of this. The confirmation counts
- * the matches first and says the number out loud.
+ * A stock number is six digits, and reading a business operation's price
+ * out of the whole sentence turned "mark STC143580 as sold" into a sale
+ * at one hundred and forty three thousand five hundred and eighty
+ * pounds. The reference is not a value, whatever it looks like.
  */
-function readBulkTarget(raw: string, spec: WritableField, newValue: string): EditTarget | null {
-  const t = soften(raw);
-  if (!/\b(all|every|any|the lot|everything|each)\b/.test(t)) return null;
+function withoutReferences(raw: string, named: string[]): string {
+  let out = raw.replace(/\bSTC\s?\d+\b/gi, ' ');
+  for (const n of named) out = out.split(n).join(' ');
+  return out.replace(/\s+/g, ' ');
+}
 
-  /* Which subset, from the same vocabulary that supplies the new value,
-     and read from the half of the sentence before "as". That is where
-     the description of the rows lives; after it is where they are
-     going. */
-  if (spec.kind !== 'enum' || !spec.vocabulary) return null;
-  const subject = soften(splitOnAs(raw).subject);
-  let hit = '';
-  let hitValue = '';
-  for (const [word, value] of Object.entries(spec.vocabulary)) {
-    if (value === newValue) continue;            // that is the destination, not the subset
-    if (!subject.includes(` ${word} `)) continue;
-    if (word.length > hit.length) { hit = word; hitValue = value; }
+/** Which capability each handoff hands off to. */
+const HANDOFF_CAPABILITY: Record<'markSold', string> = { markSold: 'deal.markSold' };
+
+/**
+ * Values a business operation declares it needs, found in the sentence.
+ *
+ * One loop over `CapabilityDef.inputs`, using the same readers a field
+ * value goes through. A capability that declares a money input gets the
+ * amount out of "for £24,995"; one that declares a date gets the date.
+ * Neither this function nor the capability knows about the other beyond
+ * the declaration.
+ */
+function readCapabilityInputs(
+  raw: string, capabilityId: string,
+): Record<string, string | number | null> {
+  const cap = capability(capabilityId);
+  const out: Record<string, string | number | null> = {};
+  for (const input of cap?.inputs ?? []) {
+    if (input.kind === 'money' || input.kind === 'number') {
+      const a = readAmount(soften(raw));
+      if (a) out[input.key] = a.value;
+    } else if (input.kind === 'date') {
+      const d = readDate(soften(raw));
+      if (d) out[input.key] = d.value;
+    }
   }
-  if (!hit) return null;
+  return out;
+}
+
+/**
+ * "All the outstanding ones at Hyde", rather than a named record.
+ *
+ * Read by `parseQuery`, which is the machinery that already knows what
+ * a described set of rows is. `readBulkTarget` used to live here and
+ * did the job badly: it matched one enum value on the field being
+ * written, so it could read "all the outstanding posts" and could not
+ * read "every available curtainsider at Hyde". Deleting it removed a
+ * ceiling rather than a feature.
+ *
+ * Still refuses a sentence that names no subset. "Approve everything"
+ * is four words and a whole table, and a bar that acts on that is a bar
+ * that ruins somebody's afternoon.
+ */
+function readDescribedSet(
+  raw: string, spec: WritableField, value: string | number | null,
+  vocabulary: VocabularyIndex,
+): { match: Cond; label: string } | null {
+  const t = soften(raw);
+  /* A word that genuinely means every match. Without one, a sentence
+     with no named record is incomplete rather than a bulk write. */
+  if (!COLLECTIVE.test(t)) return null;
+
+  /* WHICHEVER HALF THE COLLECTIVE WORD IS IN.
+     One half of the sentence describes the rows and the other says what
+     they become, and English puts them in either order:
+
+       move every available curtainsider at Hyde to Bredbury
+       add 250 refurb costs to every available curtainsider at Hyde
+
+     Always taking the half before the split word read the second of
+     those as "add 250 refurb costs", which names no rows at all, so the
+     instruction came back incomplete. The word that means every match is
+     in the half that describes the rows, by definition, which is a
+     better question to ask than which side of the sentence it is on. */
+  const halves = splitOnAs(raw);
+  const inSubject = COLLECTIVE.test(soften(halves.subject));
+  const inDestination = COLLECTIVE.test(soften(halves.destination));
+  const subject = inSubject === inDestination ? halves.subject
+    : inSubject ? halves.subject : halves.destination;
+
+  const read = parseQuery(subject, vocabulary);
+  if (!read || read.entity.id !== spec.entity) return null;
+
+  /* The destination is not a description of the rows.
+     "Approve all outstanding posts" has no "as" to split on, so the word
+     the value came from is still in the subject, and selecting on it
+     would pick the posts that are already approved.
+
+     Only that exact value goes, not every mention of the column. The
+     column being written is very often the column the rows are described
+     by: "move every available curtainsider at Hyde to Bredbury" writes
+     the location and selects on it, and dropping the whole column
+     narrowed that to every trailer in the yard. */
+  const filters = read.filters.filter(
+    (f) => !(f.column === spec.key && String(f.value ?? '') === String(value ?? '')),
+  );
+  const match = condForFilters(spec.entity, filters);
+  if (!match) return null;
 
   return {
-    kind: 'filter',
-    text: hit,
-    label: `every ${spec.entity === 'posts' ? 'post' : 'record'} currently ${hit}`,
-    column: spec.key,
-    value: hitValue,
+    match,
+    label: read.summary.replace(/^Count of /i, 'every ').replace(/^List of /i, 'every '),
   };
 }
 
@@ -713,6 +1207,9 @@ function readBulkTarget(raw: string, spec: WritableField, newValue: string): Edi
  * longest state word won, and the longest one was the description of the
  * records rather than their destination.
  */
+/** A word that means every match, rather than some of them. */
+const COLLECTIVE = /\b(all|every|any|the lot|everything|each)\b/;
+
 function splitOnAs(text: string): { subject: string; destination: string } {
   const m = text.match(/^(.*?)\s+(?:as|to|into)\s+(.+)$/i);
   if (!m) return { subject: text, destination: '' };
@@ -725,12 +1222,24 @@ function readFreeText(stripped: string, spec: WritableField, opWord: string): st
   const colon = stripped.match(/:\s*(.+)$/);
   if (colon) return colon[1].trim();
 
-  // A depot name is a location however it is phrased.
+  /* A depot name is a location however it is phrased, and a sentence
+     that moves rows between depots names two of them:
+
+       move all the trailers at Carrington to Hyde
+
+     Taking the first left every Carrington trailer set to Carrington,
+     which is a change that looks like it worked and does nothing. The
+     half after "to" is where they are going. */
   if (spec.key === 'location') {
-    const t = ` ${stripped.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')} `;
-    for (const [word, depot] of Object.entries(DEPOTS)) {
-      if (t.includes(` ${word} `)) return depot;
-    }
+    const depot = (text: string): string | null => {
+      const t = ` ${text.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ')} `;
+      for (const [word, name] of Object.entries(DEPOTS)) {
+        if (t.includes(` ${word} `)) return name;
+      }
+      return null;
+    };
+    const halves = splitOnAs(stripped);
+    return depot(halves.destination) ?? depot(stripped);
   }
 
   // Otherwise the words after "to" or after the verb, minus the filler.
@@ -750,11 +1259,9 @@ function formatMoney(n: number): string {
 }
 
 function describe(
-  spec: WritableField, op: EditOp, valueLabel: string,
-  target: EditTarget | null, targets: EditTarget[] = [],
+  spec: WritableField, op: EditOp, valueLabel: string, matchLabel: string,
 ): string {
-  const named = targets.length ? targets.map((t) => t.label).join(' and ') : target?.label;
-  const on = named ? ` on ${named}` : '';
+  const on = matchLabel ? ` on ${matchLabel}` : '';
   switch (op) {
     case 'clear': return `Clear ${spec.label}${on}`;
     case 'add':
@@ -766,16 +1273,43 @@ function describe(
   }
 }
 
+/**
+ * How sure this reading is.
+ *
+ * `selection` is what the sentence gave us to find rows with, not the
+ * `Cond` it became. Scoring the condition tree would say a loose title
+ * match and a stock number are the same shape, and they are not: a stock
+ * number is one unit and nothing else, whereas a company name is a guess
+ * that happens to be expressible as the same comparison.
+ *
+ * A DESCRIBED SET COUNTS AS SAYING WHICH ROWS.
+ *
+ * It scored nothing at all until the reader could express one properly.
+ * "Move every available curtainsider at Hyde to Bredbury" names three
+ * things about the rows and came out one point below the threshold that
+ * decides whether a sentence is an instruction, so it was read as a
+ * question, and the question it was read as had the destination in its
+ * filters: "list trailers in stock, curtainsiders, at Bredbury". A
+ * confident wrong answer, from a scorer that had never seen a sentence
+ * like it because the reader could not produce one.
+ */
 function confidenceOf(
   spec: WritableField, op: EditOp, value: string | number | null,
-  target: EditTarget | null, opWord: string,
+  selection: { named: number; stock: boolean; described: boolean }, opWord: string,
 ): number {
   let score = 4;
-  if (target?.kind === 'stock') score += 4;        // a stock number is unambiguous
-  else if (target) score += 2;
-  if (value != null) score += 3;
+  if (selection.stock) score += 4;                 // a stock number is unambiguous
+  else if (selection.named || selection.described) score += 2;
+  /* A CLEAR NAMES NO VALUE AND NEEDS NONE.
+
+     The value was worth three points because guessing one wrong is how
+     a write goes wrong. A clear has nothing to guess: the field and the
+     word "clear" are the whole sentence. Charging it for the value it
+     could not have left every clear against a record on the screen one
+     point below the threshold, so "remove the image from this post" was
+     read as a question about posts and answered with a list. */
+  if (value != null || op === 'clear') score += 3;
   if (opWord) score += 2;
-  if (op === 'clear') score += 1;
   // A free text field with a guessed value is the easiest thing to get
   // wrong, so it has to clear a higher bar before it is acted on.
   if ((spec.kind === 'text' || spec.kind === 'longtext') && !opWord) score -= 2;

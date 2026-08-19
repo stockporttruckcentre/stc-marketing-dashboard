@@ -31,6 +31,7 @@ import { ENTITIES, type EntitySpec } from './schema';
 import { DEPOTS, isReservedWord } from './lexicon';
 import { TABLES } from './columns';
 import { readSlots } from './params';
+import { attributeNames, columnAfter } from './attributes';
 
 export type Condition =
   /** column = value, for the enums. */
@@ -76,31 +77,31 @@ const PRESENT_LEADS = [
 ];
 
 /**
- * Column words for the emptiness clauses.
+ * Which columns an emptiness clause can reach.
  *
- * Deliberately separate from the writable field aliases. "With no owner"
- * is about the column being blank; "set the owner" is about writing it.
- * The words overlap and the meanings do not.
+ * This used to be seventeen columns written out here, on the reasoning
+ * that "with no owner" and "set the owner" are different meanings even
+ * though they share words. The meanings are different; the COLUMN is the
+ * same one, and keeping a second list of them meant "customers with no
+ * email" worked while "customers with no website" did not, for no
+ * reason anybody could see from either file.
+ *
+ * So the columns now come from `attributes.ts`, which merges what the
+ * schema, the writable fields and the yard phrasings all know. Every
+ * column anybody can name is a column they can ask to be empty.
  */
-const NULLABLE: { words: string[]; column: string; label: string }[] = [
-  { words: ['owner', 'rep', 'account manager', 'anybody on it', 'anyone on it'], column: 'assigned_to', label: 'owner' },
-  { words: ['email', 'email address', 'e mail'], column: 'email', label: 'email' },
-  { words: ['phone', 'phone number', 'number', 'telephone', 'mobile'], column: 'phone', label: 'phone number' },
-  { words: ['contact name', 'contact', 'named contact', 'person'], column: 'contact_name', label: 'contact name' },
-  { words: ['address', 'site', 'location', 'town'], column: 'location', label: 'location' },
-  { words: ['next action', 'next step', 'follow up'], column: 'next_action', label: 'next action' },
-  { words: ['notes', 'note', 'history'], column: 'notes', label: 'notes' },
-  { words: ['website', 'web site', 'url', 'links'], column: 'links', label: 'website' },
-  { words: ['value', 'estimated value', 'deal value'], column: 'estimated_value', label: 'estimated value' },
-  { words: ['turnover'], column: 'turnover', label: 'turnover' },
-  { words: ['fleet', 'fleet size', 'vehicles'], column: 'fleet_size', label: 'fleet size' },
-  { words: ['source'], column: 'source', label: 'source' },
-  { words: ['mot', 'mot date'], column: 'mot_date', label: 'MOT date' },
-  { words: ['price', 'sale price'], column: 'sales_price', label: 'sale price' },
-  { words: ['customer', 'buyer'], column: 'customer', label: 'customer' },
-  { words: ['chassis', 'chassis number'], column: 'chassis_number', label: 'chassis number' },
-  { words: ['stock number', 'stc number'], column: 'stc_no', label: 'stock number' },
-];
+function nullableFor(entity: EntitySpec): { words: string[]; column: string; label: string }[] {
+  const byColumn = new Map<string, { words: string[]; column: string; label: string }>();
+  for (const n of attributeNames(entity)) {
+    const prev = byColumn.get(n.column);
+    if (prev) { if (!prev.words.includes(n.alias)) prev.words.push(n.alias); continue; }
+    byColumn.set(n.column, { words: [n.alias], column: n.column, label: n.label });
+  }
+  return [...byColumn.values()];
+}
+
+/** For the census, which counts clauses rather than reading a sentence. */
+const NULLABLE_COUNT = (entity: EntitySpec) => nullableFor(entity).length;
 
 /** Numeric columns somebody compares against a figure. */
 const COMPARABLE: { words: string[]; column: string; label: string; money?: boolean }[] = [
@@ -204,17 +205,12 @@ export function parseSelection(input: string, me?: string): Selection | null {
      "without". Getting that backwards turns "without an email" into a
      search for rows containing the word "an". */
   for (const [leads, kind] of [[EMPTY_LEADS, 'empty'], [PRESENT_LEADS, 'present']] as const) {
-    for (const lead of [...leads].sort((a, b) => b.length - a.length)) {
-      for (const n of NULLABLE) {
-        for (const w of [...n.words].sort((a, b) => b.length - a.length)) {
-          if (!t.includes(` ${lead} ${w} `)) continue;
-          if (has(n.column)) continue;
-          conditions.push(kind === 'empty'
-            ? { kind: 'empty', column: n.column, label: `no ${n.label}` }
-            : { kind: 'present', column: n.column, label: `has a ${n.label}` });
-          spoken.push(`${lead} ${w}`);
-        }
-      }
+    for (const found of columnAfter(entity, t, [...leads])) {
+      if (has(found.column)) continue;
+      conditions.push(kind === 'empty'
+        ? { kind: 'empty', column: found.column, label: `no ${found.label}` }
+        : { kind: 'present', column: found.column, label: `has a ${found.label}` });
+      spoken.push(found.spoken);
     }
   }
 
@@ -370,7 +366,7 @@ export function selectionSpace(entity: EntitySpec): number {
   const owns = (list: { column: string }[]) => list.filter((x) => cols.has(x.column)).length;
 
   // Absent, empty, or present.
-  const nullable = 3 ** owns(NULLABLE);
+  const nullable = 3 ** NULLABLE_COUNT(entity);
   // Absent, or over/under at three rough magnitudes.
   const compare = 7 ** owns(COMPARABLE);
   // Absent, never, or before/after at four windows.
@@ -393,14 +389,14 @@ export function clauseCounts(entity: EntitySpec) {
     (TABLES.find((t) => t.table === entity.table)?.columns ?? []).map((c) => c.name),
   );
   return {
-    nullable: NULLABLE.filter((x) => cols.has(x.column)).length,
+    nullable: NULLABLE_COUNT(entity),
     comparable: COMPARABLE.filter((x) => cols.has(x.column)).length,
     dated: DATED.filter((x) => cols.has(x.column)).length,
   };
 }
 
 export const SELECTOR_CLAUSES = {
-  nullable: NULLABLE.length,
+  nullable: Math.max(...ENTITIES.map(NULLABLE_COUNT)),
   comparable: COMPARABLE.length,
   dated: DATED.length,
 };
