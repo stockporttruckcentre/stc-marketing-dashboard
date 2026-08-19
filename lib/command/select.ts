@@ -256,8 +256,16 @@ export function parseSelection(input: string, me?: string): Selection | null {
     for (const w of words) {
       /* The noun that named the entity is not also a filter on it.
          Without this, "quoted customers" comes back as status=customer
-         and the actual status is thrown away. */
-      if (w === entityNoun) continue;
+         and the actual status is thrown away.
+
+         Every one of the entity's nouns, not only the one the sentence
+         happened to use. "Leads with no next action" says `leads` and
+         `lead` is a status, so matching on the exact word let the
+         plural through and the whole sentence came back as "proposals
+         where status lead": the noun eaten as a filter, the question
+         gone. Any entity whose name is also one of its own states has
+         the same hole, which is most of them. */
+      if (entity.nouns.includes(w)) continue;
       if (spoken.some((s) => s.includes(w))) continue;
       if (!t.includes(` ${w} `)) continue;
       conditions.push({

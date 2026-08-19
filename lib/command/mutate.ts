@@ -406,9 +406,22 @@ function findField(
     return hit;
   };
 
-  let best: { field: WritableField; alias: string } | null = null;
+  /* THE SAME WORDS NAME COLUMNS ON DIFFERENT TABLES.
+
+     `sale price` is a column on a trailer and a column on a deal, and
+     `status` is a column on four things. This loop took the longest
+     alias and never asked whether the sentence could be about that
+     table at all, which was survivable while one reading was much more
+     common and stopped being so the moment a deal became its own table:
+     "set sale price on Dawson to 1200" reached a stock column, because
+     Dawson is a company and nothing was looking.
+
+     So an alias on a table the sentence plausibly names beats an alias
+     on one it does not, and length only decides between equals. */
+  let best: { field: WritableField; alias: string; named: number } | null = null;
   for (const f of WRITABLE_FIELDS) {
     if (caps && !caps.has(f.capability)) continue;
+    const named = entityLikelihood(t, f.entity, assumed);
     for (const a of f.aliases) {
       if (!t.includes(` ${a} `) && !t.includes(` ${a}s `) && !fuzzyContains(t, a)) continue;
       /* A word somebody is POINTING at is the thing, not a column of
@@ -416,7 +429,10 @@ function findField(
          trailer's customer column, because "customer" is a longer alias
          than "note" and nothing looked at the word in front of it. */
       if (pointedAt(t, a)) continue;
-      if (!best || a.length > best.alias.length) best = { field: f, alias: a };
+      const better = !best
+        || named > best.named
+        || (named === best.named && a.length > best.alias.length);
+      if (better) best = { field: f, alias: a, named };
     }
   }
   /* An alias that is also one of its own field's VALUES is describing
@@ -611,12 +627,39 @@ const MARK_WORDS = [
 /** Words that say which table a sentence is about. */
 const ENTITY_WORDS: Record<WritableEntity, string[]> = {
   trailers: ['trailer', 'trailers', 'unit', 'units', 'stock', 'stc', 'vehicle', 'vehicles'],
+  /* A company. Not a pitch to one: `lead`, `deal` and `proposal` used to
+     be listed here because both readings landed on the same table, and
+     they have moved to where they belong rather than been invented. */
   contacts: ['customer', 'customers', 'contact', 'contacts', 'account', 'accounts',
-             'company', 'companies', 'lead', 'leads', 'deal', 'deals', 'proposal', 'proposals'],
+             'company', 'companies'],
+  leads: ['lead', 'leads', 'deal', 'deals', 'proposal', 'proposals'],
   posts: ['post', 'posts', 'social', 'socials', 'content'],
   meetings: ['meeting', 'meetings', 'call', 'calls', 'appointment', 'appointments',
              'visit', 'visits', 'diary', 'event', 'events'],
 };
+
+/**
+ * How likely the sentence is about this table, as an ordering.
+ *
+ * 2 is said outright: a noun for it, or a stock number, or the thing on
+ * the screen. 1 is the shape of the sentence agreeing: no stock number
+ * anywhere means a subject like "Dawson" is a company or a pitch to
+ * one, and cannot be a trailer. 0 is no reason to think so.
+ *
+ * The middle rung is what stops "set status on Dawson to quoted"
+ * refusing. `status` is a column on four tables and `quoted` is a state
+ * of exactly one of them, but with nothing to rank the tables by, the
+ * first with a `status` column won, the value did not fit it, and the
+ * sentence came back as nothing at all.
+ */
+function entityLikelihood(
+  softened: string, entity: WritableEntity, assumed?: string,
+): number {
+  if (mentionsEntity(softened, entity, assumed)) return 2;
+  const stock = /\bstc[\s\-_]?\d{3,8}\b/i.test(softened);
+  if (!stock && (entity === 'contacts' || entity === 'leads')) return 1;
+  return 0;
+}
 
 function mentionsEntity(
   softened: string, entity: WritableEntity, assumed?: string,

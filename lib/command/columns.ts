@@ -99,7 +99,8 @@ export const TABLES: TableSpec[] = [
       { name: 'email', kind: 'text' },
       { name: 'phone', kind: 'text' },
       { name: 'source', kind: 'text' },
-      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
+      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'],
+        writable: false, why: 'derived from the state of the account\'s leads, migration 043' },
       { name: 'fleet_size', kind: 'number', writable: false, why: 'derived from trucks, trailers and vans by a trigger' },
       { name: 'location', kind: 'text' },
       { name: 'services_interested', kind: 'text' },
@@ -114,30 +115,54 @@ export const TABLES: TableSpec[] = [
       { name: 'links', kind: 'system', writable: false, why: 'a list of links, edited one at a time' },
       { name: 'employee_count', kind: 'number' },
       { name: 'turnover', kind: 'money' },
-      { name: 'date_of_enquiry', kind: 'date' },
       { name: 'description', kind: 'longtext' },
+      { name: 'account_manager', kind: 'text' },
+      { name: 'category', kind: 'text' },
+      { name: 'vehicles', kind: 'text' },
+      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set by a trigger on notes and status changes' },
+      { name: 'parent_customer_id', kind: 'system', writable: false, why: 'set by linking two accounts' },
+      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing'] },
+    ],
+  },
+  {
+    /*
+       A pitch, which is not something a company has.
+
+       Everything below used to be a column on `crm_contacts`, and the
+       comment two files over said the quiet part: "deals and contacts
+       are two readings of crm_contacts". They are two tables now, so
+       "add £1k refurb value to STC143980" reaches a deal and "add their
+       phone number" reaches a company, and neither can land on the
+       other by accident.
+    */
+    table: 'crm_leads', label: 'leads',
+    lifecycle: { create: 'crm.create', delete: 'crm.delete', attach: 'crm.edit' },
+    columns: [
+      ...SYSTEM,
+      { name: 'contact_id', kind: 'system', writable: false, why: 'the customer it is a pitch to, set when the lead is raised' },
+      { name: 'owner_id', kind: 'system', writable: false, why: 'whose tracker it is on, set when the lead is raised or handed over' },
+      { name: 'shared_with', kind: 'system', writable: false, why: 'who else is working it, changed by sharing rather than typing' },
+      { name: 'type', kind: 'enum', values: ['trailer_sales', 'maintenance', 'rental'] },
+      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
+      { name: 'what', kind: 'text' },
+      { name: 'requirement', kind: 'longtext' },
       { name: 'new_or_used', kind: 'enum', values: ['New', 'Used'] },
       { name: 'estimated_value', kind: 'money' },
-      { name: 'requirement', kind: 'longtext' },
+      { name: 'date_of_enquiry', kind: 'date' },
       { name: 'action', kind: 'text' },
+      { name: 'next_action', kind: 'text' },
+      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set when the lead moves' },
+      { name: 'stock_trailer_id', kind: 'system', writable: false, why: 'set by linking a trailer to the deal' },
       { name: 'order_date', kind: 'date' },
       { name: 'dispatch_date', kind: 'date' },
       { name: 'sale_price', kind: 'money' },
       { name: 'profit', kind: 'money' },
       { name: 'profit_pct', kind: 'number' },
       { name: 'commission', kind: 'money' },
-      { name: 'side', kind: 'enum', values: ['trailer_sales', 'maintenance'] },
-      { name: 'what', kind: 'text' },
-      { name: 'account_manager', kind: 'text' },
-      { name: 'next_action', kind: 'text' },
-      { name: 'category', kind: 'text' },
-      { name: 'vehicles', kind: 'text' },
-      { name: 'initials', kind: 'text' },
-      { name: 'stock_trailer_id', kind: 'system', writable: false, why: 'set by linking a trailer to the deal' },
       { name: 'commission_rate', kind: 'number' },
-      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set by a trigger on notes and status changes' },
-      { name: 'parent_customer_id', kind: 'system', writable: false, why: 'set by linking two accounts' },
-      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing'] },
+      { name: 'rep_initials', kind: 'text' },
+      { name: 'notes', kind: 'longtext' },
+      { name: 'created_by', kind: 'system', writable: false, why: 'who raised it' },
     ],
   },
   {

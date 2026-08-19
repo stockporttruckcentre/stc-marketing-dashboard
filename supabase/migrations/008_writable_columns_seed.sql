@@ -10,7 +10,7 @@
 -- writable stops being writable here too. A seed that only ever grows
 -- is how a revoked permission survives in the database.
 --
--- 103 columns.
+-- 86 columns.
 -- =============================================================
 
 BEGIN;
@@ -26,43 +26,26 @@ INSERT INTO command_writable_columns (table_name, column_name) VALUES
   ('calendar_events', 'title'),
   ('calendar_events', 'visibility'),
   ('crm_contacts', 'account_manager'),
-  ('crm_contacts', 'action'),
   ('crm_contacts', 'address'),
   ('crm_contacts', 'assigned_to'),
   ('crm_contacts', 'category'),
-  ('crm_contacts', 'commission'),
-  ('crm_contacts', 'commission_rate'),
   ('crm_contacts', 'company_name'),
   ('crm_contacts', 'contact_name'),
-  ('crm_contacts', 'date_of_enquiry'),
   ('crm_contacts', 'description'),
-  ('crm_contacts', 'dispatch_date'),
   ('crm_contacts', 'email'),
   ('crm_contacts', 'employee_count'),
-  ('crm_contacts', 'estimated_value'),
-  ('crm_contacts', 'initials'),
   ('crm_contacts', 'last_contact'),
   ('crm_contacts', 'location'),
-  ('crm_contacts', 'new_or_used'),
-  ('crm_contacts', 'next_action'),
   ('crm_contacts', 'notes'),
-  ('crm_contacts', 'order_date'),
   ('crm_contacts', 'phone'),
-  ('crm_contacts', 'profit'),
-  ('crm_contacts', 'profit_pct'),
   ('crm_contacts', 'relationship'),
-  ('crm_contacts', 'requirement'),
-  ('crm_contacts', 'sale_price'),
   ('crm_contacts', 'services_interested'),
-  ('crm_contacts', 'side'),
   ('crm_contacts', 'source'),
-  ('crm_contacts', 'status'),
   ('crm_contacts', 'trailers'),
   ('crm_contacts', 'trucks'),
   ('crm_contacts', 'turnover'),
   ('crm_contacts', 'vans'),
   ('crm_contacts', 'vehicles'),
-  ('crm_contacts', 'what'),
   ('social_posts', 'caption'),
   ('social_posts', 'content'),
   ('social_posts', 'hashtags'),
