@@ -469,11 +469,24 @@ DELETE FROM crm_lists    WHERE name LIKE 'TEST %';
 -- -------------------------------------------------------------
 SELECT reset_fixtures();
 
-INSERT INTO crm_contacts (id, company_name, status, source, stock_trailer_id, sale_price, profit, commission_rate)
+-- Two customers, and a deal against each. A deal is a lead now, so the
+-- sale price and the commission sit on the pitch and the company is just
+-- the company. Selling one used to set a COMPANY to 'customer' and write
+-- a sale price onto the account book.
+INSERT INTO crm_contacts (id, company_name, status, source)
 VALUES
-  ('a1111111-0000-0000-0000-000000000001', 'TEST buyer one', 'quoted', 'manual',
+  ('c1111111-0000-0000-0000-000000000001', 'TEST buyer one', 'quoted', 'manual'),
+  ('c1111111-0000-0000-0000-000000000002', 'TEST buyer two', 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status,
+                       stock_trailer_id, sale_price, profit, commission_rate)
+VALUES
+  ('a1111111-0000-0000-0000-000000000001', 'c1111111-0000-0000-0000-000000000001',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
    '11111111-1111-1111-1111-111111111111', 24995, 3000, 0.10),
-  ('a1111111-0000-0000-0000-000000000002', 'TEST buyer two', 'quoted', 'manual',
+  ('a1111111-0000-0000-0000-000000000002', 'c1111111-0000-0000-0000-000000000002',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
    '22222222-2222-2222-2222-222222222222', 31000, 4000, 0.10)
 ON CONFLICT (id) DO NOTHING;
 
@@ -492,15 +505,27 @@ END
 $$;
 
 SELECT assert('both deals are won',
-  (SELECT COUNT(*) FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND status = 'customer') = 2,
-  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND status = 'customer'));
+  (SELECT COUNT(*) FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
+    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'customer') = 2,
+  (SELECT COUNT(*)::TEXT FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
+    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'customer'));
+
+-- And winning the work says something about the company, not only about
+-- one person's tracker. The CRM could never say this while a won deal
+-- and the company were separate rows.
+SELECT assert('and both are now customers of the business',
+  (SELECT COUNT(*) FROM crm_contacts
+    WHERE company_name LIKE 'TEST buyer%' AND status = 'customer') = 2,
+  (SELECT string_agg(company_name || '=' || status, ', ') FROM crm_contacts
+    WHERE company_name LIKE 'TEST buyer%'));
 
 SELECT assert('both stock units are sold',
   (SELECT COUNT(*) FROM stock_trailers WHERE stc_no IN ('TESTSTC1','TESTSTC2') AND status = 'sold') = 2,
   (SELECT string_agg(stc_no || '=' || status, ', ') FROM stock_trailers WHERE stc_no LIKE 'TESTSTC%'));
 
 SELECT assert('commission was raised on each',
-  (SELECT COUNT(*) FROM crm_contacts WHERE company_name LIKE 'TEST buyer%' AND commission IS NOT NULL) = 2);
+  (SELECT COUNT(*) FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
+    WHERE c.company_name LIKE 'TEST buyer%' AND l.commission IS NOT NULL) = 2);
 
 SELECT assert('and the rep is on the units',
   (SELECT COUNT(*) FROM stock_trailers WHERE stc_no IN ('TESTSTC1','TESTSTC2') AND sales_rep = 'AE') = 2);
@@ -508,8 +533,14 @@ SELECT assert('and the rep is on the units',
 -- One bad deal in the list takes the whole call with it.
 SELECT reset_fixtures();
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST buyer%';
-INSERT INTO crm_contacts (id, company_name, status, source, stock_trailer_id, sale_price, profit, commission_rate)
-VALUES ('a1111111-0000-0000-0000-000000000003', 'TEST buyer three', 'quoted', 'manual',
+INSERT INTO crm_contacts (id, company_name, status, source)
+VALUES ('c1111111-0000-0000-0000-000000000003', 'TEST buyer three', 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status,
+                       stock_trailer_id, sale_price, profit, commission_rate)
+VALUES ('a1111111-0000-0000-0000-000000000003', 'c1111111-0000-0000-0000-000000000003',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
         '11111111-1111-1111-1111-111111111111', 24995, 3000, 0.10)
 ON CONFLICT (id) DO NOTHING;
 
@@ -528,8 +559,10 @@ END
 $$;
 
 SELECT assert('and the good deal in the same call was rolled back',
-  (SELECT status FROM crm_contacts WHERE company_name = 'TEST buyer three') <> 'customer',
-  (SELECT status FROM crm_contacts WHERE company_name = 'TEST buyer three'));
+  (SELECT l.status FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
+    WHERE c.company_name = 'TEST buyer three') <> 'customer',
+  (SELECT l.status FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
+    WHERE c.company_name = 'TEST buyer three'));
 
 SELECT assert('so its stock unit is untouched too',
   (SELECT status FROM stock_trailers WHERE stc_no = 'TESTSTC1') <> 'sold',
@@ -860,11 +893,20 @@ BEGIN
 END
 $$;
 
-INSERT INTO crm_contacts (id, company_name, list_id, status, source, stock_trailer_id, profit, sale_price)
+-- Two companies, and a deal against each, both chasing the same unit.
+-- The deal ids are kept, because a deal is what these assertions name.
+INSERT INTO crm_contacts (id, company_name, list_id, status, source)
+VALUES ('e0000000-0000-0000-0000-000000000010', 'TEST buyer', test_global_list(), 'quoted', 'manual'),
+       ('e0000000-0000-0000-0000-000000000011', 'TEST rival', test_global_list(), 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status, stock_trailer_id, profit, sale_price)
 VALUES
-  ('f0000000-0000-0000-0000-000000000010', 'TEST buyer', test_global_list(), 'quoted', 'manual',
+  ('f0000000-0000-0000-0000-000000000010', 'e0000000-0000-0000-0000-000000000010',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
    '11111111-1111-1111-1111-111111111111', 4000, 24000),
-  ('f0000000-0000-0000-0000-000000000011', 'TEST rival', test_global_list(), 'quoted', 'manual',
+  ('f0000000-0000-0000-0000-000000000011', 'e0000000-0000-0000-0000-000000000011',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
    '11111111-1111-1111-1111-111111111111', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
@@ -876,16 +918,21 @@ BEGIN
   PERFORM assert('commission is worked out at the row''s rate',
     (result ->> 'commission')::NUMERIC = 400, result ->> 'commission');
   PERFORM assert('the deal is marked won',
-    (SELECT status FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000010') = 'customer');
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000010') = 'customer');
+  PERFORM assert('and the company is a customer of the business now',
+    (SELECT status FROM crm_contacts WHERE id='e0000000-0000-0000-0000-000000000010') = 'customer');
   PERFORM assert('the stock unit is sold',
     (SELECT status FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'sold');
   PERFORM assert('and it carries the buyer and the rep',
     (SELECT customer FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'TEST buyer'
     AND (SELECT sales_rep FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'DA');
+  -- The rival was chasing a unit that has gone, so their pitch is lost
+  -- rather than won. It used to be set to 'customer', which read as
+  -- them having sold it too.
   PERFORM assert('the other rep is told it is gone',
-    (SELECT status FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000011') = 'customer');
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000011') = 'lost');
   PERFORM assert('but keeps no commission',
-    (SELECT commission FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000011') IS NULL);
+    (SELECT commission FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000011') IS NULL);
   PERFORM assert('and it reports how many others it told',
     (result ->> 'cascadedOthers')::INTEGER = 1, result ->> 'cascadedOthers');
 END
@@ -901,8 +948,12 @@ $$;
 -- update, exactly as an RLS restriction would.
 SELECT reset_fixtures();
 
-INSERT INTO crm_contacts (id, company_name, list_id, status, source, stock_trailer_id, profit)
-VALUES ('f0000000-0000-0000-0000-000000000012', 'TEST blocked', test_global_list(), 'quoted', 'manual',
+INSERT INTO crm_contacts (id, company_name, list_id, status, source)
+VALUES ('e0000000-0000-0000-0000-000000000012', 'TEST blocked', test_global_list(), 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status, stock_trailer_id, profit)
+VALUES ('f0000000-0000-0000-0000-000000000012', 'e0000000-0000-0000-0000-000000000012',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
         '22222222-2222-2222-2222-222222222222', 1000)
 ON CONFLICT (id) DO NOTHING;
 
@@ -931,11 +982,11 @@ BEGIN
       SQLERRM LIKE '%stock unit could not be updated%', SQLERRM);
   END;
   PERFORM assert('and the deal was rolled back to where it started',
-    (SELECT status FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000012') = 'quoted',
-    (SELECT status FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000012'));
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000012') = 'quoted',
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000012'));
   PERFORM assert('and the other reps were not told either',
-    (SELECT COUNT(*) FROM crm_contacts
-     WHERE stock_trailer_id='22222222-2222-2222-2222-222222222222' AND status='customer') = 0);
+    (SELECT COUNT(*) FROM crm_leads
+     WHERE stock_trailer_id='22222222-2222-2222-2222-222222222222' AND status='lost') = 0);
 END
 $$;
 
@@ -945,8 +996,12 @@ ALTER TABLE stock_trailers NO FORCE ROW LEVEL SECURITY;
 DROP POLICY "test_block_stock_update" ON stock_trailers;
 
 -- A deal with no stock unit at all is a legitimate sale.
-INSERT INTO crm_contacts (id, company_name, list_id, status, source, profit)
-VALUES ('f0000000-0000-0000-0000-000000000013', 'TEST unlinked', test_global_list(), 'quoted', 'manual', 500)
+INSERT INTO crm_contacts (id, company_name, list_id, status, source)
+VALUES ('e0000000-0000-0000-0000-000000000013', 'TEST unlinked', test_global_list(), 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status, profit)
+VALUES ('f0000000-0000-0000-0000-000000000013', 'e0000000-0000-0000-0000-000000000013',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted', 500)
 ON CONFLICT (id) DO NOTHING;
 
 DO $$
@@ -954,7 +1009,7 @@ DECLARE result JSONB;
 BEGIN
   SELECT command_mark_sold('f0000000-0000-0000-0000-000000000013', 'DA', NULL, NULL, NULL, NULL, DATE '2026-08-14') INTO result;
   PERFORM assert('a deal with no stock unit still sells',
-    (SELECT status FROM crm_contacts WHERE id='f0000000-0000-0000-0000-000000000013') = 'customer');
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000013') = 'customer');
   PERFORM assert('and reports no stock update', (result ->> 'stockUpdated')::BOOLEAN = FALSE, result::TEXT);
 END
 $$;
@@ -1356,12 +1411,19 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
-SELECT assert('as a lead on the trailer sales side',
-  (SELECT COUNT(*) FROM crm_contacts
-    WHERE source = 'From Stock' AND side = 'trailer_sales' AND status = 'lead') = 1);
-SELECT assert('linked to the unit it came from',
-  (SELECT COUNT(*) FROM crm_contacts c JOIN stock_trailers t ON t.id = c.stock_trailer_id
-    WHERE c.source = 'From Stock' AND t.stc_no = 'TESTSTC1') = 1);
+SELECT assert('as a trailer sales lead',
+  (SELECT COUNT(*) FROM crm_leads l JOIN stock_trailers t ON t.id = l.stock_trailer_id
+    WHERE t.stc_no = 'TESTSTC1' AND l.type = 'trailer_sales' AND l.status = 'lead') = 1);
+
+-- And WITHOUT inventing a customer. This used to create a crm_contacts
+-- row called "Lead TESTSTC1", which was tolerable while tracker rows
+-- lived on a private list and would now be a phantom account in the CRM
+-- for every unit anybody put on their tracker.
+SELECT assert('with nobody buying it yet, and no company invented to hold it',
+  (SELECT COUNT(*) FROM crm_leads l JOIN stock_trailers t ON t.id = l.stock_trailer_id
+    WHERE t.stc_no = 'TESTSTC1' AND l.contact_id IS NULL) = 1
+  AND (SELECT COUNT(*) FROM crm_contacts WHERE company_name LIKE 'Lead %') = 0,
+  (SELECT string_agg(company_name, ', ') FROM crm_contacts WHERE company_name LIKE 'Lead %'));
 
 -- A unit that is not there takes the whole call with it.
 DO $$
@@ -1394,12 +1456,44 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
-SELECT assert('as a quoted row on the maintenance side',
-  (SELECT COUNT(*) FROM crm_contacts
-    WHERE source = 'CRM proposal' AND side = 'maintenance' AND status = 'quoted') = 1);
-SELECT assert('carrying the relationship across',
-  (SELECT relationship FROM crm_contacts WHERE source = 'CRM proposal' LIMIT 1) = 'existing',
-  (SELECT relationship FROM crm_contacts WHERE source = 'CRM proposal' LIMIT 1));
+SELECT assert('as a quoted maintenance lead against that account',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'a2222222-0000-0000-0000-000000000001'
+      AND type = 'maintenance' AND status = 'quoted') = 1);
+
+-- The relationship is not carried across any more, because there is
+-- nothing to carry it to: it describes the company and the company is
+-- one record. An existing customer stays an existing customer whoever
+-- quotes them for whatever.
+SELECT assert('and the account keeps saying it is an existing customer',
+  (SELECT relationship FROM crm_contacts
+    WHERE id = 'a2222222-0000-0000-0000-000000000001') = 'existing',
+  (SELECT relationship FROM crm_contacts
+    WHERE id = 'a2222222-0000-0000-0000-000000000001'));
+
+-- Rental has a tab of its own now, so a rental proposal stops being
+-- filed under trailer sales.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_raise_proposal(
+    ARRAY['a2222222-0000-0000-0000-000000000001'::UUID], 'rental',
+    'aaaaaaaa-0000-0000-0000-000000000001') INTO out;
+  PERFORM assert('a rental proposal is raised', (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a rental proposal is raised', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('as a rental lead rather than a trailer sales one',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'a2222222-0000-0000-0000-000000000001' AND type = 'rental') = 1);
+
+-- The same customer, twice, for different work. Meaningless before and
+-- the ordinary case now.
+SELECT assert('and that account now carries two open leads',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'a2222222-0000-0000-0000-000000000001') = 2);
 
 DO $$
 BEGIN
@@ -1777,10 +1871,15 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
-SELECT assert('and it lands under the colleague''s name',
-  (SELECT COUNT(*) FROM crm_contacts
-    WHERE source = 'CRM proposal' AND assigned_to = 'TEST Colleague') = 1,
-  (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE source = 'CRM proposal'));
+-- It lands on the colleague's tracker, which is a column on the lead
+-- rather than their name typed into a text field on a copy of the
+-- company. Whose lead it is, is now a fact rather than a label.
+SELECT assert('and it lands on the colleague''s tracker',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'a3333333-0000-0000-0000-000000000001'
+      AND owner_id = 'cccccccc-0000-0000-0000-00000000000c') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_leads
+    WHERE contact_id = 'a3333333-0000-0000-0000-000000000001'));
 
 -- Even an administrator has no delegated form of sending stock.
 DO $$
@@ -2128,37 +2227,77 @@ DECLARE out JSONB;
 BEGIN
   SELECT command_tracker_from_crm(
     ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[]) INTO out;
-  PERFORM assert('a customer is copied onto the tracker',
+  PERFORM assert('a customer goes onto the tracker',
     (out ->> 'made')::INT = 1, out::TEXT);
 EXCEPTION WHEN OTHERS THEN
-  PERFORM assert('a customer is copied onto the tracker', FALSE, SQLERRM);
+  PERFORM assert('a customer goes onto the tracker', FALSE, SQLERRM);
 END
 $$;
 
-SELECT assert('onto the caller''s own tracker list',
-  (SELECT COUNT(*) FROM crm_contacts c
-     JOIN crm_lists l ON l.id = c.list_id
-    WHERE c.company_name = 'TEST Source Co'
-      AND l.owner_id = 'aaaaaaaa-0000-0000-0000-000000000001'
-      AND l.is_global = FALSE) = 1,
+-- As a lead owned by the caller, NOT as a second copy of the company.
+-- The copy was the duplicate: using the CRM properly grew another
+-- Dawson every time somebody put one on their tracker.
+SELECT assert('as a lead of the caller''s own',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'd3333333-0000-0000-0000-000000000001'
+      AND owner_id = 'aaaaaaaa-0000-0000-0000-000000000001') = 1,
+  (SELECT COUNT(*)::TEXT FROM crm_leads
+    WHERE contact_id = 'd3333333-0000-0000-0000-000000000001'));
+
+SELECT assert('and there is still exactly one of that company',
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Source Co') = 1,
   (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Source Co'));
 
-SELECT assert('and the original is still where it was',
-  (SELECT COUNT(*) FROM crm_contacts c
-     JOIN crm_lists l ON l.id = c.list_id
-    WHERE c.id = 'd3333333-0000-0000-0000-000000000001' AND l.is_global = TRUE) = 1);
+-- Somebody else's tracker IS a thing this operation does now.
+--
+-- It refused before for a reason that has gone: whose tracker gained a
+-- deal was decided by a list id the browser sent, so trusting an owner
+-- meant trusting the payload. A lead names its owner as a column. The
+-- business asked for this directly, for the case of taking a call while
+-- a colleague is away.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_tracker_from_crm(
+    ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[],
+    'trailer_sales', NULL,
+    'bbbbbbbb-0000-0000-0000-000000000002') INTO out;
+  PERFORM assert('a lead can be handed to a colleague as it is raised',
+    (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a lead can be handed to a colleague as it is raised', FALSE, SQLERRM);
+END
+$$;
 
--- Somebody else's tracker is not a thing this operation does.
+SELECT assert('and it is on their tracker, not the caller''s',
+  (SELECT COUNT(*) FROM crm_leads
+    WHERE contact_id = 'd3333333-0000-0000-0000-000000000001'
+      AND owner_id = 'bbbbbbbb-0000-0000-0000-000000000002') = 1);
+
+-- Handing one to somebody who is not here is a typo, not a delegation.
 DO $$
 BEGIN
   PERFORM command_tracker_from_crm(
     ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[],
     'trailer_sales', NULL,
-    'bbbbbbbb-0000-0000-0000-000000000002');
-  PERFORM assert('somebody else''s tracker is refused', FALSE, 'it succeeded');
+    'ffffffff-0000-0000-0000-0000000000ff');
+  PERFORM assert('handing one to nobody is refused', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
-  PERFORM assert('somebody else''s tracker is refused',
-    SQLERRM LIKE '%your own tracker%', SQLERRM);
+  PERFORM assert('handing one to nobody is refused',
+    SQLERRM LIKE '%nobody here%', SQLERRM);
+END
+$$;
+
+-- Rental is a lead type now, so this takes one.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_tracker_from_crm(
+    ARRAY['d3333333-0000-0000-0000-000000000001']::UUID[], 'rental') INTO out;
+  PERFORM assert('a rental lead can be raised against a customer',
+    (out ->> 'made')::INT = 1, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('a rental lead can be raised against a customer', FALSE, SQLERRM);
 END
 $$;
 
@@ -2175,8 +2314,10 @@ EXCEPTION WHEN OTHERS THEN
 END
 $$;
 
+-- The failed call left nothing behind, and the company is still one
+-- company however many leads have been raised against it.
 SELECT assert('and the one that was there did not arrive twice',
-  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Source Co') = 2,
+  (SELECT COUNT(*) FROM crm_contacts WHERE company_name = 'TEST Source Co') = 1,
   (SELECT COUNT(*)::TEXT FROM crm_contacts WHERE company_name = 'TEST Source Co'));
 
 DELETE FROM crm_contacts WHERE company_name = 'TEST Source Co';
@@ -2853,13 +2994,20 @@ DELETE FROM crm_lists WHERE name = 'TEST chain list';
 
 SELECT reset_fixtures();
 
-INSERT INTO crm_contacts (id, company_name, list_id, status, source,
-                          stock_trailer_id, profit, sale_price, commission_rate)
+INSERT INTO crm_contacts (id, company_name, list_id, status, source)
+VALUES ('e0000000-0000-0000-0000-000000000030', 'TEST projected buyer', test_global_list(), 'quoted', 'manual'),
+       ('e0000000-0000-0000-0000-000000000031', 'TEST projected rival', test_global_list(), 'quoted', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status,
+                       stock_trailer_id, profit, sale_price, commission_rate)
 VALUES
-  ('f0000000-0000-0000-0000-000000000030', 'TEST projected buyer', test_global_list(),
-   'quoted', 'manual', '11111111-1111-1111-1111-111111111111', 4000, 24000, 0.15),
-  ('f0000000-0000-0000-0000-000000000031', 'TEST projected rival', test_global_list(),
-   'quoted', 'manual', '11111111-1111-1111-1111-111111111111', NULL, NULL, NULL)
+  ('f0000000-0000-0000-0000-000000000030', 'e0000000-0000-0000-0000-000000000030',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
+   '11111111-1111-1111-1111-111111111111', 4000, 24000, 0.15),
+  ('f0000000-0000-0000-0000-000000000031', 'e0000000-0000-0000-0000-000000000031',
+   'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted',
+   '11111111-1111-1111-1111-111111111111', NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
 DO $$
@@ -2892,7 +3040,7 @@ BEGIN
 
   -- NOTHING HAPPENED.
   PERFORM assert('and nothing was written to work it out',
-    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000030') = 'quoted'
+    (SELECT status FROM crm_leads WHERE id = 'f0000000-0000-0000-0000-000000000030') = 'quoted'
     AND (SELECT status FROM stock_trailers WHERE id = '11111111-1111-1111-1111-111111111111') <> 'sold',
     'the projection wrote something');
 
@@ -2900,12 +3048,12 @@ BEGIN
   PERFORM command_mark_sold_many(
     ARRAY['f0000000-0000-0000-0000-000000000030']::UUID[], 'DA', NULL, NULL, DATE '2026-08-14');
 
-  SELECT jsonb_object_agg(k, to_jsonb(c.*) -> k) INTO after
-    FROM crm_contacts c,
+  SELECT jsonb_object_agg(k, to_jsonb(l.*) -> k) INTO after
+    FROM crm_leads l,
          LATERAL jsonb_object_keys(
            (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
              WHERE r ->> 'id' = 'f0000000-0000-0000-0000-000000000030')) AS k
-   WHERE c.id = 'f0000000-0000-0000-0000-000000000030';
+   WHERE l.id = 'f0000000-0000-0000-0000-000000000030';
 
   PERFORM assert('the deal is exactly what was projected',
     after = (SELECT r -> 'set' FROM jsonb_array_elements(projected -> 'rows') AS r
@@ -2925,8 +3073,8 @@ BEGIN
     after::TEXT);
 
   PERFORM assert('including the rival it said would be told',
-    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000031') = 'customer',
-    (SELECT status FROM crm_contacts WHERE id = 'f0000000-0000-0000-0000-000000000031'));
+    (SELECT status FROM crm_leads WHERE id = 'f0000000-0000-0000-0000-000000000031') = 'lost',
+    (SELECT status FROM crm_leads WHERE id = 'f0000000-0000-0000-0000-000000000031'));
 END
 $$;
 

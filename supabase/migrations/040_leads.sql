@@ -91,7 +91,15 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
 
   -- The account this is a pitch to. One account, many leads.
-  contact_id UUID REFERENCES crm_contacts ON DELETE CASCADE NOT NULL,
+  --
+  -- Null only where there is genuinely no customer yet: a unit sent from
+  -- stock to somebody's tracker is "I am trying to sell this trailer"
+  -- before it is a pitch to anybody. That used to be expressed by
+  -- inventing a company called "Lead STC12345" in the CRM, which is a
+  -- phantom account nobody asked for. A lead with no customer named is
+  -- the honest version of the same thing, and naming one later is
+  -- filling in a column rather than merging two records.
+  contact_id UUID REFERENCES crm_contacts ON DELETE CASCADE,
 
   -- Whose tracker it sits on. Not the account owner: anybody can raise
   -- a lead against any account in the CRM and hand it to somebody else
