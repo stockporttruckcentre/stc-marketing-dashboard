@@ -1,5 +1,15 @@
 export type UserRole = 'admin' | 'marketer' | 'sales' | 'viewer';
 export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'customer' | 'lost';
+
+/**
+ * The three tabs of the sales tracker.
+ *
+ * Rental and leasing is here because a lead type is a value now. It used
+ * to be `side` on the company, a column with two things it could ever
+ * hold, which is why the third tab was a schema change rather than an
+ * option. See migration 040.
+ */
+export type LeadType = 'trailer_sales' | 'maintenance' | 'rental';
 export type PostStatus = 'draft' | 'pending_review' | 'approved' | 'scheduled' | 'posted';
 export type AssetType = 'logo' | 'font' | 'color' | 'template' | 'image';
 
@@ -83,6 +93,61 @@ export interface CRMContact {
   commission: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * A pitch to a customer, sitting on somebody's tracker.
+ *
+ * One account can carry several at once, which is the whole point: two
+ * people can be quoting the same firm for different work, and before
+ * migration 040 that was only expressible by having two of the firm.
+ *
+ * `owner_id` is whose tracker it is on, and is not the account owner.
+ * Anybody may raise a lead against any account in the CRM and hand it to
+ * somebody else as they create it. `shared_with` is how one lead worked
+ * by two people shows on both trackers without becoming two leads.
+ */
+export interface Lead {
+  id: string;
+  contact_id: string;
+  owner_id: string | null;
+  shared_with: string[];
+  type: LeadType;
+  status: ContactStatus;
+  what: string | null;
+  requirement: string | null;
+  new_or_used: string | null;
+  estimated_value: number | null;
+  date_of_enquiry: string | null;
+  action: string | null;
+  next_action: string | null;
+  /** What the inactive prospect nudge reads. */
+  last_activity_at: string | null;
+  stock_trailer_id: string | null;
+  order_date: string | null;
+  dispatch_date: string | null;
+  sale_price: number | null;
+  profit: number | null;
+  profit_pct: number | null;
+  commission: number | null;
+  commission_rate: number | null;
+  rep_initials: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The company a lead is against, carried alongside it. */
+export type LeadAccount = Pick<CRMContact,
+  'id' | 'company_name' | 'contact_name' | 'email' | 'phone' | 'location' | 'relationship'>;
+
+/**
+ * How a tracker row is actually read: the pitch, plus enough of the
+ * company to render it without a second query.
+ */
+export interface LeadWithAccount extends Lead {
+  account: LeadAccount | null;
 }
 
 export interface SocialPost {

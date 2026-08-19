@@ -48,5 +48,6 @@
 038_duplicate_and_link
 039_rows_forward
 040_leads
+041_tracker_from_crm_makes_a_lead
 018_command_set_role
 019_last_admin

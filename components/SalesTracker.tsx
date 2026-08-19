@@ -10,9 +10,66 @@ import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ImportDialog } from '@/components/crm/ImportDialog';
-import { SALES_TRACKER } from '@/lib/import/dictionary';
 import { trackerFromCrm } from '@/lib/crm/tracker-operations';
-import type { CRMContact, ContactStatus, CrmList, Profile, StockTrailer } from '@/lib/types';
+import { SALES_TRACKER } from '@/lib/import/dictionary';
+import type { CRMContact, ContactStatus, LeadAccount, LeadType, LeadWithAccount, Profile, StockTrailer } from '@/lib/types';
+
+/**
+ * One row of the tracker: the pitch, with the company's own details
+ * flattened alongside it.
+ *
+ * Flattened rather than nested because the grid, the drawer and the
+ * commission view all address fields by name, and a company's name is
+ * something you edit in the same breath as the deal it belongs to. What
+ * decides the difference is `ACCOUNT_FIELDS` below: those go to the
+ * company record, everything else to the lead.
+ */
+type TrackerRow = LeadWithAccount & {
+  company_name: string;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  location: string | null;
+  source: string | null;
+  description: string | null;
+  category: string | null;
+  account_manager: string | null;
+  vehicles: string | null;
+};
+
+/**
+ * The fields that describe the company rather than the pitch.
+ *
+ * Editing a phone number on a tracker row now changes it for everybody,
+ * because there is one Dawson and that is their phone number. Editing an
+ * estimated value changes this pitch and no other.
+ */
+const ACCOUNT_FIELDS = new Set([
+  'company_name', 'contact_name', 'email', 'phone', 'location',
+  'source', 'description', 'category', 'account_manager', 'vehicles',
+]);
+
+function flatten(l: LeadWithAccount): TrackerRow {
+  return {
+    ...l,
+    company_name:    l.account?.company_name ?? 'Unknown company',
+    contact_name:    l.account?.contact_name ?? null,
+    email:           l.account?.email ?? null,
+    phone:           l.account?.phone ?? null,
+    location:        l.account?.location ?? null,
+    source:          (l.account as any)?.source ?? null,
+    description:     (l.account as any)?.description ?? null,
+    category:        (l.account as any)?.category ?? null,
+    account_manager: (l.account as any)?.account_manager ?? null,
+    vehicles:        (l.account as any)?.vehicles ?? null,
+  };
+}
+
+const TYPE_LABEL: Record<LeadType, string> = {
+  trailer_sales: 'Trailer sales',
+  maintenance:   'Maintenance',
+  rental:        'Rental & leasing',
+};
 
 // Tracker has 3 tabs that group the existing CRM statuses
 type TrackerTab = 'all' | 'working' | 'customer' | 'lost' | 'commission';
@@ -44,25 +101,28 @@ function fmtDate(v: string | null | undefined) {
 }
 
 export function SalesTracker({
-  list, initialContacts, profile,
-}: { list: CrmList; initialContacts: CRMContact[]; profile: Profile }) {
+  initialLeads, profile,
+}: { initialLeads: LeadWithAccount[]; profile: Profile }) {
   const supabase = useMemo(() => createClient(), []);
-  const [rows, setRows] = useState<CRMContact[]>(initialContacts);
-  const [side, setSide] = useState<'trailer_sales' | 'maintenance'>('trailer_sales');
+  const [rows, setRows] = useState<TrackerRow[]>(() => initialLeads.map(flatten));
+  const [side, setSide] = useState<LeadType>('trailer_sales');
   const [whatFilter, setWhatFilter] = useState<string | null>(null);
   const [tab, setTab] = useState<TrackerTab>('working');
   const [query, setQuery] = useState('');
-  const [editingRow, setEditingRow] = useState<CRMContact | null>(null);
+  const [editingRow, setEditingRow] = useState<TrackerRow | null>(null);
 
-  // ?contact=ID deep-link from the stock drawer's "View in tracker" button
+  // ?contact=ID deep-link from the stock drawer's "View in tracker" button.
+  // It names a company, and a company can now have several pitches open,
+  // so it opens the one on the tab being looked at and otherwise the first.
   const sp = useSearchParams();
   useEffect(() => {
     const id = sp?.get('contact');
     if (!id) return;
-    const target = rows.find(r => r.id === id);
+    const mine = rows.filter(r => r.contact_id === id || r.id === id);
+    const target = mine.find(r => r.type === side) ?? mine[0];
     if (target) {
       setEditingRow(target);
-      if (target.side) setSide(target.side as any);
+      setSide(target.type);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp, rows]);
@@ -70,7 +130,7 @@ export function SalesTracker({
   const [message, setMessage] = useState<string | null>(null);
 
   // Counts of the CURRENT side only
-  const sideRows = useMemo(() => rows.filter(r => (r.side ?? 'trailer_sales') === side), [rows, side]);
+  const sideRows = useMemo(() => rows.filter(r => (r.type ?? 'trailer_sales') === side), [rows, side]);
   const counts = useMemo(() => {
     const c = { all: sideRows.length, working: 0, customer: 0, lost: 0, commission: 0 } as Record<TrackerTab, number>;
     for (const r of sideRows) c[STATUS_TO_TAB[r.status]]++;
@@ -79,8 +139,9 @@ export function SalesTracker({
     return c;
   }, [sideRows]);
   const sideCounts = useMemo(() => ({
-    trailer_sales: rows.filter(r => (r.side ?? 'trailer_sales') === 'trailer_sales').length,
-    maintenance:   rows.filter(r => r.side === 'maintenance').length,
+    trailer_sales: rows.filter(r => (r.type ?? 'trailer_sales') === 'trailer_sales').length,
+    maintenance:   rows.filter(r => r.type === 'maintenance').length,
+    rental:        rows.filter(r => r.type === 'rental').length,
   }), [rows]);
   // Unique "What" values present in current side (for the maintenance filter chips)
   const whatValues = useMemo(() => {
@@ -111,11 +172,24 @@ export function SalesTracker({
     sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.commission) || 0), 0),
     [sideRows]);
 
-  const saveCell = useCallback((params: ValueSetterParams<CRMContact>): boolean => {
-    const field = params.colDef.field as keyof CRMContact;
-    if (params.data[field] === params.newValue) return false;
+  /**
+   * One cell, and the field decides which record it belongs to.
+   *
+   * A phone number is the company's, so editing it here changes it
+   * everywhere, which is the point of there being one Dawson. An
+   * estimated value is this pitch's and touches nothing else.
+   */
+  const saveCell = useCallback((params: ValueSetterParams<TrackerRow>): boolean => {
+    const field = params.colDef.field as string;
+    if ((params.data as any)[field] === params.newValue) return false;
     (params.data as any)[field] = params.newValue;
-    supabase.from('crm_contacts').update({ [field]: params.newValue }).eq('id', params.data.id)
+
+    const toAccount = ACCOUNT_FIELDS.has(field);
+    const table = toAccount ? 'crm_contacts' : 'crm_leads';
+    const id    = toAccount ? params.data.contact_id : params.data.id;
+    if (!id) { setMessage('That row has no record behind it to write to.'); return false; }
+
+    supabase.from(table).update({ [field]: params.newValue }).eq('id', id)
       .then(({ error }) => { if (error) setMessage(error.message); });
     return true;
   }, [supabase]);
@@ -123,8 +197,8 @@ export function SalesTracker({
   const isCustomerTab = tab === 'customer';
   const isMaintenance = side === 'maintenance';
 
-  const columnDefs = useMemo<ColDef<CRMContact>[]>(() => {
-    const commonStart: ColDef<CRMContact>[] = [
+  const columnDefs = useMemo<ColDef<TrackerRow>[]>(() => {
+    const commonStart: ColDef<TrackerRow>[] = [
       { field: 'date_of_enquiry', headerName: isMaintenance ? 'Last update' : 'Enquiry', width: 110,
         valueFormatter: (p) => fmtDate(p.value), editable: true, valueSetter: saveCell, cellEditor: 'agTextCellEditor' },
       { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 160, editable: true, valueSetter: saveCell },
@@ -132,7 +206,7 @@ export function SalesTracker({
       { field: 'phone', headerName: 'Phone', width: 140, editable: true, valueSetter: saveCell },
       { field: 'email', headerName: 'Email', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
     ];
-    const salesMid: ColDef<CRMContact>[] = [
+    const salesMid: ColDef<TrackerRow>[] = [
       { field: 'new_or_used', headerName: 'New/Used', width: 110, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'New', 'Used', 'New/Used', 'Used/Refurb', 'Refurb'] } },
       { field: 'estimated_value', headerName: 'Est. value', width: 120, editable: true, valueSetter: saveCell,
@@ -141,26 +215,26 @@ export function SalesTracker({
       { field: 'source', headerName: 'Source', width: 140, editable: true, valueSetter: saveCell },
       { field: 'description', headerName: 'Description', flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
     ];
-    const maintMid: ColDef<CRMContact>[] = [
+    const maintMid: ColDef<TrackerRow>[] = [
       { field: 'what', headerName: 'What', width: 150, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['', 'Maintenance', 'Trukplan', 'All Services', 'Maintenance and MOT', 'Maintenance and Trukplan', 'Van Maintenance and Repair', 'Accident Repair', 'All Services and Parking'] } },
       { field: 'category', headerName: 'Cat', width: 70, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'A', 'B', 'C'] },
-        cellRenderer: (p: ICellRendererParams<CRMContact, string>) => p.value
+        cellRenderer: (p: ICellRendererParams<TrackerRow, string>) => p.value
           ? <span className={`maint-cat maint-cat--${p.value.toLowerCase()}`}>{p.value}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span> },
       { field: 'account_manager', headerName: 'Manager', width: 100, editable: true, valueSetter: saveCell },
       { field: 'source', headerName: 'Source', width: 130, editable: true, valueSetter: saveCell },
       { field: 'vehicles', headerName: 'Vehicles', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
     ];
-    const commonEnd: ColDef<CRMContact>[] = [
+    const commonEnd: ColDef<TrackerRow>[] = [
       { field: 'requirement', headerName: 'Requirement', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
       { field: 'action', headerName: 'Action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
-      ...(isMaintenance ? [{ field: 'next_action' as keyof CRMContact, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
+      ...(isMaintenance ? [{ field: 'next_action' as keyof TrackerRow, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
       { field: 'status', headerName: 'Status', width: 120, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
-        cellRenderer: (p: ICellRendererParams<CRMContact, ContactStatus>) => p.value
+        cellRenderer: (p: ICellRendererParams<TrackerRow, ContactStatus>) => p.value
           ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{p.value}</span> : null },
       { field: 'notes', headerName: 'Latest update', flex: 1.5, minWidth: 200, editable: true, valueSetter: saveCell },
     ];
@@ -182,15 +256,18 @@ export function SalesTracker({
     }
     base.push({
       headerName: '', width: 56, pinned: 'right', sortable: false, filter: false, editable: false,
-      cellRenderer: (p: ICellRendererParams<CRMContact>) => (
+      cellRenderer: (p: ICellRendererParams<TrackerRow>) => (
         <div className="row" style={{ gap: 4 }}>
           <button onClick={() => setEditingRow(p.data!)} className="btn btn--icon btn--sm" title="Edit"><Edit2 size={12} /></button>
+          {/* Removes the pitch, never the customer. Dropping a quote is
+              not the same as saying you have never heard of them, and
+              before leads existed those were the same button. */}
           <button onClick={async () => {
-            if (!confirm(`Delete "${p.data!.company_name}"?`)) return;
-            const { error } = await supabase.from('crm_contacts').delete().eq('id', p.data!.id);
+            if (!confirm(`Drop this ${TYPE_LABEL[p.data!.type].toLowerCase()} lead for "${p.data!.company_name}"?\n\nThe customer stays in the CRM.`)) return;
+            const { error } = await supabase.from('crm_leads').delete().eq('id', p.data!.id);
             if (error) { setMessage(error.message); return; }
             setRows(r => r.filter(x => x.id !== p.data!.id));
-          }} className="btn btn--icon btn--sm" style={{ color: 'var(--stc-red-300)' }} title="Delete"><Trash2 size={12} /></button>
+          }} className="btn btn--icon btn--sm" style={{ color: 'var(--stc-red-300)' }} title="Drop this lead"><Trash2 size={12} /></button>
         </div>
       ),
     });
@@ -213,57 +290,136 @@ export function SalesTracker({
    * have already reviewed every column would be a fourth step nobody
    * wants. Wrong guesses are one cell to change.
    */
-  async function commitTrackerImport(records: Record<string, any>[]) {
-    const withDefaults = records.map((r) => ({
-      list_id: list.id,
-      side,
-      status: 'lead',
-      source: 'Spreadsheet import',
-      ...r,
-    }));
-    const { error, count } = await supabase.from('crm_contacts')
-      .insert(withDefaults, { count: 'exact' });
-    if (error) return { inserted: 0, error: error.message };
-    const { data } = await supabase.from('crm_contacts').select('*')
-      .eq('list_id', list.id).order('updated_at', { ascending: false });
-    setRows((data ?? []) as CRMContact[]);
-    setMessage(`Imported ${count ?? withDefaults.length} onto ${side === 'maintenance' ? 'maintenance' : 'trailer sales'}`);
-    return { inserted: count ?? withDefaults.length };
+  /** Read a lead back with its company attached, the way the page loads them. */
+  async function readLead(id: string): Promise<TrackerRow | null> {
+    const { data } = await supabase.from('crm_leads').select(`*, account:crm_contacts (
+      id, company_name, contact_name, email, phone, location, relationship,
+      source, description, category, account_manager, vehicles
+    )`).eq('id', id).single();
+    return data ? flatten(data as unknown as LeadWithAccount) : null;
   }
 
-  async function createBlankLead(company: string, websiteUrl: string, newSide: 'trailer_sales' | 'maintenance', what: string | null) {
-    const today = new Date().toISOString().slice(0, 10);
+  /**
+   * The company this pitch is to, found or created.
+   *
+   * A tracker never invents a customer quietly any more. If the name is
+   * already in the CRM this returns that account, so a second quote to
+   * Dawson attaches to the Dawson everybody else can see. If it is not,
+   * the account is created IN THE CRM, on the shared pipeline, which is
+   * the rule the business set: you cannot have a lead for a company that
+   * does not exist as an account.
+   */
+  async function accountFor(companyName: string, websiteUrl = ''): Promise<string | null> {
+    const name = companyName.trim();
+    if (!name) { setMessage('A lead needs a company.'); return null; }
+
+    const { data: found } = await supabase.from('crm_contacts')
+      .select('id').ilike('company_name', name).limit(1).maybeSingle();
+    if (found) return (found as { id: string }).id;
+
     const links = websiteUrl.trim()
       ? [{ id: crypto.randomUUID(), label: 'Website', url: websiteUrl.trim(), kind: 'website' as const }]
       : [];
-    const { data, error } = await supabase.from('crm_contacts').insert({
-      list_id: list.id, company_name: company.trim() || 'New lead', source: 'Manual',
-      status: 'lead', date_of_enquiry: today, links,
-      side: newSide, what: newSide === 'maintenance' ? what : null,
-    }).select('*').single();
-    if (error) { setMessage(error.message); return; }
-    setRows(r => [data as CRMContact, ...r]);
-    setSide(newSide);
-    setShowNewLead(false);
-    setEditingRow(data as CRMContact);
+    const { data: made, error } = await supabase.from('crm_contacts')
+      .insert({ company_name: name, source: 'Manual', status: 'lead', links })
+      .select('id').single();
+    if (error || !made) { setMessage(error?.message ?? 'Could not create that account.'); return null; }
+
+    // Onto the shared pipeline, so it is an account everybody can find
+    // rather than something that exists only inside one tracker.
+    const { data: pipeline } = await supabase.from('crm_lists')
+      .select('id').eq('is_global', true).limit(1).maybeSingle();
+    if (pipeline) {
+      await supabase.from('crm_list_contacts')
+        .insert({ list_id: (pipeline as { id: string }).id, contact_id: (made as { id: string }).id });
+    }
+    return (made as { id: string }).id;
   }
 
-  /* The same operation the command bar performs. This used to insert
-     from the browser with the list id the screen was holding, so the
-     payload decided whose tracker gained a deal. Migration 033 decides
-     it from who is asking. */
-  async function importFromCrm(sourceContact: CRMContact, newSide: 'trailer_sales' | 'maintenance' = 'trailer_sales', what: string | null = null) {
+  /**
+   * Write the reviewed tracker rows.
+   *
+   * A spreadsheet row is a pitch, so each one finds or creates its
+   * company and then becomes a lead against it. Importing Dean's
+   * maintenance sheet twice no longer produces two of every customer.
+   *
+   * They land on whichever side is being looked at, because a tracker
+   * import is somebody bringing in one of the spreadsheets rather than a
+   * mixture, and asking which type each row is after they have already
+   * reviewed every column would be a step nobody wants. Wrong guesses
+   * are one cell to change.
+   */
+  async function commitTrackerImport(records: Record<string, any>[]) {
+    const made: TrackerRow[] = [];
+    for (const r of records) {
+      const contactId = await accountFor(String(r.company_name ?? ''));
+      if (!contactId) continue;
+
+      const patch: Record<string, any> = {};
+      for (const [k, v] of Object.entries(r)) {
+        if (k === 'company_name' || ACCOUNT_FIELDS.has(k)) continue;
+        patch[k] = v;
+      }
+      const { data, error } = await supabase.from('crm_leads').insert({
+        contact_id: contactId,
+        owner_id: profile.id,
+        created_by: profile.id,
+        type: side,
+        status: 'lead',
+        last_activity_at: new Date().toISOString(),
+        ...patch,
+      }).select('id').single();
+      if (error) return { inserted: made.length, error: error.message };
+
+      const row = await readLead((data as { id: string }).id);
+      if (row) made.push(row);
+    }
+    setRows(r => [...made, ...r]);
+    setMessage(`Imported ${made.length} onto ${TYPE_LABEL[side].toLowerCase()}`);
+    return { inserted: made.length };
+  }
+
+  /**
+   * A new lead, against an account that exists.
+   *
+   * `contactId` is null only when the person typed a company the CRM has
+   * never heard of, and then the account is created first. Either way a
+   * lead is a pitch to somebody who is in the CRM by the time it exists.
+   */
+  async function createLead(
+    contactId: string | null,
+    company: string,
+    websiteUrl: string,
+    newSide: LeadType,
+    what: string | null,
+    ownerId: string,
+  ) {
+    const account = contactId ?? await accountFor(company, websiteUrl);
+    if (!account) return;
+
+    /* The same operation the command bar performs, rather than an insert
+       of this screen's own. Two implementations of "start a lead" is how
+       one of them forgets to carry the status across or quietly lets you
+       raise one against a company that is not an account. */
     const done = await trackerFromCrm(supabase, {
-      contacts: [sourceContact.id], side: newSide, what,
+      contacts: [account], side: newSide, what, owner: ownerId,
     });
     if (!done.ok) { setMessage(done.why); return; }
+    if (!done.rowId) { setMessage('That lead was raised but did not come back.'); return; }
 
-    const { data } = await supabase.from('crm_contacts').select('*').eq('id', done.rowId).single();
-    if (!data) { setMessage('That went on the tracker but did not come back.'); return; }
-    setRows(r => [data as CRMContact, ...r]);
+    const row = await readLead(done.rowId);
     setSide(newSide);
     setShowNewLead(false);
-    setEditingRow(data as CRMContact);
+    if (!row) return;
+    setRows(r => [row, ...r]);
+
+    // Handed to somebody else, so it is on their tracker and not this one.
+    if (ownerId !== profile.id) {
+      setRows(r => r.filter(x => x.id !== row.id));
+      setMessage(`Lead created and handed over. It is on their tracker now.`);
+      return;
+    }
+    setEditingRow(row);
   }
 
 
@@ -274,10 +430,10 @@ export function SalesTracker({
           <div className="page-head__eyebrow">Sales · Personal tracker</div>
           <h1 className="page-head__title">
             <TrendingUp size={26} style={{ color: 'var(--stc-red)' }} />
-            <span>{list.name}<span style={{ color: 'var(--stc-red)' }}>.</span></span>
+            <span>{(profile?.full_name ?? 'My').split(' ')[0]}&rsquo;s leads<span style={{ color: 'var(--stc-red)' }}>.</span></span>
           </h1>
           <div className="page-head__sub">
-            Only you see this list. {sideRows.length} {isMaintenance ? 'maintenance account' : 'trailer-sales lead'}{sideRows.length === 1 ? '' : 's'}
+            Your own and any shared with you. {sideRows.length} {TYPE_LABEL[side].toLowerCase()} lead{sideRows.length === 1 ? '' : 's'}
             {!isMaintenance && <> · Pipeline est: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalEstValue)}</strong> · Customer revenue: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCustomerRevenue)}</strong> · Commission: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCommission)}</strong></>}
           </div>
         </div>
@@ -290,14 +446,16 @@ export function SalesTracker({
       {showImport && (
         <ImportDialog
           dict={SALES_TRACKER}
-          listName={`${list.name}, ${isMaintenance ? 'maintenance' : 'trailer sales'}`}
+          listName={`your ${TYPE_LABEL[side].toLowerCase()} leads`}
           existing={rows.map((r) => ({ id: r.id, company_name: r.company_name, email: r.email }))}
           onCommit={commitTrackerImport}
           onClose={() => setShowImport(false)}
         />
       )}
 
-      {/* Top-level side switcher: Trailer Sales | Maintenance */}
+      {/* The three kinds of work a lead can be for. Rental and leasing
+          is here because a lead type is a value, not a column that has
+          to be widened to hold a third thing. */}
       <div className="side-toggle">
         <button onClick={() => { setSide('trailer_sales'); setWhatFilter(null); }}
           className={`side-toggle__btn ${side === 'trailer_sales' ? 'is-active' : ''}`}>
@@ -308,6 +466,11 @@ export function SalesTracker({
           className={`side-toggle__btn ${side === 'maintenance' ? 'is-active' : ''}`}>
           <Wrench size={14} /> <span>Maintenance</span>
           <span className="side-toggle__count">{sideCounts.maintenance}</span>
+        </button>
+        <button onClick={() => { setSide('rental'); setWhatFilter(null); }}
+          className={`side-toggle__btn ${side === 'rental' ? 'is-active' : ''}`}>
+          <Truck size={14} /> <span>Rental &amp; Leasing</span>
+          <span className="side-toggle__count">{sideCounts.rental}</span>
         </button>
       </div>
 
@@ -343,7 +506,7 @@ export function SalesTracker({
         <CommissionView rows={sideRows} />
       ) : (
       <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 320px)', marginTop: 14, minHeight: 480 }}>
-        <AgGridReact<CRMContact>
+        <AgGridReact<TrackerRow>
           rowData={filtered}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
@@ -357,9 +520,8 @@ export function SalesTracker({
 
       {showNewLead && (
         <NewLeadModal
-          currentListId={list.id}
-          onCreateNew={createBlankLead}
-          onImport={importFromCrm}
+          profile={profile}
+          onCreate={createLead}
           onClose={() => setShowNewLead(false)}
         />
       )}
@@ -380,9 +542,9 @@ export function SalesTracker({
 }
 
 // ===== Detail drawer for full edit of a single lead =====
-function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; profile: Profile; onClose: () => void; onSave: (patch: Partial<CRMContact>) => void }) {
+function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; profile: Profile; onClose: () => void; onSave: (patch: Partial<TrackerRow>) => void }) {
   const supabase = useMemo(() => createClient(), []);
-  const [edit, setEdit] = useState<CRMContact>(row);
+  const [edit, setEdit] = useState<TrackerRow>(row);
   const [saving, setSaving] = useState(false);
   const [meetings, setMeetings] = useState<CalendarEvent[]>([]);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
@@ -390,19 +552,21 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
   const [conflictMeeting, setConflictMeeting] = useState<CalendarEvent | null>(null);
   const tab = STATUS_TO_TAB[edit.status];
 
-  // Load all scheduled meetings tied to this contact (any visibility user can see)
+  // Every meeting with this company, whichever pitch prompted it. Read
+  // by company rather than by lead: a visit to Dawson is a visit to
+  // Dawson, and closing one quote should not hide it.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoadingMeetings(true);
       const { data } = await supabase
         .from('calendar_events').select('*')
-        .eq('contact_id', row.id)
+        .eq('contact_id', row.contact_id)
         .order('start_at', { ascending: true });
       if (!cancelled) { setMeetings((data ?? []) as CalendarEvent[]); setLoadingMeetings(false); }
     })();
     return () => { cancelled = true; };
-  }, [supabase, row.id]);
+  }, [supabase, row.contact_id]);
 
   function handleSchedule() {
     // Find any existing meeting within +/- 14 days from now - warn before opening modal
@@ -416,11 +580,23 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
     setShowSchedule(true);
   }
 
-  async function saveField<K extends keyof CRMContact>(field: K, value: CRMContact[K]) {
+  /**
+   * One field, written to whichever record owns it.
+   *
+   * The same split as the grid: a company's phone number belongs to the
+   * company, this pitch's estimated value belongs to this pitch. Writing
+   * both to `crm_contacts` was correct only while they were the same row.
+   */
+  async function saveField<K extends keyof TrackerRow>(field: K, value: TrackerRow[K]) {
     if (edit[field] === value) return;
     setEdit(e => ({ ...e, [field]: value }));
     setSaving(true);
-    const { error } = await supabase.from('crm_contacts').update({ [field]: value }).eq('id', row.id);
+    const toAccount = ACCOUNT_FIELDS.has(field as string);
+    const target = toAccount ? row.contact_id : row.id;
+    if (!target) { setSaving(false); alert('That row has no record behind it to write to.'); return; }
+    const { error } = await supabase
+      .from(toAccount ? 'crm_contacts' : 'crm_leads')
+      .update({ [field]: value }).eq('id', target);
     setSaving(false);
     if (error) { alert(error.message); return; }
     onSave({ [field]: value } as any);
@@ -606,13 +782,13 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: CRMContact; pr
 
         {showSchedule && (
           <ScheduleMeetingModal
-            contact={edit}
+            contact={{ id: edit.contact_id, company_name: edit.company_name }}
             profile={profile}
             allProfiles={[]}
             onClose={() => {
               setShowSchedule(false);
               // Reload meetings after the modal closes (in case one was created)
-              supabase.from('calendar_events').select('*').eq('contact_id', row.id).order('start_at', { ascending: true })
+              supabase.from('calendar_events').select('*').eq('contact_id', row.contact_id).order('start_at', { ascending: true })
                 .then(({ data }) => setMeetings((data ?? []) as CalendarEvent[]));
             }}
           />
@@ -632,21 +808,42 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 
-// ===== New lead modal: checks user's accessible CRM contacts for matches before creating =====
-function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
-  currentListId: string;
-  onCreateNew: (company: string, websiteUrl: string, side: 'trailer_sales' | 'maintenance', what: string | null) => void;
-  onImport: (contact: CRMContact, side: 'trailer_sales' | 'maintenance', what: string | null) => void;
+// ===== New lead: a pitch to a company that is already an account =====
+/**
+ * You cannot raise a lead for a company that is not in the CRM.
+ *
+ * That is the rule the business set and it is the whole reason the
+ * duplicates existed: this used to offer "Create new" as a first class
+ * button beside the search, so anybody in a hurry made a second Dawson
+ * rather than picking the one already there. Now the search is the
+ * route, and creating an account is what happens when the search comes
+ * back empty, which is the only time it should.
+ *
+ * Delegation is here rather than after the fact because the meeting's
+ * example was Dave taking a call while Dean is away: he wants it in
+ * Dean's tracker as he writes it down, not in his own and moved later.
+ */
+function NewLeadModal({ profile, onCreate, onClose }: {
+  profile: Profile;
+  onCreate: (contactId: string | null, company: string, websiteUrl: string,
+             type: LeadType, what: string | null, ownerId: string) => void;
   onClose: () => void;
 }) {
-  const [side, setSide] = useState<'trailer_sales' | 'maintenance'>('trailer_sales');
-  const [what, setWhat] = useState<string>('Maintenance');
   const supabase = useMemo(() => createClient(), []);
+  const [type, setType] = useState<LeadType>('trailer_sales');
+  const [what, setWhat] = useState<string>('Maintenance');
   const [company, setCompany] = useState('');
   const [website, setWebsite] = useState('');
   const [searching, setSearching] = useState(false);
-  const [matches, setMatches] = useState<Array<CRMContact & { list_name?: string | null }>>([]);
+  const [matches, setMatches] = useState<LeadAccount[]>([]);
   const [searched, setSearched] = useState(false);
+  const [owner, setOwner] = useState(profile.id);
+  const [people, setPeople] = useState<Profile[]>([]);
+
+  useEffect(() => {
+    supabase.from('profiles').select('*').order('full_name')
+      .then(({ data }) => setPeople((data ?? []) as Profile[]));
+  }, [supabase]);
 
   function extractDomain(s: string): string {
     let v = s.trim().toLowerCase();
@@ -655,70 +852,82 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
     try { return new URL(v).hostname.replace(/^www\./i, ''); } catch { return ''; }
   }
 
-  async function search() {
-    if (!company.trim() && !website.trim()) return;
-    setSearching(true);
-    setSearched(false);
+  /* Every account the person can see, not every account minus this
+     tracker's list. A tracker is no longer a list, and a company being
+     on somebody's tracker is not a reason to hide it: that is precisely
+     the company you want to attach a second pitch to. */
+  const search = useCallback(async () => {
     const q = company.trim();
     const domain = extractDomain(website);
-    // Search crm_contacts the user can see (RLS handles list visibility), excluding the current tracker list
-    let query = supabase
-      .from('crm_contacts')
-      .select('*, crm_lists(name)')
-      .neq('list_id', currentListId)
-      .limit(20);
-    if (q) query = query.ilike('company_name', `%${q}%`);
-    const { data } = await query;
-    let results = (data ?? []) as any[];
-    // If website domain provided, also include rows whose links contain that domain
+    if (!q && !domain) return;
+    setSearching(true);
+    setSearched(false);
+
+    const cols = 'id, company_name, contact_name, email, phone, location, relationship, links';
+    let rows: any[] = [];
+    if (q) {
+      const { data } = await supabase.from('crm_contacts').select(cols)
+        .ilike('company_name', `%${q}%`).order('company_name').limit(20);
+      rows = (data ?? []) as any[];
+    }
     if (domain) {
-      const seen = new Set(results.map((r: any) => r.id));
-      const { data: byUrl } = await supabase
-        .from('crm_contacts')
-        .select('*, crm_lists(name)')
-        .neq('list_id', currentListId)
-        .limit(20);
-      for (const row of (byUrl ?? []) as any[]) {
+      const seen = new Set(rows.map(r => r.id));
+      const { data } = await supabase.from('crm_contacts').select(cols).limit(200);
+      for (const row of (data ?? []) as any[]) {
         if (seen.has(row.id)) continue;
-        const hasMatch = (row.links || []).some((l: any) => {
-          if (!l?.url) return false;
-          const d = extractDomain(l.url);
-          return d && d === domain;
-        });
-        if (hasMatch) { results.push(row); seen.add(row.id); }
+        if ((row.links || []).some((l: any) => l?.url && extractDomain(l.url) === domain)) {
+          rows.push(row); seen.add(row.id);
+        }
       }
     }
-    setMatches(results.map(r => ({ ...r, list_name: r.crm_lists?.name ?? null })));
+    setMatches(rows as LeadAccount[]);
     setSearching(false);
     setSearched(true);
-  }
+  }, [company, website, supabase]);
+
+  // Search as they type, so the CRM is consulted without anybody
+  // deciding to consult it.
+  useEffect(() => {
+    if (company.trim().length < 2) { setMatches([]); setSearched(false); return; }
+    const handle = setTimeout(() => { void search(); }, 250);
+    return () => clearTimeout(handle);
+  }, [company, search]);
+
+  const delegated = owner !== profile.id;
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal__head">
           <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Plus size={16} style={{ color: 'var(--stc-red)' }} /> New lead
           </h3>
           <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
         </div>
+
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="field">
-            <div className="field__label">What are you tracking?</div>
+            <div className="field__label">What are you pitching for?</div>
             <div className="side-picker">
-              <button type="button" onClick={() => setSide('trailer_sales')}
-                className={`side-picker__opt ${side === 'trailer_sales' ? 'is-active' : ''}`}>
+              <button type="button" onClick={() => setType('trailer_sales')}
+                className={`side-picker__opt ${type === 'trailer_sales' ? 'is-active' : ''}`}>
                 <Container size={14} /> <strong>Trailer Sales</strong>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pursuing a deal on trailer / vehicle sales</span>
+                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pursuing a deal on trailer or vehicle sales</span>
               </button>
-              <button type="button" onClick={() => setSide('maintenance')}
-                className={`side-picker__opt ${side === 'maintenance' ? 'is-active' : ''}`}>
+              <button type="button" onClick={() => setType('maintenance')}
+                className={`side-picker__opt ${type === 'maintenance' ? 'is-active' : ''}`}>
                 <Wrench size={14} /> <strong>Maintenance</strong>
                 <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Trukplan, MOT, servicing, repairs</span>
               </button>
+              <button type="button" onClick={() => setType('rental')}
+                className={`side-picker__opt ${type === 'rental' ? 'is-active' : ''}`}>
+                <Truck size={14} /> <strong>Rental &amp; Leasing</strong>
+                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Hire, contract hire, leasing</span>
+              </button>
             </div>
           </div>
-          {side === 'maintenance' && (
+
+          {type === 'maintenance' && (
             <Field label="What kind of maintenance work?">
               <select className="input" value={what} onChange={(e) => setWhat(e.target.value)}>
                 <option>Maintenance</option>
@@ -733,64 +942,80 @@ function NewLeadModal({ currentListId, onCreateNew, onImport, onClose }: {
               </select>
             </Field>
           )}
-          <p style={{ margin: 0, color: 'var(--fg-2)', fontSize: 13 }}>
-            We&apos;ll check the CRM first so you don&apos;t duplicate an existing record.
-          </p>
-          <Field label="Company name">
-            <input className="input" value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Zenith Vehicles" autoFocus />
-          </Field>
-          <Field label="Website URL (optional, helps dedup)">
-            <input className="input" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="customer.com or https://customer.com/" />
-          </Field>
-          <div className="row" style={{ gap: 8 }}>
-            <button onClick={search} disabled={searching || (!company.trim() && !website.trim())} className="btn">
-              {searching ? <Loader size={12} className="spin" /> : <Search size={12} />} Check CRM
-            </button>
-            <div className="toolbar__spacer" />
-            <button onClick={() => onCreateNew(company, website, side, side === 'maintenance' ? what : null)} disabled={!company.trim()} className="btn btn--primary">
-              <Plus size={12} /> Create new
-            </button>
-          </div>
 
-          {searched && (
-            matches.length === 0 ? (
-              <div className="card" style={{ padding: 10, borderColor: 'var(--stc-success, #2da44e)' }}>
-                <div style={{ fontSize: 12.5, color: 'var(--fg-1)' }}>
-                  <strong style={{ color: 'var(--stc-success, #2da44e)' }}>✓ No existing record found</strong>
-                  <div style={{ fontSize: 11.5, color: 'var(--fg-2)', marginTop: 4 }}>Safe to create new. Click &ldquo;Create new&rdquo; above.</div>
+          <Field label="Which customer?">
+            <input className="input" value={company} onChange={(e) => setCompany(e.target.value)}
+              placeholder="Start typing a company in the CRM" autoFocus />
+          </Field>
+
+          {company.trim().length >= 2 && (
+            <div className="card" style={{ padding: 10 }}>
+              {searching ? (
+                <div className="row" style={{ gap: 6, fontSize: 12.5, color: 'var(--fg-2)' }}>
+                  <Loader size={12} className="spin" /> Looking in the CRM
                 </div>
-              </div>
-            ) : (
-              <div className="card" style={{ padding: 10 }}>
-                <div className="field__label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--stc-warning, #d4a017)', marginBottom: 8 }}>
-                  <AlertTriangle size={12} /> {matches.length} EXISTING RECORD{matches.length === 1 ? '' : 'S'} IN CRM
-                </div>
-                <div className="col" style={{ gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                  {matches.map(m => (
-                    <div key={m.id} className="row" style={{ gap: 8, padding: 8, background: 'var(--bg-3)', borderRadius: 6 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{m.company_name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                          {[m.contact_name, m.email].filter(Boolean).join(' · ')}
-                          {m.list_name && <span className="mono" style={{ marginLeft: 6 }}>in &ldquo;{m.list_name}&rdquo;</span>}
-                          {' · '}<span className={`pill pill--${m.status}`} style={{ fontSize: 10 }}>{m.status}</span>
+              ) : matches.length > 0 ? (
+                <>
+                  <div className="field__label" style={{ marginBottom: 8 }}>
+                    {matches.length} account{matches.length === 1 ? '' : 's'} in the CRM
+                  </div>
+                  <div className="col" style={{ gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                    {matches.map(m => (
+                      <div key={m.id} className="row" style={{ gap: 8, padding: 8, background: 'var(--bg-3)', borderRadius: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{m.company_name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                            {[m.contact_name, m.email, m.location].filter(Boolean).join(' · ') || 'No contact details yet'}
+                          </div>
                         </div>
+                        <button onClick={() => onCreate(m.id, m.company_name, '', type, type === 'maintenance' ? what : null, owner)}
+                          className="btn btn--sm btn--primary">
+                          <LinkIcon size={11} /> Start lead
+                        </button>
                       </div>
-                      <button onClick={() => onImport(m, side, side === 'maintenance' ? what : null)} className="btn btn--sm btn--primary"><LinkIcon size={11} /> Import</button>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                </>
+              ) : searched ? (
+                <div style={{ fontSize: 12.5 }}>
+                  <strong>Not in the CRM.</strong>
+                  <div style={{ fontSize: 11.5, color: 'var(--fg-2)', margin: '4px 0 10px' }}>
+                    Creating the lead adds <strong>{company.trim()}</strong> to the CRM as a new account first,
+                    so everybody can see them and the next quote attaches to the same record.
+                  </div>
+                  <Field label="Website (optional)">
+                    <input className="input" value={website} onChange={(e) => setWebsite(e.target.value)}
+                      placeholder="customer.com" />
+                  </Field>
+                  <button onClick={() => onCreate(null, company, website, type, type === 'maintenance' ? what : null, owner)}
+                    className="btn btn--primary" style={{ marginTop: 8 }}>
+                    <Plus size={12} /> Add to the CRM and start the lead
+                  </button>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 10 }}>
-                  Import copies an existing CRM contact into your tracker. Click &ldquo;Create new&rdquo; to add a separate row anyway.
-                </div>
-              </div>
-            )
+              ) : null}
+            </div>
+          )}
+
+          <Field label="Whose tracker does it go on?">
+            <select className="input" value={owner} onChange={(e) => setOwner(e.target.value)}>
+              {people.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.full_name || p.email}{p.id === profile.id ? ' (you)' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {delegated && (
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)' }}>
+              This goes straight onto their tracker rather than yours.
+            </p>
           )}
         </div>
       </div>
     </div>
   );
 }
+
 
 
 // ===== Stock trailer picker (typeahead by STC No / chassis / make/model) =====
@@ -918,7 +1143,7 @@ function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
 
 // ===== Right-click context menu for tracker rows =====
 function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveStatus, onDuplicate, onDelete }: {
-  x: number; y: number; row: CRMContact;
+  x: number; y: number; row: TrackerRow;
   onView: () => void; onEditCell: () => void;
   onMarkSold: () => void;
   onMoveStatus: (s: ContactStatus) => void;
@@ -947,7 +1172,7 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
       </div>
       <button onClick={onView}><Eye size={12} /> Open full view</button>
       <button onClick={onEditCell}><Edit2 size={12} /> Edit this cell</button>
-      {row.side === 'trailer_sales' && row.status !== 'customer' && (
+      {row.type === 'trailer_sales' && row.status !== 'customer' && (
         <button onClick={onMarkSold}><PoundSterling size={12} /> Mark as Sold…</button>
       )}
       <hr />
@@ -966,14 +1191,14 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
 
 
 // ===== My Commission tab: KPIs, monthly bars, per-sale table =====
-function CommissionView({ rows }: { rows: CRMContact[] }) {
+function CommissionView({ rows }: { rows: TrackerRow[] }) {
   // Only consider rows that actually have commission (closed deals)
   const sales = useMemo(() => rows.filter(r => Number(r.commission) > 0)
     .sort((a, b) => (b.dispatch_date || b.order_date || '').localeCompare(a.dispatch_date || a.order_date || '')), [rows]);
 
   const now = new Date();
   const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-  const dKey = (r: CRMContact) => (r.dispatch_date || r.order_date || '').slice(0,7);
+  const dKey = (r: TrackerRow) => (r.dispatch_date || r.order_date || '').slice(0,7);
   const thisMonthKey = ym(now);
   const thisQuarter = Math.floor(now.getMonth() / 3);
   const thisYear = now.getFullYear();

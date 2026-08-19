@@ -18,6 +18,7 @@
    functions are SECURITY INVOKER and ask for the capability themselves,
    so this widens nothing.
    ============================================================= */
+import type { LeadType } from '@/lib/types';
 
 /** The narrowest slice of the client this needs. */
 type Rpc = {
@@ -59,28 +60,33 @@ export async function sendFromStock(
 
 /** What a proposal can be about. The four the business runs. */
 /**
- * A CRM customer, copied onto YOUR tracker.
+ * A lead against a CRM customer, on somebody's tracker.
  *
- * The screen sent its own `list.id`. That is right on a screen showing
- * your own tracker and wrong as an operation: a list id is a value
- * anybody can type, and row level security lets a person write to any
- * list shared with them, so the payload decided whose tracker gained a
- * deal. Migration 033 decides it from who is asking.
+ * It used to copy the company row onto your tracker list, and that copy
+ * was the duplicate: using the CRM properly grew another Dawson every
+ * time. Migration 041 raises a lead pointing at the account instead,
+ * which is what "put Dawson on my tracker" always meant.
+ *
+ * `owner` is who ends up holding it, and defaults to you. The operation
+ * refused an owner before because whose tracker gained a deal was
+ * decided by a list id the browser sent, so trusting one meant trusting
+ * the payload. A lead names its owner as a column, so handing one over
+ * at the moment of writing it down is a value rather than a loophole.
  */
 export async function trackerFromCrm(
   client: Rpc,
-  input: { contacts: string[]; side?: 'trailer_sales' | 'maintenance'; what?: string | null },
-): Promise<TrackerOutcome<{ listId: string; made: number; rowId: string | null }>> {
+  input: { contacts: string[]; side?: LeadType; what?: string | null; owner?: string | null },
+): Promise<TrackerOutcome<{ made: number; rowId: string | null; ownerId: string | null }>> {
   const { data, error } = await client.rpc('command_tracker_from_crm', {
     p_contacts: input.contacts,
     p_side: input.side ?? 'trailer_sales',
     p_what: input.what ?? null,
-    p_owner: null,
+    p_owner: input.owner ?? null,
   });
   if (error) return { ok: false, why: String((error as { message?: string })?.message ?? error) };
 
-  const body = (data ?? {}) as { listId?: string; made?: number; rowId?: string };
-  return { ok: true, listId: body.listId ?? '', made: body.made ?? 0, rowId: body.rowId ?? null };
+  const body = (data ?? {}) as { made?: number; rowId?: string; ownerId?: string };
+  return { ok: true, made: body.made ?? 0, rowId: body.rowId ?? null, ownerId: body.ownerId ?? null };
 }
 
 export const PROPOSAL_KINDS = ['trailer_sales', 'maintenance', 'rental', 'refurb'] as const;
