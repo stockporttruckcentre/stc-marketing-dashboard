@@ -513,14 +513,20 @@ const BETA_Q = `how many ${BETA} deals`;
    client returns is what their sentences mean. */
 const A_MAKE = 'Kroneseven';
 const B_MAKE = 'Schmitzeight';
+/* `crm_leads` is here as well as `crm_contacts` because a pitch is its
+   own table now and carries its customer's name, so a private company
+   reaches the vocabulary by both routes exactly as it would from a real
+   client. "How many Alphacorp deals" is a question about leads. */
 const clientA = clientSeeing({
   stock_trailers: [{ make: A_MAKE, model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
   crm_contacts: [{ company_name: ALPHA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+  crm_leads: [{ company_name: ALPHA, what: 'Curtainsider', status: 'quoted', type: 'trailer_sales' }],
   calendar_events: [{ title: 'A only' }],
 });
 const clientB = clientSeeing({
   stock_trailers: [{ make: B_MAKE, model: 'Cool Liner', location: 'Carrington', customer: 'Shared Haulage', sales_rep: 'Dave' }],
   crm_contacts: [{ company_name: BETA, assigned_to: 'Dave', location: 'Carrington', source: 'web' }],
+  crm_leads: [{ company_name: BETA, what: 'PMI', status: 'lead', type: 'maintenance' }],
   calendar_events: [{ title: 'B only' }],
 });
 
@@ -640,9 +646,11 @@ ok('nothing A can see appears anywhere in what B is told',
 const SHARED = 'Meridian';
 const sharedA = clientSeeing({
   crm_contacts: [{ company_name: `${SHARED} North`, assigned_to: 'Dave' }],
+  crm_leads: [{ company_name: `${SHARED} North`, status: 'quoted', type: 'trailer_sales' }],
 });
 const sharedB = clientSeeing({
   crm_contacts: [{ company_name: `${SHARED} South`, assigned_to: 'Dave' }],
+  crm_leads: [{ company_name: `${SHARED} South`, status: 'quoted', type: 'trailer_sales' }],
 });
 resetVocabularyCaches();
 const sharedQ = `how many ${SHARED} deals`;

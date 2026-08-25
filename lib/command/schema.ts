@@ -202,8 +202,8 @@ export const ENTITIES: EntitySpec[] = [
     label: 'leads', labelOne: 'lead',
     nouns: ['deal', 'deals', 'proposal', 'proposals', 'quote', 'quotes', 'opportunity',
             'opportunities', 'lead', 'leads', 'enquiry', 'enquiries', 'pipeline'],
-    titleColumn: 'what',
-    subtitleColumns: ['requirement', 'status', 'action'],
+    titleColumn: 'company_name',
+    subtitleColumns: ['what', 'status', 'requirement'],
     dateColumn: 'date_of_enquiry',
     /* The same rule on the tracker side, where the commission lives. */
     saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
@@ -233,11 +233,17 @@ export const ENTITIES: EntitySpec[] = [
                       sales: 'trailer_sales', 'trailer sales': 'trailer_sales',
                       rental: 'rental', leasing: 'rental', hire: 'rental',
                       'contract hire': 'rental' } },
+      /* Naming the company is how people ask about a pitch: "how many
+         Dawson deals", "Dawson's open leads". The name is carried on
+         the lead by a trigger so this is a filter rather than a join. */
+      { key: 'customer', column: 'company_name', kind: 'text', label: 'customer', freeText: true },
       { key: 'what', column: 'what', kind: 'text', label: 'what for', freeText: true },
       { key: 'requirement', column: 'requirement', kind: 'text', label: 'requirement', freeText: true },
     ],
     dimensions: [
       { key: 'status', column: 'status', label: 'status', words: ['status', 'stage', 'state'] },
+      { key: 'customer', column: 'company_name', label: 'customer',
+        words: ['customer', 'company', 'client', 'account'] },
       { key: 'type', column: 'type', label: 'kind of work',
         words: ['side', 'division', 'kind', 'type', 'work'] },
       { key: 'what', column: 'what', label: 'what for', words: ['what'] },

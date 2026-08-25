@@ -146,6 +146,22 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   rep_initials     TEXT,
 
   notes      TEXT,
+
+  /* The customer's name, kept here as well as on the account.
+  
+     A copy, deliberately. Every question anybody asks about a pitch
+     names the company in the same breath, "how many Dawson deals",
+     "Dawson's open leads", and a lead's company is one join away.
+     Answering it by joining means the query layer has to learn to
+     join for one filter; answering it by carrying the name means a
+     trigger keeps two strings in step, both ways, and every export,
+     search and count keeps working unchanged.
+  
+     Kept honest by `crm_lead_carries_its_company`, so a company
+     renamed in the CRM is renamed on its leads in the same statement.
+     Nothing writes it by hand, which is why it is not writable. */
+  company_name TEXT,
+
   created_by UUID REFERENCES auth.users ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
@@ -482,6 +498,51 @@ DROP TRIGGER IF EXISTS crm_contacts_list_membership ON crm_contacts;
 CREATE TRIGGER crm_contacts_list_membership
   AFTER INSERT OR UPDATE OF list_id ON crm_contacts
   FOR EACH ROW EXECUTE FUNCTION crm_list_id_follows_membership();
+
+-- -------------------------------------------------------------
+-- 7. The company's name, on the lead, kept true
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION crm_lead_carries_its_company()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  SELECT company_name INTO NEW.company_name
+    FROM crm_contacts WHERE id = NEW.contact_id;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS crm_leads_carry_company ON crm_leads;
+CREATE TRIGGER crm_leads_carry_company
+  BEFORE INSERT OR UPDATE OF contact_id ON crm_leads
+  FOR EACH ROW EXECUTE FUNCTION crm_lead_carries_its_company();
+
+CREATE OR REPLACE FUNCTION crm_rename_reaches_its_leads()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  UPDATE crm_leads SET company_name = NEW.company_name
+   WHERE contact_id = NEW.id AND company_name IS DISTINCT FROM NEW.company_name;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS crm_contacts_rename_leads ON crm_contacts;
+CREATE TRIGGER crm_contacts_rename_leads
+  AFTER UPDATE OF company_name ON crm_contacts
+  FOR EACH ROW EXECUTE FUNCTION crm_rename_reaches_its_leads();
+
+UPDATE crm_leads l SET company_name = c.company_name
+  FROM crm_contacts c
+ WHERE c.id = l.contact_id AND l.company_name IS DISTINCT FROM c.company_name;
+
+CREATE INDEX IF NOT EXISTS idx_leads_company ON crm_leads (LOWER(company_name));
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON crm_leads         TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON crm_list_contacts TO authenticated;

@@ -240,7 +240,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
        Modelled here for the same reason the sale is: a fake that cannot
        perform an operation cannot show that the operation reached it. */
     if (name === 'command_duplicate_stock' || name === 'command_duplicate_deal') {
-      const table = name === 'command_duplicate_stock' ? 'stock_trailers' : 'crm_contacts';
+      const table = name === 'command_duplicate_stock' ? 'stock_trailers' : 'crm_leads';
       const ids = (args.p_ids ?? []) as string[];
       if (!ids.length) return { data: null, error: { message: 'nothing said which row to duplicate' } };
 
@@ -310,7 +310,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
     }
 
     if (name === 'command_link_stock') {
-      const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === String(args.p_deal));
+      const deal = (tables.crm_leads ?? []).find((r) => String(r.id) === String(args.p_deal));
       if (!deal) return { data: null, error: { message: 'that deal is not there' } };
       const unit = (tables.stock_trailers ?? []).find((r) => String(r.id) === String(args.p_unit));
       if (!unit) return { data: null, error: { message: 'that stock unit is not there' } };
@@ -321,7 +321,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
         };
       }
       deal.stock_trailer_id = args.p_unit;
-      writes.push({ table: 'crm_contacts', set: { stock_trailer_id: args.p_unit }, ids: [String(deal.id)] });
+      writes.push({ table: 'crm_leads', set: { stock_trailer_id: args.p_unit }, ids: [String(deal.id)] });
       return { data: { id: deal.id, unit: unit.id, stcNo: unit.stc_no }, error: null };
     }
 
@@ -360,7 +360,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
        would pass a check that the real thing fails, which is the one
        thing a fake must never do. */
     const saleOf = (id: string, rep: string, price: number | null, dispatch: string | null, today: string) => {
-      const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+      const deal = (tables.crm_leads ?? []).find((r) => String(r.id) === id);
       if (!deal) return { ok: false as const, id, why: 'that deal is not there' };
 
       const salePrice = price ?? (deal.sale_price as number | null) ?? null;
@@ -378,7 +378,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
       }
 
       const cascades = unitId
-        ? (tables.crm_contacts ?? [])
+        ? (tables.crm_leads ?? [])
           .filter((r) => String(r.id) !== id
             && String(r.stock_trailer_id ?? '') === unitId
             && r.status !== 'customer')
@@ -434,9 +434,9 @@ export function fakeDb(tables: Record<string, Row[]>) {
         const sale = saleOf(id, rep, price, dispatch, when);
         if (!sale.ok) { refused.push({ id: sale.id, why: sale.why }); continue; }
 
-        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id);
+        const deal = (tables.crm_leads ?? []).find((r) => String(r.id) === id);
         rows.push({
-          table: 'crm_contacts', id, label: sale.label,
+          table: 'crm_leads', id, label: sale.label,
           was: only(deal, Object.keys(sale.deal)), set: sale.deal,
         });
         if (sale.unit) {
@@ -447,9 +447,9 @@ export function fakeDb(tables: Record<string, Row[]>) {
           });
         }
         for (const other of sale.cascades) {
-          const row = (tables.crm_contacts ?? []).find((r) => String(r.id) === other);
+          const row = (tables.crm_leads ?? []).find((r) => String(r.id) === other);
           rows.push({
-            table: 'crm_contacts', id: other,
+            table: 'crm_leads', id: other,
             label: String(row?.company_name ?? other),
             was: { status: row?.status ?? null }, set: { status: 'customer' },
           });
@@ -470,10 +470,17 @@ export function fakeDb(tables: Record<string, Row[]>) {
         const sale = saleOf(id, rep, price, dispatch, when);
         if (!sale.ok) return { data: null, error: { message: sale.why } };
 
-        const deal = (tables.crm_contacts ?? []).find((r) => String(r.id) === id)!;
+        const deal = (tables.crm_leads ?? []).find((r) => String(r.id) === id)!;
         /* Exactly what the projection said, and nothing else. */
-        writes.push({ table: 'crm_contacts', set: sale.deal, ids: [id] });
+        writes.push({ table: 'crm_leads', set: sale.deal, ids: [id] });
         Object.assign(deal, sale.deal);
+
+        /* Winning the work makes them a customer of the business, which
+           is what migration 043 does with a trigger. The fake has to do
+           it too or a check would pass here and fail against Postgres. */
+        const account = (tables.crm_contacts ?? [])
+          .find((r) => String(r.id) === String(deal.contact_id ?? ''));
+        if (account) { account.status = 'customer'; account.relationship = 'existing'; }
 
         let cascaded = 0;
         if (sale.unit) {
@@ -481,10 +488,13 @@ export function fakeDb(tables: Record<string, Row[]>) {
           writes.push({ table: 'stock_trailers', set: sale.unit.set, ids: [sale.unit.id] });
           Object.assign(unit, sale.unit.set);
 
+          /* Everybody else chasing that unit is chasing something that
+             has gone, so their pitch is LOST rather than won. It used
+             to read as though they had sold it too. */
           for (const other of sale.cascades) {
-            const row = (tables.crm_contacts ?? []).find((r) => String(r.id) === other);
+            const row = (tables.crm_leads ?? []).find((r) => String(r.id) === other);
             if (!row) continue;
-            row.status = 'customer';
+            row.status = 'lost';
             cascaded += 1;
           }
         }

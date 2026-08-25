@@ -162,6 +162,7 @@ export const TABLES: TableSpec[] = [
       { name: 'commission_rate', kind: 'number' },
       { name: 'rep_initials', kind: 'text' },
       { name: 'notes', kind: 'longtext' },
+      { name: 'company_name', kind: 'text', writable: false, why: 'the customer\'s name, kept in step with the account by a trigger' },
       { name: 'created_by', kind: 'system', writable: false, why: 'who raised it' },
     ],
   },

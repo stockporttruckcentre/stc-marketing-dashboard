@@ -600,7 +600,7 @@ SELECT reset_fixtures();
 DO $$
 DECLARE n INTEGER;
 BEGIN
-  SELECT command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST made here","status":"lead"}}]'::JSONB)
+  SELECT command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST made here","location":"Hyde"}}]'::JSONB)
     INTO n;
   PERFORM assert('an insert creates one row', n = 1, n::TEXT);
 EXCEPTION WHEN OTHERS THEN
@@ -632,7 +632,7 @@ SELECT assert('and nothing was created by the attempt',
 -- A constraint the database holds is still held.
 DO $$
 BEGIN
-  PERFORM command_apply('[{"op":"insert","table":"crm_contacts","set":{"company_name":"TEST bad status","status":"nonsense"}}]'::JSONB);
+  PERFORM command_apply('[{"op":"insert","table":"crm_leads","set":{"company_name":"TEST bad status","status":"nonsense"}}]'::JSONB);
   PERFORM assert('an insert outside a CHECK is refused', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
   PERFORM assert('an insert outside a CHECK is refused', TRUE);
@@ -2058,9 +2058,9 @@ DECLARE out JSONB;
 BEGIN
   SELECT command_import_contacts(jsonb_build_array(
     jsonb_build_object('company_name', 'TEST Dawson', 'email', 'sam@dawson.co.uk',
-                       'source', 'Spreadsheet import', 'status', 'lead'),
+                       'source', 'Spreadsheet import'),
     jsonb_build_object('company_name', 'TEST Ward', 'email', 'lisa@ward.co.uk',
-                       'source', 'Spreadsheet import', 'status', 'lead')
+                       'source', 'Spreadsheet import')
   ), 'TEST import list') INTO out;
   PERFORM assert('a file is imported', (out ->> 'inserted')::INT = 2, out::TEXT);
 EXCEPTION WHEN OTHERS THEN
@@ -2882,7 +2882,7 @@ BEGIN
         -- `list_id` is not a column the bar may write. The list is what
         -- `list.add` is for, which the mixed programme below uses.
         'set', jsonb_build_object(
-          'company_name', 'TEST Chain Co', 'status', 'lead', 'source', 'Chain')))),
+          'company_name', 'TEST Chain Co', 'source', 'Chain')))),
     jsonb_build_object(
       'op', 'changes',
       'changes', jsonb_build_array(jsonb_build_object(
@@ -2890,7 +2890,7 @@ BEGIN
         -- The row the step before made. Its id did not exist when this
         -- payload was built.
         'id', jsonb_build_object('$from', jsonb_build_object('step', 0, 'key', 'id')),
-        'set', jsonb_build_object('next_action', 'ring them Friday'))))
+        'set', jsonb_build_object('location', 'Hyde'))))
   )) INTO out;
   PERFORM assert('a create and a change to it are one transaction',
     (out ->> 'changed')::INT = 2, out::TEXT);
@@ -2900,9 +2900,8 @@ END
 $$;
 
 SELECT assert('and the change landed on the row that was just made',
-  (SELECT next_action FROM crm_contacts WHERE company_name = 'TEST Chain Co')
-    = 'ring them Friday',
-  COALESCE((SELECT next_action FROM crm_contacts WHERE company_name = 'TEST Chain Co'), 'nothing'));
+  (SELECT location FROM crm_contacts WHERE company_name = 'TEST Chain Co') = 'Hyde',
+  COALESCE((SELECT location FROM crm_contacts WHERE company_name = 'TEST Chain Co'), 'nothing'));
 
 -- A FIELD WRITE AND AN OPERATION, TOGETHER.
 --
@@ -2923,7 +2922,7 @@ BEGIN
       'changes', jsonb_build_array(jsonb_build_object(
         'op', 'update', 'table', 'crm_contacts',
         'id', 'c4444444-0000-0000-0000-000000000009',
-        'set', jsonb_build_object('status', 'quoted')))),
+        'set', jsonb_build_object('location', 'Carrington')))),
     jsonb_build_object(
       'op', 'invoke', 'capability', 'list.add',
       'subjects', jsonb_build_array('c4444444-0000-0000-0000-000000000009'),
@@ -2937,8 +2936,8 @@ END
 $$;
 
 SELECT assert('the field changed',
-  (SELECT status FROM crm_contacts WHERE company_name = 'TEST Chain Mixed') = 'quoted',
-  (SELECT status FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
+  (SELECT location FROM crm_contacts WHERE company_name = 'TEST Chain Mixed') = 'Carrington',
+  (SELECT location FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
 
 SELECT assert('and the operation ran',
   (SELECT list_id FROM crm_contacts WHERE company_name = 'TEST Chain Mixed')
@@ -2956,7 +2955,7 @@ BEGIN
       'changes', jsonb_build_array(jsonb_build_object(
         'op', 'insert', 'table', 'crm_contacts',
         'set', jsonb_build_object(
-          'company_name', 'TEST Chain Rollback', 'status', 'lead', 'source', 'Chain')))),
+          'company_name', 'TEST Chain Rollback', 'source', 'Chain')))),
     jsonb_build_object(
       'op', 'invoke', 'capability', 'list.add',
       'subjects', jsonb_build_array(
@@ -3172,10 +3171,14 @@ BEGIN
 END
 $$;
 
--- LINKING A UNIT TO A DEAL.
+-- LINKING A UNIT TO A DEAL. A deal is a lead, so the unit goes on the
+-- pitch and the customer keeps no column about it.
 DELETE FROM crm_contacts WHERE company_name = 'TEST link deal';
-INSERT INTO crm_contacts (id, company_name, list_id, status, source)
-VALUES ('e1111111-0000-0000-0000-000000000002', 'TEST link deal', test_global_list(), 'quoted', 'manual');
+INSERT INTO crm_contacts (id, company_name, list_id, source)
+VALUES ('e0000000-0000-0000-0000-00000000000e', 'TEST link deal', test_global_list(), 'manual');
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status)
+VALUES ('e1111111-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-00000000000e',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'quoted');
 
 DO $$
 DECLARE out JSONB;
@@ -3183,7 +3186,7 @@ BEGIN
   SELECT command_link_stock('e1111111-0000-0000-0000-000000000002',
                             '22222222-2222-2222-2222-222222222222') INTO out;
   PERFORM assert('a unit can be put against a deal',
-    (SELECT stock_trailer_id FROM crm_contacts WHERE id = 'e1111111-0000-0000-0000-000000000002')
+    (SELECT stock_trailer_id FROM crm_leads WHERE id = 'e1111111-0000-0000-0000-000000000002')
       = '22222222-2222-2222-2222-222222222222',
     out::TEXT);
   PERFORM assert('and it says which unit', out ->> 'stcNo' = 'TESTSTC2', out::TEXT);
@@ -3323,8 +3326,11 @@ SELECT set_config('request.jwt.claim.sub', '', FALSE);
 -- 16. The allowlist matches the registry
 -- =============================================================
 \echo '--- allowlist size ---'
+/* The number follows the dictionary, which is the point of generating
+   the seed from it. It fell when a pitch stopped being something a
+   company has: those columns are still writable, on the lead. */
 SELECT assert('the seed loaded',
-  (SELECT COUNT(*) FROM command_writable_columns) = 103,
+  (SELECT COUNT(*) FROM command_writable_columns) = 86,
   (SELECT COUNT(*)::TEXT FROM command_writable_columns));
 
 SELECT reset_fixtures();

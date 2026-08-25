@@ -495,9 +495,14 @@ const YARD_WITH_DEALS = () => fakeDb({
     { id: 'u4', stc_no: 'STC166666', status: 'in_stock', category: 'Curtainsider', location: 'Hyde', sales_price: null, customer: null, sales_rep: null },
   ],
   crm_contacts: [
-    { id: 'd1', company_name: 'Dawson Group', stock_trailer_id: 'u1', sale_price: 24995, profit: 3000, commission_rate: 0.1, status: 'quoted' },
-    { id: 'd2', company_name: 'Wincanton', stock_trailer_id: 'u2', sale_price: 31000, profit: 4000, commission_rate: 0.1, status: 'quoted' },
-    { id: 'd3', company_name: 'Culina', stock_trailer_id: 'u3', sale_price: null, profit: null, commission_rate: 0.1, status: 'quoted' },
+    { id: 'c_d1', company_name: 'Dawson Group' },
+    { id: 'c_d2', company_name: 'Wincanton' },
+    { id: 'c_d3', company_name: 'Culina' },
+  ],
+  crm_leads: [
+    { id: 'd1', contact_id: 'c_d1', company_name: 'Dawson Group', stock_trailer_id: 'u1', sale_price: 24995, profit: 3000, commission_rate: 0.1, status: 'quoted' },
+    { id: 'd2', contact_id: 'c_d2', company_name: 'Wincanton', stock_trailer_id: 'u2', sale_price: 31000, profit: 4000, commission_rate: 0.1, status: 'quoted' },
+    { id: 'd3', contact_id: 'c_d3', company_name: 'Culina', stock_trailer_id: 'u3', sale_price: null, profit: null, commission_rate: 0.1, status: 'quoted' },
   ],
 });
 
@@ -541,15 +546,15 @@ test('mark all the in stock curtainsiders as sold', async () => {
 
   /* All three parts of the operation, which is why it is an operation. */
   ok('the deals are won',
-    db.tables.crm_contacts.filter((r) => r.status === 'customer').length === 2,
-    JSON.stringify(db.tables.crm_contacts.map((r) => [r.company_name, r.status])));
+    db.tables.crm_leads.filter((r) => r.status === 'customer').length === 2,
+    JSON.stringify(db.tables.crm_leads.map((r) => [r.company_name, r.status])));
   ok('the units are sold',
     ['u1', 'u2'].every((id) => db.tables.stock_trailers.find((r) => r.id === id)?.status === 'sold'));
   ok('with the buyer on them',
     db.tables.stock_trailers.find((r) => r.id === 'u1')?.customer === 'Dawson Group');
   ok('and a commission line was raised',
-    db.tables.crm_contacts.find((r) => r.id === 'd1')?.commission === 300,
-    String(db.tables.crm_contacts.find((r) => r.id === 'd1')?.commission));
+    db.tables.crm_leads.find((r) => r.id === 'd1')?.commission === 300,
+    String(db.tables.crm_leads.find((r) => r.id === 'd1')?.commission));
   ok('the fridge was not sold',
     db.tables.stock_trailers.find((r) => r.id === 'u3')?.status === 'in_stock');
   ok('nor the curtainsider nobody is buying',
@@ -560,7 +565,7 @@ test('a sale with no price anywhere says which deals and stops', async () => {
   const db = YARD_WITH_DEALS();
   /* The Culina deal has no price on it. The sentence gives none either,
      and a sale recorded at nothing is worse than a sale not recorded. */
-  db.tables.crm_contacts.find((r) => r.id === 'd1')!.sale_price = null;
+  db.tables.crm_leads.find((r) => r.id === 'd1')!.sale_price = null;
 
   const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db);
   const preview = planned?.preview;
@@ -574,7 +579,7 @@ test('a sale with no price anywhere says which deals and stops', async () => {
 
 test('the same sale with a price in the sentence goes through', async () => {
   const db = YARD_WITH_DEALS();
-  db.tables.crm_contacts.find((r) => r.id === 'd1')!.sale_price = null;
+  db.tables.crm_leads.find((r) => r.id === 'd1')!.sale_price = null;
   const text = 'mark all the in stock curtainsiders as sold for £30,000';
 
   const planned = await plan(text, 'admin', db);
@@ -664,10 +669,13 @@ test('create a new lead for Smith Logistics', async () => {
   ok('with the name that was typed',
     db.tables.crm_contacts[0]?.company_name === 'Smith Logistics',
     String(db.tables.crm_contacts[0]?.company_name));
-  /* The noun said what kind of record it is, from the same vocabulary a
-     question about leads narrows on. */
-  ok('and the status the noun implied',
-    db.tables.crm_contacts[0]?.status === 'lead',
+  /* A company with no pitches against it yet IS at lead. The sentence
+     used to have to say so, because the noun was also a value of a
+     column somebody typed into. Migration 043 derives the account's
+     status from its leads, so a new account with none lands there by
+     itself and nothing has to set it. */
+  ok('and the status a company with no pitches has',
+    (db.tables.crm_contacts[0]?.status ?? 'lead') === 'lead',
     String(db.tables.crm_contacts[0]?.status));
 });
 
@@ -1024,18 +1032,21 @@ test('an operation over more records than a ceiling allows refuses', async () =>
   /* 501 deals against a ceiling of 500. Performing it on 500 of them
      would be atomic, would report success, and would be wrong. */
   const units: Record<string, unknown>[] = [];
+  const accounts: Record<string, unknown>[] = [];
   const deals: Record<string, unknown>[] = [];
   for (let i = 0; i < 501; i++) {
     units.push({
       id: `u${i}`, stc_no: `STC90${String(i).padStart(4, '0')}`,
       status: 'in_stock', category: 'Curtainsider', location: 'Hyde',
     });
+    accounts.push({ id: `c${i}`, company_name: `Buyer ${i}` });
     deals.push({
-      id: `d${i}`, company_name: `Buyer ${i}`, stock_trailer_id: `u${i}`,
+      id: `d${i}`, contact_id: `c${i}`, company_name: `Buyer ${i}`,
+      stock_trailer_id: `u${i}`, type: 'trailer_sales',
       sale_price: 1000, profit: 100, commission_rate: 0.1, status: 'quoted',
     });
   }
-  const db = fakeDb({ stock_trailers: units, crm_contacts: deals });
+  const db = fakeDb({ stock_trailers: units, crm_contacts: accounts, crm_leads: deals });
 
   const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db, false);
   ok('it plans', !!planned);
@@ -1056,18 +1067,21 @@ test('an operation over more records than a ceiling allows refuses', async () =>
 
 test('the same operation with no ceiling acts on every one of them', async () => {
   const units: Record<string, unknown>[] = [];
+  const accounts: Record<string, unknown>[] = [];
   const deals: Record<string, unknown>[] = [];
   for (let i = 0; i < 501; i++) {
     units.push({
       id: `u${i}`, stc_no: `STC90${String(i).padStart(4, '0')}`,
       status: 'in_stock', category: 'Curtainsider', location: 'Hyde',
     });
+    accounts.push({ id: `c${i}`, company_name: `Buyer ${i}` });
     deals.push({
-      id: `d${i}`, company_name: `Buyer ${i}`, stock_trailer_id: `u${i}`,
+      id: `d${i}`, contact_id: `c${i}`, company_name: `Buyer ${i}`,
+      stock_trailer_id: `u${i}`, type: 'trailer_sales',
       sale_price: 1000, profit: 100, commission_rate: 0.1, status: 'quoted',
     });
   }
-  const db = fakeDb({ stock_trailers: units, crm_contacts: deals });
+  const db = fakeDb({ stock_trailers: units, crm_contacts: accounts, crm_leads: deals });
 
   const planned = await plan('mark all the in stock curtainsiders as sold', 'admin', db);
   const preview = planned?.preview;
@@ -2349,7 +2363,11 @@ test('marking deals sold and exporting them exports them sold', async () => {
       { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
     ],
     crm_contacts: [
-      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+      { id: 'c_k1', company_name: 'Dawson Group' },
+    ],
+    crm_leads: [
+      { id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group',
+        stock_trailer_id: 'u1', type: 'trailer_sales', status: 'quoted',
         sale_price: 20000, profit: 4000, commission_rate: 0.1 },
     ],
   });
@@ -2385,11 +2403,17 @@ test('marking deals sold and exporting them exports them sold', async () => {
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
 
-  ok('the deal is sold', db.tables.crm_contacts[0]?.status === 'customer',
-    String(db.tables.crm_contacts[0]?.status));
+  ok('the deal is sold', db.tables.crm_leads[0]?.status === 'customer',
+    String(db.tables.crm_leads[0]?.status));
   ok('with the commission the preview showed',
-    db.tables.crm_contacts[0]?.commission === 400,
-    String(db.tables.crm_contacts[0]?.commission));
+    db.tables.crm_leads[0]?.commission === 400,
+    String(db.tables.crm_leads[0]?.commission));
+  /* And the company is a customer of the business, which is the thing
+     the CRM could not say while a won deal and the company were rows of
+     one table. Migration 043. */
+  ok('and the company is a customer now',
+    db.tables.crm_contacts[0]?.status === 'customer',
+    String(db.tables.crm_contacts[0]?.status));
   ok('and the stock unit went with it', db.tables.stock_trailers[0]?.status === 'sold',
     String(db.tables.stock_trailers[0]?.status));
 
@@ -2416,7 +2440,11 @@ test('a sale whose numbers move between looking and agreeing is not written', as
       { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
     ],
     crm_contacts: [
-      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+      { id: 'c_k1', company_name: 'Dawson Group' },
+    ],
+    crm_leads: [
+      { id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group',
+        stock_trailer_id: 'u1', type: 'trailer_sales', status: 'quoted',
         sale_price: 20000, profit: 4000, commission_rate: 0.1 },
     ],
   });
@@ -2432,7 +2460,7 @@ test('a sale whose numbers move between looking and agreeing is not written', as
      the same. What has moved is a number the OPERATION computes from,
      which is exactly the drift a check watching only the read values
      cannot see. */
-  db.tables.crm_contacts[0].commission_rate = 0.2;
+  db.tables.crm_leads[0].commission_rate = 0.2;
 
   const done = await applyMutation({
     text, ...actor('admin'), store: postgrestStore(db.supabase),
@@ -2441,8 +2469,8 @@ test('a sale whose numbers move between looking and agreeing is not written', as
   });
 
   ok('confirming is refused', !done.ok, 'it wrote a commission nobody was shown');
-  ok('and the deal is untouched', db.tables.crm_contacts[0]?.status === 'quoted',
-    String(db.tables.crm_contacts[0]?.status));
+  ok('and the deal is untouched', db.tables.crm_leads[0]?.status === 'quoted',
+    String(db.tables.crm_leads[0]?.status));
   ok('and the unit is still in stock', db.tables.stock_trailers[0]?.status === 'in_stock',
     String(db.tables.stock_trailers[0]?.status));
   if (!done.ok) {
@@ -2456,7 +2484,11 @@ test('marking deals sold on its own still sells them', async () => {
       { id: 'u1', stc_no: 'STC910001', status: 'in_stock', category: 'Curtainsider', location: 'Hyde' },
     ],
     crm_contacts: [
-      { id: 'k1', company_name: 'Dawson Group', stock_trailer_id: 'u1', status: 'quoted',
+      { id: 'c_k1', company_name: 'Dawson Group' },
+    ],
+    crm_leads: [
+      { id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group',
+        stock_trailer_id: 'u1', type: 'trailer_sales', status: 'quoted',
         sale_price: 20000, profit: 4000, commission_rate: 0.1 },
     ],
   });
@@ -4898,8 +4930,9 @@ test('duplicate this stock unit', async () => {
 
 test('duplicate this deal for a second unit', async () => {
   const db = fakeDb({
-    crm_contacts: [{
-      id: 'k1', company_name: 'Dawson Group', status: 'customer', side: 'trailer_sales',
+    crm_contacts: [{ id: 'c_k1', company_name: 'Dawson Group' }],
+    crm_leads: [{
+      id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group', status: 'customer', type: 'trailer_sales',
       requirement: 'two curtainsiders', notes: 'rings on Fridays',
       stock_trailer_id: 'u1', sale_price: 24000, profit: 4000, commission: 400,
       order_date: '2026-08-01',
@@ -4924,8 +4957,13 @@ test('duplicate this deal for a second unit', async () => {
   });
   ok('confirming makes the second deal', done.ok === true, JSON.stringify(done).slice(0, 200));
 
-  const copy = db.tables.crm_contacts.find((r) => r.id !== 'k1');
-  ok('for the same customer', copy?.company_name === 'Dawson Group', String(copy?.company_name));
+  const copy = db.tables.crm_leads.find((r) => r.id !== 'k1');
+  ok('for the same customer', copy?.contact_id === 'c_k1', String(copy?.contact_id));
+  /* One customer, two pitches. Duplicating a deal used to copy the whole
+     company row, which is the last place that would still have made a
+     second Dawson. */
+  ok('and there is still exactly one of that customer',
+    db.tables.crm_contacts.length === 1, String(db.tables.crm_contacts.length));
   ok('carrying what they want', copy?.requirement === 'two curtainsiders', String(copy?.requirement));
   /* THE SECOND UNIT IS A SECOND UNIT, NOT A SECOND SALE. */
   ok('against no unit yet', copy?.stock_trailer_id == null, String(copy?.stock_trailer_id));
@@ -4937,7 +4975,9 @@ test('duplicate this deal for a second unit', async () => {
 test('link STC143580 to this deal', async () => {
   const db = fakeDb({
     stock_trailers: trailers(),
-    crm_contacts: [{ id: 'k1', company_name: 'Dawson Group', status: 'quoted' }],
+    crm_contacts: [{ id: 'c_k1', company_name: 'Dawson Group' }],
+    crm_leads: [{ id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group',
+                  type: 'trailer_sales', status: 'quoted' }],
   });
   const text = 'link STC143580 to this deal';
   const context = { record: { entity: 'deals', id: 'k1', label: 'Dawson Group' } };
@@ -4961,8 +5001,8 @@ test('link STC143580 to this deal', async () => {
   });
   ok('confirming links it', done.ok === true, JSON.stringify(done).slice(0, 200));
   ok('to the unit the sentence named',
-    db.tables.crm_contacts[0].stock_trailer_id === 't1',
-    String(db.tables.crm_contacts[0].stock_trailer_id));
+    db.tables.crm_leads[0].stock_trailer_id === 't1',
+    String(db.tables.crm_leads[0].stock_trailer_id));
 });
 
 test('a stock number that fits two units is a question, not a guess', async () => {
@@ -4971,7 +5011,9 @@ test('a stock number that fits two units is a question, not a guess', async () =
       { id: 't1', stc_no: 'STC143580', status: 'in_stock' },
       { id: 't9', stc_no: 'STC143580', status: 'in_stock' },
     ],
-    crm_contacts: [{ id: 'k1', company_name: 'Dawson Group', status: 'quoted' }],
+    crm_contacts: [{ id: 'c_k1', company_name: 'Dawson Group' }],
+    crm_leads: [{ id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group',
+                  type: 'trailer_sales', status: 'quoted' }],
   });
   const text = 'link STC143580 to this deal';
   const context = { record: { entity: 'deals', id: 'k1', label: 'Dawson Group' } };
