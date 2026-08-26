@@ -598,6 +598,35 @@ test('the same sale with a price in the sentence goes through', async () => {
     String(db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price));
 });
 
+test('a stock number that is not here says so, and what is near it', async () => {
+  /* THE REFUSAL THIS IS HERE FOR.
+
+     "nothing here matches that" is true and useless. It is the same
+     sentence whether the yard is empty, the unit was sold last year, or
+     a digit was typed wrong, so somebody reading it cannot tell a
+     working tool from a broken one, and the commonest cause by far is
+     one character out in a stock number. */
+  const db = YARD_WITH_DEALS();
+  const planned = await plan('add £500 refurb cost to STC143585', 'admin', db);
+  const preview = planned?.preview;
+  ok('it refuses', !!preview && !preview.ok, 'it previewed');
+  if (!preview || preview.ok) return;
+
+  ok('naming what it looked for', /stock number STC143585/.test(preview.why), preview.why);
+  ok('and what is actually here',
+    /STC143580/.test(preview.why) && /closest/.test(preview.why), preview.why);
+  ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+});
+
+test('and when nothing is close it says that rather than listing the yard', async () => {
+  const db = YARD_WITH_DEALS();
+  const planned = await plan('add £500 refurb cost to STC900001', 'admin', db);
+  const preview = planned?.preview;
+  ok('it refuses', !!preview && !preview.ok, 'it previewed');
+  if (!preview || preview.ok) return;
+  ok('saying nothing is close', /nothing here is close/.test(preview.why), preview.why);
+});
+
 test('a stock number is not a price', async () => {
   const db = YARD_WITH_DEALS();
   /* Six digits after STC is a reference, not an amount. Reading it as

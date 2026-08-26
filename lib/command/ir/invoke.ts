@@ -34,10 +34,11 @@
    ============================================================= */
 import type { Invoke, Plan, Select } from './types';
 import { isResultRef } from './types';
-import { capability, entity as entityDef, RELATIONSHIPS } from './registry';
+import { capability, entity as entityDef, field as fieldDef, RELATIONSHIPS } from './registry';
 import type { Store } from './store';
 import { runSelect, selectBehind } from './read';
 import { resolveReference } from './resolve';
+import { whyNothingMatched } from './near';
 
 export type InvokeSubject = {
   /** The row the operation will run on. */
@@ -229,7 +230,23 @@ export async function resolveInvoke(
         + 'which is more than this is configured to act on in one go. Narrow it down.',
     };
   }
-  if (!read.rows.length) return { ok: false, reason: 'nothing matched', why: 'nothing here matches that' };
+  if (!read.rows.length) {
+    const def = entityDef(namedEntity);
+    return {
+      ok: false,
+      reason: 'nothing matched',
+      why: def
+        ? await whyNothingMatched({
+            store: opts.store,
+            table: def.table,
+            where: select.where,
+            titleField: def.titleField ?? null,
+            label: def.label ?? def.table,
+            fieldLabel: (column) => fieldDef(namedEntity, column)?.label ?? column.replace(/_/g, ' '),
+          })
+        : 'nothing here matches that',
+    };
+  }
 
   /* ONE MEANS ONE.
 
