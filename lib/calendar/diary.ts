@@ -46,6 +46,33 @@ export type DiaryInvite = {
 
 export type DiaryPerson = { id: string; full_name: string | null; email: string | null };
 
+/**
+ * Somebody on a meeting who does not work here.
+ *
+ * Migration 062. The same four standings as a colleague's invitation,
+ * because from the meeting's point of view "the transport manager has
+ * not answered" and "Dave has not answered" are the same fact, and a
+ * screen that drew them as two different kinds of thing would be making
+ * a distinction the organiser does not care about.
+ *
+ * No token here, and there never is one on the wire: the column is
+ * revoked from `authenticated` in the migration.
+ */
+export type DiaryGuest = {
+  id: string;
+  event_id: string;
+  email: string;
+  name: string;
+  status: InviteStatus;
+  proposed_start_at: string | null;
+  proposed_end_at: string | null;
+  rounds: number;
+  note: string | null;
+  responded_at: string | null;
+  seen_at: string | null;
+  invited_by: string | null;
+};
+
 /** One person on one event, however they got there. */
 export type DiaryAttendee = {
   key: string;
@@ -55,9 +82,15 @@ export type DiaryAttendee = {
   /** Null where they are a name on the row and were never actually asked. */
   status: InviteStatus | null;
   inviteId: string | null;
+  /** Set where this is a guest rather than a colleague. */
+  guestId: string | null;
   /** True where the meeting is waiting on this person to answer. */
   awaited: boolean;
   organiser: boolean;
+  /** Somebody who does not work here. Drawn with their email, not a name. */
+  external: boolean;
+  /** For a guest: whether they have opened the link yet. */
+  seenAt: string | null;
 };
 
 export const STATUS_LABEL: Record<InviteStatus, string> = {
@@ -85,6 +118,11 @@ export type DiaryEntry = {
 export type DiaryContext = {
   meId: string;
   invites: DiaryInvite[];
+  /* Everybody's guests, matched to events in the browser. The policy on
+     `calendar_guests` already limits them to meetings somebody can see,
+     which is what makes a guest visible to every colleague on the
+     meeting rather than only to whoever asked them. */
+  guests?: DiaryGuest[];
   people: Map<string, DiaryPerson>;
   companies: Map<string, string>;
 };
@@ -104,7 +142,7 @@ function nameOf(people: Map<string, DiaryPerson>, id: string | null): string | n
  */
 export function attendeesOf(
   event: CalendarEvent,
-  ctx: Pick<DiaryContext, 'invites' | 'people'>,
+  ctx: Pick<DiaryContext, 'invites' | 'people' | 'guests'>,
 ): DiaryAttendee[] {
   const out: DiaryAttendee[] = [];
   const seen = new Set<string>();
@@ -118,8 +156,11 @@ export function attendeesOf(
       userId: event.created_by,
       status: 'accepted',
       inviteId: null,
+      guestId: null,
       awaited: false,
       organiser: true,
+      external: false,
+      seenAt: null,
     });
   }
 
@@ -134,8 +175,35 @@ export function attendeesOf(
       userId: i.user_id,
       status: i.status,
       inviteId: i.id,
+      guestId: null,
       awaited: i.awaiting === i.user_id && (i.status === 'pending' || i.status === 'proposed'),
       organiser: false,
+      external: false,
+      seenAt: null,
+    });
+  }
+
+  /* The guests, before the JSONB list, so somebody typed in as a name
+     and later asked properly shows as asked rather than twice. Matched
+     on the email, because that is the only thing the two have in
+     common. */
+  const guests = (ctx.guests ?? []).filter((g) => g.event_id === event.id);
+  for (const g of guests) {
+    seen.add(g.email.toLowerCase());
+    out.push({
+      key: `guest-${g.id}`,
+      name: g.name || g.email,
+      email: g.email,
+      userId: null,
+      status: g.status,
+      inviteId: null,
+      guestId: g.id,
+      /* Never waited on by the person reading this: a guest answers
+         through their own link, and nobody here can answer for them. */
+      awaited: false,
+      organiser: false,
+      external: true,
+      seenAt: g.seen_at,
     });
   }
 
@@ -145,7 +213,9 @@ export function attendeesOf(
   const listed = (Array.isArray(event.attendees) ? event.attendees : []) as CalendarEventAttendee[];
   for (const [index, a] of listed.entries()) {
     if (a.user_id && seen.has(a.user_id)) continue;
+    if (a.email && seen.has(a.email.toLowerCase())) continue;
     if (a.user_id) seen.add(a.user_id);
+    if (a.email) seen.add(a.email.toLowerCase());
     out.push({
       key: a.user_id ?? `listed-${index}-${a.email ?? a.name}`,
       name: a.name || a.email || 'Somebody',
@@ -153,8 +223,13 @@ export function attendeesOf(
       userId: a.user_id ?? null,
       status: null,
       inviteId: null,
+      guestId: null,
       awaited: false,
       organiser: false,
+      /* No account and no invitation, so they are outside the business
+         as far as anything here can tell. */
+      external: !a.user_id,
+      seenAt: null,
     });
   }
 

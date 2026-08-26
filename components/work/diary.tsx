@@ -6,7 +6,7 @@ import { CalendarClock, ExternalLink, Search } from 'lucide-react';
 import type { CalendarEvent } from '@/lib/types';
 import {
   diaryCounts, filterDiary, groupByDay, toEntries,
-  type DiaryInvite, type DiaryPerson,
+  type DiaryGuest, type DiaryInvite, type DiaryPerson,
 } from '@/lib/calendar/diary';
 import { relativeDay } from '@/lib/calendar/grid';
 import { EVENT_KINDS, KIND_CHIP, KIND_PLURAL, type EventKind } from '@/lib/calendar/kind';
@@ -44,10 +44,11 @@ import { Select } from '@/components/kit/forms';
    ============================================================= */
 
 export function WorkDiary({
-  events, invites, people, companies, meId,
+  events, invites, guests = [], people, companies, meId,
 }: {
   events: CalendarEvent[];
   invites: DiaryInvite[];
+  guests?: DiaryGuest[];
   people: DiaryPerson[];
   companies: { id: string; company_name: string | null }[];
   meId: string;
@@ -65,8 +66,10 @@ export function WorkDiary({
   );
 
   const entries = useMemo(
-    () => toEntries(events, { meId, invites, people: peopleById, companies: companiesById }),
-    [events, invites, peopleById, companiesById, meId],
+    () => toEntries(events, {
+      meId, invites, guests, people: peopleById, companies: companiesById,
+    }),
+    [events, invites, guests, peopleById, companiesById, meId],
   );
 
   const shown = useMemo(() => filterDiary(entries, {

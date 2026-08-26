@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { CalendarEvent } from '@/lib/types';
 import {
   diaryCounts, filterDiary, toEntries,
-  type DiaryEntry, type DiaryInvite, type DiaryPerson,
+  type DiaryEntry, type DiaryGuest, type DiaryInvite, type DiaryPerson,
 } from '@/lib/calendar/diary';
 import { addDays, dayKey, startOfMonth } from '@/lib/calendar/grid';
 import type { EventKind } from '@/lib/calendar/kind';
@@ -49,11 +49,13 @@ import {
    ============================================================= */
 
 export function TeamCalendar({
-  initialEvents, initialInvites, people, companies, userId, myName, capabilities,
-  openEventId, openView,
+  initialEvents, initialInvites, initialGuests, people, companies, userId, myName,
+  capabilities, openEventId, openView,
 }: {
   initialEvents: CalendarEvent[];
   initialInvites: DiaryInvite[];
+  /** Everybody on a meeting who does not work here. Migration 062. */
+  initialGuests: DiaryGuest[];
   people: Person[];
   companies: Company[];
   userId: string;
@@ -71,6 +73,7 @@ export function TeamCalendar({
 
   const [events, setEvents] = useState(initialEvents);
   const [invites, setInvites] = useState(initialInvites);
+  const [guests, setGuests] = useState(initialGuests);
   const [view, setView] = useState<ViewKind>(openView);
   const [cursor, setCursor] = useState(new Date());
   const [search, setSearch] = useState('');
@@ -92,8 +95,10 @@ export function TeamCalendar({
      renderings of `shown`, so the strip and the grid cannot disagree
      about how many meetings there are on Thursday. */
   const entries = useMemo(
-    () => toEntries(events, { meId: userId, invites, people: peopleById, companies: companiesById }),
-    [events, invites, peopleById, companiesById, userId],
+    () => toEntries(events, {
+      meId: userId, invites, guests, people: peopleById, companies: companiesById,
+    }),
+    [events, invites, guests, peopleById, companiesById, userId],
   );
 
   const shown = useMemo(() => filterDiary(entries, {
@@ -129,15 +134,18 @@ export function TeamCalendar({
     const from = startOfMonth(addDays(startOfMonth(cursor), -1)).toISOString();
     const to = addDays(startOfMonth(cursor), 120).toISOString();
 
-    const [eventsRes, invitesRes] = await Promise.all([
+    const [eventsRes, invitesRes, guestsRes] = await Promise.all([
       supabase.from('calendar_events').select('*')
         .gte('start_at', from).lt('start_at', to).order('start_at'),
       supabase.from('calendar_invites')
         .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
+      supabase.from('calendar_guests')
+        .select('id, event_id, email, name, status, proposed_start_at, proposed_end_at, rounds, note, responded_at, seen_at, invited_by'),
     ]);
 
     setEvents((eventsRes.data ?? []) as CalendarEvent[]);
     setInvites((invitesRes.data ?? []) as DiaryInvite[]);
+    setGuests((guestsRes.data ?? []) as DiaryGuest[]);
   }, [supabase, cursor]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -152,6 +160,11 @@ export function TeamCalendar({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' },
         () => { void reload(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_invites' },
+        () => { void reload(); })
+      /* A guest answering is somebody else's browser writing, so it has
+         to arrive here the same way a colleague's answer does. That is
+         the whole of "others on the meeting see the update". */
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_guests' },
         () => { void reload(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
@@ -212,6 +225,7 @@ export function TeamCalendar({
           draft={open.draft}
           people={people}
           companies={companies}
+          guests={guests.filter((g) => g.event_id === open.event?.id)}
           meId={userId}
           may={may}
           onClose={() => setOpen(null)}
