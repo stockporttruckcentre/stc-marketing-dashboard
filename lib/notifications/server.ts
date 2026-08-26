@@ -75,10 +75,24 @@ export async function tell(supabase: Client, n: {
    notification is still written without a path, saying to run it
    again. An export that reached the person who asked for it has done
    its job whether or not a copy was kept.
+
+   ---- Why it prunes on the way in ----
+
+   The notification says the copy is kept for a month. Nothing enforced
+   that: the constant below existed and no code read it, so the bucket
+   would have grown for as long as anybody kept exporting, and the
+   sentence on the card would have been wrong from day thirty one.
+
+   There is no scheduler here to sweep it, so the prune happens where
+   the writing happens. Every export tidies its own author's older ones
+   first. That means the work is spread across the people doing it,
+   somebody who exports twice a year costs two list calls a year, and
+   the total never drifts far above one month of what the business
+   actually produces.
    ------------------------------------------------------------- */
 export const EXPORT_BUCKET = 'exports';
 
-/** How long a kept export is worth keeping. */
+/** How long a kept export is worth keeping, and what the card promises. */
 export const EXPORT_KEEP_DAYS = 30;
 
 export async function keepExport(supabase: Client, args: {
@@ -102,8 +116,50 @@ export async function keepExport(supabase: Client, args: {
       });
 
     if (error) return null;
+
+    /* After the upload, never before it. A prune that failed would
+       otherwise take the export with it, and the export is the thing
+       somebody actually asked for. */
+    await pruneExports(supabase, args.userId);
+
     return path;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Throw away this person's kept exports once they are past their month.
+ *
+ * Best effort throughout. Nothing here may surface to the person who
+ * ran the export: they asked for a spreadsheet, not for a report on
+ * housekeeping.
+ */
+async function pruneExports(supabase: Client, userId: string): Promise<void> {
+  try {
+    const { data, error } = await supabase.storage
+      .from(EXPORT_BUCKET)
+      .list(userId, { limit: 200, sortBy: { column: 'created_at', order: 'asc' } });
+
+    if (error || !data || data.length === 0) return;
+
+    const cutoff = Date.now() - EXPORT_KEEP_DAYS * 24 * 3600_000;
+
+    const stale = data
+      .filter((f) => {
+        /* `created_at` is what the store says. A file with no date on
+           it is left alone rather than guessed at: deleting somebody's
+           export because the metadata was missing is the wrong way to
+           be wrong. */
+        const at = f.created_at ? Date.parse(f.created_at) : NaN;
+        return Number.isFinite(at) && at < cutoff;
+      })
+      .map((f) => `${userId}/${f.name}`);
+
+    if (stale.length > 0) {
+      await supabase.storage.from(EXPORT_BUCKET).remove(stale);
+    }
+  } catch {
+    /* Deliberately silent. See above. */
   }
 }
