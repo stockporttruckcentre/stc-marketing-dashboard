@@ -2,24 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, Search,
-} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CalendarEvent } from '@/lib/types';
 import {
   diaryCounts, filterDiary, toEntries,
   type DiaryEntry, type DiaryInvite, type DiaryPerson,
 } from '@/lib/calendar/diary';
+import { addDays, dayKey, startOfMonth } from '@/lib/calendar/grid';
+import type { EventKind } from '@/lib/calendar/kind';
 import {
-  addDays, dayKey, monthGrid, monthLabel, startOfDay, startOfMonth, startOfWeek, weekLabel,
-} from '@/lib/calendar/grid';
-import { EVENT_KINDS, KIND_PLURAL, type EventKind } from '@/lib/calendar/kind';
-import {
-  Alert, Badge, Button, Chip, IconButton, RecordHead, SearchInput, StatStrip, TabShell, Tabs,
-} from '@/components/kit/primitives';
-import { Select } from '@/components/kit/forms';
-import { AgendaView, MonthView, WeekView } from '@/components/calendar/views';
+  DiaryScreen, entriesInView, type ViewKind, type Whose,
+} from '@/components/calendar/screen';
 import {
   EntryDrawer, blankDraft, draftFor, type Company, type Draft, type Person,
 } from '@/components/calendar/drawer';
@@ -69,7 +62,7 @@ export function TeamCalendar({
   /** `?event=` from an invitation link or the Work tab's diary. */
   openEventId: string | null;
   /** `?view=` from the command bar. The month unless a sentence said otherwise. */
-  openView: 'month' | 'week' | 'agenda';
+  openView: ViewKind;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -78,11 +71,11 @@ export function TeamCalendar({
 
   const [events, setEvents] = useState(initialEvents);
   const [invites, setInvites] = useState(initialInvites);
-  const [view, setView] = useState<'month' | 'week' | 'agenda'>(openView);
+  const [view, setView] = useState<ViewKind>(openView);
   const [cursor, setCursor] = useState(new Date());
   const [search, setSearch] = useState('');
   const [kinds, setKinds] = useState<EventKind[]>([]);
-  const [whose, setWhose] = useState<'everything' | 'mine'>('everything');
+  const [whose, setWhose] = useState<Whose>('everything');
   const [open, setOpen] = useState<{ event: CalendarEvent | null; draft: Draft } | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -110,22 +103,10 @@ export function TeamCalendar({
   }), [entries, kinds, whose, search]);
 
   /* The agenda looks forward, because "what is next" is the question it
-     answers. The month and the week show what they show. */
-  const inView = useMemo(() => {
-    if (view === 'agenda') {
-      const today = startOfDay(new Date()).getTime();
-      return shown.filter((e) => startOfDay(e.start).getTime() >= today);
-    }
-    if (view === 'week') {
-      const from = startOfWeek(cursor).getTime();
-      const to = addDays(startOfWeek(cursor), 7).getTime();
-      return shown.filter((e) => e.start.getTime() >= from && e.start.getTime() < to);
-    }
-    const cells = monthGrid(cursor);
-    const from = cells[0].getTime();
-    const to = addDays(cells[cells.length - 1], 1).getTime();
-    return shown.filter((e) => e.start.getTime() >= from && e.start.getTime() < to);
-  }, [shown, view, cursor]);
+     answers. The month and the week show what they show. One function,
+     shared with the preview harness, so what gets looked at and what
+     ships are the same arithmetic. */
+  const inView = useMemo(() => entriesInView(shown, view, cursor), [shown, view, cursor]);
 
   const counts = useMemo(() => diaryCounts(entries, userId), [entries, userId]);
   const perKind = useMemo(() => {
@@ -205,154 +186,27 @@ export function TeamCalendar({
     setOpen({ event: null, draft: blankDraft(day, userId, myName) });
   }, [canBook, userId, myName]);
 
-  const narrowed = useMemo(() => {
-    const bits: string[] = [];
-    if (kinds.length) bits.push(`only ${kinds.map((k) => KIND_PLURAL[k].toLowerCase()).join(' and ')}`);
-    if (whose === 'mine') bits.push('only what you are on');
-    if (search.trim()) bits.push(`only what mentions "${search.trim()}"`);
-    return bits.length ? bits.join(', ') : null;
-  }, [kinds, whose, search]);
-
-  const label = view === 'week' ? weekLabel(cursor) : monthLabel(cursor);
-  const viewProps = {
-    entries: inView,
-    cursor,
-    onOpen: openEntry,
-    onCompose: compose,
-    canCompose: canBook,
-  };
-
   return (
-    <TabShell>
-      <RecordHead
-        icon={<CalendarDays size={20} />}
-        title="Diary"
-        badges={<>
-          {counts.waitingOnMe > 0 && (
-            <Badge tone="warning" dot>
-              {counts.waitingOnMe} waiting on you
-            </Badge>
-          )}
-          {counts.today > 0 && <Badge tone="neutral" dot>{counts.today} today</Badge>}
-        </>}
-        sub="Every call, meeting, visit and inspection booked anywhere in the business."
-        actions={canBook
-          ? (
-            <Button variant="accent" onClick={() => compose(dayKey(new Date()))}>
-              <Plus size={14} /> Book something
-            </Button>
-          )
-          : undefined}
-      />
-
-      <StatStrip items={[
-        { label: 'Today', value: counts.today, note: 'in the diary' },
-        { label: 'This week', value: counts.thisWeek, note: 'next seven days' },
-        { label: 'Calls', value: counts.calls, note: 'still to make' },
-        { label: 'Meetings', value: counts.meetings, note: 'and visits ahead' },
-        { label: 'Waiting on you', value: counts.waitingOnMe, note: 'to answer' },
-      ]} />
-
-      {note && (
-        <Alert tone="success">
-          <span style={{ flex: 1 }}>{note}</span>
-          <Button size="sm" variant="ghost" onClick={() => setNote(null)}>Dismiss</Button>
-        </Alert>
-      )}
-
-      {/* ---- the bar: where you are, then what narrows it ---- */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
-        padding: '9px 12px', borderRadius: 'var(--r-md)',
-        background: 'var(--surface)', border: '1px solid var(--border)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <IconButton label={view === 'week' ? 'The week before' : 'The month before'}
-            onClick={() => step(-1)}>
-            <ChevronLeft size={14} />
-          </IconButton>
-          <IconButton label={view === 'week' ? 'The week after' : 'The month after'}
-            onClick={() => step(1)}>
-            <ChevronRight size={14} />
-          </IconButton>
-          <Button size="sm" variant="secondary" onClick={() => setCursor(new Date())}>Today</Button>
-        </div>
-
-        <div style={{
-          fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 16,
-          letterSpacing: '-0.02em', color: 'var(--text)', minWidth: 168,
-          /* The agenda is not a month, so labelling it with one would be
-             saying something untrue about what is on the screen. */
-          visibility: view === 'agenda' ? 'hidden' : 'visible',
-        }}>{label}</div>
-
-        <span style={{ flex: 1 }} />
-
-        <div style={{ width: 200, maxWidth: '100%' }}>
-          <SearchInput
-            value={search} onChange={setSearch}
-            placeholder="Title, customer or person"
-            icon={<Search size={14} />}
-          />
-        </div>
-
-        <div style={{ width: 150 }}>
-          <Select value={whose} onChange={(v) => setWhose(v as 'everything' | 'mine')}>
-            <option value="everything">Everything</option>
-            <option value="mine">Only mine</option>
-          </Select>
-        </div>
-
-        <Tabs
-          value={view}
-          onChange={setView}
-          tabs={[
-            { key: 'month' as const, label: 'Month' },
-            { key: 'week' as const, label: 'Week' },
-            { key: 'agenda' as const, label: 'What is next', count: counts.ahead },
-          ]}
-        />
-      </div>
-
-      {/* ---- the kinds, as chips, because a diary is read by kind ---- */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <Chip active={kinds.length === 0} onClick={() => setKinds([])}>
-          Everything
-        </Chip>
-        {EVENT_KINDS.filter((k) => k !== 'reminder').map((k) => (
-          <Chip
-            key={k}
-            active={kinds.includes(k)}
-            count={perKind.get(k) ?? 0}
-            empty={(perKind.get(k) ?? 0) === 0}
-            onClick={() => setKinds(kinds.includes(k)
-              ? kinds.filter((x) => x !== k)
-              : [...kinds, k])}
-          >{KIND_PLURAL[k]}</Chip>
-        ))}
-
-        <span style={{ flex: 1 }} />
-
-        {narrowed && (
-          <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
-            Showing {narrowed}.{' '}
-            <button
-              type="button"
-              onClick={() => { setKinds([]); setWhose('everything'); setSearch(''); }}
-              style={{
-                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                color: 'var(--text-muted)', font: 'inherit', textDecoration: 'underline',
-              }}
-            >Show everything</button>
-          </span>
-        )}
-      </div>
-
-      {view === 'month' && <MonthView {...viewProps} />}
-      {view === 'week' && <WeekView {...viewProps} />}
-      {view === 'agenda' && <AgendaView {...viewProps} />}
-
-      {open && (
+    <DiaryScreen
+      entries={inView}
+      counts={counts}
+      perKind={perKind}
+      view={view}
+      cursor={cursor}
+      search={search}
+      kinds={kinds}
+      whose={whose}
+      note={note}
+      canBook={canBook}
+      onView={setView}
+      onCursor={setCursor}
+      onSearch={setSearch}
+      onKinds={setKinds}
+      onWhose={setWhose}
+      onNote={setNote}
+      onOpen={openEntry}
+      onCompose={compose}
+      drawer={open && (
         <EntryDrawer
           event={open.event}
           draft={open.draft}
@@ -365,6 +219,6 @@ export function TeamCalendar({
           onDeleted={(message) => { setNote(message); setOpen(null); void reload(); }}
         />
       )}
-    </TabShell>
+    />
   );
 }

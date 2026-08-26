@@ -4,7 +4,7 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Building2, CalendarClock, Check, Clock, Globe2, Lock, Mail, MessageSquare,
-  Plus, Search, Send, Trash2, UserPlus, Users, X,
+  Pencil, Plus, Search, Send, Trash2, UserPlus, Users, X,
 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventAttendee, CalendarVisibility } from '@/lib/types';
 import { EVENT_COLOURS } from '@/lib/calendar/wire';
@@ -297,16 +297,30 @@ export function EntryDrawer({
       icon={<CalendarClock size={18} />}
       onClose={onClose}
       width={720}
+      /* Rule one of the kit: red is the single most important action on
+         a screen, plus destructive intent, and three red buttons means
+         none. Calling a meeting off is destructive and it is not what
+         somebody came here to do, so it sits quietly on the left beside
+         Close. The right hand end is the thing they did come for:
+         editing it, or saving what they have typed. */
       footer={
         <>
           <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
-          {!isNew && may('crm.delegate') && !editing && (
-            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+          {!isNew && may('crm.delegate') && (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={remove}>
+              <Trash2 size={13} /> Call it off
+            </Button>
           )}
           <span style={{ flex: 1 }} />
-          {!isNew && may('crm.delegate') && (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={remove}>
-              <Trash2 size={13} /> Cancel it
+          {!isNew && may('crm.delegate') && !editing && (
+            <Button size="sm" variant="primary" onClick={() => setEditing(true)}>
+              <Pencil size={13} /> Edit
+            </Button>
+          )}
+          {editing && !isNew && (
+            <Button size="sm" variant="secondary" disabled={busy}
+              onClick={() => { setDraft(initialDraft); setEditing(false); }}>
+              Put it back
             </Button>
           )}
           {editing && (

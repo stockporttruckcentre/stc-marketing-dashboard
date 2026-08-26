@@ -38,6 +38,24 @@ export const KIND_LABEL: Record<EventKind, string> = {
   appointment: 'Appointment',
 };
 
+/**
+ * Short, for a filter chip.
+ *
+ * Six chips at their full names came to 612px of a bar that had 448px
+ * for them at 1280, so the last two scrolled out of sight and the one
+ * on the edge was cut through the middle of a word. These are the same
+ * six words a person would say out loud anyway: nobody asks to see the
+ * site visits when the column already says visits.
+ */
+export const KIND_CHIP: Record<EventKind, string> = {
+  call: 'Calls',
+  meeting: 'Meetings',
+  visit: 'Visits',
+  inspection: 'Checks',
+  reminder: 'Reminders',
+  appointment: 'Other',
+};
+
 /** Plural, for a count above a list. */
 export const KIND_PLURAL: Record<EventKind, string> = {
   call: 'Calls',

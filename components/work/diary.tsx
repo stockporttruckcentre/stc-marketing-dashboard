@@ -9,7 +9,7 @@ import {
   type DiaryInvite, type DiaryPerson,
 } from '@/lib/calendar/diary';
 import { relativeDay } from '@/lib/calendar/grid';
-import { EVENT_KINDS, KIND_PLURAL, type EventKind } from '@/lib/calendar/kind';
+import { EVENT_KINDS, KIND_CHIP, KIND_PLURAL, type EventKind } from '@/lib/calendar/kind';
 import { DiaryRow } from '@/components/calendar/parts';
 import {
   Button, Chip, EmptyState, GridHint, Label, PanelHead, SearchInput, StatStrip,
@@ -151,7 +151,7 @@ export function WorkDiary({
             onClick={() => setKinds(kinds.includes(k)
               ? kinds.filter((x) => x !== k)
               : [...kinds, k])}
-          >{KIND_PLURAL[k]}</Chip>
+          >{KIND_CHIP[k]}</Chip>
         ))}
         <span style={{ flex: 1 }} />
         {narrowed && (

@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return gate.response;
   const { supabase, user } = gate;
 
-  const read = readEventBody(await req.json().catch(() => ({})));
+  const read = readEventBody(await req.json().catch(() => ({})), user.id);
   if ('error' in read) {
     return NextResponse.json({ ok: false, error: 'bad_request', message: read.error }, { status: 400 });
   }

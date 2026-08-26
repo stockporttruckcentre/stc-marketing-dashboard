@@ -1243,6 +1243,13 @@ a { color: inherit; text-decoration: none; }
   padding: 24px 28px 56px;
   max-width: 1800px;
   width: 100%;
+  /* Centred once the window is wider than the cap.
+
+     Without this the column is pinned to the left, so a 4K screen at
+     native scaling put the whole application in the left half and left
+     1,792px of empty ground down the right hand side. Below 1800px
+     nothing moves, which is every 1080p machine. */
+  margin-inline: auto;
 }
 
 /* ========== AUTH PAGES ========== */
