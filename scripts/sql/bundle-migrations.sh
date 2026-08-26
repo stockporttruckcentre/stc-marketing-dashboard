@@ -35,22 +35,50 @@
 # same replaces or skips.
 #
 #   ./scripts/sql/bundle-migrations.sh --since 039_rows_forward
+#
+# A SEED THAT SITS EARLY IN THE ORDER AND KEEPS CHANGING.
+#
+# `--with <migration>` puts one migration at the front of the bundle
+# whatever `--since` says. It exists for `016_capability_roles_seed`,
+# which is generated from `lib/crm/permissions.ts` and is rewritten
+# every time a capability is added, but which sits at position five in
+# `order.txt` because a fresh install needs it before 011.
+#
+# Without this, a `--since` bundle covering a branch that added a
+# capability is a bundle that quietly leaves it out, and the feature it
+# belongs to answers every read with nothing. Rerunning that seed is
+# safe by construction: it empties the table and refills it.
+#
+#   ./scripts/sql/bundle-migrations.sh --since 058_work_workflow \
+#     --with 016_capability_roles_seed
 # =============================================================
 set -u
 cd "$(dirname "$0")/../.."
 
 SINCE=""
-if [ "${1:-}" = "--since" ]; then
-  SINCE="${2:-}"
-  if [ -z "$SINCE" ]; then
-    echo "--since needs the name of a migration in order.txt" >&2
-    exit 1
-  fi
-  if ! grep -qx "$SINCE" scripts/sql/order.txt; then
-    echo "no migration called $SINCE in scripts/sql/order.txt" >&2
-    exit 1
-  fi
-fi
+WITH=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --since|--with)
+      flag="$1"
+      name="${2:-}"
+      if [ -z "$name" ]; then
+        echo "$flag needs the name of a migration in order.txt" >&2
+        exit 1
+      fi
+      if ! grep -qx "$name" scripts/sql/order.txt; then
+        echo "no migration called $name in scripts/sql/order.txt" >&2
+        exit 1
+      fi
+      if [ "$flag" = "--since" ]; then SINCE="$name"; else WITH="$name"; fi
+      shift 2
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
 
 # -------------------------------------------------------------
 # Two of these migrations open and close a transaction of their own,
@@ -86,16 +114,34 @@ STRIP_OWN_TRANSACTION='
   if (tags % 2 == 1) inside = 1 - inside;
 }'
 
+emit() {
+  file="supabase/migrations/${1}.sql"
+  if [ ! -f "$file" ]; then
+    echo "-- MISSING: $file" >&2
+    exit 1
+  fi
+  echo "-- ============================================================="
+  echo "-- $file"
+  echo "-- ============================================================="
+  awk "$STRIP_OWN_TRANSACTION" "$file"
+  echo
+}
+
 if [ -n "$SINCE" ]; then
   echo "-- The command runtime, everything after ${SINCE}, as one file."
 else
   echo "-- The command runtime, as one file."
 fi
+[ -n "$WITH" ] && echo "-- Plus ${WITH}, which is a seed and is rerun on purpose."
 echo "-- Generated from scripts/sql/order.txt. Do not edit by hand."
 echo "-- Safe to run more than once: every statement replaces or skips."
 echo
 echo "BEGIN;"
 echo
+
+# The named seed first, so anything after it that reads the seed sees
+# the new rows rather than the ones it is replacing.
+[ -n "$WITH" ] && emit "$WITH"
 
 # Everything before and including --since is skipped, in file order.
 skipping=0
@@ -107,6 +153,8 @@ while read -r name; do
     if [ "$name" = "$SINCE" ]; then skipping=0; fi
     continue
   fi
+  # Not twice, where --with named something that comes after --since.
+  [ "$name" = "$WITH" ] && continue
   file="supabase/migrations/${name}.sql"
   if [ ! -f "$file" ]; then
     echo "-- MISSING: $file" >&2

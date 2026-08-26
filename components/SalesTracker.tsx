@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import {
   Alert, Badge, Button, Card, Chip, EmptyState, GridBadge, GridHint, IconButton,
-  money, RecordHead, Row, SearchInput, SectionHead, StatStrip, TabShell, Tabs,
+  money, PanelHead, RecordHead, Row, SearchInput, StatStrip, TabShell, Tabs,
 } from '@/components/kit/primitives';
 import {
   Drawer, Field, Modal, OptionCard, Select, Split, TextArea, TextInput,
@@ -645,15 +645,35 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
     setShowSchedule(true);
   }
 
+  /* What is actually in the database, as opposed to what is in the box.
+     See `saveField`: comparing a commit against the box it came from is
+     always equal, and was silently dropping every write. */
+  const persisted = useRef<TrackerRow>(row);
+
   /**
    * One field, written to whichever record owns it.
    *
    * The same split as the grid: a company's phone number belongs to the
    * company, this pitch's estimated value belongs to this pitch. Writing
    * both to `crm_contacts` was correct only while they were the same row.
+   *
+   * ---- The comparison is against the DATABASE, not the box ----
+   *
+   * Every text field here is `onChange` into local state plus `onCommit`
+   * to here, which is the kit's inline edit shape: typing is local,
+   * leaving the field is the save. So by the time a commit arrives,
+   * `edit[field]` IS the new value, and `edit[field] === value` was
+   * therefore true on every single edit. The function returned before
+   * writing anything, the drawer showed the new text because the box
+   * held it, and nothing reached Supabase.
+   *
+   * That is why an action note typed into this drawer came back empty:
+   * nine fields were affected, not one. Held in a ref rather than state
+   * because it must be current within the same tick as the write and
+   * nothing renders from it.
    */
   async function saveField<K extends keyof TrackerRow>(field: K, value: TrackerRow[K]) {
-    if (edit[field] === value) return;
+    if (persisted.current[field] === value) return;
     setEdit(e => ({ ...e, [field]: value }));
     setSaving(true);
     const toAccount = ACCOUNT_FIELDS.has(field as string);
@@ -664,6 +684,9 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
       .update({ [field]: value }).eq('id', target);
     setSaving(false);
     if (error) { alert(error.message); return; }
+    /* Only once the write came back. A field marked saved before the
+       round trip is a field that stops retrying after a refusal. */
+    persisted.current = { ...persisted.current, [field]: value };
     onSave({ [field]: value } as any);
   }
 
@@ -743,9 +766,19 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
           {/* Every meeting with this company, whichever pitch prompted it.
               Read by company rather than by lead: a visit to Dawson is a
               visit to Dawson, and closing one quote should not hide it. */}
+          {/* `PanelHead`, not `SectionHead`.
+
+              `SectionHead` is a page heading: no padding of its own and
+              a 12px bottom margin, both right in a padded page and
+              wrong inside `Card padded={false}`. The title sat flush
+              against the left border, the Schedule button against the
+              right one, and the margin collided with the body's own
+              padding underneath. Five other panels on this screen had
+              the same shape and the same defect. */}
           <Card padded={false}>
-            <SectionHead
+            <PanelHead
               title="Scheduled meetings"
+              count={meetings.length || undefined}
               action={
                 <Button size="sm" variant="secondary" onClick={handleSchedule}>
                   <CalendarPlus size={12} /> Schedule
@@ -796,7 +829,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
           {/* Only once there is a sale to describe. */}
           {(edit.status === 'customer' || edit.status === 'won') && (
             <Card padded={false}>
-              <SectionHead title="Closing details" hint="What the sale was worth" />
+              <PanelHead title="Closing details" hint="What the sale was worth" />
               <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <Split>
                   <Field label="Order date">
@@ -1022,7 +1055,7 @@ function NewLeadModal({ profile, onCreate, onClose }: {
             </div>
           ) : matches.length > 0 ? (
             <>
-              <SectionHead title={`${matches.length} in the CRM`} hint="Pick the one you mean" />
+              <PanelHead title={`${matches.length} in the CRM`} hint="Pick the one you mean" />
               <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
                 {matches.map((m) => (
                   <div key={m.id} style={{
@@ -1198,7 +1231,7 @@ function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
 
       {sp > 0 && (
         <Card padded={false}>
-          <SectionHead title="What this earns" />
+          <PanelHead title="What this earns" />
           <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 7 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
               <span style={{ color: 'var(--text-muted)' }}>Profit</span>
@@ -1322,7 +1355,7 @@ function CommissionView({ rows }: { rows: TrackerRow[] }) {
           series carrying the message, which is the only thing red is
           for on a chart. */}
       <Card padded={false}>
-        <SectionHead title="Last twelve months" hint="Commission earned" />
+        <PanelHead title="Last twelve months" hint="Commission earned" />
         <div style={{ padding: '14px 16px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 180 }}>
             {monthly.map(m => {
@@ -1359,7 +1392,7 @@ function CommissionView({ rows }: { rows: TrackerRow[] }) {
       </Card>
 
       <Card padded={false}>
-        <SectionHead title="Every closed deal" hint={`${sales.length} in all`} />
+        <PanelHead title="Every closed deal" hint={`${sales.length} in all`} />
         {sales.length === 0 ? (
           <div style={{ padding: '10px 16px 16px' }}>
             <EmptyState

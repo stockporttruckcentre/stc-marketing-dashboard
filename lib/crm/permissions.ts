@@ -180,7 +180,23 @@ export type CrmCapability =
   /** Set somebody else's. */
   | 'entity.setOthers'
   /** Read records flagged as commercially sensitive. */
-  | 'compliance.sensitive';
+  | 'compliance.sensitive'
+
+  /* ---- FleetSmart+ ----
+
+     A maintenance contract is a price and a promise in one document, so
+     the four verbs are deliberately separate. Reading a contract
+     somebody else built, building one, discounting it, and sending it
+     to a customer are four different amounts of authority. */
+
+  /** See the FleetSmart+ tab and the contracts on it. */
+  | 'fleetsmart.view'
+  /** Build and price a contract, and save it as a draft. */
+  | 'fleetsmart.build'
+  /** Apply a manager's discount, which comes off before the promotion. */
+  | 'fleetsmart.discount'
+  /** Send a contract to the customer, which is the point of no quiet undo. */
+  | 'fleetsmart.send';
 
 export type CrmCapabilities = Set<CrmCapability>;
 
@@ -239,6 +255,7 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.views', 'work.shareViews', 'work.manageFields', 'work.manageSystemViews',
     'work.schedule', 'work.rollback', 'work.analytics', 'work.analyticsAll',
     'entity.viewAll', 'entity.setOwn', 'entity.setOthers', 'compliance.sensitive',
+    'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send',
   ],
   sales: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.create', 'crm.delete',
@@ -253,6 +270,11 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.view', 'work.viewDepartment', 'work.create', 'work.edit',
     'work.requestRelease', 'work.views', 'work.shareViews',
     'work.projects', 'work.analytics', 'entity.setOwn',
+    /* A FleetSmart+ contract is this role's own work: they build it and
+       they send it, the same as a proposal. What is not theirs is the
+       manager's discount, which is the one number on the document that
+       comes out of somebody else's margin. */
+    'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.send',
   ],
   marketer: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.export',
@@ -272,6 +294,8 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.view', 'work.viewDepartment', 'work.create', 'work.edit',
     'work.requestRelease', 'work.review', 'work.views', 'work.shareViews',
     'work.projects', 'work.analytics', 'entity.setOwn',
+    /* Read only. Marketing writes about FleetSmart+ and does not price it. */
+    'fleetsmart.view',
   ],
   viewer: [
     'crm.view', 'crm.viewGlobal', 'crm.export',
@@ -283,6 +307,8 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
        to say no is somebody whose "yes" means nothing. */
     'work.view', 'work.viewDepartment', 'work.requestRelease',
     'work.views', 'work.projects', 'work.analytics',
+    /* Read only, like everything else a viewer holds. */
+    'fleetsmart.view',
   ],
 };
 

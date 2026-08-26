@@ -315,6 +315,16 @@ const RESERVED = new Set([
   'campaigns', 'template', 'templates', 'queue', 'slot', 'slots',
   'approval', 'approvals', 'caption', 'hashtag', 'hashtags', 'preview',
   'linkedin', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube',
+
+  /* FleetSmart+, for the same reason again. "Send the contract to
+     Wilsons" has to read Wilsons as the customer and contract as the
+     thing, and without these it reads a customer called Contract.
+
+     Bare "maintenance" is deliberately absent. It is a lead type value
+     the resolver matches on, so reserving it would stop "show me the
+     maintenance leads" finding any. */
+  'contract', 'contracts', 'fleetsmart', 'plan', 'plans', 'platinum', 'gold',
+  'pmi', 'inspection', 'inspections', 'loler', 'tacho', 'axle', 'axles',
   ...Object.keys(BODY_TYPES),
 ]);
 

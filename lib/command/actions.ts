@@ -994,6 +994,60 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['task note', 'note on a task', 'note on this task', 'task comment',
               'comment on a task', 'work note'],
     phrases: ['leave a note on this task', 'comment on this task', 'note on this task'] },
+
+  /* ---------- FleetSmart+ ----------
+
+     Contract work is talked about four different ways depending on who
+     is talking: the workshop says R and M, the office says maintenance
+     contract, the sales team says FleetSmart, and the customer says
+     "the plan". All four have to land on the same screen.
+
+     Bare "contract" is deliberately not here. It belongs to the
+     proposal generator, which claimed it first, and an object word two
+     actions both claim is one neither wins on. "Maintenance contract"
+     and "fleetsmart" are unambiguous, and that is what these say. */
+
+  { id: 'nav.fleetsmart', label: 'FleetSmart+', blurb: 'Fixed price maintenance contracts', kind: 'navigate',
+    capability: 'fleetsmart.view', path: '/dashboard/fleetsmart', verbs: GO,
+    objects: ['fleetsmart', 'fleet smart', 'fleetsmart+', 'fleetsmart plus', 'fleet smart plus',
+              'maintenance contracts', 'maintenance contract', 'service contracts',
+              'r and m', 'r&m', 'contract builder', 'the contracts tab'] },
+
+  { id: 'make.fleetsmartContract', label: 'Build a maintenance contract',
+    blurb: 'Priced off the rate card as you fill it in', kind: 'create',
+    capability: 'fleetsmart.build', path: '/dashboard/fleetsmart', verbs: MAKE,
+    objects: ['maintenance contract', 'fleetsmart contract', 'service contract',
+              'r and m contract', 'fleetsmart quote', 'maintenance quote', 'contract for a fleet'],
+    phrases: ['build a maintenance contract', 'price up a fleet', 'quote a maintenance contract',
+              'new fleetsmart contract'] },
+
+  { id: 'fleetsmart.send', label: 'Send a contract to the customer',
+    blurb: 'Freezes the price and records who it went to', kind: 'record',
+    capability: 'fleetsmart.send', path: '/dashboard/fleetsmart',
+    verbs: ['send', 'issue', 'put out', 'get out', 'email over', 'share'],
+    objects: ['maintenance contract', 'fleetsmart contract', 'the contract to the customer'],
+    phrases: ['send the maintenance contract', 'get the fleetsmart contract out'] },
+
+  { id: 'fleetsmart.decide', label: 'Record a contract answer',
+    blurb: 'Accepted or declined, so it stops being pipeline', kind: 'record',
+    capability: 'fleetsmart.build', path: '/dashboard/fleetsmart',
+    verbs: ['record', 'mark', 'accept', 'decline', 'log'],
+    objects: ['contract answer', 'contract decision', 'signed contract', 'declined contract',
+              'maintenance contract answer'],
+    phrases: ['they signed the maintenance contract', 'they turned the contract down',
+              'mark the fleetsmart contract as accepted'] },
+
+  /* The one action on this screen with its own permission. A salesman
+     may build and send at rate card; only somebody holding the discount
+     capability may take money off it, so a salesman typing this sees
+     nothing rather than a control that appears and then refuses. */
+  { id: 'fleetsmart.discount', label: 'Discount a maintenance contract',
+    blurb: 'A manager rate off the whole contract', kind: 'record',
+    capability: 'fleetsmart.discount', path: '/dashboard/fleetsmart',
+    verbs: ['discount', 'reduce', 'knock off', 'take off', 'drop'],
+    objects: ['manager discount', 'contract discount', 'discount on a maintenance contract',
+              'fleetsmart discount'],
+    phrases: ['discount the maintenance contract', 'give them a manager discount'] },
 ];
 
 /* =============================================================

@@ -17,6 +17,7 @@ const CRUMBS: Record<string, [string, string]> = {
   '/dashboard/leads':     ['Sales',     'Sales tracker'],
   '/dashboard/finder':    ['Sales',     'Company finder'],
   '/dashboard/sales':     ['Sales',     'Trailer sales'],
+  '/dashboard/fleetsmart': ['Sales',    'FleetSmart+'],
   '/dashboard/social':    ['Marketing', 'Social planner'],
   '/dashboard/brand':     ['Marketing', 'Brand kit'],
   '/dashboard/admin':     ['Admin',     'Team'],

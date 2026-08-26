@@ -33,6 +33,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
         { href: '/dashboard/leads',       label: 'Sales tracker', Icon: TrendingUp, roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/finder', label: 'Company finder', Icon: Search,   roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: Container, roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/fleetsmart', label: 'FleetSmart+', Icon: ShieldCheck, roles: ['admin','marketer','sales','viewer'] },
       ],
     },
     {

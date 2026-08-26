@@ -1025,6 +1025,67 @@ ok('a viewer can still open the planner',
 ok('a sales user can still open the planner',
   suggestActions('social planner', CAPS.sales, 8).some((h) => h.action.id === 'nav.social'));
 
+/* ---------- FleetSmart+ ----------
+
+   Four vocabularies land on one screen: the workshop says R and M, the
+   office says maintenance contract, sales says FleetSmart, and the
+   customer says the plan. A phrasing listed in actions.ts is a guess.
+   One asserted here is a promise. */
+for (const said of [
+  'fleetsmart', 'fleet smart', 'fleetsmart plus', 'maintenance contracts',
+  'maintenance contract', 'service contracts', 'r and m', 'contract builder',
+]) {
+  const reached = ROLES.some((r) =>
+    suggestActions(said, CAPS[r], 8).some((h) => h.action.path?.startsWith('/dashboard/fleetsmart') ?? false));
+  ok(`"${said}" reaches FleetSmart+`, reached);
+}
+
+for (const said of [
+  'build a maintenance contract', 'new fleetsmart contract', 'price up a fleet',
+  'quote a maintenance contract', 'create a maintenance contract',
+]) {
+  ok(`"${said}" builds a contract`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'make.fleetsmartContract'));
+}
+
+for (const said of ['send the maintenance contract', 'get the fleetsmart contract out']) {
+  ok(`"${said}" reaches sending`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.send'));
+}
+
+for (const said of [
+  'they signed the maintenance contract', 'they turned the contract down',
+  'mark the fleetsmart contract as accepted',
+]) {
+  ok(`"${said}" reaches recording the answer`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.decide'));
+}
+
+/* Both directions, per role. Sales builds and sends at rate card and
+   cannot discount; a marketer and a viewer read the screen and do
+   neither. An action that appears and then refuses teaches people the
+   tool lies, and a discount is the one on this screen worth money. */
+ok('a viewer can still open FleetSmart+',
+  suggestActions('fleetsmart', CAPS.viewer, 8).some((h) => h.action.id === 'nav.fleetsmart'));
+ok('a marketer can still open FleetSmart+',
+  suggestActions('fleetsmart', CAPS.marketer, 8).some((h) => h.action.id === 'nav.fleetsmart'));
+ok('a viewer is not offered building a contract',
+  !suggestActions('build a maintenance contract', CAPS.viewer, 8).some((h) => h.action.id === 'make.fleetsmartContract'));
+ok('a marketer is not offered building a contract',
+  !suggestActions('build a maintenance contract', CAPS.marketer, 8).some((h) => h.action.id === 'make.fleetsmartContract'));
+ok('a sales user is offered building a contract',
+  suggestActions('build a maintenance contract', CAPS.sales, 8).some((h) => h.action.id === 'make.fleetsmartContract'));
+ok('a sales user is offered sending a contract',
+  suggestActions('send the maintenance contract', CAPS.sales, 8).some((h) => h.action.id === 'fleetsmart.send'));
+ok('a viewer is not offered sending a contract',
+  !suggestActions('send the maintenance contract', CAPS.viewer, 8).some((h) => h.action.id === 'fleetsmart.send'));
+ok('a sales user is not offered discounting a contract',
+  !suggestActions('discount the maintenance contract', CAPS.sales, 8).some((h) => h.action.id === 'fleetsmart.discount'));
+ok('a viewer is not offered discounting a contract',
+  !suggestActions('discount the maintenance contract', CAPS.viewer, 8).some((h) => h.action.id === 'fleetsmart.discount'));
+ok('an admin is offered discounting a contract',
+  suggestActions('discount the maintenance contract', CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.discount'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

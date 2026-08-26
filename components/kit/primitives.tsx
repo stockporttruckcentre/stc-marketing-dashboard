@@ -508,6 +508,47 @@ export function TabShell({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The header bar on a panel, as opposed to a heading on a page.
+ *
+ * `SectionHead` is the page heading: no padding of its own, a bottom
+ * margin, and an h2 at the 17px step. Dropped inside `Card padded={false}`
+ * it reads as broken, and it was, in six places: the title flush against
+ * the left border, the action button against the right, and the margin
+ * colliding with the body's own padding underneath.
+ *
+ * This is the other shape, and the one a bordered panel wants: a 36px
+ * bar on `--bg-subtle`, the kit's label step, an optional count, a rule
+ * under it, and room for one action on the right.
+ */
+export function PanelHead({
+  title, count, hint, action,
+}: { title: string; count?: number; hint?: string; action?: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      minHeight: 36, padding: '0 14px',
+      background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
+    }}>
+      <Label>{title}</Label>
+      {count != null && (
+        <span style={{
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+          fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
+        }}>{count}</span>
+      )}
+      {hint && (
+        <span style={{
+          fontSize: 11.5, color: 'var(--text-subtle)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{hint}</span>
+      )}
+      <span style={{ flex: 1 }} />
+      {action}
+    </div>
+  );
+}
+
 /** The line under a grid saying what the mouse does. */
 export function GridHint({ children }: { children: ReactNode }) {
   return <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{children}</div>;

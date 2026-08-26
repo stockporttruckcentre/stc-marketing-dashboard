@@ -67,6 +67,7 @@
 057_entity_membership
 058_work_workflow
 060_existing_posts_get_a_channel
+061_fleetsmart_contracts
 018_command_set_role
 019_last_admin
 059_work_role_templates

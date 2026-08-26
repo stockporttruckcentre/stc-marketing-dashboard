@@ -94,6 +94,8 @@ export type Capability =
   // ---- The company split, and the information barrier ----
   | 'entity.viewAll' | 'entity.setOwn' | 'entity.setOthers'
   | 'compliance.sensitive'
+  // ---- FleetSmart+ ----
+  | 'fleetsmart.view' | 'fleetsmart.build' | 'fleetsmart.discount' | 'fleetsmart.send'
   // ---- Administration ----
   | 'admin.users' | 'admin.settings' | 'admin.audit';
 
@@ -181,6 +183,12 @@ export const CAPABILITY_CATALOG = [
   { key: 'entity.viewAll', label: 'See both companies', description: 'See records belonging to every company in the group, whichever they work for. Auditors, the board, and whoever reconciles the two.', area: 'Compliance', feature: 'Company split', danger: 'sensitive', requires: [], scoped: false, position: 20 },
   { key: 'entity.setOwn', label: 'Choose their own company', description: 'Set which of the companies they work for in their own settings. Somebody who genuinely works for both should not need a ticket.', area: 'Compliance', feature: 'Company split', danger: 'routine', requires: [], scoped: false, position: 30 },
   { key: 'entity.setOthers', label: 'Set somebody else\'s company', description: 'Decide which companies a colleague belongs to. This is the control that decides what a new starter can see.', area: 'Compliance', feature: 'Company split', danger: 'sensitive', requires: [], scoped: false, position: 40 },
+
+  // ---- FleetSmart+ ----
+  { key: 'fleetsmart.view', label: 'See FleetSmart+ contracts', description: 'Open the FleetSmart+ tab and read the contracts on it, whoever built them.', area: 'FleetSmart+', feature: 'Contracts', danger: 'routine', requires: [], scoped: false, position: 10 },
+  { key: 'fleetsmart.build', label: 'Build a contract', description: 'Price a fleet and save the result as a draft. The price comes off the rate card, so this is not the right to set a price.', area: 'FleetSmart+', feature: 'Contracts', danger: 'routine', requires: ['fleetsmart.view'], scoped: false, position: 20 },
+  { key: 'fleetsmart.discount', label: 'Apply a manager\'s discount', description: 'Take a percentage off the whole contract before the promotional discount. The one number on the document that comes out of somebody else\'s margin.', area: 'FleetSmart+', feature: 'Contracts', danger: 'sensitive', requires: ['fleetsmart.build'], scoped: false, position: 30 },
+  { key: 'fleetsmart.send', label: 'Send a contract to a customer', description: 'Mark a contract sent and record what went out. A price a customer has seen is a price they will hold you to.', area: 'FleetSmart+', feature: 'Contracts', danger: 'sensitive', requires: ['fleetsmart.build'], scoped: false, position: 40 },
 
   { key: 'admin.audit', label: 'Read the audit trail', description: 'Read the permanent record of who changed what, and generate insider lists from it.', area: 'Admin', feature: 'Compliance', danger: 'sensitive', requires: [], scoped: false, position: 30 },
 ] as const satisfies readonly CapabilityEntry[];
