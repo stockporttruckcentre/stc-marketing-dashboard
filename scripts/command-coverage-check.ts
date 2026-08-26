@@ -1151,10 +1151,9 @@ ok('a viewer can still see what is next',
 /* -------------------------------------------------------------
    Notifications.
 
-   The bell was a button with no click handler until now, and the one
-   action pointing at it went to the dashboard, which showed five and
-   let you answer none. Three screens now, and the words below are the
-   ones people actually use for them.
+   The bell is the feed. The toggles are a tab on Settings. The words
+   below are the ones people actually use for both, which is most of
+   what was missing: the action existed and knew six phrasings.
 
    The settings half matters more than the reach half. "Turn off
    notifications" and "I get too many notifications" are the same
@@ -1178,14 +1177,6 @@ for (const said of [
 ]) {
   ok(`"${said}" reaches the notification settings`,
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'notifications.settings'));
-}
-
-for (const said of [
-  'team notifications', 'business notifications', 'company feed', 'team feed',
-  'what the team is doing', 'what everybody is doing',
-]) {
-  ok(`"${said}" reaches the business feed`,
-    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'notifications.team'));
 }
 
 /* Everybody, in both directions. There is no role that does not get

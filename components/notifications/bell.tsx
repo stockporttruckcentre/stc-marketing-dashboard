@@ -176,7 +176,7 @@ export function NotificationBell() {
               ><CheckCheck size={15} /></button>
             )}
             <button
-              onClick={() => { setOpen(false); router.push('/dashboard/notifications?tab=settings'); }}
+              onClick={() => { setOpen(false); router.push('/dashboard/settings?tab=notifications'); }}
               title="What you get told"
               style={{
                 border: 'none', background: 'transparent', cursor: 'pointer',
@@ -231,13 +231,19 @@ export function NotificationBell() {
           </div>
 
           <div style={{
-            display: 'flex', gap: 8, padding: '10px 13px', flex: 'none',
+            display: 'flex', alignItems: 'center', gap: 8, padding: '9px 13px', flex: 'none',
             borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)',
           }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+              {shown.length === 0
+                ? 'Cleared ones do not come back.'
+                : `${shown.length} here. Clearing one takes it off the list for good.`}
+            </span>
+            <span style={{ flex: 1 }} />
             <Button
-              size="sm" variant="secondary"
-              onClick={() => { setOpen(false); router.push('/dashboard/notifications'); }}
-            >Open them all</Button>
+              size="sm" variant="ghost"
+              onClick={() => { setOpen(false); router.push('/dashboard/settings?tab=notifications'); }}
+            >What you get told</Button>
           </div>
         </div>
       )}
