@@ -60,6 +60,7 @@ import {
   capability as capabilityDef, destination, entity as entityDef, FILE_EMIT_CAPABILITY,
 } from './ir/registry';
 import type { Cond, Emit, Expr, Invoke, Plan, Select } from './ir/types';
+import { referenceMatch } from './ir/conditions';
 
 /* =============================================================
    Availability
@@ -362,11 +363,9 @@ function attachTarget(
     return {
       op: 'select',
       from: { entity: spec.id },
-      where: {
-        kind: 'cmp', op: 'eq',
-        left: { kind: 'field', of: { entity: spec.id, field: title } },
-        right: { kind: 'literal', value: named },
-      },
+      // On the digits: the same unit is written STC145602 by one person
+      // and 145602 by the file that loaded it.
+      where: referenceMatch(spec.id, title, named),
       produces: { kind: 'rows', entity: spec.id },
     };
   }

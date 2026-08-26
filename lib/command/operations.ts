@@ -33,6 +33,7 @@ import {
   fileDigest, readContextReference, resolveContext, type CommandContext,
 } from './context';
 import type { CrmCapabilities } from '@/lib/crm/permissions';
+import { referenceMatchAny } from './ir/conditions';
 
 export type OperationPlan = {
   step: Invoke;
@@ -326,20 +327,9 @@ function subjectOf(
   const title = def?.titleField;
   if (named.length && title === 'stc_no') {
     return {
-      where: named.length === 1
-        ? {
-            kind: 'cmp', op: 'eq',
-            left: { kind: 'field', of: { entity, field: title } },
-            right: { kind: 'literal', value: named[0] },
-          }
-        : {
-            kind: 'or',
-            of: named.map((n) => ({
-              kind: 'cmp' as const, op: 'eq' as const,
-              left: { kind: 'field' as const, of: { entity, field: title } },
-              right: { kind: 'literal' as const, value: n },
-            })),
-          },
+      // On the digits, so however the prefix is written it still finds
+      // the unit. Migration of habits, not of data.
+      where: referenceMatchAny(entity, title, named),
       label: named.join(' and '),
     };
   }
