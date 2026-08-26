@@ -608,6 +608,79 @@ BEGIN
   RAISE NOTICE 'ok  a guest is visible to everybody who can see the meeting';
 END $$;
 
+/* A name is enough, which is the commonest case by far and the one the
+   whole thing is actually for: writing somebody down so the sales team
+   can see who is in the meeting.
+
+   No address, so no way to reach them and nothing to answer, and that
+   is fine. What matters is that everybody looking at the meeting can
+   see them. */
+DO $$
+DECLARE ev UUID; g calendar_guests; second calendar_guests; n INT;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT event_id INTO ev FROM fixture_guest;
+
+  g := calendar_invite_guest(ev, NULL, 'James from the IT company', NULL, NULL);
+  IF g.email IS NOT NULL THEN
+    RAISE EXCEPTION 'a name only guest was given an address';
+  END IF;
+  IF g.name <> 'James from the IT company' THEN
+    RAISE EXCEPTION 'the name did not stick: %', g.name;
+  END IF;
+  IF g.status <> 'pending' THEN
+    RAISE EXCEPTION 'a name only guest starts at %', g.status;
+  END IF;
+  RAISE NOTICE 'ok  somebody with no email address can be put on a meeting';
+
+  -- And they need no customer. This is the case the ask named: a
+  -- meeting with the IT company, who are not a CRM customer and should
+  -- not have to become one.
+  IF g.contact_id IS NOT NULL THEN
+    RAISE EXCEPTION 'a guest was forced onto a customer record';
+  END IF;
+  RAISE NOTICE 'ok  and needs no customer record to hang off';
+
+  /* Two people with no address are two people. Nothing here can tell
+     whether two Waynes are the same Wayne, and quietly keeping one is a
+     worse answer than keeping both where somebody can see it. */
+  second := calendar_invite_guest(ev, NULL, 'James from the IT company', NULL, NULL);
+  IF second.id = g.id THEN
+    RAISE EXCEPTION 'the second one silently replaced the first';
+  END IF;
+  RAISE NOTICE 'ok  and two people with no address are two people';
+
+  -- Everybody on the meeting sees them.
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT count(*) INTO n FROM calendar_guests
+   WHERE event_id = ev AND email IS NULL;
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'a colleague sees % of the two people with no address', n;
+  END IF;
+  RAISE NOTICE 'ok  and a colleague on the meeting sees them';
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  PERFORM calendar_withdraw_guest(second.id);
+END $$;
+
+-- Neither a name nor an address is not a person.
+DO $$
+DECLARE ev UUID;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT event_id INTO ev FROM fixture_guest;
+  BEGIN
+    PERFORM calendar_invite_guest(ev, '   ', '  ', NULL, NULL);
+    RAISE EXCEPTION 'somebody with no name and no address went onto a meeting';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%name, or an email%' THEN
+      RAISE NOTICE 'ok  and a blank one is refused';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
 -- =============================================================
 -- 10. What the link is worth, which is one invitation and nothing else.
 --
