@@ -34,6 +34,7 @@ import { createHash } from 'crypto';
 import type { Expr, Mutate, Plan, Select } from './types';
 import { entity as entityDef, field as fieldDef } from './registry';
 import type { Store } from './store';
+import { whyNothingMatched } from './near';
 
 /* -------------------------------------------------------------
    What comes back
@@ -373,7 +374,20 @@ export async function resolveMutation(
     before: Object.fromEntries(fields.map((f) => [f, r[f] ?? null])),
   }));
 
-  if (!rows.length) return fail('nothing matched', 'nothing here matches that');
+  if (!rows.length) {
+    /* Not "nothing here matches that". That sentence is the same
+       whether the yard is empty, the unit was sold last year or a digit
+       was typed wrong, and somebody reading it cannot tell a working
+       tool from a broken one. */
+    return fail('nothing matched', await whyNothingMatched({
+      store,
+      table: def.table,
+      where: (match as Select).where,
+      titleField: title,
+      label: def.label ?? def.table,
+      fieldLabel: (column) => fieldDef(def.id, column)?.label ?? column.replace(/_/g, ' '),
+    }));
+  }
 
   /* WHAT THE SENTENCE SAID, against what was found. */
   if (step.expect === 'one' && rows.length > 1) {
