@@ -489,4 +489,271 @@ BEGIN
   RAISE NOTICE 'ok  moving a meeting keeps its length';
 END $$;
 
+-- =============================================================
+-- 9. Guests: somebody who does not work here.
+--
+-- Migration 062. The half that matters most is not that a guest can
+-- answer, it is that a guest's link is worth exactly one thing. A
+-- customer following a link out of their inbox must not be able to read
+-- the diary, the CRM, or anybody else's invitation.
+-- =============================================================
+DO $$
+DECLARE made JSONB; ev UUID; g calendar_guests;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('Site visit with Dawson', NOW() + INTERVAL '11 days', 60, NULL, 'team');
+  ev := (made ->> 'id')::UUID;
+
+  g := calendar_invite_guest(ev, 'ops@dawsongroup.test', 'Julie Barnes', NULL, 'Bring the spec.');
+  IF g.status <> 'pending' THEN
+    RAISE EXCEPTION 'a guest starts at %', g.status;
+  END IF;
+  IF g.token IS NULL OR length(g.token) <> 64 THEN
+    RAISE EXCEPTION 'the link token is % characters', COALESCE(length(g.token), 0);
+  END IF;
+
+  CREATE TEMP TABLE fixture_guest ON COMMIT DROP AS SELECT g.id AS id, g.token AS token, ev AS event_id;
+  /* And to `anon`, because half the assertions below are run as the
+     guest holding the link and they need to know which link it is.
+     A scaffold inside a transaction that rolls back, not a grant on
+     anything the product has. */
+  GRANT SELECT ON fixture_guest TO authenticated, anon;
+  RAISE NOTICE 'ok  a guest is asked, and the link is 64 characters of randomness';
+
+  -- Asking the same address again is the same invitation, not a second.
+  PERFORM calendar_invite_guest(ev, 'OPS@DawsonGroup.test', 'Julie', NULL, NULL);
+  IF (SELECT count(*) FROM calendar_guests WHERE event_id = ev) <> 1 THEN
+    RAISE EXCEPTION 'the same address in a different case made a second guest';
+  END IF;
+  IF (SELECT token FROM calendar_guests WHERE event_id = ev) <> g.token THEN
+    RAISE EXCEPTION 'asking again changed the link, so the first email stopped working';
+  END IF;
+  RAISE NOTICE 'ok  the same address twice is one guest, and the link does not change';
+END $$;
+
+-- Only whoever booked it can ask a guest.
+DO $$
+DECLARE ev UUID;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT event_id INTO ev FROM fixture_guest;
+  BEGIN
+    PERFORM calendar_invite_guest(ev, 'somebody@else.test', '', NULL, NULL);
+    RAISE EXCEPTION 'somebody asked a guest to a meeting they did not book';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%Only whoever booked%' THEN
+      RAISE NOTICE 'ok  only whoever booked a meeting can ask a guest to it';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- A read only viewer cannot ask anybody.
+DO $$
+DECLARE ev UUID;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000004');
+  SELECT event_id INTO ev FROM fixture_guest;
+  BEGIN
+    PERFORM calendar_invite_guest(ev, 'nope@example.test', '', NULL, NULL);
+    RAISE EXCEPTION 'a read only viewer asked a guest to a meeting';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%delegate permission%' OR SQLERRM LIKE '%Only whoever booked%' THEN
+      RAISE NOTICE 'ok  a viewer cannot ask a guest';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- Everybody on the meeting sees the guest, not just whoever asked.
+DO $$
+DECLARE ev UUID; n INT;
+BEGIN
+  SELECT event_id INTO ev FROM fixture_guest;
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT count(*) INTO n FROM calendar_guests WHERE event_id = ev;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'a colleague on the meeting sees % of its guests', n;
+  END IF;
+  RAISE NOTICE 'ok  a guest is visible to everybody who can see the meeting';
+END $$;
+
+-- =============================================================
+-- 10. What the link is worth, which is one invitation and nothing else.
+--
+-- Run as `anon`, because that is who is holding it: somebody with no
+-- account who followed a link out of their inbox.
+-- =============================================================
+RESET ROLE;
+SET LOCAL ROLE anon;
+
+DO $$
+DECLARE t TEXT; seen JSONB;
+BEGIN
+  SELECT token INTO t FROM fixture_guest;
+
+  seen := calendar_guest_view(t);
+  IF NOT (seen ->> 'ok')::BOOLEAN THEN
+    RAISE EXCEPTION 'the guest cannot open their own invitation: %', seen ->> 'why';
+  END IF;
+  IF seen -> 'meeting' ->> 'title' <> 'Site visit with Dawson' THEN
+    RAISE EXCEPTION 'the invitation shows the wrong meeting';
+  END IF;
+  RAISE NOTICE 'ok  a guest can open their own invitation with no account';
+
+  /* And nothing else. Not the diary, not the CRM, not the invitations.
+
+     Refused outright rather than returning nothing, and that is worth
+     saying: the select policy on `calendar_events` reads
+     `calendar_invites`, which `anon` has no grant on at all, so the
+     query does not get as far as being filtered. Either answer is the
+     right one, so both count. */
+  BEGIN
+    IF (SELECT count(*) FROM calendar_events) <> 0 THEN
+      RAISE EXCEPTION 'a guest can read the diary';
+    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+  RAISE NOTICE 'ok  and cannot read the diary';
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM count(*) FROM calendar_guests;
+    IF (SELECT count(*) FROM calendar_guests) > 0 THEN
+      RAISE EXCEPTION 'a guest can read the guest table, tokens and all';
+    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;  -- refused outright, which is the stronger answer
+  END;
+  RAISE NOTICE 'ok  and cannot read the guests, which is where the tokens are';
+END $$;
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM count(*) FROM crm_contacts;
+    IF (SELECT count(*) FROM crm_contacts) > 0 THEN
+      RAISE EXCEPTION 'a guest link reads the CRM';
+    END IF;
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+  RAISE NOTICE 'ok  and cannot read the CRM';
+END $$;
+
+-- A token that is not a token answers nothing.
+DO $$
+DECLARE said JSONB;
+BEGIN
+  said := calendar_guest_view(repeat('a', 64));
+  IF (said ->> 'ok')::BOOLEAN THEN
+    RAISE EXCEPTION 'a made up token opened an invitation';
+  END IF;
+  said := calendar_guest_answer(repeat('a', 64), 'accept', NULL, NULL, NULL);
+  IF (said ->> 'ok')::BOOLEAN THEN
+    RAISE EXCEPTION 'a made up token answered an invitation';
+  END IF;
+  RAISE NOTICE 'ok  a token nobody was given is worth nothing';
+END $$;
+
+-- =============================================================
+-- 11. A guest answering, and what it does not move.
+-- =============================================================
+DO $$
+DECLARE t TEXT; ev UUID; was TIMESTAMPTZ; said JSONB;
+BEGIN
+  SELECT token, event_id INTO t, ev FROM fixture_guest;
+
+  said := calendar_guest_answer(t, 'accept', NULL, NULL, NULL);
+  IF NOT (said ->> 'ok')::BOOLEAN OR said ->> 'status' <> 'accepted' THEN
+    RAISE EXCEPTION 'accepting did not take: %', said;
+  END IF;
+  RAISE NOTICE 'ok  a guest accepts through the link';
+
+  -- Suggesting a time never moves the meeting. A customer cannot move a
+  -- booking other people have already accepted.
+  RESET ROLE;
+  SET LOCAL ROLE authenticated;
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT start_at INTO was FROM calendar_events WHERE id = ev;
+
+  RESET ROLE;
+  SET LOCAL ROLE anon;
+  said := calendar_guest_answer(t, 'propose', was + INTERVAL '1 day', NULL, 'Thursday suits us.');
+  IF said ->> 'status' <> 'proposed' THEN
+    RAISE EXCEPTION 'suggesting a time left it at %', said ->> 'status';
+  END IF;
+
+  RESET ROLE;
+  SET LOCAL ROLE authenticated;
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  IF (SELECT start_at FROM calendar_events WHERE id = ev) <> was THEN
+    RAISE EXCEPTION 'a guest moved the meeting on their own';
+  END IF;
+  RAISE NOTICE 'ok  a guest suggesting a time moves nothing on its own';
+
+  -- And every round of it is on the record, in the same history as
+  -- everybody else's.
+  IF (SELECT count(*) FROM calendar_invite_messages m
+       JOIN calendar_guests g ON g.id = m.guest_id
+      WHERE g.event_id = ev) < 3 THEN
+    RAISE EXCEPTION 'the guest exchange is not on the record';
+  END IF;
+  RAISE NOTICE 'ok  and every round of it is in the same history as everybody else''s';
+END $$;
+
+-- Whoever booked it was told.
+DO $$
+DECLARE n INT;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT count(*) INTO n FROM notifications
+   WHERE user_id = 'ee000000-0000-0000-0000-000000000001'
+     AND kind IN ('meeting_accepted', 'meeting_proposed');
+  IF n < 2 THEN
+    RAISE EXCEPTION 'the organiser was not told what the guest said: % notifications', n;
+  END IF;
+  RAISE NOTICE 'ok  and the organiser is told, through the same notifications as everybody else';
+END $$;
+
+-- =============================================================
+-- 12. Taking a guest off stops their link.
+-- =============================================================
+DO $$
+DECLARE t TEXT; gid UUID; said JSONB;
+BEGIN
+  SELECT token, id INTO t, gid FROM fixture_guest;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  BEGIN
+    PERFORM calendar_withdraw_guest(gid);
+    RAISE EXCEPTION 'somebody took a guest off a meeting they did not book';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%Only whoever booked%' THEN
+      RAISE NOTICE 'ok  only whoever booked it can take a guest off';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  PERFORM calendar_withdraw_guest(gid);
+
+  RESET ROLE;
+  SET LOCAL ROLE anon;
+  said := calendar_guest_view(t);
+  IF (said ->> 'ok')::BOOLEAN THEN
+    RAISE EXCEPTION 'a withdrawn invitation still opens';
+  END IF;
+  RAISE NOTICE 'ok  and a withdrawn invitation is a link that stops working';
+END $$;
+
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+
 ROLLBACK;

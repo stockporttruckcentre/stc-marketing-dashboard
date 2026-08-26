@@ -34,7 +34,7 @@ import {
 import { EVENT_KINDS, KIND_LABEL, KIND_PLURAL, KIND_TONE, eventKind } from '../lib/calendar/kind';
 import {
   attendeesOf, diaryCounts, filterDiary, groupByDay, toEntries,
-  type DiaryInvite, type DiaryPerson,
+  type DiaryGuest, type DiaryInvite, type DiaryPerson,
 } from '../lib/calendar/diary';
 import { readEventBody } from '../lib/calendar/wire';
 import type { CalendarEvent } from '../lib/types';
@@ -309,6 +309,73 @@ ok('exactly one kind carries the accent',
 
   const asAlex = toEntries([event], { ...ctx, meId: ORG })[0];
   ok('the organiser is not waiting on themselves', !asAlex.needsMyAnswer);
+
+  /* ---- guests, from migration 062 ----
+
+     Somebody on the meeting with no account. The point of the merge is
+     that they land in the same list as a colleague with the same four
+     standings, so a screen draws one list and every colleague on the
+     meeting sees the same people. */
+  const guests: DiaryGuest[] = [
+    {
+      id: 'g1', event_id: 'e1', email: 'ops@dawsongroup.test', name: 'Julie Barnes',
+      status: 'accepted', proposed_start_at: null, proposed_end_at: null, rounds: 1,
+      note: null, responded_at: '2026-06-01T10:00:00Z', seen_at: '2026-06-01T09:00:00Z',
+      invited_by: ORG,
+    },
+    {
+      id: 'g2', event_id: 'e1', email: 'yard@bredbury.test', name: '',
+      status: 'pending', proposed_start_at: null, proposed_end_at: null, rounds: 0,
+      note: null, responded_at: null, seen_at: null, invited_by: ORG,
+    },
+    /* On a different meeting, so the filter by event is exercised. */
+    {
+      id: 'g3', event_id: 'e2', email: 'nobody@elsewhere.test', name: 'Somebody Else',
+      status: 'declined', proposed_start_at: null, proposed_end_at: null, rounds: 1,
+      note: null, responded_at: null, seen_at: null, invited_by: ORG,
+    },
+  ];
+
+  const withGuests = attendeesOf(event, { invites, guests, people });
+  ok('a guest is on the list', withGuests.some((a) => a.guestId === 'g1'));
+  ok('and marked as somebody outside the business',
+    withGuests.find((a) => a.guestId === 'g1')?.external === true);
+  ok('and carries their standing',
+    withGuests.find((a) => a.guestId === 'g1')?.status === 'accepted');
+  ok('a guest with no name is shown by their address',
+    withGuests.find((a) => a.guestId === 'g2')?.name === 'yard@bredbury.test');
+  ok('a guest on another meeting is not on this one',
+    !withGuests.some((a) => a.guestId === 'g3'));
+  ok('nobody is waiting on a guest here, because they answer through their own link',
+    withGuests.filter((a) => a.guestId && a.awaited).length === 0);
+  ok('and whether they have opened it is carried',
+    withGuests.find((a) => a.guestId === 'g1')?.seenAt !== null
+    && withGuests.find((a) => a.guestId === 'g2')?.seenAt === null);
+  ok('everybody still appears exactly once',
+    new Set(withGuests.map((a) => a.key)).size === withGuests.length);
+
+  /* The JSONB name and the guest are the same person, matched on the
+     address. Before this, adding a guest to a meeting that already
+     listed them by name drew them twice. */
+  const listedTwice = attendeesOf(
+    { ...event, attendees: [
+      { user_id: ORG, name: 'Alex' },
+      { name: 'Julie Barnes', email: 'OPS@dawsongroup.test' },
+    ] },
+    { invites: [], guests, people },
+  );
+  ok('a guest already listed by name is not drawn twice',
+    listedTwice.filter((a) => (a.email ?? '').toLowerCase() === 'ops@dawsongroup.test').length === 1);
+  ok('and it is the guest row that survives, with the standing on it',
+    listedTwice.find((a) => (a.email ?? '').toLowerCase() === 'ops@dawsongroup.test')?.status
+      === 'accepted');
+
+  /* An event with no guests at all behaves exactly as it did before,
+     which is what makes this safe in front of every row booked before
+     migration 062. */
+  const noGuests = attendeesOf(event, { invites, people });
+  ok('a meeting with no guests is unchanged', noGuests.every((a) => !a.external || !a.guestId));
+  ok('and still lists everybody it did', noGuests.length === after.length);
 
   const stranger = '00000000-0000-0000-0000-000000000009';
   const asStranger = toEntries([event], { ...ctx, meId: stranger })[0];

@@ -7,7 +7,7 @@ import type {
   Task, TaskView, Person, Entity, DelegationRequest,
 } from '@/lib/work/types';
 import type { CalendarEvent, Profile } from '@/lib/types';
-import type { DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
+import type { DiaryGuest, DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,13 +72,14 @@ export default async function WorkPage({
      what somebody may see and `calendar_invites` shows only the ones
      they are on either side of. */
   const now = new Date();
-  const [diaryRes, inviteRes, peopleRes2] = await Promise.all([
+  const [diaryRes, inviteRes, guestRes, peopleRes2] = await Promise.all([
     supabase.from('calendar_events').select('*')
       .gte('start_at', new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString())
       .lt('start_at', new Date(now.getFullYear(), now.getMonth() + 4, 1).toISOString())
       .order('start_at').limit(1000),
     supabase.from('calendar_invites')
       .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
+    supabase.from('calendar_guests').select('id, event_id, email, name, status, proposed_start_at, proposed_end_at, rounds, note, responded_at, seen_at, invited_by'),
     supabase.from('profiles').select('id, full_name, email').limit(200),
   ]);
 
@@ -137,6 +138,7 @@ export default async function WorkPage({
       openTab={searchParams?.tab === 'diary' ? 'diary' : 'tasks'}
       diaryEvents={(diaryRes.data ?? []) as CalendarEvent[]}
       diaryInvites={(inviteRes.data ?? []) as DiaryInvite[]}
+      diaryGuests={(guestRes.data ?? []) as DiaryGuest[]}
       diaryPeople={(peopleRes2.data ?? []) as DiaryPerson[]}
     />
   );

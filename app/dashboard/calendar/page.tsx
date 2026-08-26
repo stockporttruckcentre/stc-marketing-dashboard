@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { TeamCalendar } from '@/components/TeamCalendar';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import type { CalendarEvent, Profile } from '@/lib/types';
-import type { DiaryInvite } from '@/lib/calendar/diary';
+import type { DiaryGuest, DiaryInvite } from '@/lib/calendar/diary';
 import type { Company, Person } from '@/components/calendar/drawer';
 
 export const dynamic = 'force-dynamic';
@@ -37,12 +37,17 @@ export default async function CalendarPage({
   const from = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
   const to = new Date(now.getFullYear(), now.getMonth() + 4, 1).toISOString();
 
-  const [profileRes, eventsRes, inviteRes, peopleRes, companyRes] = await Promise.all([
+  const [profileRes, eventsRes, inviteRes, guestRes, peopleRes, companyRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('calendar_events').select('*')
       .gte('start_at', from).lt('start_at', to).order('start_at').limit(1000),
     supabase.from('calendar_invites')
       .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
+    /* Guests, from migration 062. Scoped by their own policy to
+       meetings this person can see, which is what makes somebody the
+       customer's transport manager was added to visible to every
+       colleague on the meeting rather than only to whoever asked. */
+    supabase.from('calendar_guests').select('id, event_id, email, name, status, proposed_start_at, proposed_end_at, rounds, note, responded_at, seen_at, invited_by'),
     supabase.from('profiles').select('id, full_name, email').order('full_name').limit(200),
     supabase.from('crm_contacts').select('id, company_name').order('company_name').limit(2000),
   ]);
@@ -57,6 +62,7 @@ export default async function CalendarPage({
          here yet". Either way an empty list draws the diary correctly
          and every entry reads as one nobody was asked to. */
       initialInvites={(inviteRes.data ?? []) as DiaryInvite[]}
+      initialGuests={(guestRes.data ?? []) as DiaryGuest[]}
       people={(peopleRes.data ?? []) as Person[]}
       companies={(companyRes.data ?? []) as Company[]}
       userId={user.id}

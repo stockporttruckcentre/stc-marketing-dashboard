@@ -50,7 +50,7 @@ import { ViewEditor } from '@/components/work/viewedit';
 import { Empty } from '@/components/work/parts';
 import { WorkDiary } from '@/components/work/diary';
 import type { CalendarEvent } from '@/lib/types';
-import type { DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
+import type { DiaryGuest, DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
 import { diaryCounts, toEntries } from '@/lib/calendar/diary';
 
 const LAYOUTS: { key: Layout; label: string; Icon: typeof Columns3 }[] = [
@@ -82,7 +82,7 @@ export function viewSlug(name: string): string {
 export function WorkHub({
   initialTasks, views, people, departments, entities, projects, customers, trailers,
   requests, viewer, capabilities, multiEntity, openView, openTab,
-  diaryEvents, diaryInvites, diaryPeople,
+  diaryEvents, diaryInvites, diaryGuests, diaryPeople,
 }: {
   initialTasks: Task[];
   views: TaskView[];
@@ -106,6 +106,7 @@ export function WorkHub({
      than flashing an empty diary and filling it in. */
   diaryEvents: CalendarEvent[];
   diaryInvites: DiaryInvite[];
+  diaryGuests: DiaryGuest[];
   diaryPeople: DiaryPerson[];
 }) {
   const [tasks, setTasks] = useState(initialTasks);
@@ -194,11 +195,12 @@ export function WorkHub({
     toEntries(diaryEvents, {
       meId: viewer.userId,
       invites: diaryInvites,
+      guests: diaryGuests,
       people: new Map(diaryPeople.map((p) => [p.id, p])),
       companies: new Map(customers.map((c) => [c.id, c.company_name ?? 'Unnamed'])),
     }),
     viewer.userId,
-  ), [diaryEvents, diaryInvites, diaryPeople, customers, viewer.userId]);
+  ), [diaryEvents, diaryInvites, diaryGuests, diaryPeople, customers, viewer.userId]);
 
   /* The numbers across the top. Counted here from the same rows the
      list draws, so a figure saying seven can never sit above four. */
@@ -494,6 +496,7 @@ export function WorkHub({
         <WorkDiary
           events={diaryEvents}
           invites={diaryInvites}
+          guests={diaryGuests}
           people={diaryPeople}
           companies={customers}
           meId={viewer.userId}

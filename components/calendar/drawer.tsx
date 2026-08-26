@@ -4,12 +4,12 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Building2, CalendarClock, Check, Clock, Globe2, Lock, Mail, MessageSquare,
-  Pencil, Plus, Search, Send, Trash2, UserPlus, Users, X,
+  Copy, Pencil, Plus, Search, Send, Trash2, UserPlus, Users, X,
 } from 'lucide-react';
 import type { CalendarEvent, CalendarEventAttendee, CalendarVisibility } from '@/lib/types';
 import { EVENT_COLOURS } from '@/lib/calendar/wire';
 import {
-  attendeesOf, type DiaryAttendee, type DiaryInvite, type DiaryPerson,
+  attendeesOf, type DiaryAttendee, type DiaryGuest, type DiaryInvite, type DiaryPerson,
 } from '@/lib/calendar/diary';
 import { dateLabel, durationLabel, timeLabel } from '@/lib/calendar/grid';
 import { eventKind, KIND_LABEL } from '@/lib/calendar/kind';
@@ -127,13 +127,18 @@ export function blankDraft(dayKey: string, meId: string, myName: string): Draft 
 }
 
 export function EntryDrawer({
-  event, draft: initialDraft, people, companies, meId, may, onClose, onSaved, onDeleted,
+  event, draft: initialDraft, people, companies, guests: initialGuests = [],
+  meId, may, onClose, onSaved, onDeleted,
 }: {
   /** Null when this is a new entry being booked. */
   event: CalendarEvent | null;
   draft: Draft;
   people: Person[];
   companies: Company[];
+  /* Everybody on the meeting who does not work here. Handed down rather
+     than fetched, so a colleague opening a meeting somebody else booked
+     sees the same guests they do. */
+  guests?: DiaryGuest[];
   meId: string;
   may: (c: string) => boolean;
   onClose: () => void;
@@ -147,7 +152,12 @@ export function EntryDrawer({
   const [error, setError] = useState<string | null>(null);
 
   const [invites, setInvites] = useState<DiaryInvite[]>([]);
+  const [guests, setGuests] = useState<DiaryGuest[]>(initialGuests);
   const [messages, setMessages] = useState<InviteMessage[]>([]);
+  /* The link for a guest just added, shown once. There is no transport
+     here, so this is how the invitation gets to them. */
+  const [freshLink, setFreshLink] = useState<{ who: string; link: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [loadingInvites, setLoadingInvites] = useState(!isNew);
   const [proposing, setProposing] = useState<{ inviteId: string; at: string } | null>(null);
 
@@ -164,16 +174,27 @@ export function EntryDrawer({
      exchange that got there. Read on open rather than handed down,
      because it changes when somebody else answers and the list the page
      was rendered with would be yesterday's. */
+  /* Read back rather than patched, for the same reason the invitations
+     are: a colleague may have asked somebody else while this was open,
+     and the list on the screen has to be the list in the database. */
+  const refreshGuests = useCallback(async () => {
+    if (!draft.id) return;
+    const res = await fetch(`/api/calendar/invite?eventId=${draft.id}&guests=1`);
+    const json = await res.json().catch(() => ({}));
+    if (json.ok) setGuests((json.guests ?? []) as DiaryGuest[]);
+  }, [draft.id]);
+
   useEffect(() => {
     if (!event) return;
     let live = true;
     setLoadingInvites(true);
-    fetch(`/api/calendar/invite?eventId=${event.id}`)
+    fetch(`/api/calendar/invite?eventId=${event.id}&guests=1`)
       .then((r) => r.json())
       .then((json) => {
         if (!live || !json.ok) return;
         setInvites((json.invites ?? []) as DiaryInvite[]);
         setMessages((json.messages ?? []) as InviteMessage[]);
+        if (json.guests) setGuests(json.guests as DiaryGuest[]);
       })
       .catch(() => { /* the drawer still shows the meeting */ })
       .finally(() => { if (live) setLoadingInvites(false); });
@@ -192,15 +213,18 @@ export function EntryDrawer({
         userId: a.user_id ?? null,
         status: null,
         inviteId: null,
+        guestId: null,
         awaited: false,
         organiser: a.user_id === meId,
+        external: !a.user_id,
+        seenAt: null,
       }));
     }
     return attendeesOf(
       { ...event, attendees: draft.attendees },
-      { invites, people: peopleById },
+      { invites, guests, people: peopleById },
     );
-  }, [event, draft.attendees, invites, peopleById, meId]);
+  }, [event, draft.attendees, invites, guests, peopleById, meId]);
 
   const mine = attendees.find((a) => a.userId === meId && a.inviteId);
   const company = draft.contactId
@@ -280,6 +304,49 @@ export function EntryDrawer({
         setMessages((fresh.messages ?? []) as InviteMessage[]);
       }
       onSaved(json.message ?? then);
+    } catch {
+      setError('That did not reach the server. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* Asking somebody outside the business.
+
+     Only on a saved entry, because a guest is a row against a meeting
+     and a meeting being typed does not have an id yet. On a new one the
+     footer says so rather than the field failing quietly. */
+  async function askGuest(email: string, name: string) {
+    if (!draft.id) return;
+    setBusy(true); setError(null); setCopied(false);
+    try {
+      const res = await fetch(`/api/calendar/events/${draft.id}/guests`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, name, contact_id: draft.contactId }),
+      });
+      const json = await res.json();
+      if (!json.ok) { setError(json.message ?? 'That did not go through.'); return; }
+      setFreshLink({ who: json.guest.name || json.guest.email, link: json.link });
+      await refreshGuests();
+    } catch {
+      setError('That did not reach the server. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dropGuest(guestId: string, who: string) {
+    if (!draft.id) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(
+        `/api/calendar/events/${draft.id}/guests?guest=${guestId}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.ok) { setError(json.message ?? 'That did not go through.'); return; }
+      setFreshLink(null);
+      await refreshGuests();
+      onSaved(`${who} is off the meeting, and their link no longer opens.`);
     } catch {
       setError('That did not reach the server. Try again.');
     } finally {
@@ -411,12 +478,31 @@ export function EntryDrawer({
               </div>
 
               {a.organiser && <Badge tone="neutral">Organiser</Badge>}
+              {a.external && !a.organiser && <Badge tone="info">Guest</Badge>}
               {a.status && !a.organiser && <StatusBadge status={a.status} />}
               {!a.status && !a.organiser && (
                 <span
                   title="On the list, but never actually asked. Save the entry to send an invitation."
                   style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}
                 >Not asked</span>
+              )}
+              {a.guestId && a.status === 'pending' && (
+                <span
+                  title={a.seenAt
+                    ? 'They have opened the link and not answered yet.'
+                    : 'They have not opened the link yet.'}
+                  style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}
+                >{a.seenAt ? 'opened' : 'not opened'}</span>
+              )}
+
+              {a.guestId && may('crm.delegate') && (
+                <IconButton
+                  label={`Take ${a.name} off the meeting`}
+                  disabled={busy}
+                  onClick={() => dropGuest(a.guestId!, a.name)}
+                >
+                  <X size={13} />
+                </IconButton>
               )}
 
               {/* The organiser's controls on somebody else's invitation. */}
@@ -452,6 +538,51 @@ export function EntryDrawer({
             onAdd={(p) => set('attendees', [...draft.attendees,
               { user_id: p.id, name: p.full_name ?? p.email ?? 'Somebody', email: p.email ?? undefined }])}
           />
+        )}
+
+        {may('crm.delegate') && (
+          <AddGuest
+            saved={Boolean(draft.id)}
+            busy={busy}
+            onAsk={askGuest}
+          />
+        )}
+
+        {/* The link, once, for the guest just added.
+
+            There is no way to send it from here: this application has no
+            outbound mail transport, and single sign on is coming, so
+            nothing has been built that is about to be replaced. What
+            makes the feature usable today is that the link works the
+            moment it exists, so it goes into whatever the organiser
+            already sends mail from. */}
+        {freshLink && (
+          <div style={{
+            margin: '0 14px 12px', padding: 11, borderRadius: 'var(--r)',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+            borderLeft: '2px solid var(--info)',
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text)' }}>
+              {freshLink.who} is on the meeting. Send them this link and their answer comes
+              straight back here.
+            </span>
+            <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <TextInput value={freshLink.link} readOnly onChange={() => undefined} />
+              </div>
+              <Button
+                size="sm"
+                variant={copied ? 'secondary' : 'primary'}
+                onClick={() => {
+                  void navigator.clipboard?.writeText(freshLink.link);
+                  setCopied(true);
+                }}
+              >
+                {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+              </Button>
+            </div>
+          </div>
         )}
 
         {!isNew && !editing && may('crm.delegate') && event?.created_by === meId && (
@@ -819,6 +950,68 @@ function History({
             whatever time is on the table, and the meeting moves to it.
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- asking somebody outside ---------------- */
+
+/**
+ * A guest is an email address, not a name from a list.
+ *
+ * That is the whole difference and it is why this is a separate control
+ * rather than another row in the picker above: nobody outside the
+ * business is in `profiles`, and a search that never matches teaches
+ * people the feature does not exist.
+ */
+function AddGuest({
+  saved, busy, onAsk,
+}: {
+  saved: boolean;
+  busy: boolean;
+  onAsk: (email: string, name: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+
+  const looksRight = /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email.trim());
+
+  return (
+    <div style={{
+      padding: '11px 14px', borderTop: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column', gap: 9,
+    }}>
+      <Label>Somebody outside the business</Label>
+
+      {!saved ? (
+        <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+          Book the entry first. A guest is asked to a meeting, so there has to be a meeting.
+        </span>
+      ) : (
+        <>
+          <Split cols={2}>
+            <Field label="Their email">
+              <TextInput value={email} onChange={setEmail} placeholder="ops@dawsongroup.co.uk" />
+            </Field>
+            <Field label="Their name" hint="Optional.">
+              <TextInput value={name} onChange={setName} placeholder="Julie Barnes" />
+            </Field>
+          </Split>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <Button
+              size="sm" variant="secondary"
+              disabled={busy || !looksRight}
+              onClick={() => { onAsk(email.trim(), name.trim()); setEmail(''); setName(''); }}
+            >
+              <UserPlus size={13} /> Add them
+            </Button>
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', flex: 1 }}>
+              They answer through a link. No account, nothing to sign in to, and everybody on the
+              meeting sees what they said.
+            </span>
+          </div>
+        </>
       )}
     </div>
   );
