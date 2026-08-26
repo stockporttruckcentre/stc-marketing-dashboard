@@ -131,6 +131,65 @@ that properly is a bigger database change and belongs with the admin panel.
 
 ---
 
+## Section 13: Fleet Smart Plus builder
+
+Built as its own tab under Sales, `/dashboard/fleetsmart`. The rate card, the
+inclusion matrix and the wording all came out of
+`FleetSmart_Contract_Builder.xlsx`, which stays the source of the prices.
+What moved into the application is the act of building one for a named
+customer, which the workbook cannot do because it has no idea who the
+customer is.
+
+The engine is `lib/fleetsmart/price.ts`, the wizard is
+`components/fleetsmart/wizard.tsx` and the printable contract is
+`components/fleetsmart/document.tsx`. The price is computed on the server in
+`/api/fleetsmart/contracts` and never accepted from a browser.
+
+### New features requested
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 13.1 | Customer details block | **Built** | Customer step, picked off the CRM rather than typed twice. The account and the lead it came out of are both stored on the contract |
+| 13.2 | Silver, Gold and Platinum selector | **Built** | Plan step, with what each plan buys written next to it. The plan drives the inclusion matrix, so changing it reprices every line |
+| 13.3 | Contract term selector, minimum 12 months | **Built** | 12, 24, 36, 48 and 60 months, defaulting to 36. The end date writes itself |
+| 13.4 | Longer terms multiply the price, and a 5% annual increase inside that multiplier | **Not built** | The workbook prices a year and treats the term as a date range, so there is nothing to port. It needs the multiplier matrix from the business before it can be built rather than invented |
+| 13.5 | Mileage, defaulting to 60,000 a year | **Partial** | Per asset, and it drives the wear and tear allowance: 60,000 miles counts as a year of ageing. The wider "higher mileage adds a percentage per the forecast matrix" needs that matrix |
+| 13.6 | Labour rates, £85 truck and van, £65 trailer | **Built** | Plan step, and they price collection and delivery and print in the Charges block |
+| 13.7 | Multi asset entry, one row per reg | **Built** | Fleet step. A reg and an asset type is enough; every other column has a default and shows it as a placeholder, so a blank cell is a standard value rather than missing data. Rows copy, which is the eight identical trailers case |
+| 13.8 | Inspection interval per asset | **Built** | In weeks, 4 to 26, and the visit count follows it |
+| 13.9 | Laden brake test count per asset | **Built** | Four a year on a vehicle, one at MOT on a trailer, none on a van, all typed over |
+| 13.10 | Days against nights working pattern | **Built** | Days, nights at 1.25 and combined at 1.125, applied to labour lines only, with a further 5% for out of hours |
+| 13.11 | Per asset cost and a total build cost | **Built** | Annual, monthly and weekly per asset, and the contract total in the wizard footer while it is being built |
+| 13.12 | Notes flagging missing data | **Built** | Per asset warnings on the fleet step and again on the review step. Nothing blocks: every one of them is a question to answer before it goes out |
+| 13.13 | The contract builds itself from the pricing data | **Built** | Eight wording blocks that write themselves from the fleet and the plan, each overridable. The document only claims what was actually charged, so a trailer only fleet does not promise bulbs |
+| 13.14 | Miscellaneous expense line, separate from wear and tear | **Built** | Per asset, and it prints as its own line |
+| 13.15 | Laden RBT include or exclude, with a count | **Built** | Setting it to zero removes it, and the asset then says so in its warnings |
+| 13.16 | One pricing unit, never mixed | **Built** | One annual figure, shown as annual, monthly or weekly. There is no second calculation to disagree with the first |
+| 13.17 | PMI intervals in weeks, not months | **Built** | Weeks everywhere, in the field label and in the wording |
+| 13.18 | Tyres section | **Not built** | Waiting on the supplier decision, same as the workbook, whose Tyres tab is a placeholder |
+| 13.19 | Telematics as an add on line | **Built** | A per asset annual figure. Pricing it changes the warnings on that asset: an asset on brake performance monitoring may not need the extra RBTs next to it |
+| 13.20 | Manual override on any line | **Partial** | Wear and tear, miscellaneous and telematics take a typed figure, and every frequency is overridable, which between them cover the cases in the meeting. An arbitrary override on any of the forty rate card lines is not built |
+| 13.21 | An EMS API for real parts pricing | **Not built** | Long term, flagged as such in the meeting |
+
+### Beyond the meeting spec
+
+| Item | Where |
+|---|---|
+| A manager's discount with its own permission | `fleetsmart.discount`. Sales builds and sends at rate card and cannot discount, and the control is not drawn for them. A request carrying one is dropped in `lib/fleetsmart/wire.ts` rather than refused, because the only way to send one is a modified client |
+| The price snapshot | `priced` is stored alongside `input`, so a contract signed at one rate card still prints its own numbers after prices move |
+| A sent contract is frozen | Row level security, not a disabled button. Proved in `scripts/sql/fleetsmart-check.sql`, which caught the first version letting anybody who could send edit what they had sent |
+
+### The bug in the workbook, not carried over
+
+`Contract!H43` is `SUM(H18:H22)`. The asset block runs to row 42, so a fleet of
+six or more prints a monthly total lower than the sum of its own lines.
+`scripts/fleetsmart-price-check.ts` asserts the opposite: six identical assets
+cost six times one.
+
+Worth telling whoever is still using the spreadsheet.
+
+---
+
 ## What to do next on this tab, in order
 
 Section 1 is now built out as far as it can go without Protean, the ITG

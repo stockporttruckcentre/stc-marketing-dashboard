@@ -11,7 +11,7 @@
 -- a capability it loses here too. A seed that only ever grows is how a
 -- revoked permission survives in the database.
 --
--- 125 pairs.
+-- 134 pairs.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS command_capability_roles (
@@ -137,6 +137,15 @@ INSERT INTO command_capability_roles (capability, role) VALUES
   ('entity.setOwn', 'marketer'),
   ('entity.setOwn', 'sales'),
   ('entity.viewAll', 'admin'),
+  ('fleetsmart.build', 'admin'),
+  ('fleetsmart.build', 'sales'),
+  ('fleetsmart.discount', 'admin'),
+  ('fleetsmart.send', 'admin'),
+  ('fleetsmart.send', 'sales'),
+  ('fleetsmart.view', 'admin'),
+  ('fleetsmart.view', 'marketer'),
+  ('fleetsmart.view', 'sales'),
+  ('fleetsmart.view', 'viewer'),
   ('marketing.approve', 'admin'),
   ('marketing.edit', 'admin'),
   ('marketing.edit', 'marketer'),

@@ -32,6 +32,12 @@
 # two runs, same rules.
 #
 #   su postgres -c "bash scripts/sql/bundle-twice-check.sh --since 039_rows_forward"
+#
+# `--with <migration>` is passed straight through to the bundler, for
+# the capability seed that sits early in the order and is rewritten
+# every time a capability is added. Rerunning it is the case this whole
+# file exists to prove: the seed empties its table and refills it, so
+# the count after the second run has to be the count after the first.
 # =============================================================
 set -u
 export PATH=/usr/lib/postgresql/16/bin:$PATH
@@ -39,7 +45,17 @@ export PGHOST=/var/tmp/pgtest
 cd "$(dirname "$0")/../.."
 
 SINCE=""
-if [ "${1:-}" = "--since" ]; then SINCE="${2:-}"; fi
+WITH=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --since) SINCE="${2:-}"; shift 2 ;;
+    --with)  WITH="${2:-}";  shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+BUNDLE_ARGS=""
+[ -n "$SINCE" ] && BUNDLE_ARGS="--since $SINCE"
+[ -n "$WITH" ]  && BUNDLE_ARGS="$BUNDLE_ARGS --with $WITH"
 
 DB=stcpreview
 BUNDLE=/var/tmp/pgtest/catch-up-twice.sql
@@ -74,15 +90,31 @@ if [ -n "$SINCE" ]; then
     [ "$name" = "$SINCE" ] && break
   done < scripts/sql/order.txt
 
+  # The starting database has to be level to $SINCE and no further.
+  #
+  # `crm_leads` arrives in 040 and is the marker, but whether it SHOULD
+  # be there depends on where $SINCE sits in the order. Asserted as
+  # absent outright, this line failed every time somebody bundled from a
+  # migration later than 040, which is now most of them, and said the
+  # starting database was wrong when the assertion was.
+  WANT_LEADS=0
+  while read -r name; do
+    case "$name" in ''|\#*) continue ;; esac
+    [ "$name" = "040_leads" ] && WANT_LEADS=1
+    [ "$name" = "$SINCE" ] && break
+  done < scripts/sql/order.txt
+
   LEADS=$($Q -c "SELECT count(*) FROM information_schema.tables
                   WHERE table_schema = 'public' AND table_name = 'crm_leads'")
-  if [ "$LEADS" = "0" ]; then
-    say ok "behind: level to $SINCE, and crm_leads is not there yet"
+  if [ "$LEADS" = "$WANT_LEADS" ]; then
+    say ok "behind: level to $SINCE, and no further"
+  elif [ "$WANT_LEADS" = "0" ]; then
+    say FAIL "the starting database is ahead of $SINCE: crm_leads is already there"; FAILED=1
   else
-    say FAIL "the starting database already has crm_leads"; FAILED=1
+    say FAIL "the starting database is behind $SINCE: crm_leads should be there and is not"; FAILED=1
   fi
 
-  ./scripts/sql/bundle-migrations.sh --since "$SINCE" > "$BUNDLE" || exit 1
+  ./scripts/sql/bundle-migrations.sh $BUNDLE_ARGS > "$BUNDLE" || exit 1
 else
   HAS=$($Q -c "SELECT count(*) FROM pg_proc
                 WHERE proname = 'command_perform'
@@ -93,7 +125,7 @@ else
     say FAIL "the starting database already has command_perform"; FAILED=1
   fi
 
-  ./scripts/sql/bundle-migrations.sh > "$BUNDLE" || exit 1
+  ./scripts/sql/bundle-migrations.sh $BUNDLE_ARGS > "$BUNDLE" || exit 1
 fi
 say ok "bundle written, $(md5sum < "$BUNDLE" | cut -c1-12)"
 

@@ -78,6 +78,19 @@ export const FEATURES: Feature[] = [
     ],
   },
   {
+    id: 'fleetsmart', title: 'FleetSmart+', path: '/dashboard/fleetsmart',
+    /* "Fleet" alone belongs to the stock screen, which had it first and
+       means a set of trailers by it. These all say contract or
+       FleetSmart out loud so neither screen takes the other's word. */
+    aliases: ['fleetsmart', 'fleet smart', 'fleetsmart plus', 'maintenance contract',
+              'maintenance contracts', 'service contract', 'r and m', 'contract builder'],
+    blurb: 'Fixed price maintenance contracts, priced off the rate card',
+    actions: [
+      { label: 'Build a contract', phrase: 'build a maintenance contract' },
+      { label: 'What is with customers', phrase: 'fleetsmart' },
+    ],
+  },
+  {
     id: 'analytics', title: 'Analytics', path: '/dashboard/analytics',
     aliases: ['analytics', 'reports', 'reporting', 'figures', 'numbers', 'performance', 'revenue', 'profit', 'leaderboard', 'targets'],
     blurb: 'Revenue, profit, leaderboard and stock mix',
