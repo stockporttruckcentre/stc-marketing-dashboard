@@ -153,10 +153,19 @@ export function EntryDrawer({
 
   const [invites, setInvites] = useState<DiaryInvite[]>([]);
   const [guests, setGuests] = useState<DiaryGuest[]>(initialGuests);
+  /* Somebody typed in before the entry has been booked.
+
+     A guest is a row against a meeting, so there is nothing to write
+     until the meeting exists. Telling somebody to save first and come
+     back is the wrong answer to "make an entry and add James to it":
+     they are booking one meeting, not doing two jobs. So they are held
+     here, shown on the list straight away, and written the moment the
+     entry has an id. */
+  const [pending, setPending] = useState<{ name: string; email: string }[]>([]);
   const [messages, setMessages] = useState<InviteMessage[]>([]);
   /* The link for a guest just added, shown once. There is no transport
      here, so this is how the invitation gets to them. */
-  const [freshLink, setFreshLink] = useState<{ who: string; link: string } | null>(null);
+  const [freshLink, setFreshLink] = useState<{ who: string; link: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
   const [loadingInvites, setLoadingInvites] = useState(!isNew);
   const [proposing, setProposing] = useState<{ inviteId: string; at: string } | null>(null);
@@ -206,25 +215,40 @@ export function EntryDrawer({
       /* A meeting being booked has no invitations yet, so the list is
          whoever is in the form. Shown with no status, which is honest:
          nobody has been asked until it is saved. */
-      return draft.attendees.map((a, i) => ({
-        key: a.user_id ?? `new-${i}`,
-        name: a.name,
-        email: a.email ?? null,
-        userId: a.user_id ?? null,
-        status: null,
-        inviteId: null,
-        guestId: null,
-        awaited: false,
-        organiser: a.user_id === meId,
-        external: !a.user_id,
-        seenAt: null,
-      }));
+      return [
+        ...draft.attendees.map((a, i) => ({
+          key: a.user_id ?? `new-${i}`,
+          name: a.name,
+          email: a.email ?? null,
+          userId: a.user_id ?? null,
+          status: null,
+          inviteId: null,
+          guestId: null,
+          awaited: false,
+          organiser: a.user_id === meId,
+          external: !a.user_id,
+          seenAt: null,
+        })),
+        ...pending.map((g, i) => ({
+          key: `pending-${i}`,
+          name: g.name || g.email,
+          email: g.email || null,
+          userId: null,
+          status: null,
+          inviteId: null,
+          guestId: null,
+          awaited: false,
+          organiser: false,
+          external: true,
+          seenAt: null,
+        })),
+      ];
     }
     return attendeesOf(
       { ...event, attendees: draft.attendees },
       { invites, guests, people: peopleById },
     );
-  }, [event, draft.attendees, invites, guests, peopleById, meId]);
+  }, [event, draft.attendees, invites, guests, peopleById, meId, pending]);
 
   const mine = attendees.find((a) => a.userId === meId && a.inviteId);
   const company = draft.contactId
@@ -257,11 +281,41 @@ export function EntryDrawer({
       const json = await res.json();
       if (!json.ok) { setError(json.message ?? 'That did not save.'); return; }
 
+      /* Anybody typed in before the entry existed, written now that it
+         does. One at a time rather than in a batch, because a name that
+         will not take should not take the other three with it. */
+      const newId = (json.event as { id?: string } | undefined)?.id ?? draft.id;
+      let added = 0;
+      const refused: string[] = [];
+      if (newId && pending.length) {
+        for (const g of pending) {
+          try {
+            const one = await (await fetch(`/api/calendar/events/${newId}/guests`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ email: g.email, name: g.name, contact_id: draft.contactId }),
+            })).json();
+            if (one.ok) added += 1;
+            else refused.push(g.name || g.email);
+          } catch {
+            refused.push(g.name || g.email);
+          }
+        }
+        setPending([]);
+      }
+
       const asked = json.invited > 0
         ? ` ${json.invited} ${json.invited === 1 ? 'person has' : 'people have'} been asked.`
         : '';
+      const guested = added > 0
+        ? ` ${added} ${added === 1 ? 'other person is' : 'others are'} on it.`
+        : '';
+      const missed = refused.length
+        ? ` ${refused.join(' and ')} could not be added, so add them again from the entry.`
+        : '';
+
       onSaved((json.warning as string | undefined)
-        ?? `${draft.title} is in the diary.${asked}`);
+        ?? `${draft.title} is in the diary.${asked}${guested}${missed}`);
     } catch {
       setError('That did not reach the server. Try again.');
     } finally {
@@ -317,7 +371,11 @@ export function EntryDrawer({
      and a meeting being typed does not have an id yet. On a new one the
      footer says so rather than the field failing quietly. */
   async function askGuest(email: string, name: string) {
-    if (!draft.id) return;
+    if (!draft.id) {
+      /* Nothing to write against yet. Held, and written by `save`. */
+      setPending((p) => [...p, { name, email }]);
+      return;
+    }
     setBusy(true); setError(null); setCopied(false);
     try {
       const res = await fetch(`/api/calendar/events/${draft.id}/guests`, {
@@ -327,7 +385,10 @@ export function EntryDrawer({
       });
       const json = await res.json();
       if (!json.ok) { setError(json.message ?? 'That did not go through.'); return; }
-      setFreshLink({ who: json.guest.name || json.guest.email, link: json.link });
+      setFreshLink({
+        who: json.guest.name || json.guest.email,
+        link: (json.link as string | undefined) ?? null,
+      });
       await refreshGuests();
     } catch {
       setError('That did not reach the server. Try again.');
@@ -505,6 +566,16 @@ export function EntryDrawer({
                 </IconButton>
               )}
 
+              {a.key.startsWith('pending-') && (
+                <IconButton
+                  label={`Take ${a.name} back off`}
+                  onClick={() => setPending((p) =>
+                    p.filter((_, i) => `pending-${i}` !== a.key))}
+                >
+                  <X size={13} />
+                </IconButton>
+              )}
+
               {/* The organiser's controls on somebody else's invitation. */}
               {!isNew && event?.created_by === meId && a.inviteId && !a.organiser && (
                 <IconButton
@@ -540,23 +611,32 @@ export function EntryDrawer({
           />
         )}
 
-        {may('crm.delegate') && (
-          <AddGuest
-            saved={Boolean(draft.id)}
-            busy={busy}
-            onAsk={askGuest}
-          />
+        {may('crm.delegate') && <AddGuest busy={busy} onAsk={askGuest} />}
+
+        {/* Confirmation, and the link where there is one.
+
+            Most of the time there is not: somebody added by name has
+            nothing to answer, so they get a line saying they are on it
+            and no link. Offering one for a name would be offering
+            something with no use.
+
+            Where there is an address the link is shown once, because
+            this application cannot send it and, on the VPN, a customer
+            cannot open it. It is here for whoever can reach the
+            application and for the day that changes. */}
+        {freshLink && !freshLink.link && (
+          <div style={{
+            margin: '0 14px 12px', padding: '9px 11px', borderRadius: 'var(--r)',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+            borderLeft: '2px solid var(--success)',
+            fontSize: 12.5, color: 'var(--text-muted)',
+          }}>
+            <span style={{ color: 'var(--text)', fontWeight: 600 }}>{freshLink.who}</span>
+            {' '}is on the meeting. Everybody who can see it can see them.
+          </div>
         )}
 
-        {/* The link, once, for the guest just added.
-
-            There is no way to send it from here: this application has no
-            outbound mail transport, and single sign on is coming, so
-            nothing has been built that is about to be replaced. What
-            makes the feature usable today is that the link works the
-            moment it exists, so it goes into whatever the organiser
-            already sends mail from. */}
-        {freshLink && (
+        {freshLink?.link && (
           <div style={{
             margin: '0 14px 12px', padding: 11, borderRadius: 'var(--r)',
             background: 'var(--surface-sunken)', border: '1px solid var(--border)',
@@ -564,18 +644,18 @@ export function EntryDrawer({
             display: 'flex', flexDirection: 'column', gap: 8,
           }}>
             <span style={{ fontSize: 12.5, color: 'var(--text)' }}>
-              {freshLink.who} is on the meeting. Send them this link and their answer comes
-              straight back here.
+              {freshLink.who} is on the meeting. This link lets them answer, if they can reach
+              this application from where they are.
             </span>
             <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <TextInput value={freshLink.link} readOnly onChange={() => undefined} />
+                <TextInput value={freshLink.link ?? ''} readOnly onChange={() => undefined} />
               </div>
               <Button
                 size="sm"
                 variant={copied ? 'secondary' : 'primary'}
                 onClick={() => {
-                  void navigator.clipboard?.writeText(freshLink.link);
+                  void navigator.clipboard?.writeText(freshLink.link ?? '');
                   setCopied(true);
                 }}
               >
@@ -966,53 +1046,66 @@ function History({
  * people the feature does not exist.
  */
 function AddGuest({
-  saved, busy, onAsk,
+  busy, onAsk,
 }: {
-  saved: boolean;
   busy: boolean;
   onAsk: (email: string, name: string) => void;
 }) {
-  const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
 
-  const looksRight = /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email.trim());
+  /* The name is what this is for. Most of the time it is the whole of
+     it: writing Wayne down so the sales team can see Wayne is in it.
+     The address is the optional half, and it is second because it is
+     the rarer one. */
+  const emailLooksRight = email.trim() === ''
+    || /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email.trim());
+  const ready = (name.trim() !== '' || email.trim() !== '') && emailLooksRight;
 
   return (
     <div style={{
       padding: '11px 14px', borderTop: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', gap: 9,
     }}>
-      <Label>Somebody outside the business</Label>
+      <Label>Anybody else on it</Label>
 
-      {!saved ? (
-        <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
-          Book the entry first. A guest is asked to a meeting, so there has to be a meeting.
-        </span>
-      ) : (
-        <>
+      <>
           <Split cols={2}>
-            <Field label="Their email">
-              <TextInput value={email} onChange={setEmail} placeholder="ops@dawsongroup.co.uk" />
+            <Field label="Name">
+              <TextInput
+                value={name} onChange={setName}
+                placeholder="Wayne"
+                onKeyDown={(e) => { if (e.key === 'Enter' && ready) ask(); }}
+              />
             </Field>
-            <Field label="Their name" hint="Optional.">
-              <TextInput value={name} onChange={setName} placeholder="Julie Barnes" />
+            <Field
+              label="Email"
+              hint="Optional. Only needed if they are going to answer."
+              error={emailLooksRight ? undefined : 'That is not an email address.'}
+            >
+              <TextInput
+                value={email} onChange={setEmail}
+                placeholder="ops@dawsongroup.co.uk"
+                invalid={!emailLooksRight}
+                onKeyDown={(e) => { if (e.key === 'Enter' && ready) ask(); }}
+              />
             </Field>
           </Split>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <Button
-              size="sm" variant="secondary"
-              disabled={busy || !looksRight}
-              onClick={() => { onAsk(email.trim(), name.trim()); setEmail(''); setName(''); }}
-            >
+            <Button size="sm" variant="secondary" disabled={busy || !ready} onClick={ask}>
               <UserPlus size={13} /> Add them
             </Button>
             <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', flex: 1 }}>
-              They answer through a link. No account, nothing to sign in to, and everybody on the
-              meeting sees what they said.
+              A name is enough. Everybody who can see the meeting can see who is on it.
             </span>
           </div>
-        </>
-      )}
+      </>
     </div>
   );
+
+  function ask() {
+    onAsk(email.trim(), name.trim());
+    setName('');
+    setEmail('');
+  }
 }

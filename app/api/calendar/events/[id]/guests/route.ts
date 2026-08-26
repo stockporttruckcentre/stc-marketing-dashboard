@@ -37,7 +37,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '';
 
-  if (!email || !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+  /* A name is enough. Most of the time that is all there is: putting
+     Wayne on a meeting so the sales team can see Wayne is in it. An
+     address as well gives them a link, which is worth having on the day
+     this application is reachable from outside the VPN and is a record
+     of who they are until then. */
+  if (!email && !name) {
+    return NextResponse.json(
+      { ok: false, error: 'bad_request', message: 'Give them a name, or an email address, or both.' },
+      { status: 400 },
+    );
+  }
+  if (email && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
     return NextResponse.json(
       { ok: false, error: 'bad_request', message: 'That is not an email address.' },
       { status: 400 },
@@ -59,12 +70,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  const guest = data as { id: string; token: string; email: string; name: string };
+  const guest = data as { id: string; token: string; email: string | null; name: string };
+  const who = guest.name || guest.email || 'They';
+
+  /* The link only comes back where there is somewhere to send it. A
+     name on a meeting has nothing to answer and offering a link for one
+     would be offering something with no use. */
   return NextResponse.json({
     ok: true,
     guest: { id: guest.id, email: guest.email, name: guest.name },
-    link: invitationLink(req, guest.token),
-    message: `${guest.name || guest.email} is on the meeting. Send them the link so they can answer.`,
+    ...(guest.email ? { link: invitationLink(req, guest.token) } : {}),
+    message: guest.email
+      ? `${who} is on the meeting. The link lets them answer, if they can reach this application.`
+      : `${who} is on the meeting. Everybody who can see it can see them.`,
   });
 }
 
