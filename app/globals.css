@@ -2204,6 +2204,30 @@ textarea.input { height: auto; min-height: 80px; padding: 10px; line-height: 1.4
 .side-picker__opt > strong { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
 
 
+/* =============================================================
+   The drawer body keeps its panels at their own height.
+
+   The body is a flex column that scrolls. Its children default to
+   flex-shrink: 1, so instead of overflowing and letting the body
+   scroll, a tall panel gets squashed to fit. A panel with
+   overflow: hidden on it, which is every panel in the kit because
+   that is what keeps a rounded corner rounded, then clips its own
+   fields rather than showing them.
+
+   Measured on the diary drawer at 1080p and 125% scaling: the body
+   reported scrollHeight equal to clientHeight, so it could not
+   scroll at all, while the two panels inside it were hiding 219px
+   and 141px of content. Half the fields on each, and no way to
+   reach them.
+
+   One rule, in one place, because there are twelve drawers and this
+   is true of all of them. A caller that genuinely wants a child to
+   fill the remaining height still can: an inline flex: 1 beats a
+   class.
+   ============================================================= */
+.kit-drawer-body > * { flex: 0 0 auto; }
+
+
 /* Stock trailer status pills */
 .pill--in_stock    { background: rgba(46,160,67,0.15);  color: #5fb572;  border: 1px solid rgba(46,160,67,0.35); }
 .pill--in_stock    .pill__dot { background: #5fb572; }
