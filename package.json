@@ -36,6 +36,7 @@
     "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh",
     "check:work": "bash scripts/sql/work-check.sh",
     "check:content": "bash scripts/sql/content-check.sh",
+    "check:anon": "bash scripts/sql/anon-check.sh",
     "check:diary": "bash scripts/sql/calendar-check.sh",
     "check:calendar": "tsx scripts/calendar-check.ts",
     "check:price": "tsx scripts/fleetsmart-price-check.ts",
