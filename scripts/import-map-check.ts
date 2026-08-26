@@ -149,7 +149,46 @@ check('the dropped column is named and explained',
 
 check('the counts add up',
   countPlan(plan),
-  { create: 2, skip: 3, merge: 0, withIssues: 2, duplicates: 2, dropped: 1, unknown: 0 });
+  { create: 2, skip: 3, attach: 0, withIssues: 2, duplicates: 2, dropped: 1, unknown: 0 });
+
+/* ---------- a company that is in the CRM but not on this list ----------
+
+   Dean imports his customer sheet onto his own list. Half of it is
+   already in the CRM on the shared pipeline. Checking only the list on
+   screen found nothing, so every one of those was written again, which
+   is the duplicate problem coming back through the front door on the
+   day somebody first used the tab.
+
+   It is not a new company and it is not a row to drop either: it is
+   that company, and it goes onto this list as well. */
+const elsewhere = [
+  { id: 'x1', company_name: 'Dawson Group', email: 'buy@dawson.co.uk', onThisList: false },
+];
+const crossList = buildPlan(matchColumns(headers, rows), rows, elsewhere, CRM_CONTACTS);
+
+check('a company on another list is recognised, not imported again',
+  crossList.rows[4].duplicateOf?.id, 'x1');
+check('and it says it is elsewhere in the CRM',
+  crossList.rows[4].duplicateOf?.onThisList, false);
+check('so the default is to put it on this list rather than skip it',
+  crossList.rows[4].decision, 'attach');
+check('it is counted as something to attach, not something to create',
+  [countPlan(crossList).attach, countPlan(crossList).create], [1, 2]);
+
+/* And a match on the list somebody has open still needs nothing. */
+check('a company already on this list is still left alone',
+  buildPlan(matchColumns(headers, rows), rows,
+    [{ id: 'x1', company_name: 'Dawson Group', email: 'buy@dawson.co.uk', onThisList: true }],
+    CRM_CONTACTS).rows[4].decision,
+  'skip');
+
+/* A dictionary with no lists behind it, like the stock list, says
+   nothing about where a match lives and every match is right here. */
+check('a table with no lists treats every match as already here',
+  buildPlan(matchColumns(headers, rows), rows,
+    [{ id: 'x1', company_name: 'Dawson Group', email: 'buy@dawson.co.uk' }],
+    CRM_CONTACTS).rows[4].decision,
+  'skip');
 
 /* ---------- stock, where the same header means something else ---------- */
 

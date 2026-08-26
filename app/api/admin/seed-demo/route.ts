@@ -121,28 +121,47 @@ export async function POST(req: NextRequest) {
   const fullName: string = target.full_name || target.email;
   const initials = fullName.split(/\s+/).map((s: string) => s[0]).join('').toUpperCase();
 
-  // The rep's tracker list, created if missing, exactly as the tracker page does.
-  const trackerName = `${fullName.split(' ')[0]}'s Sales tracker`;
-  let { data: list } = await supabase.from('crm_lists').select('id')
-    .eq('owner_id', target.id).eq('is_global', false)
-    .ilike('name', '%Sales tracker%').limit(1).maybeSingle();
-  if (!list && mode === 'seed') {
-    const { data: created, error } = await supabase.from('crm_lists').insert({
-      name: trackerName, owner_id: target.id, is_global: false, color: '#cf2417',
-      description: 'Personal sales pipeline',
-    }).select('id').single();
-    if (error) return NextResponse.json({ error: `could not create tracker list: ${error.message}` }, { status: 500 });
-    list = created;
-  }
-  const listId = (list as any)?.id;
+  /* WHERE THE DEMO ACCOUNTS GO.
+
+     This used to make the rep a private tracker list and write every
+     deal onto it as a company. That is the shape the duplicates came
+     from: TIP Trailers is quoted for more work below and has already
+     bought from us, and one company written twice is two companies.
+
+     Accounts go on the shared pipeline, the same place a real one goes,
+     and each pitch is a lead against the account. TIP Trailers ends up
+     as one customer with three pitches, which is the thing worth
+     showing somebody. */
+  const { data: pipeline } = await supabase.from('crm_lists')
+    .select('id, name').eq('is_global', true).limit(1).maybeSingle();
+  const pipelineId = (pipeline as any)?.id as string | undefined;
+  const pipelineName = (pipeline as any)?.name ?? 'CRM pipeline';
 
   // ---------------- wipe ----------------
   const wiped: Record<string, number> = {};
-  if (listId) {
-    const { data: gone } = await supabase.from('crm_contacts').delete()
-      .eq('list_id', listId).eq('source', DEMO).select('id');
-    wiped.deals = gone?.length ?? 0;
+
+  const { data: goneLeads } = await supabase.from('crm_leads').delete()
+    .eq('owner_id', target.id).like('notes', `${DEMO}%`).select('id');
+  wiped.leads = goneLeads?.length ?? 0;
+
+  /* The accounts go too, but only the ones nothing points at any more.
+     A demo company somebody has since raised a real lead against is a
+     real customer now, and deleting it takes their lead with it. */
+  const { data: demoAccounts } = await supabase.from('crm_contacts')
+    .select('id').eq('source', DEMO);
+  const demoIds = ((demoAccounts ?? []) as { id: string }[]).map((r) => r.id);
+  if (demoIds.length) {
+    const { data: stillPitched } = await supabase.from('crm_leads')
+      .select('contact_id').in('contact_id', demoIds);
+    const keep = new Set(((stillPitched ?? []) as { contact_id: string }[]).map((r) => r.contact_id));
+    const removable = demoIds.filter((id) => !keep.has(id));
+    if (removable.length) {
+      const { data: gone } = await supabase.from('crm_contacts').delete()
+        .in('id', removable).select('id');
+      wiped.accounts = gone?.length ?? 0;
+    }
   }
+
   const { data: goneStock } = await supabase.from('stock_trailers').delete()
     .like('stc_no', 'DEMO-%').select('id');
   wiped.stock = goneStock?.length ?? 0;
@@ -160,48 +179,78 @@ export async function POST(req: NextRequest) {
   }
 
   // ---------------- seed ----------------
-  if (!listId) return NextResponse.json({ error: 'no tracker list' }, { status: 500 });
+  if (!pipelineId) {
+    return NextResponse.json({
+      error: 'there is no shared CRM pipeline to put the demo accounts on',
+    }, { status: 500 });
+  }
   const created: Record<string, number> = {};
 
-  const dealRows = [
+  // One account per company, however many times it is pitched to below.
+  const companies = new Map<string, string>();
+  for (const p of PIPELINE) if (!companies.has(p.company)) companies.set(p.company, p.contact);
+  for (const c of CLOSED) if (!companies.has(c.company)) companies.set(c.company, c.contact);
+
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  const accountRows = [...companies].map(([company, contact], i) => ({
+    source: DEMO, side: 'trailer_sales',
+    company_name: company, contact_name: contact,
+    email: `${contact.split(' ')[0].toLowerCase()}@${slug(company)}.co.uk`,
+    phone: `0161 4${String(100000 + i * 4177).slice(0, 6)}`,
+    assigned_to: fullName.split(' ')[0],
+    account_manager: initials,
+    location: 'North West',
+    last_activity_at: iso(ago(1)),
+  }));
+
+  const accountsRes = await insertTolerant(supabase, 'crm_contacts', accountRows, 'id, company_name');
+  if (accountsRes.error) {
+    return NextResponse.json({ error: `accounts: ${accountsRes.error.message}` }, { status: 500 });
+  }
+  const accounts = accountsRes.data ?? [];
+  created.accounts = accounts.length;
+
+  const byName = new Map(accounts.map((a: any) => [a.company_name, a.id as string]));
+
+  const { error: memberErr } = await supabase.from('crm_list_contacts')
+    .insert(accounts.map((a: any) => ({ list_id: pipelineId, contact_id: a.id })));
+  if (memberErr) {
+    return NextResponse.json({ error: `pipeline: ${memberErr.message}` }, { status: 500 });
+  }
+
+  /* The pitches. Some deliberately stale, so "gone quiet" has something
+     to find, and the closed ones so the revenue figures are not zero. */
+  const leadRows = [
     ...PIPELINE.map((p) => ({
-      list_id: listId, source: DEMO, side: 'trailer_sales',
-      company_name: p.company, contact_name: p.contact,
-      email: `${p.contact.split(' ')[0].toLowerCase()}@${p.company.toLowerCase().replace(/[^a-z]/g, '')}.co.uk`,
-      phone: '01614 ' + String(100000 + Math.floor(p.value % 899999)).slice(0, 6),
-      status: p.status,
+      contact_id: byName.get(p.company), owner_id: target.id, created_by: target.id,
+      type: 'trailer_sales', status: p.status,
       estimated_value: p.value,
-      vehicles: p.vehicles,
-      assigned_to: fullName.split(' ')[0],
-      account_manager: initials,
-      date_of_enquiry: day(ago(p.quietDays + 6)),
-      last_contact: day(ago(p.quietDays)),
-      last_activity_at: iso(ago(p.quietDays)),
-      description: `${p.vehicles} unit requirement, ${p.status === 'quoted' ? 'quote issued' : 'initial discussion'}`,
+      what: `${p.vehicles} unit requirement`,
       requirement: 'Trailer supply',
-      location: 'North West',
+      new_or_used: 'Used',
+      rep_initials: initials,
+      date_of_enquiry: day(ago(p.quietDays + 6)),
+      last_activity_at: iso(ago(p.quietDays)),
+      notes: `${DEMO} ${p.status === 'quoted' ? 'Quote issued' : 'Initial discussion'}`,
     })),
     ...CLOSED.map((c) => ({
-      list_id: listId, source: DEMO, side: 'trailer_sales',
-      company_name: c.company, contact_name: c.contact,
-      email: `${c.contact.split(' ')[0].toLowerCase()}@${c.company.toLowerCase().replace(/[^a-z]/g, '')}.co.uk`,
-      status: 'customer',
+      contact_id: byName.get(c.company), owner_id: target.id, created_by: target.id,
+      type: 'trailer_sales', status: 'customer',
       sale_price: c.sale, profit: c.profit,
       commission: Number((c.profit * 0.1).toFixed(2)), commission_rate: 0.1,
+      rep_initials: initials,
       order_date: day(ago(c.daysAgo)),
       dispatch_date: day(ago(Math.max(0, c.daysAgo - 5))),
-      assigned_to: fullName.split(' ')[0],
-      account_manager: initials,
       date_of_enquiry: day(ago(c.daysAgo + 30)),
       last_activity_at: iso(ago(c.daysAgo)),
-      location: 'North West',
+      notes: `${DEMO} Delivered and invoiced`,
     })),
   ];
 
-  const dealsRes = await insertTolerant(supabase, 'crm_contacts', dealRows, 'id, company_name');
-  if (dealsRes.error) return NextResponse.json({ error: `deals: ${dealsRes.error.message}` }, { status: 500 });
-  const deals = dealsRes.data;
-  created.deals = deals?.length ?? 0;
+  const leadsRes = await insertTolerant(supabase, 'crm_leads', leadRows, 'id');
+  if (leadsRes.error) return NextResponse.json({ error: `leads: ${leadsRes.error.message}` }, { status: 500 });
+  created.leads = leadsRes.data?.length ?? 0;
+
 
   const stockRes = await insertTolerant(supabase, 'stock_trailers', [
     ...SOLD_STOCK.map((s) => ({
@@ -221,7 +270,6 @@ export async function POST(req: NextRequest) {
   created.stock = stockRes.data?.length ?? 0;
 
   // Meetings: two today so the action queue is populated, plus the week.
-  const byName = new Map((deals ?? []).map((d: any) => [d.company_name, d.id]));
   const meetings = [
     { title: `${DEMO} Call with Dawson Group`,      at: ahead(0, new Date().getHours() + 1), company: 'Dawson Group' },
     { title: `${DEMO} Site visit, Culina Logistics`,at: ahead(0, new Date().getHours() + 3), company: 'Culina Logistics' },
@@ -261,16 +309,16 @@ export async function POST(req: NextRequest) {
   optional.targets = targetErr ? `skipped: ${targetErr.message}` : 'seeded';
 
   const { error: ownErr } = await supabase.from('account_ownership').insert(
-    (deals ?? []).slice(0, 10).map((d: any) => ({ contact_id: d.id, user_id: target.id, role_on_account: 'owner' })),
+    accounts.slice(0, 10).map((a: any) => ({ contact_id: a.id, user_id: target.id, role_on_account: 'owner' })),
   );
   optional.account_ownership = ownErr ? `skipped: ${ownErr.message}` : 'seeded';
 
   const skippedColumns = Array.from(new Set([
-    ...dealsRes.dropped, ...stockRes.dropped, ...eventsRes.dropped,
+    ...accountsRes.dropped, ...leadsRes.dropped, ...stockRes.dropped, ...eventsRes.dropped,
   ]));
 
   return NextResponse.json({
-    ok: true, mode, target: fullName, list: trackerName,
+    ok: true, mode, target: fullName, list: pipelineName,
     wiped, created, optional,
     skippedColumns: skippedColumns.length ? skippedColumns : undefined,
     migrationNote: skippedColumns.length

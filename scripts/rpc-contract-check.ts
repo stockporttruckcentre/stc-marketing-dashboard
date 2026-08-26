@@ -40,6 +40,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { FUNCTIONS, PROJECTIONS } from '../lib/command/store/postgrest';
+import { CAPABILITIES, entities, entity } from '../lib/command/ir/registry';
+import { TABLES } from '../lib/command/columns';
 
 /* -------------------------------------------------------------
    What the code calls
@@ -147,6 +149,83 @@ function expected(): Expected[] {
  * query reports what the database has beside it. It reads catalogues
  * only: nothing here writes, and nothing here needs a service role.
  */
+/* -------------------------------------------------------------
+   What columns the code reads
+   -------------------------------------------------------------
+
+   A function that is present and a column that is not fail the same
+   way: the command works everywhere it is tested and refuses against
+   the real database. Two of these were live at once.
+
+     column crm_contacts.website does not exist
+
+   `contact.enrich` declared it read the website from a `website`
+   column. The website lives inside `links`, and `crm_contacts` has
+   never had that column, so every Lusha lookup from a sentence failed
+   on a column name nobody typed.
+
+   The list is read out of the code: every column the command layer
+   declares it knows about, and every column a capability says it reads
+   an input from. Adding either without adding the column is caught
+   here rather than by somebody in Bredbury.
+   ------------------------------------------------------------- */
+type WantedColumn = { table: string; column: string; why: string };
+
+export function expectedColumns(): WantedColumn[] {
+  const out = new Map<string, WantedColumn>();
+  const add = (table: string, column: string, why: string) => {
+    if (!table || !column) return;
+    const key = `${table}.${column}`;
+    if (!out.has(key)) out.set(key, { table, column, why });
+  };
+
+  for (const t of TABLES) {
+    for (const c of t.columns) add(t.table, c.name, `declared on ${t.label}`);
+  }
+
+  for (const cap of CAPABILITIES) {
+    const on = cap.entities?.[0];
+    const table = on ? entity(on)?.table : null;
+    if (!table) continue;
+    for (const i of cap.inputs ?? []) {
+      if (i.from) add(table, i.from, `${cap.id} reads ${i.key} from it`);
+      if (i.shows) add(table, i.shows, `${cap.id} shows it beside ${i.key}`);
+    }
+  }
+
+  for (const e of entities()) {
+    if (e.titleField) add(e.table, e.titleField, `what names a ${e.label}`);
+  }
+
+  return [...out.values()].sort((a, b) => `${a.table}.${a.column}`.localeCompare(`${b.table}.${b.column}`));
+}
+
+export function columnSql(list: WantedColumn[] = expectedColumns()): string {
+  const rows = list.map((c) => `    ('${c.table}', '${c.column}')`).join(',\n');
+  return `-- What columns this branch's command runtime reads, and whether
+-- this database has them. Reads catalogues only: no writes, no data.
+WITH wanted(tbl, col) AS (
+  VALUES
+${rows}
+)
+SELECT * FROM (
+SELECT w.tbl || '.' || w.col AS name,
+       CASE
+         WHEN NOT EXISTS (SELECT 1 FROM information_schema.tables t
+                           WHERE t.table_schema = 'public' AND t.table_name = w.tbl)
+           THEN 'MISSING TABLE'
+         WHEN NOT EXISTS (SELECT 1 FROM information_schema.columns c
+                           WHERE c.table_schema = 'public'
+                             AND c.table_name = w.tbl AND c.column_name = w.col)
+           THEN 'MISSING COLUMN'
+         ELSE 'ok'
+       END AS state
+  FROM wanted w
+) AS answer
+ ORDER BY state <> 'ok' DESC, name;
+`;
+}
+
 export function contractSql(list: Expected[] = expected()): string {
   const rows = list.map((e) => `    ('${e.name}', ARRAY[${
     e.args.map((a) => `'${a}'`).join(', ')}]::TEXT[], '${e.role}')`).join(',\n');
@@ -199,6 +278,7 @@ function main() {
 
   if (process.argv.includes('--sql')) {
     console.log(contractSql(list));
+    console.log(columnSql());
     return;
   }
 
@@ -225,8 +305,25 @@ function main() {
   for (const [name, state] of rows) {
     console.log(`   ${state === 'ok' ? ' ok ' : 'FAIL'}  ${name.padEnd(30)} ${state === 'ok' ? '' : state}`);
   }
-  console.log(`\n  ${rows.length - bad.length}/${rows.length} callable, with the argument names PostgREST matches on.\n`);
-  if (bad.length) process.exitCode = 1;
+  console.log(`\n  ${rows.length - bad.length}/${rows.length} callable, with the argument names PostgREST matches on.`);
+
+  /* And the columns. A function that is present and a column that is
+     not fail the same way, and only one of the two was ever checked. */
+  const wantedColumns = expectedColumns();
+  const colOut = execFileSync(
+    PSQL,
+    ['-p', '55432', '-U', 'postgres', '-d', 'stctest', '-tAq', '-v', 'ON_ERROR_STOP=1',
+     '-c', columnSql(wantedColumns)],
+    { env: { ...process.env, PGHOST: SOCKET }, encoding: 'utf8' },
+  );
+  const colRows = colOut.trim().split('\n').filter(Boolean).map((l) => l.split('|'));
+  const badCols = colRows.filter((r) => r[1] !== 'ok');
+  for (const [name, state] of badCols) {
+    const why = wantedColumns.find((c) => `${c.table}.${c.column}` === name)?.why ?? '';
+    console.log(`   FAIL  ${name.padEnd(40)} ${state}${why ? `, ${why}` : ''}`);
+  }
+  console.log(`  ${colRows.length - badCols.length}/${colRows.length} columns the runtime reads are really there.\n`);
+  if (bad.length || badCols.length) process.exitCode = 1;
 }
 
 main();

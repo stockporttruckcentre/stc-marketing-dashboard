@@ -76,10 +76,17 @@ function phraseFor(column: string, label: string): string {
 /** `fields.ts` names its entities slightly differently from `schema.ts`. */
 function sameEntity(fieldEntity: string, entityId: string): boolean {
   if (fieldEntity === entityId) return true;
-  /* A proposal and a customer are rows in the same table, so a field on
-     one is reachable from the other. */
-  return (fieldEntity === 'contacts' && entityId === 'deals')
-      || (fieldEntity === 'deals' && entityId === 'contacts');
+  /* `deals` and `leads` are one thing under two names: the entity people
+     ask questions about is called `deals`, the entity people edit is
+     called `leads`, and both are `crm_leads`.
+     
+     A customer used to be here too, because a proposal and a customer
+     were rows in the same table and a field on one was reachable from
+     the other. Migration 040 ended that, and leaving it would mean "set
+     the sale price on Dawson" quietly writing a deal column onto a
+     company. */
+  return (fieldEntity === 'leads' && entityId === 'deals')
+      || (fieldEntity === 'deals' && entityId === 'leads');
 }
 
 const CACHE = new Map<string, NamedColumn[]>();

@@ -99,14 +99,16 @@ export const TABLES: TableSpec[] = [
       { name: 'email', kind: 'text' },
       { name: 'phone', kind: 'text' },
       { name: 'source', kind: 'text' },
-      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
+      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'],
+        writable: false, why: 'derived from the state of the account\'s leads, migration 043' },
       { name: 'fleet_size', kind: 'number', writable: false, why: 'derived from trucks, trailers and vans by a trigger' },
       { name: 'location', kind: 'text' },
       { name: 'services_interested', kind: 'text' },
       { name: 'notes', kind: 'longtext' },
       { name: 'assigned_to', kind: 'text' },
       { name: 'last_contact', kind: 'date' },
-      { name: 'list_id', kind: 'system', writable: false, why: 'moved with the move to list action, not typed' },
+      { name: 'list_id', kind: 'system', writable: false,
+        why: 'kept in step with the lists a company is on, which is crm_list_contacts' },
       { name: 'trucks', kind: 'number' },
       { name: 'trailers', kind: 'number' },
       { name: 'vans', kind: 'number' },
@@ -114,30 +116,55 @@ export const TABLES: TableSpec[] = [
       { name: 'links', kind: 'system', writable: false, why: 'a list of links, edited one at a time' },
       { name: 'employee_count', kind: 'number' },
       { name: 'turnover', kind: 'money' },
-      { name: 'date_of_enquiry', kind: 'date' },
       { name: 'description', kind: 'longtext' },
+      { name: 'account_manager', kind: 'text' },
+      { name: 'category', kind: 'text' },
+      { name: 'vehicles', kind: 'text' },
+      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set by a trigger on notes and status changes' },
+      { name: 'parent_customer_id', kind: 'system', writable: false, why: 'set by linking two accounts' },
+      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing'] },
+    ],
+  },
+  {
+    /*
+       A pitch, which is not something a company has.
+
+       Everything below used to be a column on `crm_contacts`, and the
+       comment two files over said the quiet part: "deals and contacts
+       are two readings of crm_contacts". They are two tables now, so
+       "add £1k refurb value to STC143980" reaches a deal and "add their
+       phone number" reaches a company, and neither can land on the
+       other by accident.
+    */
+    table: 'crm_leads', label: 'leads',
+    lifecycle: { create: 'crm.create', delete: 'crm.delete', attach: 'crm.edit' },
+    columns: [
+      ...SYSTEM,
+      { name: 'contact_id', kind: 'system', writable: false, why: 'the customer it is a pitch to, set when the lead is raised' },
+      { name: 'owner_id', kind: 'system', writable: false, why: 'whose tracker it is on, set when the lead is raised or handed over' },
+      { name: 'shared_with', kind: 'system', writable: false, why: 'who else is working it, changed by sharing rather than typing' },
+      { name: 'type', kind: 'enum', values: ['trailer_sales', 'maintenance', 'rental'] },
+      { name: 'status', kind: 'enum', values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
+      { name: 'what', kind: 'text' },
+      { name: 'requirement', kind: 'longtext' },
       { name: 'new_or_used', kind: 'enum', values: ['New', 'Used'] },
       { name: 'estimated_value', kind: 'money' },
-      { name: 'requirement', kind: 'longtext' },
+      { name: 'date_of_enquiry', kind: 'date' },
       { name: 'action', kind: 'text' },
+      { name: 'next_action', kind: 'text' },
+      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set when the lead moves' },
+      { name: 'stock_trailer_id', kind: 'system', writable: false, why: 'set by linking a trailer to the deal' },
       { name: 'order_date', kind: 'date' },
       { name: 'dispatch_date', kind: 'date' },
       { name: 'sale_price', kind: 'money' },
       { name: 'profit', kind: 'money' },
       { name: 'profit_pct', kind: 'number' },
       { name: 'commission', kind: 'money' },
-      { name: 'side', kind: 'enum', values: ['trailer_sales', 'maintenance'] },
-      { name: 'what', kind: 'text' },
-      { name: 'account_manager', kind: 'text' },
-      { name: 'next_action', kind: 'text' },
-      { name: 'category', kind: 'text' },
-      { name: 'vehicles', kind: 'text' },
-      { name: 'initials', kind: 'text' },
-      { name: 'stock_trailer_id', kind: 'system', writable: false, why: 'set by linking a trailer to the deal' },
       { name: 'commission_rate', kind: 'number' },
-      { name: 'last_activity_at', kind: 'system', writable: false, why: 'set by a trigger on notes and status changes' },
-      { name: 'parent_customer_id', kind: 'system', writable: false, why: 'set by linking two accounts' },
-      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing'] },
+      { name: 'rep_initials', kind: 'text' },
+      { name: 'notes', kind: 'longtext' },
+      { name: 'company_name', kind: 'text', writable: false, why: 'the customer\'s name, kept in step with the account by a trigger' },
+      { name: 'created_by', kind: 'system', writable: false, why: 'who raised it' },
     ],
   },
   {
@@ -299,6 +326,19 @@ export const TABLES: TableSpec[] = [
       { name: 'owner_id', kind: 'system', writable: false, why: 'whoever made it' },
       { name: 'is_global', kind: 'bool', writable: false, why: 'there is exactly one, enforced by an index' },
       { name: 'color', kind: 'text' },
+    ],
+  },
+  {
+    /* Which companies are on which list. A row here is what used to be
+       `crm_contacts.list_id`, and moving it off the company is what
+       makes one Dawson able to appear on the pipeline and on two
+       trackers at once. */
+    table: 'crm_list_contacts', label: 'list membership',
+    columns: [
+      { name: 'list_id', kind: 'system', writable: false, why: 'which list' },
+      { name: 'contact_id', kind: 'system', writable: false, why: 'which company' },
+      { name: 'added_by', kind: 'system', writable: false, why: 'whoever put it there' },
+      { name: 'added_at', kind: 'system', writable: false, why: 'set on insert' },
     ],
   },
   {

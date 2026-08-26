@@ -25,9 +25,32 @@
 # a database that is only part way through is the intended use.
 #
 #   ./scripts/sql/bundle-migrations.sh > /tmp/catch-up.sql
+#
+# A DATABASE THAT IS ONLY A LITTLE BEHIND.
+#
+# `--since <migration>` bundles only what comes AFTER that one in
+# `order.txt`, for a database known to be level up to it. The whole file
+# is always safe to run, so this is a convenience for whoever has to
+# paste it, not a different guarantee: the same one transaction, the
+# same replaces or skips.
+#
+#   ./scripts/sql/bundle-migrations.sh --since 039_rows_forward
 # =============================================================
 set -u
 cd "$(dirname "$0")/../.."
+
+SINCE=""
+if [ "${1:-}" = "--since" ]; then
+  SINCE="${2:-}"
+  if [ -z "$SINCE" ]; then
+    echo "--since needs the name of a migration in order.txt" >&2
+    exit 1
+  fi
+  if ! grep -qx "$SINCE" scripts/sql/order.txt; then
+    echo "no migration called $SINCE in scripts/sql/order.txt" >&2
+    exit 1
+  fi
+fi
 
 # -------------------------------------------------------------
 # Two of these migrations open and close a transaction of their own,
@@ -63,15 +86,27 @@ STRIP_OWN_TRANSACTION='
   if (tags % 2 == 1) inside = 1 - inside;
 }'
 
-echo "-- The command runtime, as one file."
+if [ -n "$SINCE" ]; then
+  echo "-- The command runtime, everything after ${SINCE}, as one file."
+else
+  echo "-- The command runtime, as one file."
+fi
 echo "-- Generated from scripts/sql/order.txt. Do not edit by hand."
 echo "-- Safe to run more than once: every statement replaces or skips."
 echo
 echo "BEGIN;"
 echo
 
+# Everything before and including --since is skipped, in file order.
+skipping=0
+[ -n "$SINCE" ] && skipping=1
+
 while read -r name; do
   case "$name" in ''|\#*) continue ;; esac
+  if [ "$skipping" = "1" ]; then
+    if [ "$name" = "$SINCE" ]; then skipping=0; fi
+    continue
+  fi
   file="supabase/migrations/${name}.sql"
   if [ ! -f "$file" ]; then
     echo "-- MISSING: $file" >&2

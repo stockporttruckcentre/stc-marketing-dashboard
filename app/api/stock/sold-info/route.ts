@@ -20,11 +20,12 @@ export async function POST(req: NextRequest) {
   const sql = postgres(url!, { ssl: 'require', max: 1, idle_timeout: 5, prepare: false });
   try {
     const rows = await sql<any[]>`
+      -- Who sold it. The deal names its owner, so the list that used to
+      -- stand between the two is gone.
       SELECT cc.sale_price, cc.order_date, cc.dispatch_date,
              p.full_name AS sold_by_name, p.email
-      FROM crm_contacts cc
-      JOIN crm_lists l ON cc.list_id = l.id
-      JOIN profiles p ON l.owner_id = p.id
+      FROM crm_leads cc
+      JOIN profiles p ON cc.owner_id = p.id
       WHERE cc.stock_trailer_id = ${body.stock_trailer_id}
         AND cc.status = 'customer'
         AND cc.sale_price IS NOT NULL

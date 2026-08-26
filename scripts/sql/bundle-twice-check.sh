@@ -22,11 +22,24 @@
 # Run as the postgres user, against the disposable server:
 #
 #   su postgres -c "bash scripts/sql/bundle-twice-check.sh"
+#
+# A DATABASE THAT IS ONLY A LITTLE BEHIND.
+#
+# `--since <migration>` is the other case, and the commoner one once a
+# deployment is live: the database is level up to a known migration and
+# the branch has added a few since. It builds the database TO that
+# migration, then applies twice the bundle of everything after it. Same
+# two runs, same rules.
+#
+#   su postgres -c "bash scripts/sql/bundle-twice-check.sh --since 039_rows_forward"
 # =============================================================
 set -u
 export PATH=/usr/lib/postgresql/16/bin:$PATH
 export PGHOST=/var/tmp/pgtest
 cd "$(dirname "$0")/../.."
+
+SINCE=""
+if [ "${1:-}" = "--since" ]; then SINCE="${2:-}"; fi
 
 DB=stcpreview
 BUNDLE=/var/tmp/pgtest/catch-up-twice.sql
@@ -52,16 +65,36 @@ for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"    >/dev/null 2>&1; don
 $P -f supabase/schema.sql                                   >/dev/null 2>&1
 for m in supabase/migrations/00[1-6]*.sql; do $P -f "$m"    >/dev/null 2>&1; done
 
-HAS=$($Q -c "SELECT count(*) FROM pg_proc
-              WHERE proname = 'command_perform'
-                AND pronamespace = 'public'::REGNAMESPACE")
-if [ "$HAS" = "0" ]; then
-  say ok "behind: command_perform is absent, as a stale deployment has it"
-else
-  say FAIL "the starting database already has command_perform"; FAILED=1
-fi
+if [ -n "$SINCE" ]; then
+  # Level up to and including $SINCE, which is where the live database is.
+  while read -r name; do
+    case "$name" in ''|\#*) continue ;; esac
+    $P -v ON_ERROR_STOP=1 -f "supabase/migrations/${name}.sql" >/dev/null 2>&1 || {
+      say FAIL "could not build the starting state: $name"; exit 1; }
+    [ "$name" = "$SINCE" ] && break
+  done < scripts/sql/order.txt
 
-./scripts/sql/bundle-migrations.sh > "$BUNDLE" || exit 1
+  LEADS=$($Q -c "SELECT count(*) FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = 'crm_leads'")
+  if [ "$LEADS" = "0" ]; then
+    say ok "behind: level to $SINCE, and crm_leads is not there yet"
+  else
+    say FAIL "the starting database already has crm_leads"; FAILED=1
+  fi
+
+  ./scripts/sql/bundle-migrations.sh --since "$SINCE" > "$BUNDLE" || exit 1
+else
+  HAS=$($Q -c "SELECT count(*) FROM pg_proc
+                WHERE proname = 'command_perform'
+                  AND pronamespace = 'public'::REGNAMESPACE")
+  if [ "$HAS" = "0" ]; then
+    say ok "behind: command_perform is absent, as a stale deployment has it"
+  else
+    say FAIL "the starting database already has command_perform"; FAILED=1
+  fi
+
+  ./scripts/sql/bundle-migrations.sh > "$BUNDLE" || exit 1
+fi
 say ok "bundle written, $(md5sum < "$BUNDLE" | cut -c1-12)"
 
 # -------------------------------------------------------------
@@ -102,7 +135,10 @@ done
 psql -p 55432 -U postgres -d $DB -tAq -f scripts/sql/validate-007.sql \
   >/var/tmp/pgtest/twice-validate.out 2>&1
 ok=$(grep -c 'NOTICE:  ok' /var/tmp/pgtest/twice-validate.out)
-bad=$(grep -c 'NOTICE:  FAIL' /var/tmp/pgtest/twice-validate.out)
+# A failed assertion is a WARNING, not a NOTICE. This counted NOTICEs,
+# so it reported no failures whatever the file did, which is the same
+# class of quiet pass the column checks were just built to stop.
+bad=$(grep -c 'WARNING:  FAIL' /var/tmp/pgtest/twice-validate.out)
 if [ "$bad" = "0" ] && [ "$ok" -gt 0 ]; then
   say ok "$ok assertions pass against the twice migrated database"
 else

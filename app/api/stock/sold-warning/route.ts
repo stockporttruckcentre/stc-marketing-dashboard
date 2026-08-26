@@ -30,11 +30,11 @@ export async function POST(req: NextRequest) {
   const sql = postgres(url!, { ssl: 'require', max: 1, idle_timeout: 5, prepare: false });
   try {
     const rows = await sql<any[]>`
+      -- Anybody who has this unit down as sold. Owner is on the deal.
       SELECT cc.sale_price, cc.dispatch_date, cc.order_date, cc.status,
              p.id AS owner_id, p.full_name, p.email
-      FROM crm_contacts cc
-      JOIN crm_lists l ON cc.list_id = l.id
-      JOIN profiles p ON l.owner_id = p.id
+      FROM crm_leads cc
+      JOIN profiles p ON cc.owner_id = p.id
       WHERE cc.stock_trailer_id = ${body.stock_trailer_id}
         AND cc.status IN ('customer','won')`;
     return NextResponse.json({

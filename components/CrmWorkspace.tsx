@@ -84,6 +84,25 @@ export function CrmWorkspace({
     setRows(initialContacts);
   }, [initialContacts, selectedListId]);
 
+  /**
+   * Everything on the list showing, read back from the database.
+   *
+   * Two queries rather than one because membership is a join table now.
+   * A company used to carry the list it was on as a column, which is
+   * exactly why the same haulier had to exist once per list and why the
+   * pipeline and a rep's tracker held different Dawsons.
+   */
+  const reloadList = useCallback(async (): Promise<CRMContact[]> => {
+    if (!selectedListId) return [];
+    const { data: onList } = await supabase
+      .from('crm_list_contacts').select('contact_id').eq('list_id', selectedListId);
+    const ids = ((onList ?? []) as { contact_id: string }[]).map((r) => r.contact_id);
+    if (!ids.length) return [];
+    const { data } = await supabase.from('crm_contacts').select('*')
+      .in('id', ids).order('updated_at', { ascending: false });
+    return (data ?? []) as CRMContact[];
+  }, [supabase, selectedListId]);
+
   // Remember last list so the sidebar nav can return you here
   useEffect(() => {
     if (selectedListId) try { localStorage.setItem('stc:lastListId', selectedListId); } catch {}
@@ -108,6 +127,16 @@ export function CrmWorkspace({
   const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
   const [showAddContact, setShowAddContact] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  /**
+   * Every company in the CRM, for the import to check against.
+   *
+   * Loaded when the dialog opens rather than kept in step, because it
+   * is read once, at the moment somebody is about to import, and a
+   * stale answer there is a duplicate written.
+   */
+  const [everyCompany, setEveryCompany] = useState<
+    { id: string; company_name: string; email: string | null; onThisList: boolean }[]
+  >([]);
   const [search, setSearch] = useState('');
 
   /**
@@ -228,20 +257,39 @@ export function CrmWorkspace({
     }
   }, [searchParams, rows, supabase]);
 
-  // Realtime: contacts in this list
+  /* REALTIME, IN TWO PARTS.
+
+     Postgres filters a change stream on a column of the row that
+     changed, and which list a company is on is no longer a column on
+     the company. So joining and leaving the list is watched on the
+     membership table, where it now happens, and edits are watched on
+     the company and applied only to rows already on screen. */
   useEffect(() => {
     if (!selectedListId) return;
     const channel = supabase
-      .channel(`crm_contacts:${selectedListId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_contacts', filter: `list_id=eq.${selectedListId}` },
-        (payload: any) => {
-          if (payload.eventType === 'INSERT') {
-            setRows((rs) => (rs.find((r) => r.id === payload.new.id) ? rs : [payload.new as CRMContact, ...rs]));
-          } else if (payload.eventType === 'UPDATE') {
-            setRows((rs) => rs.map((r) => (r.id === payload.new.id ? (payload.new as CRMContact) : r)));
-          } else if (payload.eventType === 'DELETE') {
-            setRows((rs) => rs.filter((r) => r.id !== payload.old.id));
+      .channel(`crm_list:${selectedListId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'crm_list_contacts', filter: `list_id=eq.${selectedListId}` },
+        async (payload: any) => {
+          if (payload.eventType === 'DELETE') {
+            const gone = payload.old?.contact_id;
+            if (gone) setRows((rs) => rs.filter((r) => r.id !== gone));
+            return;
           }
+          const joined = payload.new?.contact_id;
+          if (!joined) return;
+          // The membership arrives without the company on it, so fetch it.
+          const { data } = await supabase.from('crm_contacts').select('*').eq('id', joined).maybeSingle();
+          if (!data) return;
+          setRows((rs) => (rs.some((r) => r.id === joined) ? rs : [data as CRMContact, ...rs]));
+        })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_contacts' },
+        (payload: any) => {
+          setRows((rs) => rs.map((r) => (r.id === payload.new.id ? (payload.new as CRMContact) : r)));
+        })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'crm_contacts' },
+        (payload: any) => {
+          setRows((rs) => rs.filter((r) => r.id !== payload.old?.id));
         })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -446,20 +494,46 @@ export function CrmWorkspace({
    * time a row arrives here the user has seen it and its values are
    * already the right shape for the column, so this only has to write.
    */
-  async function commitImport(records: Record<string, any>[]) {
+  async function openImport() {
+    const onHere = new Set(rows.map((r) => r.id));
+    const { data, error } = await supabase
+      .from('crm_contacts').select('id, company_name, email');
+    if (error) { setMessage(error.message); return; }
+    setEveryCompany(((data ?? []) as { id: string; company_name: string; email: string | null }[])
+      .map((c) => ({ ...c, onThisList: onHere.has(c.id) })));
+    setShowImport(true);
+  }
+
+  async function commitImport(records: Record<string, any>[], attach: string[] = []) {
     setImporting(true); setMessage(null);
     try {
-      const res = await fetch('/api/crm/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: records, list_id: selectedListId, mapped: true }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Import failed');
-      setMessage(`Imported ${json.inserted} ${json.inserted === 1 ? 'contact' : 'contacts'}`);
-      const { data } = await supabase.from('crm_contacts').select('*')
-        .eq('list_id', selectedListId).order('updated_at', { ascending: false });
-      setRows((data ?? []) as CRMContact[]);
-      return { inserted: json.inserted as number };
+      /* Companies already in the CRM go onto this list rather than
+         being written again. One record, on as many lists as it needs
+         to be, which is the whole point of the join table. */
+      if (attach.length) {
+        const { error } = await supabase.from('crm_list_contacts')
+          .upsert(attach.map((contact_id) => ({ list_id: selectedListId, contact_id })));
+        if (error) throw new Error(error.message);
+      }
+
+      let inserted = 0;
+      if (records.length) {
+        const res = await fetch('/api/crm/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: records, list_id: selectedListId, mapped: true }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Import failed');
+        inserted = json.inserted as number;
+      }
+
+      const added = [
+        inserted ? `${inserted} ${inserted === 1 ? 'company' : 'companies'} imported` : '',
+        attach.length ? `${attach.length} already in the CRM, now on this list` : '',
+      ].filter(Boolean).join(', ');
+      setMessage(added || 'Nothing to import');
+      setRows(await reloadList());
+      return { inserted };
     } catch (e: any) {
       return { inserted: 0, error: e.message as string };
     } finally {
@@ -478,19 +552,46 @@ export function CrmWorkspace({
    */
   async function handleAddRow(fields?: Partial<CRMContact>) {
     setShowAddContact(false);
+    const name = fields?.company_name?.trim() || 'New company';
+
+    /* THE CRM HOLDS ONE RECORD PER COMPANY.
+
+       Somebody typing in a firm that is already here means to work with
+       that firm, not to start a second one beside it. So an exact name
+       match joins the list showing instead of being created again, and
+       the drawer opens on the record that already has the history on
+       it. Adding it a second time is what made three Dawsons. */
+    const { data: already } = await supabase.from('crm_contacts')
+      .select('*').ilike('company_name', name).limit(1).maybeSingle();
+
+    if (already) {
+      const account = already as CRMContact;
+      const { error } = await supabase.from('crm_list_contacts')
+        .upsert({ list_id: selectedListId, contact_id: account.id });
+      if (error) { setMessage(error.message); return; }
+      setRows((r) => (r.some((c) => c.id === account.id) ? r : [account, ...r]));
+      setDrawerRow(account);
+      setMessage(`${account.company_name} is already in the CRM, so this list now shows that record`);
+      return;
+    }
+
     const { data, error } = await supabase.from('crm_contacts')
       .insert({
-        company_name: fields?.company_name?.trim() || 'New company',
+        company_name: name,
         contact_name: fields?.contact_name?.trim() || null,
         email: fields?.email?.trim() || null,
         phone: fields?.phone?.trim() || null,
         assigned_to: caps.has('crm.edit') ? (fields?.assigned_to ?? profile.full_name) : null,
         status: 'lead',
         source: 'manual',
-        list_id: selectedListId,
       })
       .select('*').single();
     if (error) { setMessage(error.message); return; }
+
+    const { error: joinError } = await supabase.from('crm_list_contacts')
+      .insert({ list_id: selectedListId, contact_id: (data as CRMContact).id });
+    if (joinError) { setMessage(joinError.message); return; }
+
     setRows((r) => [data as CRMContact, ...r]);
     setDrawerRow(data as CRMContact);
     // Do not leave people staring at a blank record. Ask for the next step
@@ -529,8 +630,7 @@ export function CrmWorkspace({
       } catch {}
     }
     setMessage(`Enriched ${ok}/${withEmail.length}`);
-    const { data } = await supabase.from('crm_contacts').select('*').eq('list_id', selectedListId).order('updated_at', { ascending: false });
-    setRows((data ?? []) as CRMContact[]);
+    setRows(await reloadList());
     fetchBalance();
   }
 
@@ -543,9 +643,18 @@ export function CrmWorkspace({
     selectList((data as CrmList).id);
   }
 
+  /**
+   * Deleting a list takes the list, not the customers on it.
+   *
+   * It used to delete every company carrying the list's id, which was
+   * the only reading available while a company sat on exactly one list.
+   * A company can be on the shared pipeline and on this one now, and
+   * deleting somebody's private list is not a reason to remove a
+   * customer the whole business is working. The memberships go with the
+   * list, which the foreign key already does.
+   */
   async function deleteList(id: string) {
-    if (!confirm('Delete this list and all its contacts?')) return;
-    await supabase.from('crm_contacts').delete().eq('list_id', id);
+    if (!confirm('Delete this list? The companies on it stay in the CRM.')) return;
     const { error } = await supabase.from('crm_lists').delete().eq('id', id);
     if (error) { setMessage(error.message); return; }
     setLists((ls) => ls.filter((l) => l.id !== id));
@@ -675,7 +784,7 @@ export function CrmWorkspace({
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {caps.has('crm.import') && (
-            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)} disabled={importing}>
+            <Button size="sm" variant="secondary" onClick={openImport} disabled={importing}>
               {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
             </Button>
           )}
@@ -758,7 +867,7 @@ export function CrmWorkspace({
               onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds(), mode: 'move' })} />
           )}
           {caps.has('crm.create') && selectedCount <= 10 && (
-            <InverseButton icon={<Plus size={13} />} label="Copy to a list"
+            <InverseButton icon={<Plus size={13} />} label="Also show on a list"
               onClick={(e) => setMoveTargetMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds(), mode: 'duplicate' })} />
           )}
           {caps.has('crm.delete') && <InverseButton icon={<Trash2 size={13} />} label="Delete" onClick={bulkDelete} danger />}
@@ -894,7 +1003,14 @@ export function CrmWorkspace({
         <ImportDialog
           dict={CRM_CONTACTS}
           listName={selectedList?.name ?? 'this list'}
-          existing={rows.map((r) => ({ id: r.id, company_name: r.company_name, email: r.email }))}
+          /* THE WHOLE CRM, NOT THE LIST ON SCREEN.
+
+             Checking against the open list only was the duplicate
+             problem waiting to come back through the front door: a
+             company on somebody else's list did not match anything
+             here, so importing a customer sheet made a second copy of
+             every company already in the CRM under another list. */
+          existing={everyCompany}
           onCommit={commitImport}
           onClose={() => setShowImport(false)}
         />
@@ -950,19 +1066,33 @@ export function CrmWorkspace({
           lists={lists.filter((l) => l.id !== selectedListId)}
           onPick={async (listId) => {
             const mode = moveTargetMenu.mode ?? 'move';
-            if (mode === 'duplicate') {
-              const { data: src } = await supabase.from('crm_contacts').select('*').in('id', moveTargetMenu.rowIds);
-              if (src && src.length) {
-                const clones = src.map(({ id, created_at, updated_at, ...rest }: any) => ({ ...rest, list_id: listId }));
-                const { error } = await supabase.from('crm_contacts').insert(clones);
-                if (error) setMessage(error.message); else setMessage(`Duplicated ${clones.length} → ${lists.find((l) => l.id === listId)?.name}`);
-              }
+            const target = lists.find((l) => l.id === listId)?.name;
+            const rowIds = moveTargetMenu.rowIds;
+            const joining = rowIds.map((contact_id) => ({ list_id: listId, contact_id }));
+
+            /* SHOWING A COMPANY SOMEWHERE ELSE IS NOT COPYING IT.
+
+               This used to insert a whole second company row, which was
+               the only way to put one customer on two lists while the
+               list was a column on the customer. It was also the single
+               biggest source of the duplicates: every copy carried its
+               own name, contact, phone and fleet counts, and the two
+               drifted apart the moment either was edited.
+
+               Both branches now write memberships. The record stays one
+               record with one history, and it appears wherever it has
+               been put. */
+            const { error } = await supabase.from('crm_list_contacts').upsert(joining);
+            if (error) { setMessage(error.message); setMoveTargetMenu(null); return; }
+
+            if (mode === 'move') {
+              const { error: off } = await supabase.from('crm_list_contacts')
+                .delete().eq('list_id', selectedListId).in('contact_id', rowIds);
+              if (off) { setMessage(off.message); setMoveTargetMenu(null); return; }
+              setRows((r) => r.filter((c) => !rowIds.includes(c.id)));
+              setMessage(`Moved ${rowIds.length} to ${target}`);
             } else {
-              const { error } = await supabase.from('crm_contacts').update({ list_id: listId }).in('id', moveTargetMenu.rowIds);
-              if (error) setMessage(error.message); else {
-                setRows((r) => r.filter((c) => !moveTargetMenu.rowIds.includes(c.id)));
-                setMessage(`Moved ${moveTargetMenu.rowIds.length} → ${lists.find((l) => l.id === listId)?.name}`);
-              }
+              setMessage(`${rowIds.length === 1 ? 'That company' : `Those ${rowIds.length} companies`} now show on ${target} as well`);
             }
             setMoveTargetMenu(null);
           }}
@@ -990,7 +1120,7 @@ export function CrmWorkspace({
           <MenuItem icon={<Plus size={13} />} label="Add contact" disabled={!canEdit}
             onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} />
           <MenuItem icon={<Upload size={13} />} label="Import a spreadsheet" disabled={!caps.has('crm.import')}
-            onClick={() => { setEmptyAreaMenu(null); setShowImport(true); }} />
+            onClick={() => { setEmptyAreaMenu(null); openImport(); }} />
         </EdgeAwareCtxMenu>
       )}
       {nextActionFor && (
@@ -1558,7 +1688,7 @@ function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: {
 }) {
   return (
     <EdgeAwareCtxMenu x={x} y={y} width={232}>
-      <MenuHead>{mode === 'duplicate' ? 'Copy onto which list' : 'Move onto which list'}</MenuHead>
+      <MenuHead>{mode === 'duplicate' ? 'Also show on which list' : 'Move onto which list'}</MenuHead>
       {lists.map((l) => (
         <MenuItem
           key={l.id}
@@ -1569,8 +1699,8 @@ function MoveMenu({ x, y, lists, onPick, onClose, mode = 'move' }: {
       ))}
       <div style={{ padding: '2px 9px 7px', fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
         {mode === 'duplicate'
-          ? 'The contact stays where it is and a copy goes onto the other list.'
-          : 'This changes which list the contact sits on. It is not a won or lost outcome.'}
+          ? 'One record, shown in both places. Editing it on either list edits the same company.'
+          : 'This takes the company off this list and puts it on the other one. It is not a won or lost outcome.'}
       </div>
       {lists.length === 0 && (
         <div style={{ padding: '7px 9px', fontSize: 12.5, color: 'var(--text-subtle)' }}>

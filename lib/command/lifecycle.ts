@@ -473,14 +473,42 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
      reading `crm_contacts`, and only one of them appears in the
      writable dictionary, so "create a new lead" found no field to take
      a column from and came back as a question. */
-  const spec = writableFor(target, title);
+  let spec = writableFor(target, title);
+
+  /* A LEAD HAS NO NAME OF ITS OWN.
+  
+     "Create a new lead for Smith Logistics" names a company. A pitch is
+     identified by the customer it is to and the work it is for, and the
+     name it carries is the customer's, kept in step by a trigger and
+     not writable on the pitch. So a create that names one is creating
+     the customer, which is also the business's rule: you cannot have a
+     lead for a company that is not an account.
+  
+     Found rather than listed: the title column is not writable here, so
+     whichever entity DOES own it writably is the thing being named. */
+  let named = target;
+  if (!spec) {
+    /* By the column's own name. `writableFor` falls back to any writable
+       field on the table, which is right where a title is being looked
+       up on the entity that has one and wrong here: it made the first
+       entity tried look like the owner of a column it has never had. */
+    for (const other of ENTITIES) {
+      const owner = writableEntityFor(other.id) ?? other.id;
+      const its = WRITABLE_FIELDS.find((f) => f.entity === owner && f.key === title);
+      if (!its) continue;
+      spec = its;
+      named = owner;
+      break;
+    }
+  }
   if (!spec) return null;
 
   /* WHAT IT TAKES TO MAKE ONE, not what it takes to write its name.
      Creating a customer is `crm.create`; writing `company_name` on one
      that already exists is `crm.edit`, and a role can hold the second
      without the first. */
-  const requires = entityDef(target)?.createRequires ?? def.createRequires;
+  const requires = entityDef(named)?.createRequires
+    ?? entityDef(target)?.createRequires ?? def.createRequires;
   if (!requires) return null;
   if (caps && !caps.has(requires)) return null;
 
@@ -488,7 +516,7 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
   if (!name) return null;
 
   const set: NonNullable<Mutate['set']> = [{
-    field: { entity: target, field: title },
+    field: { entity: named, field: title },
     to: { kind: 'literal', value: name },
   }];
 
@@ -499,12 +527,12 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
      its status column. Taking it from the same vocabulary the question
      reader narrows on means the two agree about what a lead is. */
   const state = WRITABLE_FIELDS.find((f) =>
-    f.entity === target && f.kind === 'enum' && f.vocabulary
+    f.entity === named && f.kind === 'enum' && f.vocabulary
     && Object.keys(f.vocabulary).includes(found.noun)
     && (!caps || caps.has(f.capability)));
   if (state?.vocabulary) {
     set.push({
-      field: { entity: target, field: state.key },
+      field: { entity: named, field: state.key },
       to: { kind: 'literal', value: state.vocabulary[found.noun] },
     });
   }
@@ -512,14 +540,14 @@ function readCreate(raw: string, verb: string, caps?: CrmCapabilities): Lifecycl
   const step: Mutate = {
     op: 'create',
     id: 'c1',
-    target: { entity: target },
+    target: { entity: named },
     set,
-    produces: { kind: 'record', entity: target },
+    produces: { kind: 'record', entity: named },
   };
 
   return {
     op: 'create',
-    entity: target,
+    entity: named,
     step,
     summary: `Create ${def.labelOne} ${name}`,
     requires,

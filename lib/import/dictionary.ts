@@ -178,10 +178,14 @@ export const CRM_CONTACTS: Dictionary = {
       target: 'address', label: 'Address', kind: 'text',
       aliases: ['address', 'full address', 'site address', 'postal address', 'street', 'addr'],
     },
-    {
-      target: 'status', label: 'Status', kind: 'status',
-      aliases: ['status', 'stage', 'pipeline stage', 'lead status', 'state', 'progress'],
-    },
+    /* A STATUS COLUMN IN A CUSTOMER SPREADSHEET IS ABOUT A PITCH.
+    
+       This import creates accounts, and an account's status is derived
+       from the state of its leads since migration 043. Mapping a
+       spreadsheet's stage onto the company would be overwritten by the
+       first lead that moved, so it is not offered here. The sales
+       tracker dictionary keeps it, because that import creates the
+       pitches it belongs to. */
     {
       target: 'assigned_to', label: 'Owner', kind: 'text',
       aliases: [

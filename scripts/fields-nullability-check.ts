@@ -37,7 +37,8 @@ const ok = (what: string, cond: boolean, got = '') => {
 const TABLE: Record<string, string> = {
   trailers: 'stock_trailers',
   contacts: 'crm_contacts',
-  posts: 'social_posts',
+  leads:    'crm_leads',
+  posts:    'social_posts',
   meetings: 'calendar_events',
 };
 

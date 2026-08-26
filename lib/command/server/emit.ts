@@ -285,11 +285,7 @@ function listStepBehind(plan: Plan, from: Emit['from']): string | null {
 async function countOn(
   store: Store, table: string, list: string,
 ): Promise<{ ok: true; total: number } | { ok: false; why: string }> {
-  const where: Cond = {
-    kind: 'cmp', op: 'eq',
-    left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
-    right: { kind: 'literal', value: list },
-  };
+  const where: Cond = { kind: 'onList', list };
 
   let total = 0;
   let offset = 0;
@@ -349,17 +345,36 @@ async function prepareShare(
   const madeBy = listStepBehind(planning.plan, emit.from);
 
   if (!madeBy) {
-    /* An existing list. Which one, and is this every record on it. */
+    /* An existing list. Which one, and is this every record on it.
+
+       Read from the membership table rather than from a column on the
+       company. A company sat on exactly one list while that column was
+       the answer, so the list a record was on and the list it appeared
+       on were the same thing. They are not now: a company on the shared
+       pipeline and on two trackers has three memberships and one
+       record, and sharing has to be about a list, not about a row. */
     const def = entityDef('contacts');
     const mine = await store.read({
       table: def?.table ?? 'crm_contacts',
-      columns: ['id', 'list_id'],
+      columns: ['id'],
       where: select.where ?? { kind: 'and', of: [] },
       limit: read.rows.length,
     });
     if (!mine.ok) return { ok: false, reason: 'failed', why: mine.why };
 
-    const lists = [...new Set(mine.rows.map((r) => r.list_id).filter((v) => v != null))].map(String);
+    const memberships = await store.read({
+      table: 'crm_list_contacts',
+      columns: ['list_id', 'contact_id'],
+      where: {
+        kind: 'in',
+        of: { kind: 'field', of: { entity: 'contacts', field: 'contact_id' } },
+        values: mine.rows.map((r) => ({ kind: 'literal', value: String(r.id) })),
+      },
+      limit: Math.max(1, mine.rows.length * 8),
+    });
+    if (!memberships.ok) return { ok: false, reason: 'failed', why: memberships.why };
+
+    const lists = [...new Set(memberships.rows.map((r) => String(r.list_id)))];
     if (lists.length !== 1) {
       return {
         ok: false,

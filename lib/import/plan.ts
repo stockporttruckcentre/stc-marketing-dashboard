@@ -18,10 +18,28 @@ export type PlannedRow = {
   display: string;
   issues: RowIssue[];
   /** An existing record this looks like. */
-  duplicateOf?: { id: string; label: string; matchedOn: string };
+  duplicateOf?: {
+    id: string;
+    label: string;
+    matchedOn: string;
+    /* Whether that record is on the list being imported into, or
+       somewhere else in the CRM.
+
+       The difference is the whole of what to do about it. A company
+       already on this list needs nothing. A company that is in the CRM
+       but not on this list is not a duplicate to refuse: it is the
+       record the row is about, sitting on somebody else's list, and the
+       right answer is to put it on this one too. Importing it again
+       would make the second copy this CRM was rebuilt to stop, and
+       skipping it would quietly leave it out of the list somebody was
+       importing. */
+    onThisList: boolean;
+  };
   /** Another row in the same file. */
   duplicateInFile?: number;
-  decision: 'import' | 'skip' | 'merge';
+  /* `attach` is "that company is already in the CRM, show it on this
+     list as well". It writes a membership rather than a record. */
+  decision: 'import' | 'skip' | 'attach';
 };
 
 export type ImportPlan = {
@@ -38,8 +56,14 @@ function labelFor(values: Record<string, any>, dict: Dictionary): string {
   return String(values[dict.required] ?? values.email ?? values.contact_name ?? 'Unnamed row');
 }
 
-/** A row already in the target table, as its own columns. */
-export type ExistingRow = { id: string } & Record<string, any>;
+/**
+ * A row already in the target table, as its own columns.
+ *
+ * `onThisList` is false for a record that is in the CRM but on another
+ * list. Tables with no lists at all, like the stock list, leave it
+ * undefined and every match is treated as being right here.
+ */
+export type ExistingRow = { id: string; onThisList?: boolean } & Record<string, any>;
 
 export function buildPlan(
   columns: ColumnMatch[],
@@ -130,12 +154,14 @@ export function buildPlan(
       if (!v) continue;
       const hit = indexes.get(key)?.get(fold(String(v)));
       if (hit) {
+        const onThisList = hit.onThisList !== false;
         planned.duplicateOf = {
           id: hit.id,
           label: labelFor(hit, dict),
           matchedOn: labelOf(key),
+          onThisList,
         };
-        planned.decision = 'skip';
+        planned.decision = onThisList ? 'skip' : 'attach';
         break;
       }
     }
@@ -168,7 +194,7 @@ export function buildPlan(
 }
 
 export type PlanCounts = {
-  create: number; skip: number; merge: number; withIssues: number;
+  create: number; skip: number; attach: number; withIssues: number;
   duplicates: number; dropped: number; unknown: number;
 };
 
@@ -176,7 +202,7 @@ export function countPlan(plan: ImportPlan): PlanCounts {
   return {
     create: plan.rows.filter((r) => r.decision === 'import').length,
     skip: plan.rows.filter((r) => r.decision === 'skip').length,
-    merge: plan.rows.filter((r) => r.decision === 'merge').length,
+    attach: plan.rows.filter((r) => r.decision === 'attach').length,
     withIssues: plan.rows.filter((r) => r.issues.length > 0).length,
     duplicates: plan.rows.filter((r) => r.duplicateOf || r.duplicateInFile !== undefined).length,
     dropped: plan.dropped.length,

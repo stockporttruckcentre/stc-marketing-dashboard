@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import {
   Upload, FileSpreadsheet, ArrowRight, ArrowLeft, Check, AlertTriangle,
-  X, Loader, CircleSlash, Copy,
+  X, Loader, CircleSlash, Copy, Plus,
 } from 'lucide-react';
 import { Button, Alert, Badge } from '@/components/kit/primitives';
 import { Modal, Select } from '@/components/kit/forms';
@@ -22,7 +22,17 @@ import type { Dictionary } from '@/lib/import/dictionary';
      2. The columns. What we think each one is, what we are going to
         ignore, and why. Every guess is editable.
      3. The rows. What will be created, what is already here, and what
-        we could not read. Duplicates default to skip.
+        we could not read.
+
+   WHAT "ALREADY HERE" MEANS NOW.
+
+   A company is one record in this CRM, on as many lists as it needs to
+   be. So a row matching something already on THIS list needs nothing
+   and defaults to skip, and a row matching a company that is in the CRM
+   on somebody else's list is neither a new company nor a row to drop:
+   it is that company, and it goes onto this list as well. Importing it
+   again would make the second copy the CRM was rebuilt to stop, and
+   skipping it would quietly leave it out of the list being imported.
 
    The rule the old import broke: never write something the user has not
    seen. It posted raw headers at the database and reported a count, so a
@@ -41,7 +51,12 @@ export function ImportDialog({ dict, existing, listName, onCommit, onClose }: {
   /** Rows already in the target table, as their own columns. */
   existing: ExistingRow[];
   listName: string;
-  onCommit: (rows: Record<string, any>[]) => Promise<{ inserted: number; error?: string }>;
+  /* `attach` is the ids of records already in the CRM that should
+     appear on this list too. A screen with no lists can ignore it. */
+  onCommit: (
+    rows: Record<string, any>[],
+    attach: string[],
+  ) => Promise<{ inserted: number; error?: string }>;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>('file');
@@ -118,7 +133,12 @@ export function ImportDialog({ dict, existing, listName, onCommit, onClose }: {
   async function commit() {
     setBusy(true); setResult(null);
     const payload = plan.rows.filter((r) => r.decision === 'import').map((r) => r.values);
-    const res = await onCommit(payload);
+    const attach = [...new Set(
+      plan.rows
+        .filter((r) => r.decision === 'attach' && r.duplicateOf)
+        .map((r) => r.duplicateOf!.id),
+    )];
+    const res = await onCommit(payload, attach);
     setBusy(false);
     if (res.error) { setResult(res.error); return; }
     onClose();
@@ -259,18 +279,34 @@ export function ImportDialog({ dict, existing, listName, onCommit, onClose }: {
         </Alert>
       )}
 
-      {counts.duplicates > 0 && (
+      {counts.attach > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
           padding: '10px 13px', borderRadius: 'var(--r)',
           border: '1px solid var(--border)', background: 'var(--surface)',
         }}>
           <span style={{ fontSize: 13, color: 'var(--text)' }}>
-            {counts.duplicates} {counts.duplicates === 1 ? 'row is' : 'rows are'} already on this list.
+            {counts.attach} {counts.attach === 1 ? 'company is' : 'companies are'} already in the CRM,
+            {' '}on another list. They can go on this one as well, keeping one record each.
+          </span>
+          <span style={{ flex: 1 }} />
+          <Button size="sm" variant="ghost" onClick={() => decideAllDuplicates('skip')}>Leave them off</Button>
+          <Button size="sm" variant="secondary" onClick={() => decideAllDuplicates('attach')}>Add them all</Button>
+        </div>
+      )}
+
+      {counts.duplicates - counts.attach > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '10px 13px', borderRadius: 'var(--r)',
+          border: '1px solid var(--border)', background: 'var(--surface)',
+        }}>
+          <span style={{ fontSize: 13, color: 'var(--text)' }}>
+            {counts.duplicates - counts.attach}
+            {counts.duplicates - counts.attach === 1 ? ' row is' : ' rows are'} already on this list.
           </span>
           <span style={{ flex: 1 }} />
           <Button size="sm" variant="ghost" onClick={() => decideAllDuplicates('skip')}>Skip them all</Button>
-          <Button size="sm" variant="secondary" onClick={() => decideAllDuplicates('import')}>Import them anyway</Button>
         </div>
       )}
 
@@ -393,7 +429,9 @@ function RowRow({ row, onDecide }: { row: PlannedRow; onDecide: (d: PlannedRow['
           {row.display}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 3, lineHeight: 1.5 }}>
-          {dupe && <div>Already here as <strong>{dupe.label}</strong>, matched on {dupe.matchedOn}.</div>}
+          {dupe && (dupe.onThisList
+            ? <div>Already on this list as <strong>{dupe.label}</strong>, matched on {dupe.matchedOn}.</div>
+            : <div>Already in the CRM as <strong>{dupe.label}</strong>, matched on {dupe.matchedOn}, on another list.</div>)}
           {inFile && <div>The same record appears earlier in this file, on row {(row.duplicateInFile ?? 0) + 2}.</div>}
           {row.issues.map((i, n) => (
             <div key={n}>
@@ -407,6 +445,10 @@ function RowRow({ row, onDecide }: { row: PlannedRow; onDecide: (d: PlannedRow['
 
       {!blocked && (
         <div style={{ display: 'flex', gap: 6, flex: '0 0 auto' }}>
+          {dupe && !dupe.onThisList && (
+            <Choice on={row.decision === 'attach'} onClick={() => onDecide('attach')}
+              icon={<Plus size={12} />} label="Add to this list" />
+          )}
           <Choice on={row.decision === 'import'} onClick={() => onDecide('import')} icon={<Check size={12} />} label="Import" />
           <Choice on={row.decision === 'skip'} onClick={() => onDecide('skip')} icon={<CircleSlash size={12} />} label="Skip" />
         </div>

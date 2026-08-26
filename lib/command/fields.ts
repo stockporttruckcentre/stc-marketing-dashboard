@@ -29,7 +29,13 @@ import { TABLES, derivedAliases, type ColumnKind } from './columns';
 
 export type FieldKind = 'money' | 'number' | 'text' | 'longtext' | 'date' | 'enum';
 
-export type WritableEntity = 'trailers' | 'contacts' | 'posts' | 'meetings';
+/**
+ * `leads` is separate from `contacts` because a pitch is not something a
+ * company has. "Add £1k refurb value to STC143980" is about a deal and
+ * "add their phone number" is about a company, and while both lived on
+ * one table either sentence could land on the other's row.
+ */
+export type WritableEntity = 'trailers' | 'contacts' | 'leads' | 'posts' | 'meetings';
 
 export type WritableField = {
   /** The column, exactly as the table spells it. */
@@ -241,7 +247,7 @@ export const TRAILER_FIELDS: WritableField[] = [
    Customers and the deals against them. One table, so one list.
    ------------------------------------------------------------- */
 export const CONTACT_FIELDS: WritableField[] = [
-  { key: 'status', label: 'Status', kind: 'enum', entity: 'contacts', vocabulary: DEAL_STATUS,
+  { key: 'status', label: 'Status', kind: 'enum', entity: 'leads', vocabulary: DEAL_STATUS,
     capability: 'crm.edit', aliases: ['status', 'stage', 'state'] },
   { key: 'assigned_to', label: 'Owner', kind: 'text', entity: 'contacts', clearable: true,
     capability: 'crm.assign',
@@ -274,14 +280,14 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['employees', 'headcount', 'staff', 'employee count'] },
   { key: 'turnover', label: 'Turnover', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['turnover', 'annual turnover', 'revenue'] },
-  { key: 'estimated_value', label: 'Estimated value', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
+  { key: 'estimated_value', label: 'Estimated value', kind: 'money', entity: 'leads', clearable: true, arithmetic: true,
     capability: 'crm.edit',
     aliases: ['estimated value', 'deal value', 'opportunity value', 'pipeline value', 'estimate', 'worth'] },
-  { key: 'sale_price', label: 'Sale price', kind: 'money', entity: 'contacts', clearable: true, arithmetic: true,
+  { key: 'sale_price', label: 'Sale price', kind: 'money', entity: 'leads', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['sale price', 'sold for', 'invoiced', 'invoice value'] },
-  { key: 'commission_rate', label: 'Commission rate', kind: 'number', entity: 'contacts', clearable: true,
+  { key: 'commission_rate', label: 'Commission rate', kind: 'number', entity: 'leads', clearable: true,
     capability: 'crm.edit', aliases: ['commission rate', 'commission percentage', 'comm rate'] },
-  { key: 'next_action', label: 'Next action', kind: 'text', entity: 'contacts', clearable: true,
+  { key: 'next_action', label: 'Next action', kind: 'text', entity: 'leads', clearable: true,
     capability: 'crm.edit',
     /* Not the bare "action": crm_contacts has an action column beside
        this one, and taking the word here made that column unreachable. */
@@ -289,9 +295,9 @@ export const CONTACT_FIELDS: WritableField[] = [
   { key: 'last_contact', label: 'Last contact', kind: 'date', entity: 'contacts', clearable: true,
     capability: 'crm.edit',
     aliases: ['last contact', 'last contacted', 'last spoke', 'last called', 'contacted on'] },
-  { key: 'date_of_enquiry', label: 'Enquiry date', kind: 'date', entity: 'contacts', clearable: true,
+  { key: 'date_of_enquiry', label: 'Enquiry date', kind: 'date', entity: 'leads', clearable: true,
     capability: 'crm.edit', aliases: ['enquiry date', 'date of enquiry', 'enquired on', 'came in on'] },
-  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'contacts', clearable: true,
+  { key: 'order_date', label: 'Order date', kind: 'date', entity: 'leads', clearable: true,
     capability: 'crm.edit', aliases: ['order date', 'ordered on'] },
   { key: 'source', label: 'Source', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['source', 'came from', 'lead source', 'found via'] },
@@ -302,7 +308,7 @@ export const CONTACT_FIELDS: WritableField[] = [
   { key: 'relationship', label: 'Relationship', kind: 'enum', entity: 'contacts',
     capability: 'crm.edit', aliases: ['relationship', 'prospect or customer', 'existing customer'],
     vocabulary: { prospect: 'prospect', new: 'prospect', existing: 'existing', current: 'existing' } },
-  { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'contacts', clearable: true, arithmetic: true,
+  { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'leads', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['requirement', 'what they want', 'their requirement', 'looking for'] },
   { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['note', 'notes', 'remark', 'latest update'] },
@@ -351,7 +357,8 @@ export const POST_FIELDS: WritableField[] = [
 const ENTITY_TABLE: Record<WritableEntity, string> = {
   trailers: 'stock_trailers',
   contacts: 'crm_contacts',
-  posts: 'social_posts',
+  leads:    'crm_leads',
+  posts:    'social_posts',
   meetings: 'calendar_events',
 };
 
@@ -359,13 +366,19 @@ const ENTITY_TABLE: Record<WritableEntity, string> = {
 const TABLE_CAPABILITY: Record<string, CrmCapability> = {
   stock_trailers: 'stock.edit',
   crm_contacts: 'crm.edit',
+  // Editing your own pitch is the same permission as editing a customer.
+  // Whose pitch you may touch is row level security's answer, not this
+  // table's: a rep holds `crm.edit` and still cannot write somebody
+  // else's lead.
+  crm_leads: 'crm.edit',
   social_posts: 'marketing.edit',
   calendar_events: 'crm.delegate',
 };
 
 /** The word that qualifies a column when its plain name is taken. */
 const ENTITY_WORD: Record<WritableEntity, string> = {
-  trailers: 'trailer', contacts: 'customer', posts: 'post', meetings: 'event',
+  trailers: 'trailer', contacts: 'customer', leads: 'lead',
+  posts: 'post', meetings: 'event',
 };
 
 function kindOf(k: ColumnKind): FieldKind {
@@ -411,6 +424,11 @@ export const NOT_NULL_COLUMNS = new Set<string>([
      pair `check:fields` caught the first time it ran. */
   'contacts.relationship',
   'meetings.visibility',
+  /* A lead is always for some kind of work and always somewhere in the
+     pipeline. Neither can be emptied, which is why the dictionary has
+     to say so: a field offered as clearable that the database refuses
+     is a control that appears and then fails. Migration 040. */
+  'leads.type', 'leads.status',
 ]);
 
 function generateTail(): WritableField[] {

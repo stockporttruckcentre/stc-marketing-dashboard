@@ -153,21 +153,25 @@ export async function POST(req: NextRequest) {
   // builder's generic depth blow past what tsc will follow.
   let q: any = supabase.from(entity.table).select(Array.from(cols).join(', '));
 
-  // Scope. "Mine" means rows on the caller's own tracker list.
+  /* SCOPE. "Mine" means the deals I hold.
+  
+     It used to mean rows on a `crm_lists` row whose name contained
+     "Sales tracker", so somebody who renamed their tracker asked "how
+     many deals have I got open" and was told none. A lead names its
+     owner, and a shared lead is mine as much as one I raised. */
+  if (body.scope === 'mine' && entity.table === 'crm_leads') {
+    q = q.or(`owner_id.eq.${user.id},shared_with.cs.{${user.id}}`);
+  }
   if (body.scope === 'mine' && entity.table === 'crm_contacts') {
-    const { data: list } = await supabase.from('crm_lists').select('id')
-      .eq('owner_id', user.id).eq('is_global', false)
-      .ilike('name', '%Sales tracker%').limit(1).maybeSingle();
-    if (list) q = q.eq('list_id', (list as any).id);
+    q = q.eq('assigned_to', user.id);
   }
   if (body.scope === 'mine' && entity.table === 'calendar_events') {
     q = q.eq('created_by', user.id);
   }
-  // A deal is a tracker row; a contact is a CRM record. Same table, so the
-  // deals view has to exclude rows that are only sitting in the global list.
-  if (entity.id === 'deals' && body.scope !== 'mine') {
-    q = q.not('list_id', 'is', null);
-  }
+  /* A deal and a contact were rows of one table, so the deals view had
+     to exclude anything sitting only on the global list to avoid
+     counting every company as a deal. They are separate tables now and
+     every row of `crm_leads` is a deal, so there is nothing to exclude. */
 
   /* A price bracket lands on an amount column rather than a filter
      column, so the allowlist has to cover both. Still an allowlist: the

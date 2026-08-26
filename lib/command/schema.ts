@@ -188,20 +188,29 @@ export const ENTITIES: EntitySpec[] = [
     hrefFor: (r) => `/dashboard/sales?stock=${r.id}`,
   },
   {
+    /* A PITCH, WHICH IS A DIFFERENT QUESTION FROM A CUSTOMER.
+
+       This entity has always existed and always read `crm_contacts`,
+       because a deal and a company were the same row. "How many
+       customers are in Carrington" counts companies and "how many
+       leads has Dave got open" counts pitches, and while both came off
+       one table the two questions shared an answer that was wrong for
+       one of them. Migration 040 gave a pitch its own table and this
+       reads it. */
     id: 'deals',
-    table: 'crm_contacts',
-    label: 'proposals', labelOne: 'proposal',
+    table: 'crm_leads',
+    label: 'leads', labelOne: 'lead',
     nouns: ['deal', 'deals', 'proposal', 'proposals', 'quote', 'quotes', 'opportunity',
             'opportunities', 'lead', 'leads', 'enquiry', 'enquiries', 'pipeline'],
     titleColumn: 'company_name',
-    subtitleColumns: ['contact_name', 'status', 'location'],
+    subtitleColumns: ['what', 'status', 'requirement'],
     dateColumn: 'date_of_enquiry',
     /* The same rule on the tracker side, where the commission lives. */
     saleDate: { primary: 'dispatch_date', fallback: 'order_date' },
     dates: [
       { key: 'enquiry', column: 'date_of_enquiry', label: 'enquiry date',
         words: ['enquired', 'enquiry', 'came in', 'raised', 'opened'] },
-      { key: 'contact', column: 'last_contact', label: 'last contact',
+      { key: 'moved', column: 'last_activity_at', label: 'last touched',
         words: ['contacted', 'spoke', 'spoken', 'touched', 'heard from', 'chased'] },
       { key: 'ordered', column: 'order_date', label: 'order date', words: ['ordered', 'placed'] },
       { key: 'dispatched', column: 'dispatch_date', label: 'date out',
@@ -216,22 +225,30 @@ export const ENTITIES: EntitySpec[] = [
     ],
     filters: [
       { key: 'status', column: 'status', kind: 'enum', label: 'status', vocabulary: DEAL_STATUS },
-      { key: 'side', column: 'side', kind: 'enum', label: 'side',
+      /* Three kinds of work rather than two sides of the business.
+         Rental is here from the start: the type is a value on the lead
+         now, not a column that has to be widened to hold a third. */
+      { key: 'type', column: 'type', kind: 'enum', label: 'kind of work',
         vocabulary: { maintenance: 'maintenance', service: 'maintenance', workshop: 'maintenance',
-                      sales: 'trailer_sales', 'trailer sales': 'trailer_sales' } },
+                      sales: 'trailer_sales', 'trailer sales': 'trailer_sales',
+                      rental: 'rental', leasing: 'rental', hire: 'rental',
+                      'contract hire': 'rental' } },
+      /* Naming the company is how people ask about a pitch: "how many
+         Dawson deals", "Dawson's open leads". The name is carried on
+         the lead by a trigger so this is a filter rather than a join. */
       { key: 'customer', column: 'company_name', kind: 'text', label: 'customer', freeText: true },
-      { key: 'assigned', column: 'assigned_to', kind: 'text', label: 'assigned to', freeText: true },
-      { key: 'location', column: 'location', kind: 'text', label: 'location', freeText: true },
-      { key: 'source', column: 'source', kind: 'text', label: 'source', freeText: true },
+      { key: 'what', column: 'what', kind: 'text', label: 'what for', freeText: true },
+      { key: 'requirement', column: 'requirement', kind: 'text', label: 'requirement', freeText: true },
     ],
     dimensions: [
       { key: 'status', column: 'status', label: 'status', words: ['status', 'stage', 'state'] },
-      { key: 'customer', column: 'company_name', label: 'customer', words: ['customer', 'company', 'client', 'account'] },
-      { key: 'assigned', column: 'assigned_to', label: 'owner', words: ['rep', 'owner', 'who', 'assigned'] },
-      { key: 'side', column: 'side', label: 'side', words: ['side', 'division'] },
-      { key: 'location', column: 'location', label: 'location', words: ['location', 'area', 'region'] },
+      { key: 'customer', column: 'company_name', label: 'customer',
+        words: ['customer', 'company', 'client', 'account'] },
+      { key: 'type', column: 'type', label: 'kind of work',
+        words: ['side', 'division', 'kind', 'type', 'work'] },
+      { key: 'what', column: 'what', label: 'what for', words: ['what'] },
     ],
-    hrefFor: (r) => `/dashboard/leads?contact=${r.id}`,
+    hrefFor: (r) => `/dashboard/leads?lead=${r.id}`,
     nounImpliesFilter: {
       lead:      { column: 'status', value: 'lead',   label: 'status lead' },
       leads:     { column: 'status', value: 'lead',   label: 'status lead' },

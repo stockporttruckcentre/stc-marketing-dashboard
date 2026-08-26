@@ -27,8 +27,16 @@ import type { CRMContact, Profile } from '@/lib/types';
    booked for them. The picker still records the intent correctly.
    ============================================================= */
 
+/**
+ * A meeting is with the company, never with one pitch to them.
+ *
+ * So this takes only what identifies the company. It used to take a
+ * whole `CRMContact` because a tracker row and a company were the same
+ * record; now a tracker row is a lead, and passing the lead here would
+ * file the meeting against the pitch and lose it when the pitch closed.
+ */
 export function ScheduleMeetingModal({ contact, profile, allProfiles, onClose }: {
-  contact: CRMContact;
+  contact: Pick<CRMContact, 'id' | 'company_name'>;
   profile: Profile;
   allProfiles: Profile[];
   onClose: () => void;

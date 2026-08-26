@@ -48,7 +48,31 @@ export function AddressMap({
   onChanged: () => void;
 }) {
   const supabase = useRef(createClient()).current;
-  const holder = useRef<HTMLDivElement>(null);
+  /**
+   * The element Leaflet draws into, held as state rather than a ref.
+   *
+   * This is the whole of the "loading the map" hang, and the reason it
+   * only happened from the second time onwards.
+   *
+   * The panel renders through a portal, which cannot exist until after
+   * the first commit, so the first render returns null and the element
+   * does not exist yet. The effect that builds the map runs anyway, and
+   * the first thing it does is `await import('leaflet')`.
+   *
+   * The first time somebody opens the map, that import is a real fetch
+   * and parse, which takes long enough for React to commit the portal
+   * first. The element is there when the import resolves and the map
+   * builds. The second time, the module is already in memory and the
+   * import resolves in a microtask, before the commit. The element is
+   * still null, the effect took its early return, and its dependency
+   * list was empty so nothing ever ran it again: "Loading the map",
+   * forever, with no error anywhere.
+   *
+   * A callback ref makes the element itself the trigger. The map is
+   * built when there is something to build it in, rather than when a
+   * flag suggests there ought to be.
+   */
+  const [holder, setHolder] = useState<HTMLDivElement | null>(null);
   const map = useRef<any>(null);
   const markers = useRef<Map<string, any>>(new Map());
   const [ready, setReady] = useState(false);
@@ -160,26 +184,35 @@ export function AddressMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [past, future]);
 
-  // ---- build the map once ----
+  // ---- build the map once there is somewhere to put it ----
   useEffect(() => {
+    if (!holder) return;
     let killed = false;
     (async () => {
-      const L = (await import('leaflet')).default;
-      if (killed || !holder.current || map.current) return;
+      try {
+        const L = (await import('leaflet')).default;
+        if (killed || map.current) return;
 
-      const m = L.map(holder.current, { zoomControl: true, attributionControl: true }).setView(HOME, 9);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(m);
-      map.current = m;
-      setReady(true);
+        const m = L.map(holder, { zoomControl: true, attributionControl: true }).setView(HOME, 9);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(m);
+        map.current = m;
+        setReady(true);
+      } catch (e: any) {
+        /* Say so. Anything that goes wrong here used to leave the panel
+           reading "Loading the map" with nothing in the console and no
+           way to tell a slow connection from a broken one. */
+        if (!killed) setStatus(`The map could not be loaded. ${e?.message ?? ''}`.trim());
+      }
     })();
     return () => {
       killed = true;
       if (map.current) { map.current.remove(); map.current = null; }
+      setReady(false);
     };
-  }, []);
+  }, [holder]);
 
   /**
    * Find anything that has no position yet.
@@ -504,7 +537,7 @@ export function AddressMap({
         )}
 
         <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-          <div ref={holder} style={{ position: 'absolute', inset: 0 }} />
+          <div ref={setHolder} style={{ position: 'absolute', inset: 0 }} />
 
           {selectedSite && anchor && (
             <PinCard
@@ -522,8 +555,9 @@ export function AddressMap({
           {!ready && (
             <div style={{
               position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', color: 'var(--text-subtle)', fontSize: 13,
-            }}>Loading the map</div>
+              justifyContent: 'center', gap: 8,
+              color: 'var(--text-subtle)', fontSize: 13,
+            }}><Loader size={13} className="spin" /> Loading the map</div>
           )}
         </div>
 

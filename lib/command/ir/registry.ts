@@ -626,7 +626,10 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     label: 'lists it appears on',
     approximate: false,
     requires: ['crm.view'],
-    join: { via: 'through', table: 'crm_list_members', localKey: 'contact_id', remoteKey: 'list_id' },
+    // `crm_list_members` is who may SEE a list. Which companies are ON
+    // one is `crm_list_contacts`, and pointing at the wrong table meant
+    // "the lists Dawson appears on" answered with nothing at all.
+    join: { via: 'through', table: 'crm_list_contacts', localKey: 'contact_id', remoteKey: 'list_id' },
   },
   {
     id: 'contact.addresses',
@@ -729,7 +732,10 @@ export const CAPABILITIES: CapabilityDef[] = [
       { key: 'email', label: 'email address', kind: 'text', required: false, from: 'email' },
       { key: 'companyName', label: 'company name', kind: 'text', required: false, from: 'company_name' },
       { key: 'contactName', label: 'contact name', kind: 'text', required: false, from: 'contact_name' },
-      { key: 'website', label: 'website', kind: 'text', required: false, from: 'website' },
+      /* The website lives inside `links`, not in a column of its own.
+         This read `website`, which `crm_contacts` has never had, so the
+         whole lookup failed on a column name nobody typed. */
+      { key: 'website', label: 'website', kind: 'text', required: false, from: 'links' },
     ],
   },
   {

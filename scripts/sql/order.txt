@@ -47,5 +47,11 @@
 037_sale_projection
 038_duplicate_and_link
 039_rows_forward
+040_leads
+041_tracker_from_crm_makes_a_lead
+042_sales_and_proposals_on_leads
+043_account_status_follows_its_leads
+044_list_operations_on_memberships
+045_the_shared_pipeline_is_writable
 018_command_set_role
 019_last_admin

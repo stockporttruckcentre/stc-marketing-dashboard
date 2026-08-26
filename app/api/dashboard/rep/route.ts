@@ -38,24 +38,18 @@ export async function GET(req: NextRequest) {
     .from('profiles').select('id, full_name, role').eq('id', user.id).single();
   const fullName = (profile as any)?.full_name ?? '';
 
-  // The rep's own tracker list. Found by name, which is the existing
-  // contract in app/dashboard/leads/page.tsx. Fragile, and flagged as
-  // such in the plan, but changing it is not this build's job.
-  const { data: trackerList } = await supabase
-    .from('crm_lists').select('id, name')
-    .eq('owner_id', user.id).eq('is_global', false)
-    .ilike('name', '%Sales tracker%').limit(1).maybeSingle();
-
-  if (!trackerList) {
-    return NextResponse.json({
-      hasTracker: false,
-      profile: { full_name: fullName },
-      staleDays,
-    });
-  }
-
+  /* THE REP'S OWN DEALS.
+  
+     This used to find a `crm_lists` row whose NAME contained "Sales
+     tracker" and read the contacts on it, which was fragile enough to
+     be flagged when it was written: rename your tracker and your
+     dashboard empties. A tracker is not a list any more, so the
+     question is the one it always meant. Yours, plus anything somebody
+     shared with you. */
   const [{ data: rows }, { data: meetings }] = await Promise.all([
-    supabase.from('crm_contacts').select('*').eq('list_id', (trackerList as any).id),
+    supabase.from('crm_leads')
+      .select('*, account:crm_contacts ( id, company_name, location )')
+      .or(`owner_id.eq.${user.id},shared_with.cs.{${user.id}}`),
     supabase.from('calendar_events')
       .select('id, title, start_at, end_at, contact_id, attendees')
       .gte('start_at', new Date(Date.now() - DAY).toISOString())
@@ -63,8 +57,14 @@ export async function GET(req: NextRequest) {
       .order('start_at', { ascending: true }),
   ]);
 
-  const deals = (rows ?? []) as any[];
-  const trailerDeals = deals.filter((d) => (d.side ?? 'trailer_sales') === 'trailer_sales');
+  const deals = ((rows ?? []) as any[]).map((d) => ({
+    ...d,
+    // The screens below read a deal's customer by name, and it is one
+    // join away rather than a column on the same row now.
+    company_name: d.company_name ?? d.account?.company_name ?? null,
+    location: d.location ?? d.account?.location ?? null,
+  }));
+  const trailerDeals = deals.filter((d) => (d.type ?? 'trailer_sales') === 'trailer_sales');
 
   // Activity signal. `last_activity_at` is the honest column and is added
   // by supabase/migrations/001_dashboard.sql. Until that runs, fall back
@@ -191,11 +191,13 @@ export async function GET(req: NextRequest) {
     .reduce((s, d) => s + (Number(d.sale_price) || 0), 0);
 
   return NextResponse.json({
+    /* Everybody has a tracker now. It is not a list somebody has to have
+       created, it is the leads they hold, and an empty one is a rep with
+       nothing open rather than a screen that cannot be shown. */
     hasTracker: true,
     profile: { full_name: fullName },
     staleDays,
     usingRealActivity,
-    trackerListId: (trackerList as any).id,
     actions: { available: true, derived: true, items: [...meetingActions, ...followUpActions] },
     stale: { available: true, items: stale },
     topStuck: { available: true, items: stale.slice(0, 5) },

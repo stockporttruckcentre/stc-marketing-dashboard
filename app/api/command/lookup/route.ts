@@ -26,19 +26,43 @@ export async function GET(req: NextRequest) {
 
   const { data } = await supabase
     .from('crm_contacts')
-    .select('id, list_id, company_name, contact_name, location, status, crm_lists(name)')
+    .select('id, company_name, contact_name, location, status')
     .or(`company_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like},phone.ilike.${like},location.ilike.${like}`)
     .limit(4);
 
+  const hits = (data ?? []) as any[];
+
+  /* WHICH LIST TO OPEN THE RECORD ON.
+
+     A company sat on exactly one list while membership was a column, so
+     naming the list was the same as naming the record. It can be on
+     several now: the pipeline everybody shares, plus a list of its own
+     that somebody keeps. The pipeline is the right one to land on,
+     because it is the one every reader can open. */
+  const lists = new Map<string, { id: string; name: string | null }>();
+  if (hits.length) {
+    const { data: on } = await supabase
+      .from('crm_list_contacts')
+      .select('contact_id, list_id, crm_lists(name, is_global)')
+      .in('contact_id', hits.map((h) => h.id));
+
+    for (const row of ((on ?? []) as any[])) {
+      const held = lists.get(row.contact_id);
+      // First one wins unless a shared list turns up, which always wins.
+      if (held && !row.crm_lists?.is_global) continue;
+      lists.set(row.contact_id, { id: row.list_id, name: row.crm_lists?.name ?? null });
+    }
+  }
+
   return NextResponse.json({
-    contacts: (data ?? []).map((r: any) => ({
+    contacts: hits.map((r) => ({
       id: r.id,
-      list_id: r.list_id,
+      list_id: lists.get(r.id)?.id ?? null,
       company_name: r.company_name,
       contact_name: r.contact_name,
       location: r.location,
       status: r.status,
-      list_name: r.crm_lists?.name ?? null,
+      list_name: lists.get(r.id)?.name ?? null,
     })),
   });
 }

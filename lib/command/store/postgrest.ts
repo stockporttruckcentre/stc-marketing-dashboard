@@ -120,7 +120,36 @@ function serialise(c: Cond): string | null {
   }
 }
 
+/**
+ * Membership of a CRM list, which is a row and not a column.
+ *
+ * PostgREST filters on a joined table by embedding it with `!inner` and
+ * naming the column through the embed. That means the SELECT and the
+ * WHERE have to be built together, so the embed is worked out here
+ * before the query starts and the filter is applied in `applyCond`.
+ *
+ * Only at the top level of an AND. A membership inside an `or` or a
+ * `not` would need the join to be optional in one branch and required
+ * in another, which one embed cannot be, and answering it half right is
+ * worse than saying it cannot be answered.
+ */
+const MEMBERSHIP_EMBED = 'crm_list_contacts!inner(list_id)';
+
+function listsWanted(c: Cond, out: string[] = []): string[] {
+  if (c.kind === 'onList') out.push(c.list);
+  else if (c.kind === 'and') c.of.forEach((inner) => listsWanted(inner, out));
+  return out;
+}
+
 export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
+  switch (c.kind) {
+    case 'onList':
+      /* The embed this needs is added to the SELECT by the caller. A
+         list id reaches here from the screen rather than from anything
+         somebody typed, so it is not a place a filter can be smuggled
+         in, but it goes through the same escaping as every other value. */
+      return { q: q.eq('crm_list_contacts.list_id', c.list) };
+  }
   switch (c.kind) {
     case 'and': {
       let out = q;
@@ -202,10 +231,20 @@ export function applyCond(q: any, c: Cond): { q: any; unsupported?: string } {
 export function postgrestStore(supabase: Queryable): Store {
   return {
     async read(req: ReadRequest): Promise<ReadOutcome> {
-      const narrowed = applyCond(
-        supabase.from(req.table).select(req.columns.join(', ')),
-        req.where,
-      );
+      /* A membership test needs the join table embedded in the SELECT,
+         so the condition is inspected before the query is built. */
+      const wanted = listsWanted(req.where);
+      if (wanted.length > 1 && new Set(wanted).size > 1) {
+        return {
+          ok: false, reason: 'unsupported',
+          why: 'that asks about two lists at once, which one join cannot answer',
+        };
+      }
+      const columns = wanted.length
+        ? [...req.columns, MEMBERSHIP_EMBED].join(', ')
+        : req.columns.join(', ');
+
+      const narrowed = applyCond(supabase.from(req.table).select(columns), req.where);
       if (narrowed.unsupported) return { ok: false, reason: 'unsupported', why: narrowed.unsupported };
 
       let q = narrowed.q;

@@ -177,9 +177,13 @@ refuses('a field taken from rows is refused, because a set has many values',
   {
     op: 'update', id: 'u', expect: 'many', target: { entity: 'contacts' },
     match: { ref: 'rows', step: 'contactRows' },
+    /* `location` rather than `status`, which stopped being writable by
+       hand with migration 043: a company's status is derived from its
+       leads. These cases are about the SHAPE of a reference, so the
+       column only has to be one somebody could actually write. */
     set: [{
-      field: { entity: 'contacts', field: 'status' },
-      to: { kind: 'result', of: { ref: 'field', step: 'contactRows', field: 'status' } },
+      field: { entity: 'contacts', field: 'location' },
+      to: { kind: 'result', of: { ref: 'field', step: 'contactRows', field: 'location' } },
     }],
   },
 ]);
@@ -190,8 +194,8 @@ accepts('a field taken from a record is accepted', [
     op: 'update', id: 'u', expect: 'many', target: { entity: 'contacts' },
     match: { ref: 'record', step: 'newContact' },
     set: [{
-      field: { entity: 'contacts', field: 'status' },
-      to: { kind: 'result', of: { ref: 'field', step: 'newContact', field: 'status' } },
+      field: { entity: 'contacts', field: 'location' },
+      to: { kind: 'result', of: { ref: 'field', step: 'newContact', field: 'location' } },
     }],
   },
 ]);
@@ -297,10 +301,10 @@ refuses('a bare set of contacts cannot match a write to trailers',
 ]);
 
 refuses('a write to trailers cannot set a field belonging to contacts',
-  'sets contacts.status, but this update targets trailers', [
+  'sets contacts.location, but this update targets trailers', [
   {
     op: 'update', id: 'u', expect: 'many', target: { entity: 'trailers' }, match: { entity: 'trailers' },
-    set: [{ field: { entity: 'contacts', field: 'status' }, to: { kind: 'literal', value: 'live' } }],
+    set: [{ field: { entity: 'contacts', field: 'location' }, to: { kind: 'literal', value: 'live' } }],
   },
 ]);
 
@@ -310,7 +314,7 @@ refuses('a select over trailers cannot filter on a contacts field without a rela
     op: 'select', id: 's', from: { entity: 'trailers' },
     where: {
       kind: 'cmp', op: 'eq',
-      left: { kind: 'field', of: { entity: 'contacts', field: 'status' } },
+      left: { kind: 'field', of: { entity: 'contacts', field: 'location' } },
       right: { kind: 'literal', value: 'live' },
     },
   },
@@ -556,7 +560,7 @@ const chained: Step[] = [
   { op: 'create', id: 's2', target: { entity: 'contacts' }, produces: { kind: 'record', entity: 'contacts' } },
   {
     op: 'update', id: 's3', expect: 'many', target: { entity: 'contacts' }, match: { ref: 'record', step: 's2' },
-    set: [{ field: { entity: 'contacts', field: 'status' }, to: { kind: 'literal', value: 'live' } }],
+    set: [{ field: { entity: 'contacts', field: 'location' }, to: { kind: 'literal', value: 'live' } }],
   },
 ];
 accepts('class: select, create, then act on the created record', chained);

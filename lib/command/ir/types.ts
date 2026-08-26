@@ -197,6 +197,15 @@ export type Cond =
   | { kind: 'empty'; of: Expr }
   | { kind: 'within'; of: Expr; period: Period }
   | { kind: 'near'; of: Expr; origin: Expr; radius: number; unit: 'mi' | 'km' }
+  /* On a named CRM list.
+
+     Its own condition rather than a comparison, because membership is a
+     row in `crm_list_contacts` and not a column on the company. It was a
+     column, `crm_contacts.list_id`, and that is precisely why the same
+     haulier had to exist once per list it appeared on. Comparing a
+     column would answer "the last list anybody put it on", which reads
+     as an answer and is not one. */
+  | { kind: 'onList'; list: string }
   /** Relationship-backed. `via` is a relationship id. */
   | { kind: 'related'; via: string; where?: Cond; count?: { op: CmpOp; n: number } }
   | { kind: 'and'; of: Cond[] }

@@ -282,7 +282,11 @@ ok('half typed "expo" still offers exports',
 
 // Naming the thing narrows to that thing.
 for (const [q, want] of [['export customers', 'customers'], ['export trailers', 'trailers'],
-                         ['how many proposals', 'proposals']] as const) {
+                         /* `proposals` is still a word for a pitch and still
+                            narrows to one. What comes back is called a lead
+                            now, because that is what the business calls it
+                            and what the table is. */
+                         ['how many proposals', 'leads']] as const) {
   const got = composeSuggestions(q, CAPS.admin, 8);
   ok(`"${q}" narrows to ${want}`, got.length > 0 && got.every((g) => g.phrase.includes(want)),
     got.map((g) => g.phrase).join(' / '));
@@ -597,8 +601,14 @@ const SELECTIONS: { q: string; entity: string; expect: string[] }[] = [
     entity: 'trailers', expect: ['no MOT date', 'status in stock'] },
   { q: 'trailers with a refurb cost over 5k at carrington',
     entity: 'trailers', expect: ['refurb cost over £5,000', 'in Carrington'] },
-  { q: 'customers with no next action and no phone number',
-    entity: 'contacts', expect: ['no next action', 'no phone number'] },
+  /* `next_action` describes a pitch and moved to the lead with
+     migration 040, so the sentence that reaches it is about leads. The
+     customer half of the old sentence is kept as its own case, because
+     a phone number is still the company's. */
+  { q: 'leads with no next action',
+    entity: 'deals', expect: ['no next action'] },
+  { q: 'customers with no phone number',
+    entity: 'contacts', expect: ['no phone number'] },
 ];
 
 for (const c of SELECTIONS) {

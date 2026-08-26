@@ -1,44 +1,43 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { SalesTracker } from '@/components/SalesTracker';
-import type { CRMContact, CrmList, Profile } from '@/lib/types';
+import type { LeadWithAccount, Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * A tracker is the leads on it, not a list of companies.
+ *
+ * It used to be a private `crm_lists` row filtered by `list_id`, which
+ * is why the same customer had to be copied onto every tracker that was
+ * pitching to them. A tracker now asks the only question that was ever
+ * meant: which pitches are mine.
+ *
+ * Mine means I own it or somebody shared it with me. Deliberately
+ * spelled out rather than left to row level security, because an admin
+ * can see every tracker and would otherwise open their own and find
+ * everybody's.
+ */
 export default async function SalesTrackerPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-  const p = profile as Profile;
-  const firstName = (p?.full_name ?? user.email?.split('@')[0] ?? 'My').split(' ')[0];
-  const trackerName = `${firstName}'s Sales tracker`;
 
-  // Auto-create the user's personal sales tracker list if not present
-  const { data: existing } = await supabase
-    .from('crm_lists').select('*')
-    .eq('owner_id', user.id).eq('is_global', false).ilike('name', '%Sales tracker%')
-    .limit(1).maybeSingle();
-  let list: CrmList = existing as CrmList;
-  if (!list) {
-    const { data: created } = await supabase.from('crm_lists').insert({
-      name: trackerName, owner_id: user.id, is_global: false, color: '#cf2417',
-      description: 'Personal sales pipeline - only you see this list',
-    }).select('*').single();
-    list = created as CrmList;
-  }
-
-  const { data: contacts } = await supabase
-    .from('crm_contacts').select('*').eq('list_id', list.id)
+  const { data: leads } = await supabase
+    .from('crm_leads')
+    .select(`*, account:crm_contacts (
+       id, company_name, contact_name, email, phone, location, relationship
+     )`)
+    .or(`owner_id.eq.${user.id},shared_with.cs.{${user.id}}`)
     .order('date_of_enquiry', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   return (
     <SalesTracker
-      list={list}
-      initialContacts={(contacts ?? []) as CRMContact[]}
-      profile={p}
+      initialLeads={(leads ?? []) as LeadWithAccount[]}
+      profile={profile as Profile}
     />
   );
 }
