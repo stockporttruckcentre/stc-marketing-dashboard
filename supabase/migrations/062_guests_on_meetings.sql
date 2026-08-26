@@ -138,13 +138,24 @@ CREATE POLICY "guests_visible_with_the_meeting" ON calendar_guests
     EXISTS (SELECT 1 FROM calendar_events e WHERE e.id = event_id)
   );
 
--- SELECT only. Everything that writes goes through a function.
-GRANT SELECT ON calendar_guests TO authenticated;
-
--- The token never leaves the database except inside the two functions
--- that need it. A column level revoke says so in a way a future SELECT *
--- cannot talk its way past.
-REVOKE SELECT (token) ON calendar_guests FROM authenticated;
+-- SELECT only, and column by column, which is the only way to keep the
+-- token out of reach.
+--
+-- Granting the table and then revoking the column does nothing: a table
+-- level SELECT covers every column there is and every column added
+-- later, and Postgres will accept the REVOKE and change nothing. The
+-- readback handed over with this migration is what caught that, by
+-- asking `has_column_privilege` rather than trusting the statement.
+--
+-- So the columns are named. `token` is not among them, and a column
+-- added to this table later is not granted until somebody adds it here,
+-- which is the right way round for a table with a credential in it.
+REVOKE ALL ON calendar_guests FROM authenticated;
+GRANT SELECT (
+  id, event_id, email, name, contact_id, invited_by, status,
+  proposed_start_at, proposed_end_at, rounds, note,
+  responded_at, seen_at, created_at, updated_at
+) ON calendar_guests TO authenticated;
 
 -- -------------------------------------------------------------
 -- 4. Asking a guest.
