@@ -3404,5 +3404,118 @@ SELECT assert('the seed loaded',
   (SELECT COUNT(*) FROM command_writable_columns) = 86,
   (SELECT COUNT(*)::TEXT FROM command_writable_columns));
 
+-- =============================================================
+-- 17. A salesman using the CRM tab, from his own account
+--
+-- Everything one person does on their first day with the tab: put a
+-- company on the shared pipeline, write a note on it, correct a phone
+-- number, and be unable to reach a colleague's private list or sign a
+-- note with somebody else's name.
+--
+-- This is here because none of it worked. Migration 040 moved list
+-- membership into its own table and gave that table the policy the old
+-- lists had: your own list, one shared with you, or admin. The shared
+-- pipeline has no owner, so every branch was false and the most
+-- ordinary action on the tab came back as
+--
+--   new row violates row-level security policy for table "crm_list_contacts"
+--
+-- Adding a customer, importing a spreadsheet and putting an existing
+-- company onto the list all failed the same way, and nothing in the
+-- repository asked. Migration 045.
+-- =============================================================
+\echo '--- a salesman on the CRM tab ---'
+
+SELECT reset_fixtures();
+
+INSERT INTO crm_contacts (id, company_name, source) VALUES
+  ('d0000000-0000-0000-0000-0000000000a1', 'TEST Dean Haulage', 'manual'),
+  ('d0000000-0000-0000-0000-0000000000a2', 'TEST Someone Elses', 'manual')
+ON CONFLICT (id) DO NOTHING;
+
+-- A private list belonging to a colleague, with a company on it.
+INSERT INTO crm_lists (id, name, is_global, owner_id)
+VALUES ('d0000000-0000-0000-0000-0000000000f1', 'TEST colleagues list', FALSE,
+        'cccccccc-0000-0000-0000-00000000000c')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO crm_list_contacts (list_id, contact_id)
+VALUES ('d0000000-0000-0000-0000-0000000000f1', 'd0000000-0000-0000-0000-0000000000a2')
+ON CONFLICT DO NOTHING;
+
+-- As him, and as the `authenticated` role. Without the SET ROLE this
+-- file runs as the superuser, which bypasses row level security
+-- entirely: every assertion below would pass whatever the policies
+-- said, which is worse than not making them.
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-000000000002', FALSE);
+SELECT set_config('request.jwt.claim.role', 'authenticated', FALSE);
+
+DO $$
+DECLARE g UUID; n INT; ok BOOLEAN;
+BEGIN
+  SELECT id INTO g FROM crm_lists WHERE is_global LIMIT 1;
+
+  PERFORM assert('the fixture user is a salesman, not an admin',
+    current_role_safe() = 'sales', COALESCE(current_role_safe(), 'nobody'));
+
+  ok := TRUE;
+  BEGIN
+    INSERT INTO crm_list_contacts (list_id, contact_id)
+    VALUES (g, 'd0000000-0000-0000-0000-0000000000a1');
+  EXCEPTION WHEN OTHERS THEN ok := FALSE;
+  END;
+  PERFORM assert('a salesman can put a company on the shared pipeline', ok);
+
+  SELECT COUNT(*) INTO n FROM crm_contacts WHERE id = 'd0000000-0000-0000-0000-0000000000a1';
+  PERFORM assert('and then sees it', n = 1, n::TEXT);
+
+  ok := TRUE;
+  BEGIN
+    INSERT INTO contact_notes (contact_id, text, author_id, author_name)
+    VALUES ('d0000000-0000-0000-0000-0000000000a1', 'Rang them Tuesday',
+            'bbbbbbbb-0000-0000-0000-000000000002', 'Dean');
+  EXCEPTION WHEN OTHERS THEN ok := FALSE;
+  END;
+  PERFORM assert('and can write a note on it', ok);
+
+  SELECT COUNT(*) INTO n FROM contact_notes
+   WHERE contact_id = 'd0000000-0000-0000-0000-0000000000a1';
+  PERFORM assert('and read it back', n = 1, n::TEXT);
+
+  -- A note is the record of who said what to a customer and when. One
+  -- that can be signed with somebody else's name records nothing.
+  ok := FALSE;
+  BEGIN
+    INSERT INTO contact_notes (contact_id, text, author_id, author_name)
+    VALUES ('d0000000-0000-0000-0000-0000000000a1', 'Not mine',
+            'aaaaaaaa-0000-0000-0000-000000000001', 'Somebody else');
+  EXCEPTION WHEN OTHERS THEN ok := TRUE;
+  END;
+  PERFORM assert('but cannot sign one with a colleagues name', ok);
+
+  UPDATE crm_contacts SET phone = '0161 000 0000'
+   WHERE id = 'd0000000-0000-0000-0000-0000000000a1';
+  SELECT COUNT(*) INTO n FROM crm_contacts
+   WHERE id = 'd0000000-0000-0000-0000-0000000000a1' AND phone = '0161 000 0000';
+  PERFORM assert('and can correct a phone number', n = 1, n::TEXT);
+
+  SELECT COUNT(*) INTO n FROM crm_contacts WHERE id = 'd0000000-0000-0000-0000-0000000000a2';
+  PERFORM assert('a company on a colleagues private list stays out of sight', n = 0, n::TEXT);
+
+  -- Taking one off the shared pipeline takes it off for everybody.
+  DELETE FROM crm_list_contacts
+   WHERE list_id = g AND contact_id = 'd0000000-0000-0000-0000-0000000000a1';
+  SELECT COUNT(*) INTO n FROM crm_list_contacts
+   WHERE list_id = g AND contact_id = 'd0000000-0000-0000-0000-0000000000a1';
+  PERFORM assert('and he cannot take one off the shared pipeline', n = 1, n::TEXT);
+END
+$$;
+
+RESET ROLE;
+SELECT set_config('request.jwt.claim.sub', '', FALSE);
+SELECT set_config('request.jwt.claim.role', '', FALSE);
+DELETE FROM crm_contacts WHERE company_name LIKE 'TEST Dean%' OR company_name LIKE 'TEST Someone%';
+DELETE FROM crm_lists WHERE name = 'TEST colleagues list';
+
 SELECT reset_fixtures();
 \echo '--- done ---'

@@ -52,5 +52,6 @@
 042_sales_and_proposals_on_leads
 043_account_status_follows_its_leads
 044_list_operations_on_memberships
+045_the_shared_pipeline_is_writable
 018_command_set_role
 019_last_admin

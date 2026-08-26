@@ -127,6 +127,16 @@ export function CrmWorkspace({
   const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
   const [showAddContact, setShowAddContact] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  /**
+   * Every company in the CRM, for the import to check against.
+   *
+   * Loaded when the dialog opens rather than kept in step, because it
+   * is read once, at the moment somebody is about to import, and a
+   * stale answer there is a duplicate written.
+   */
+  const [everyCompany, setEveryCompany] = useState<
+    { id: string; company_name: string; email: string | null; onThisList: boolean }[]
+  >([]);
   const [search, setSearch] = useState('');
 
   /**
@@ -484,18 +494,46 @@ export function CrmWorkspace({
    * time a row arrives here the user has seen it and its values are
    * already the right shape for the column, so this only has to write.
    */
-  async function commitImport(records: Record<string, any>[]) {
+  async function openImport() {
+    const onHere = new Set(rows.map((r) => r.id));
+    const { data, error } = await supabase
+      .from('crm_contacts').select('id, company_name, email');
+    if (error) { setMessage(error.message); return; }
+    setEveryCompany(((data ?? []) as { id: string; company_name: string; email: string | null }[])
+      .map((c) => ({ ...c, onThisList: onHere.has(c.id) })));
+    setShowImport(true);
+  }
+
+  async function commitImport(records: Record<string, any>[], attach: string[] = []) {
     setImporting(true); setMessage(null);
     try {
-      const res = await fetch('/api/crm/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: records, list_id: selectedListId, mapped: true }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Import failed');
-      setMessage(`Imported ${json.inserted} ${json.inserted === 1 ? 'contact' : 'contacts'}`);
+      /* Companies already in the CRM go onto this list rather than
+         being written again. One record, on as many lists as it needs
+         to be, which is the whole point of the join table. */
+      if (attach.length) {
+        const { error } = await supabase.from('crm_list_contacts')
+          .upsert(attach.map((contact_id) => ({ list_id: selectedListId, contact_id })));
+        if (error) throw new Error(error.message);
+      }
+
+      let inserted = 0;
+      if (records.length) {
+        const res = await fetch('/api/crm/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: records, list_id: selectedListId, mapped: true }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Import failed');
+        inserted = json.inserted as number;
+      }
+
+      const added = [
+        inserted ? `${inserted} ${inserted === 1 ? 'company' : 'companies'} imported` : '',
+        attach.length ? `${attach.length} already in the CRM, now on this list` : '',
+      ].filter(Boolean).join(', ');
+      setMessage(added || 'Nothing to import');
       setRows(await reloadList());
-      return { inserted: json.inserted as number };
+      return { inserted };
     } catch (e: any) {
       return { inserted: 0, error: e.message as string };
     } finally {
@@ -746,7 +784,7 @@ export function CrmWorkspace({
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {caps.has('crm.import') && (
-            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)} disabled={importing}>
+            <Button size="sm" variant="secondary" onClick={openImport} disabled={importing}>
               {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
             </Button>
           )}
@@ -965,7 +1003,14 @@ export function CrmWorkspace({
         <ImportDialog
           dict={CRM_CONTACTS}
           listName={selectedList?.name ?? 'this list'}
-          existing={rows.map((r) => ({ id: r.id, company_name: r.company_name, email: r.email }))}
+          /* THE WHOLE CRM, NOT THE LIST ON SCREEN.
+
+             Checking against the open list only was the duplicate
+             problem waiting to come back through the front door: a
+             company on somebody else's list did not match anything
+             here, so importing a customer sheet made a second copy of
+             every company already in the CRM under another list. */
+          existing={everyCompany}
           onCommit={commitImport}
           onClose={() => setShowImport(false)}
         />
@@ -1075,7 +1120,7 @@ export function CrmWorkspace({
           <MenuItem icon={<Plus size={13} />} label="Add contact" disabled={!canEdit}
             onClick={() => { setEmptyAreaMenu(null); handleAddRow(); }} />
           <MenuItem icon={<Upload size={13} />} label="Import a spreadsheet" disabled={!caps.has('crm.import')}
-            onClick={() => { setEmptyAreaMenu(null); setShowImport(true); }} />
+            onClick={() => { setEmptyAreaMenu(null); openImport(); }} />
         </EdgeAwareCtxMenu>
       )}
       {nextActionFor && (
