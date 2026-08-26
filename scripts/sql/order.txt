@@ -71,6 +71,8 @@
 062_guests_on_meetings
 063_a_guest_can_just_be_a_name
 064_anonymous_reads_nothing
+065_notifications
+066_notifications_wiring
 018_command_set_role
 019_last_admin
 059_work_role_templates

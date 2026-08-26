@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
+import { Toasts } from '@/components/kit/toast';
 import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .from('social_posts').select('*', { count: 'exact', head: true })
     .eq('status', 'pending_review');
 
-  // Sidebar emblem URL — look up the most recent emblem (no-text logo) from brand_assets
+  // Sidebar emblem URL. Look up the most recent emblem, the no-text logo, from brand_assets.
   const { data: emblemRow } = await supabase
     .from('brand_assets')
     .select('url')
@@ -36,13 +37,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
     created_at: new Date().toISOString(),
   };
 
+  /* The toast provider wraps the whole shell rather than a screen, so
+     anything anywhere can confirm what it just did. It renders nothing
+     until something is said. */
   return (
-    <div className="app">
-      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
-      <div className="main">
-        <TopBar role={p.role} />
-        <main className="page">{children}</main>
+    <Toasts>
+      <div className="app">
+        <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
+        <div className="main">
+          <TopBar role={p.role} />
+          <main className="page">{children}</main>
+        </div>
       </div>
-    </div>
+    </Toasts>
   );
 }

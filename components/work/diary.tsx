@@ -11,6 +11,7 @@ import {
 import { relativeDay } from '@/lib/calendar/grid';
 import { EVENT_KINDS, KIND_CHIP, KIND_PLURAL, type EventKind } from '@/lib/calendar/kind';
 import { DiaryRow } from '@/components/calendar/parts';
+import { WaitingOnYou } from '@/components/calendar/waiting';
 import {
   Button, Chip, EmptyState, GridHint, Label, PanelHead, SearchInput, StatStrip,
 } from '@/components/kit/primitives';
@@ -108,6 +109,12 @@ export function WorkDiary({
         { label: 'Meetings', value: counts.meetings, note: 'and visits ahead' },
         { label: 'Waiting on you', value: counts.waitingOnMe, note: 'to answer' },
       ]} />
+
+      {/* Anything asking something of you, above everything that is
+          only telling you. Answerable here rather than one screen
+          along: Work is where somebody comes to find out what is on
+          them, and an invitation is the most on you a thing gets. */}
+      <WaitingOnYou entries={entries} meId={meId} />
 
       <div style={{
         display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',

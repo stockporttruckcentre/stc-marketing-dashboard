@@ -928,9 +928,22 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['target', 'my target', 'against target', 'booked this month', 'am i on track'],
     phrases: ['how far off target am i', 'how much left to hit target'] },
 
+  /* The bell is the feed and there is no screen behind it, so this
+     lands on the dashboard as it always did. What it gained is the
+     words: half the ways somebody asks for this were not in it. */
   { id: 'me.notifications', label: 'My notifications', blurb: 'Anything unread and waiting', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'check', 'any'],
-    objects: ['notifications', 'unread', 'alerts', 'my bell', 'anything for me', 'messages'] },
+    objects: ['notifications', 'unread', 'alerts', 'my bell', 'anything for me', 'messages',
+      'notification', 'notifs', 'inbox', 'what have i missed', 'what needs me'],
+    phrases: ['what is waiting on me', 'anything waiting on me', 'what needs my attention'] },
+
+  { id: 'notifications.settings', label: 'What I get told about', blurb: 'Every toggle, and quiet hours', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/settings?tab=notifications',
+    verbs: [...GO, 'change', 'set', 'turn', 'stop', 'mute', 'silence'],
+    objects: ['notification settings', 'notification preferences', 'what i get told',
+      'my alerts', 'quiet hours', 'notification toggles', 'stop notifications',
+      'turn off notifications', 'mute notifications', 'too many notifications'],
+    phrases: ['stop emailing me', 'i get too many notifications', 'turn the noise down'] },
 
   { id: 'me.inFlight', label: 'What is in flight', blurb: 'Open work split new against existing', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'what'],

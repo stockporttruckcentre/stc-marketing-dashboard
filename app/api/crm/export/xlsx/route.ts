@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { loadExportModel } from '@/lib/crm/load-export';
 import { exportStem } from '@/lib/crm/export-model';
+import { requireCapability } from '@/lib/api/guard';
+import { keepAndTell } from '@/lib/notifications/exports';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +30,15 @@ function styleHeader(row: ExcelJS.Row) {
 }
 
 export async function GET(req: NextRequest) {
+  /* This route had no capability check at all. Middleware meant it was
+     never anonymous, but a whole customer record in one file is exactly
+     what `crm.export` was written to gate, and it was never consulted
+     here. Every role that should have it does, so nothing that worked
+     before stops working. */
+  const gate = await requireCapability('crm.export');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
+
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
@@ -139,6 +150,20 @@ export async function GET(req: NextRequest) {
   }
 
   const buf = await wb.xlsx.writeBuffer();
+
+  /* Kept on the way past, so it can be fetched again from the
+     notification. Neither the copy nor the notification may stop the
+     download: both are best effort inside their own helpers, and the
+     file goes back either way. */
+  await keepAndTell(supabase, user.id, {
+    bytes: buf as ArrayBuffer,
+    filename: `${exportStem(m.company)}.xlsx`,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    company: m.company,
+    contactId: id,
+    what: 'a spreadsheet',
+  });
+
   return new NextResponse(buf as any, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

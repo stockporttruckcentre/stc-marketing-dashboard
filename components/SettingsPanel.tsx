@@ -3,9 +3,25 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Save, Loader, KeyRound, User, Sun, Moon, Settings } from 'lucide-react';
+import { NotificationPrefs } from '@/components/notifications/prefs';
+import { Tabs } from '@/components/kit/primitives';
 import type { Profile } from '@/lib/types';
 
-export function SettingsPanel({ profile }: { profile: Profile }) {
+/* Two tabs rather than a longer page.
+
+   Notifications is thirty eight toggles plus quiet hours, and stacked
+   under the password card it would push everything already here below
+   the fold on a 1080p screen. It is also the one part of this screen
+   somebody comes to deliberately, rather than landing on while looking
+   for something else.
+
+   The existing cards are untouched. They are on the old styling and
+   restyling them is a rebrand step, which is the user's ordering to
+   set, not something to do on the way past. */
+export function SettingsPanel({
+  profile, openTab = 'account',
+}: { profile: Profile; openTab?: 'account' | 'notifications' }) {
+  const [tab, setTab] = useState<'account' | 'notifications'>(openTab);
   const supabase = createClient();
   const [fullName, setFullName] = useState(profile.full_name);
   const [savingName, setSavingName] = useState(false);
@@ -58,9 +74,25 @@ export function SettingsPanel({ profile }: { profile: Profile }) {
         <div>
           <div className="page-head__eyebrow">Admin · Settings</div>
           <h1 className="page-head__title"><Settings size={26} style={{ color: 'var(--stc-red)' }} /><span>Settings<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
-          <div className="page-head__sub">Manage your profile and password.</div>
+          <div className="page-head__sub">Manage your profile, your password and what the application tells you.</div>
         </div>
       </div>
+
+      <div className="kit" style={{ marginBottom: 14 }}>
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: 'account' as const, label: 'Profile and password' },
+            { key: 'notifications' as const, label: 'Notifications' },
+          ]}
+        />
+      </div>
+
+      {tab === 'notifications' ? (
+        <div className="kit"><NotificationPrefs /></div>
+      ) : (
+      <>
 
       <div className="split-2">
         <form onSubmit={saveName} className="card">
@@ -129,6 +161,8 @@ export function SettingsPanel({ profile }: { profile: Profile }) {
           </div>
         </div>
       </div>
+      </>
+      )}
 
     </div>
   );
