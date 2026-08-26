@@ -390,6 +390,9 @@ ok('exactly one kind carries the accent',
    8. What the wire will accept.
    ============================================================= */
 {
+  /* Whoever is booking it. Everything below is read as them, which is
+     what lets the "never invite the organiser" rule be asserted. */
+  const ACTOR = '00000000-0000-0000-0000-0000000000ff';
   const good = readEventBody({
     title: '  Call Dawson  ',
     start_at: '2026-06-05T10:00:00.000Z',
@@ -402,7 +405,7 @@ ok('exactly one kind carries the accent',
     ],
     visibility: 'specific',
     visible_to: ['00000000-0000-0000-0000-000000000003', 'not-a-uuid'],
-  });
+  }, ACTOR);
   ok('a good body is read', !('error' in good));
   if (!('error' in good)) {
     ok('the title is trimmed', good.row.title === 'Call Dawson');
@@ -411,14 +414,14 @@ ok('exactly one kind carries the accent',
     ok('a value that is not a uuid is not a person', good.row.visible_to.length === 1);
   }
 
-  ok('a body with no title is refused', 'error' in readEventBody({ start_at: '2026-06-05T10:00:00Z' }));
-  ok('a body with no start is refused', 'error' in readEventBody({ title: 'Call' }));
+  ok('a body with no title is refused', 'error' in readEventBody({ start_at: '2026-06-05T10:00:00Z' }, ACTOR));
+  ok('a body with no start is refused', 'error' in readEventBody({ title: 'Call' }, ACTOR));
   ok('a start that is not a date is refused',
-    'error' in readEventBody({ title: 'Call', start_at: 'next tuesday-ish' }));
+    'error' in readEventBody({ title: 'Call', start_at: 'next tuesday-ish' }, ACTOR));
 
   const backwards = readEventBody({
     title: 'Call', start_at: '2026-06-05T10:00:00Z', end_at: '2026-06-05T09:00:00Z',
-  });
+  }, ACTOR);
   ok('an end before the start is pushed out rather than stored', !('error' in backwards));
   if (!('error' in backwards)) {
     ok('and lands half an hour after it',
@@ -427,7 +430,7 @@ ok('exactly one kind carries the accent',
 
   const invented = readEventBody({
     title: 'Call', start_at: '2026-06-05T10:00:00Z', color: '#123456', visibility: 'everybody',
-  });
+  }, ACTOR);
   ok('a colour nobody offers becomes the first one', !('error' in invented));
   if (!('error' in invented)) {
     ok('and it is the STC red', invented.row.color === '#CF2417');
@@ -437,7 +440,7 @@ ok('exactly one kind carries the accent',
   const priv = readEventBody({
     title: 'Call', start_at: '2026-06-05T10:00:00Z',
     visibility: 'private', visible_to: ['00000000-0000-0000-0000-000000000003'],
-  });
+  }, ACTOR);
   ok('named people on a private entry are dropped',
     !('error' in priv) && priv.row.visible_to.length === 0);
 
@@ -447,9 +450,36 @@ ok('exactly one kind carries the accent',
       { user_id: '00000000-0000-0000-0000-000000000002', name: 'Tom' },
       { user_id: '00000000-0000-0000-0000-000000000002', name: 'Tom again' },
     ],
-  });
+  }, ACTOR);
   ok('the same person picked twice is one invitation',
     !('error' in twice) && twice.invite.length === 1);
+
+  /* Nobody invites themselves. The compose form puts whoever is booking
+     it on the attendee list, which is right, and sending them an
+     invitation to it is not: `command_meeting_invite` sets `awaiting`
+     to the person asked, so it put a meeting somebody had just booked
+     into their own "waiting on you" count. */
+  const self = readEventBody({
+    title: 'Call Dawson', start_at: '2026-06-05T10:00:00Z',
+    attendees: [
+      { user_id: ACTOR, name: 'Me' },
+      { user_id: '00000000-0000-0000-0000-000000000002', name: 'Tom' },
+    ],
+  }, ACTOR);
+  ok('booking something does not invite you to it', !('error' in self));
+  if (!('error' in self)) {
+    ok('and only the other person is asked',
+      self.invite.length === 1 && self.invite[0] === '00000000-0000-0000-0000-000000000002');
+    ok('while you stay on the attendee list',
+      self.row.attendees.some((a) => a.user_id === ACTOR));
+  }
+
+  const alone = readEventBody({
+    title: 'Dentist', start_at: '2026-06-05T10:00:00Z',
+    attendees: [{ user_id: ACTOR, name: 'Me' }],
+  }, ACTOR);
+  ok('something booked only for yourself asks nobody',
+    !('error' in alone) && alone.invite.length === 0);
 }
 
 /* =============================================================

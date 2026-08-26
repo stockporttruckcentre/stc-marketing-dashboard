@@ -76,6 +76,9 @@ function readAttendee(raw: unknown): CalendarEventAttendee | null {
 
 export function readEventBody(
   body: unknown,
+  /* Who is doing this. Needed only so they are not invited to their own
+     meeting: see the bottom of this function. */
+  actorId: string,
 ): { row: EventRow; invite: string[] } | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'Nothing arrived to save.' };
   const b = body as Record<string, unknown>;
@@ -127,12 +130,21 @@ export function readEventBody(
     visible_to: visibility === 'specific' ? visibleTo : [],
   };
 
-  /* Who actually gets asked. Deduplicated, because the same person
-     picked twice is one invitation, and the UNIQUE constraint on
-     `calendar_invites` would refuse the second anyway. */
+  /* Who actually gets asked.
+     
+     Deduplicated, because the same person picked twice is one
+     invitation and the UNIQUE constraint on `calendar_invites` would
+     refuse the second anyway.
+
+     And never the organiser. The compose form puts whoever is booking
+     it on the attendee list, which is right: they are on the meeting.
+     Sending them an invitation to it is not. `command_meeting_invite`
+     sets `awaiting` to the person asked, so booking something for
+     yourself put a meeting into your own "waiting on you" count, with a
+     notification telling you that you had invited yourself. */
   const invite = [...new Set(
     attendees.map((a) => a.user_id).filter((id): id is string => Boolean(id)),
-  )];
+  )].filter((id) => id !== actorId);
 
   return { row, invite };
 }

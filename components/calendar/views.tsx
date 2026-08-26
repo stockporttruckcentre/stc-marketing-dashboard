@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { DiaryEntry } from '@/lib/calendar/diary';
 import { groupByDay } from '@/lib/calendar/diary';
@@ -35,17 +35,33 @@ import { DiaryRow, KindIcon } from './parts';
    fills them Monday first.
    ============================================================= */
 
+/* ---- the grid, and the two things it has to get right ----
+
+   Seven `minmax(0, 1fr)` columns, so a cell holding a long title cannot
+   widen its own column. That is the day label fix.
+
+   And the rows have to be told what they are. Without a
+   `gridTemplateRows` every row is implicit, so the row of weekday names
+   sized itself like a week and the header came out as tall as a
+   fortnight. The two views set their own below: an auto row for the
+   names, then the day rows. */
 const GRID: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
   background: 'var(--surface)',
   border: '1px solid var(--border)',
   borderRadius: 'var(--r-md)',
-  overflow: 'hidden',
+  /* Scroll rather than spill. On a laptop the head, the numbers and the
+     bar take enough of a fixed height shell that six rows of cells at
+     their comfortable height do not fit, and a grid with nowhere to go
+     pushes out through the bottom of the page. */
+  overflow: 'auto',
+  minHeight: 0,
 };
 
 const HEAD_CELL: CSSProperties = {
-  height: 30, display: 'flex', alignItems: 'center', padding: '0 10px',
+  height: 28, display: 'flex', alignItems: 'center', padding: '0 10px',
+  position: 'sticky', top: 0, zIndex: 2,
   background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
   fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
   letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-subtle)',
@@ -72,12 +88,59 @@ function byDay(entries: DiaryEntry[]): Map<string, DiaryEntry[]> {
 
 /* ---------------- month ---------------- */
 
+/* What a cell is made of, in pixels, so how many entries fit in one is
+   arithmetic rather than a guess.
+
+   A chip is 19 high with a 2px gap under it, so n of them occupy
+   `21n - 2`: the last one has no gap after it. Everything else in the
+   cell is fixed: 4px of padding, the 19px date, the 2px gap under it,
+   the 14px "and N more" line, and 4px of padding again.
+
+   So n fits when `21n - 2 <= height - 43`, which is
+   `n <= (height - 41) / 21`. Getting that plus one wrong drew a fourth
+   chip sliced through the middle at 1080p, which is the same silent
+   clipping this whole thing exists to stop. */
+const ENTRY = 21;
+const CHROME = 4 + 19 + 2 + 14 + 4;
+
 export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: ViewProps) {
   const cells = useMemo(() => monthGrid(cursor), [cursor]);
   const days = useMemo(() => byDay(entries), [entries]);
+  const weeks = cells.length / 7;
 
+  /* How many entries a cell can actually draw.
+
+     Fixed at two, a cell on a 1080p laptop was right and a cell on a 4K
+     screen was a 296px box with two lines in the top corner and nothing
+     underneath: the same picture stretched rather than the same
+     density. So the cell is measured and told how many it has room
+     for. Two is the floor, because that is what fits at the tightest
+     the shell ever gets. */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [perCell, setPerCell] = useState(2);
+
+  useLayoutEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rowHeight = (el.clientHeight - 28) / weeks;
+      const room = Math.floor((rowHeight - CHROME + 2) / ENTRY);
+      setPerCell(Math.max(1, Math.min(8, room)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [weeks]);
+
+  /* Five rows or six, depending on the month. Named here rather than
+     left implicit so the weekday row stays 28px and the week rows share
+     what is left, shrinking to 64px before the grid starts scrolling. */
   return (
-    <div style={{ ...GRID, flex: 1, minHeight: 0, gridAutoRows: 'minmax(0, 1fr)' }}>
+    <div ref={gridRef} style={{
+      ...GRID, flex: 1,
+      gridTemplateRows: `28px repeat(${weeks}, minmax(64px, 1fr))`,
+    }}>
       {WEEKDAYS.map((d, i) => (
         <div key={d} style={{ ...HEAD_CELL, borderRight: i === 6 ? 'none' : '1px solid var(--border)' }}>
           <abbr title={WEEKDAYS_LONG[i]} style={{ textDecoration: 'none' }}>{d}</abbr>
@@ -102,8 +165,12 @@ export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: Vi
               if (canCompose && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onCompose(key); }
             }}
             style={{
-              minWidth: 0, minHeight: 96, padding: 7, overflow: 'hidden',
-              display: 'flex', flexDirection: 'column', gap: 4,
+              /* Tight on purpose. Six week rows share whatever the
+                 shell has left, which on a 1280 laptop is about 81px
+                 each, and every pixel of padding is a pixel that
+                 decides whether a second entry is drawn or counted. */
+              minWidth: 0, minHeight: 0, padding: '4px 5px', overflow: 'hidden',
+              display: 'flex', flexDirection: 'column', gap: 2,
               borderRight: lastColumn ? 'none' : '1px solid var(--border)',
               borderBottom: '1px solid var(--border)',
               background: today ? 'var(--bg-subtle)' : 'transparent',
@@ -115,22 +182,40 @@ export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: Vi
               <span style={{
                 fontFamily: 'var(--panton)', fontWeight: today ? 800 : 600, fontSize: 12,
                 fontVariantNumeric: 'tabular-nums',
-                width: 20, height: 20, borderRadius: 'var(--r-full)',
+                width: 19, height: 19, borderRadius: 'var(--r-full)',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 background: today ? 'var(--accent)' : 'transparent',
                 color: today ? 'var(--accent-fg)' : 'var(--text-muted)',
               }}>{d.getDate()}</span>
               <span style={{ flex: 1 }} />
-              {mine.length > 2 && (
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
-                  color: 'var(--text-subtle)',
-                }}>{mine.length}</span>
-              )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, overflow: 'hidden' }}>
-              {mine.slice(0, 3).map((e) => (
+            {/* Two, then a count.
+
+                Three fitted at the height a month row gets on a big
+                screen and did not on a laptop, and the third was
+                clipped by the cell's own overflow with nothing saying
+                so: the corner said three and two were drawn. Two is
+                what fits at the row's minimum height, so two is what is
+                drawn, and everything past it is counted out loud. */}
+            {/* The count is never the thing that gets cut.
+
+                Two chips and a count fitted at 97px a row and did not at
+                81px, and because the whole lot sat in one
+                `overflow: hidden` box it was the count that vanished:
+                Wednesday had five things on it, drew two, and said
+                nothing about the other three. A cell that hides work
+                without saying so is worse than one that shows less.
+
+                So the count is its own row, outside the box that
+                clips. When the space runs out a chip is what gets cut,
+                and the line saying how many are not shown is always
+                there. */}
+            <div style={{
+              flex: 1, minHeight: 0, minWidth: 0,
+              display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden',
+            }}>
+              {mine.slice(0, perCell).map((e) => (
                 <button
                   key={e.event.id}
                   type="button"
@@ -138,11 +223,11 @@ export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: Vi
                   onClick={(ev) => { ev.stopPropagation(); onOpen(e); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5, minWidth: 0,
-                    height: 20, padding: '0 5px', borderRadius: 'var(--r-sm)',
+                    height: 19, flex: 'none', padding: '0 4px', borderRadius: 'var(--r-sm)',
                     border: '1px solid var(--border)',
                     borderLeft: `2px solid ${e.needsMyAnswer ? 'var(--warning)' : e.event.color}`,
                     background: 'var(--surface-raised)', cursor: 'pointer',
-                    fontFamily: 'var(--inter)', fontSize: 11, color: 'var(--text-muted)',
+                    fontFamily: 'var(--inter)', fontSize: 11, color: 'var(--text)',
                     textAlign: 'left',
                   }}
                 >
@@ -151,21 +236,30 @@ export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: Vi
                   </span>
                   {!e.event.all_day && (
                     <span style={{
-                      flex: 'none', fontVariantNumeric: 'tabular-nums', fontWeight: 600,
+                      flex: 'none', fontVariantNumeric: 'tabular-nums', fontWeight: 700,
                       color: 'var(--text)',
                     }}>{timeLabel(e.event.start_at)}</span>
                   )}
                   <span style={{
                     minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    color: 'var(--text-muted)',
                   }}>{e.event.title}</span>
                 </button>
               ))}
-              {mine.length > 3 && (
-                <span style={{ fontSize: 10.5, color: 'var(--text-subtle)', paddingLeft: 5 }}>
-                  and {mine.length - 3} more
-                </span>
-              )}
             </div>
+
+            {mine.length > perCell && (
+              <button
+                type="button"
+                onClick={(ev) => { ev.stopPropagation(); onOpen(mine[perCell]); }}
+                style={{
+                  height: 14, flex: 'none', padding: '0 4px', border: 'none',
+                  background: 'transparent', textAlign: 'left', cursor: 'pointer',
+                  fontFamily: 'var(--inter)', fontSize: 10.5, color: 'var(--text-subtle)',
+                  whiteSpace: 'nowrap',
+                }}
+              >and {mine.length - perCell} more</button>
+            )}
           </div>
         );
       })}
@@ -188,7 +282,7 @@ export function WeekView({ entries, cursor, onOpen, onCompose, canCompose }: Vie
   const days = useMemo(() => byDay(entries), [entries]);
 
   return (
-    <div style={{ ...GRID, flex: 1, minHeight: 0 }}>
+    <div style={{ ...GRID, flex: 1, gridTemplateRows: '28px minmax(0, 1fr)' }}>
       {week.map((d, i) => (
         <div key={`h${dayKey(d)}`} style={{
           ...HEAD_CELL, gap: 6,
