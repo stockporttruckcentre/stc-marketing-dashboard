@@ -3399,9 +3399,11 @@ SELECT set_config('request.jwt.claim.sub', '', FALSE);
 \echo '--- allowlist size ---'
 /* The number follows the dictionary, which is the point of generating
    the seed from it. It fell when a pitch stopped being something a
-   company has: those columns are still writable, on the lead. */
+   company has: those columns are still writable, on the lead. It rose
+   by ten when Content arrived, because a campaign, a template and a tag
+   each have a name somebody should be able to change by typing. */
 SELECT assert('the seed loaded',
-  (SELECT COUNT(*) FROM command_writable_columns) = 86,
+  (SELECT COUNT(*) FROM command_writable_columns) = 96,
   (SELECT COUNT(*)::TEXT FROM command_writable_columns));
 
 -- =============================================================
