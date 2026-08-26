@@ -732,7 +732,10 @@ export const CAPABILITIES: CapabilityDef[] = [
       { key: 'email', label: 'email address', kind: 'text', required: false, from: 'email' },
       { key: 'companyName', label: 'company name', kind: 'text', required: false, from: 'company_name' },
       { key: 'contactName', label: 'contact name', kind: 'text', required: false, from: 'contact_name' },
-      { key: 'website', label: 'website', kind: 'text', required: false, from: 'website' },
+      /* The website lives inside `links`, not in a column of its own.
+         This read `website`, which `crm_contacts` has never had, so the
+         whole lookup failed on a column name nobody typed. */
+      { key: 'website', label: 'website', kind: 'text', required: false, from: 'links' },
     ],
   },
   {

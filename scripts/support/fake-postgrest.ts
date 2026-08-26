@@ -13,6 +13,7 @@
    server by `scripts/sql/validate-007.sql`.
    ============================================================= */
 import { capabilityRoles, entityPermissions, writableColumns } from '../generate-writable-columns';
+import { TABLES } from '../../lib/command/columns';
 import type { UserRole } from '../../lib/types';
 
 /** The same grants the database is seeded with, from the same source. */
@@ -98,6 +99,46 @@ export type Recorded = { table: string; set: Row; ids: string[] };
 
 /** The same allowlist the database holds, from the same registry. */
 const ALLOWED = new Set(writableColumns().map((c) => `${c.table}.${c.column}`));
+
+/* =============================================================
+   A column the table does not have is an error, not an empty cell.
+
+   This fake used to project whatever it was asked for: a column nothing
+   holds came back `undefined`, every row looked fine, and every check
+   passed. PostgREST does not do that. It answers
+
+     column stock_trailers.sale_price does not exist
+
+   and the whole command fails. That is a real defect this could not
+   see, and it reached somebody marking two trailers sold: the deal
+   carries `sale_price` and the unit carries `sales_price`, one letter
+   apart on two different tables, and the operation asked the unit for
+   the deal's column.
+
+   What counts as a column the table has: one the command layer declares
+   in `lib/command/columns.ts`, or one a fixture row actually sets. The
+   second half matters because fixtures model rows the command layer has
+   no opinion about, and refusing those would be a false failure rather
+   than a caught bug.
+   ============================================================= */
+const DECLARED = new Map<string, Set<string>>(
+  TABLES.map((t) => [t.table, new Set(['id', ...t.columns.map((c) => c.name)])]),
+);
+
+function unknownColumn(
+  table: string, columns: string[], tables: Record<string, Row[]>,
+): string | null {
+  const declared = DECLARED.get(table);
+  if (!declared) return null;
+  const held = new Set<string>();
+  for (const row of tables[table] ?? []) for (const k of Object.keys(row)) held.add(k);
+  for (const c of columns) {
+    // An embedded resource is a join, not a column of this table.
+    if (c.includes('(') || c.includes('.') || c === '*') continue;
+    if (!declared.has(c) && !held.has(c)) return c;
+  }
+  return null;
+}
 
 /** Split on commas that are not inside brackets. */
 function topLevelParts(body: string): string[] {
@@ -221,6 +262,8 @@ export function fakeDb(tables: Record<string, Row[]>) {
         builder(table, [...ops, { kind: 'order', column, ascending: o?.ascending !== false }], columns, update),
       update: (set: Row) => builder(table, ops, columns, set),
       range: async (from: number, to: number) => {
+        const bad = columns && unknownColumn(table, columns, tables);
+        if (bad) return { data: null, error: { message: `column ${table}.${bad} does not exist` } };
         const all = sortedRows(table, ops, tables);
         const projected = columns
           ? all.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])))
@@ -228,6 +271,8 @@ export function fakeDb(tables: Record<string, Row[]>) {
         return { data: projected.slice(from, to + 1), error: null };
       },
       limit: async (n: number) => {
+        const bad = columns && unknownColumn(table, columns, tables);
+        if (bad) return { data: null, error: { message: `column ${table}.${bad} does not exist` } };
         const rows = sortedRows(table, ops, tables);
         const projected = columns
           ? rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]])))

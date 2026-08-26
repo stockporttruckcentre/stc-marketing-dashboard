@@ -618,6 +618,44 @@ test('a stock number is not a price', async () => {
     String(db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price));
 });
 
+test('selling two units by their stock numbers asks the right table for the price', async () => {
+  /* THE BUG THIS IS HERE FOR.
+
+     `deal.markSold` reads the price it needs from `sale_price`, which
+     is a column on the DEAL. The sentence names TRAILERS, so the
+     selection is over `stock_trailers`, and the operation's own columns
+     were added to that read. `stock_trailers` has `sales_price`: one
+     letter apart, on a different table.
+
+     Postgres refused the whole thing with
+
+       column stock_trailers.sale_price does not exist
+
+     and somebody marking two trailers sold got a column name they had
+     never typed and no sale. Nothing here saw it, because this fake
+     used to hand back `undefined` for a column nothing holds instead of
+     refusing it the way PostgREST does. */
+  const db = YARD_WITH_DEALS();
+  const text = 'mark STC143580 and STC143581 as sold';
+
+  const planned = await plan(text, 'admin', db);
+  const preview = planned?.preview;
+  ok('it previews rather than failing on a column', !!preview?.ok,
+    preview && !preview.ok ? preview.why : 'no preview');
+  if (!preview?.ok) return;
+
+  const done = await applyMutation({
+    text, ...actor('admin'), store: postgrestStore(db.supabase),
+    previewPlanHash: planned!.planned.meaning.hash,
+    previewProgrammeHash: preview.programmeHash,
+  });
+  ok('and both units sell', done.ok, done.ok ? '' : done.why);
+  ok('each at the price on its own deal',
+    db.tables.stock_trailers.find((r) => r.id === 'u1')?.sales_price === 24995
+      && db.tables.stock_trailers.find((r) => r.id === 'u2')?.status === 'sold',
+    JSON.stringify(db.tables.stock_trailers.map((r) => [r.stc_no, r.status, r.sales_price])));
+});
+
 test('somebody without stock.edit cannot sell', async () => {
   const db = YARD_WITH_DEALS();
   const text = 'mark STC143580 as sold';

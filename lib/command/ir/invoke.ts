@@ -188,13 +188,31 @@ export async function resolveInvoke(
   }
 
   const ceiling = opts.limits?.maxSubjects;
-  /* The columns the OPERATION needs, which the projection has no reason
-     to include: it answers what a file of this selection should show. */
-  const wantedColumns = (cap.inputs ?? [])
-    /* What a column can do for an input: answer it, or be shown beside
-       the answer. Both are read; only the first satisfies it. */
-    .flatMap((i) => [i.from, i.shows])
-    .filter((c): c is string => !!c);
+
+  /* Which entity the operation runs on. A capability that names none
+     operates on whatever the sentence named. */
+  const wanted = cap.entities?.[0] ?? namedEntity;
+
+  /* THE COLUMNS THE OPERATION NEEDS, ASKED OF THE RIGHT TABLE.
+
+     An input's `from` names a column on the entity the OPERATION runs
+     on, which is not always the one the sentence named. "Mark STC143580
+     as sold" names a trailer and marks the deal against it sold, and
+     `deal.markSold` reads its price from `sale_price` on the deal.
+     Adding that column to the read of the trailer asked `stock_trailers`
+     for `sale_price`, which does not exist there: the unit carries
+     `sales_price`, one letter apart and a different table.
+
+     Postgres said so and the whole command failed with a column name
+     nobody typed. Where the operation runs somewhere else, its columns
+     are read from there, further down, off the record they belong to. */
+  const wantedColumns = wanted === namedEntity
+    ? (cap.inputs ?? [])
+      /* What a column can do for an input: answer it, or be shown beside
+         the answer. Both are read; only the first satisfies it. */
+      .flatMap((i) => [i.from, i.shows])
+      .filter((c): c is string => !!c)
+    : [];
   const read = await runSelect(select, { store: opts.store, ceiling, extraColumns: wantedColumns });
   if (!read.ok) return { ok: false, reason: 'unresolved', why: read.why };
 
@@ -231,9 +249,6 @@ export async function resolveInvoke(
     };
   }
 
-  /* Which entity the operation runs on. A capability that names none
-     operates on whatever the sentence named. */
-  const wanted = cap.entities?.[0] ?? namedEntity;
   const namedDef = entityDef(namedEntity);
   const wantedDef = entityDef(wanted);
   if (!wantedDef) return { ok: false, reason: 'unknown', why: `nothing here holds ${wanted}` };

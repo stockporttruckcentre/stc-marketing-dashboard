@@ -308,14 +308,39 @@ const enrich: Preparer = {
   },
 };
 
-/** What a resolved subject holds, as the lookup wants it. */
+/**
+ * What a resolved subject holds, as the lookup wants it.
+ *
+ * Keyed by the INPUT keys the capability declares, which is what the
+ * resolver fills in. Two of these read `company_name` and
+ * `contact_name`, the column names, and a subject is keyed by
+ * `companyName` and `contactName`, so both were always undefined and
+ * Lusha could only ever be reached by email. A record with a name and a
+ * company and no email was told there was nothing to look it up by.
+ */
 function detailsOf(values: Record<string, unknown>) {
   return {
     email: values.email as string | null,
-    companyName: values.company_name as string | null,
-    contactName: values.contact_name as string | null,
-    websiteUrl: values.website as string | null,
+    companyName: values.companyName as string | null,
+    contactName: values.contactName as string | null,
+    websiteUrl: websiteIn(values.website),
   };
+}
+
+/**
+ * The website, out of the links a record carries.
+ *
+ * A record holds a list of links, each with a kind, because a company
+ * has a site and a LinkedIn page and sometimes neither. The CRM screen
+ * has always read it this way; the command bar was reading a column.
+ */
+function websiteIn(links: unknown): string | null {
+  if (!Array.isArray(links)) return typeof links === 'string' ? links : null;
+  const hit = links.find(
+    (l) => l && typeof l === 'object'
+      && (l as { kind?: string }).kind === 'website'
+      && (l as { url?: string }).url);
+  return (hit as { url?: string } | undefined)?.url ?? null;
 }
 
 /**
