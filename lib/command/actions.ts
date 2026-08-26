@@ -92,9 +92,11 @@ export const ACTIONS: CommandActionSpec[] = [
     path: '/dashboard/sales', verbs: GO,
     objects: ['stock', 'stock list', 'stocklist', 'trailers', 'units', 'fleet', 'yard', 'inventory'] },
 
-  { id: 'nav.calendar', label: 'Team calendar', blurb: 'Meetings, calls and visits', kind: 'navigate',
+  { id: 'nav.calendar', label: 'Diary', blurb: 'Every call, meeting, visit and inspection', kind: 'navigate',
     path: '/dashboard/calendar', verbs: GO,
-    objects: ['calendar', 'diary', 'meetings', 'appointments', 'schedule', 'agenda', 'whats on', 'events', 'availability', 'whos free', 'free time'] },
+    objects: ['calendar', 'diary', 'meetings', 'appointments', 'schedule', 'agenda', 'whats on',
+              'events', 'availability', 'whos free', 'free time', 'the diary', 'my calendar',
+              'calls', 'my calls', 'site visits', 'visits'] },
 
   { id: 'nav.analytics', label: 'Analytics', blurb: 'Revenue, leaderboards and trends', kind: 'navigate',
     path: '/dashboard/analytics', verbs: GO,
@@ -526,10 +528,41 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['another time', 'a different day', 'a new time', 'to move it', 'thursday instead'],
     phrases: ['can we do thursday instead', 'suggest another time', 'how about friday'] },
 
-  { id: 'cal.week', label: 'What is on this week', blurb: 'The next seven days', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/calendar', verbs: [...GO, 'what is'],
-    objects: ['this week', 'my week', 'next 7 days', 'my diary', 'what is on', 'coming up'],
-    phrases: ['what have i got on', 'what is on this week'] },
+  { id: 'cal.week', label: 'What is on this week', blurb: 'Seven days, side by side', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/calendar?view=week', verbs: [...GO, 'what is'],
+    objects: ['this week', 'my week', 'next 7 days', 'the week', 'week view'],
+    phrases: ['what is on this week', 'show me the week'] },
+
+  /* The view somebody works from in the morning, and the one the old
+     calendar did not have: everything ahead in order, with whatever is
+     waiting on an answer marked. */
+  { id: 'cal.next', label: 'What is next', blurb: 'Everything ahead, in order', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/calendar?view=agenda', verbs: [...GO, 'what is', 'show'],
+    objects: ['what is next', 'my agenda', 'whats next', 'my day', 'today', 'what is on',
+              'coming up', 'my diary', 'the agenda'],
+    phrases: ['what have i got on', 'what is next', 'what am i doing today'] },
+
+  { id: 'cal.answer', label: 'Invitations waiting on you', blurb: 'Meetings you have not answered', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/calendar?view=agenda', verbs: [...GO, 'show', 'what is'],
+    objects: ['invitations', 'invites', 'unanswered invites', 'what am i waiting on',
+              'meetings i have not answered', 'my invitations'],
+    phrases: ['what have i not answered', 'show my invitations'] },
+
+  /* The same diary on the Work tab, because "what is on me" is half
+     tasks and half what is booked, and somebody looking at one wants
+     the other in the same place. */
+  { id: 'nav.workDiary', label: 'Meetings and calls on Work',
+    blurb: 'Everything booked, beside the tasks', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?tab=diary', verbs: [...GO, 'show'],
+    /* Deliberately not "the meetings list" or "the calls list". Both
+       lose to the calendar's own actions, which had those words first,
+       and an object word two actions claim is one neither wins on.
+       Every phrasing here says work or booked out loud. */
+    objects: ['meetings and calls', 'calls and meetings', 'everything booked',
+              'whats booked', 'booked in', 'the work diary', 'work diary',
+              'meetings on work', 'calls on work'],
+    phrases: ['show me every meeting booked', 'what calls are booked',
+              'what is booked in across the business'] },
 
   /* ---------- social planner ----------
 

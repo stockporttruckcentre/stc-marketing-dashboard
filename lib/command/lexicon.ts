@@ -325,6 +325,18 @@ const RESERVED = new Set([
      maintenance leads" finding any. */
   'contract', 'contracts', 'fleetsmart', 'plan', 'plans', 'platinum', 'gold',
   'pmi', 'inspection', 'inspections', 'loler', 'tacho', 'axle', 'axles',
+
+  /* The diary's own vocabulary. "Invite Tom to the site visit on
+     Friday" has to read Tom as the person and everything else as the
+     grammar, and without these it finds a customer called Site Visit.
+
+     "Call" is here as a noun for the same reason, and it is the one
+     worth watching: it is also a verb, and the verb is matched before
+     names are pulled out of what is left, so reserving the word does
+     not stop "call Dawson" meaning what it says. */
+  'diary', 'calendar', 'meeting', 'meetings', 'call', 'calls', 'appointment',
+  'appointments', 'invite', 'invites', 'invitation', 'invitations', 'attendee',
+  'attendees', 'agenda', 'visit', 'visits',
   ...Object.keys(BODY_TYPES),
 ]);
 

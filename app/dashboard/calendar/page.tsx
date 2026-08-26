@@ -1,20 +1,76 @@
+import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { TeamCalendar } from '@/components/TeamCalendar';
-import type { CalendarEvent } from '@/lib/types';
+import { capabilitiesFor } from '@/lib/crm/permissions';
+import type { CalendarEvent, Profile } from '@/lib/types';
+import type { DiaryInvite } from '@/lib/calendar/diary';
+import type { Company, Person } from '@/components/calendar/drawer';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CalendarPage() {
+/* =============================================================
+   The diary.
+
+   Four reads, all row level security scoped, all on the server.
+
+   The window is deliberately wide: a month back and four months on.
+   The old page read the visible month only, which is why the seven day
+   strip at the bottom of it went empty on the 28th, and why an
+   invitation link to something in November opened an empty October.
+
+   The invitations come back unfiltered by event, because the policy on
+   `calendar_invites` already limits them to the ones somebody is on
+   either side of, and matching them to events in the browser is
+   cheaper than a join per event.
+   ============================================================= */
+
+export default async function CalendarPage({
+  searchParams,
+}: {
+  searchParams: { event?: string; view?: string };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 1).toISOString();
-  const { data } = await supabase
-    .from('calendar_events')
-    .select('*')
-    .gte('start_at', monthStart)
-    .lt('start_at', nextMonth)
-    .order('start_at');
-  return <TeamCalendar initialEvents={(data ?? []) as CalendarEvent[]} userId={user!.id} />;
+  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+  const to = new Date(now.getFullYear(), now.getMonth() + 4, 1).toISOString();
+
+  const [profileRes, eventsRes, inviteRes, peopleRes, companyRes] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase.from('calendar_events').select('*')
+      .gte('start_at', from).lt('start_at', to).order('start_at').limit(1000),
+    supabase.from('calendar_invites')
+      .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
+    supabase.from('profiles').select('id, full_name, email').order('full_name').limit(200),
+    supabase.from('crm_contacts').select('id, company_name').order('company_name').limit(2000),
+  ]);
+
+  const profile = (profileRes.data as Profile) ?? null;
+
+  return (
+    <TeamCalendar
+      initialEvents={(eventsRes.data ?? []) as CalendarEvent[]}
+      /* Missing until migration 006 has run, which is the difference
+         between "nobody has been invited" and "invitations do not exist
+         here yet". Either way an empty list draws the diary correctly
+         and every entry reads as one nobody was asked to. */
+      initialInvites={(inviteRes.data ?? []) as DiaryInvite[]}
+      people={(peopleRes.data ?? []) as Person[]}
+      companies={(companyRes.data ?? []) as Company[]}
+      userId={user.id}
+      myName={profile?.full_name ?? user.email?.split('@')[0] ?? 'Me'}
+      capabilities={[...capabilitiesFor(profile ?? { role: 'viewer' } as Profile)]}
+      openEventId={searchParams?.event ?? null}
+      /* So the command bar can land on the view a sentence asked for:
+         "what is on this week" is the week, "what have I got on" is
+         the list of what is next. */
+      openView={
+        searchParams?.view === 'week' ? 'week'
+        : searchParams?.view === 'agenda' ? 'agenda'
+        : 'month'
+      }
+    />
+  );
 }

@@ -131,6 +131,49 @@ that properly is a bigger database change and belongs with the admin panel.
 
 ---
 
+## Section 6: Calendar
+
+Rebuilt as the Diary, `/dashboard/calendar`, in the STC kit. Three views over
+one filtered list: the month for orientation, the week for laying seven days
+side by side, and what is next for the morning.
+
+The invitation model in migration 006 and the operations in migration 021 had
+existed since they went in and no screen had ever called either. That is what
+"clicking into a meeting request does not have the full wiring" was.
+
+### New features requested
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 6.1 | Call reminders, not just meetings | **Built** | `lib/calendar/kind.ts` reads what a row is from what somebody typed. A call, a site visit, an inspection and a meeting are told apart, filtered separately and drawn differently, and the strip counts calls on their own. The classification is derived rather than stored, so no existing row needs backfilling and nothing goes stale when a title is edited |
+| 6.2 | Outlook sync, so it reaches a phone | **Blocked** | Needs ITG, unchanged. Nothing in the application sends mail yet, and a button that claimed to would be a button that quietly did nothing |
+| 6.3 | Delegation of diary items across people | **Built** | Booking something with somebody on it sends them a real invitation. They accept it, say they cannot make it, or suggest another time, and it goes back and forth until somebody accepts. The whole exchange is on the entry, so the record shows how the time was arrived at rather than only the time |
+| 6.4 | A next action prompt after a quote | **Built** | `components/crm/NextActionPrompt.tsx`, unchanged by this work |
+
+### Changes to existing features
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 6.5 | A meeting and a call should look different | **Built** | Its own glyph, its own chip and its own count, on both screens that list them |
+| 6.6 | The day labels do not line up | **Fixed** | The names were a `repeat(7, 1fr)` grid above a second one. A `1fr` track is `minmax(auto, 1fr)`, so a cell holding a long title widened its own column, the header had no content to push back with, and every name after it drifted. The names are now the first row of the same grid and the tracks are `minmax(0, 1fr)`. `npm run check:calendar` asserts every cell of every month for twenty years sits under the name of its own day |
+| 6.7 | You cannot see who attends, or set it when booking | **Built** | The entry drawer lists everybody on it with where each of them stands, and the compose form picks people off the team and actually asks them |
+
+### Beyond the meeting spec
+
+| Item | Where |
+|---|---|
+| The same diary on the Work tab | A Meetings and calls tab beside Tasks, off `lib/calendar/diary.ts`, the same module the diary screen reads. Half of "what is on me" was in a calendar somebody had to go and open |
+| Deep links | `?event=` opens an entry, `?view=` opens a view. An invitation link now leads to the meeting rather than to whatever month it happens to be |
+| British Summer Time | `dayKey` reads the local parts rather than the ISO string. Keyed on UTC, anything before 1am lands in yesterday's box for seven months of the year. Asserted across both clock changes |
+
+### What is still not there
+
+A proper hour by hour week grid. With two or three entries a day it would be
+mostly empty rows, and the thing somebody wants from a week here is all seven
+days at once without scrolling. Worth revisiting when the diary is busier.
+
+---
+
 ## Section 13: Fleet Smart Plus builder
 
 Built as its own tab under Sales, `/dashboard/fleetsmart`. The rate card, the

@@ -22,7 +22,7 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
         { href: '/dashboard',          label: 'Dashboard',     Icon: LayoutDashboard, roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/analytics', label: 'Analytics',     Icon: BarChart3,       roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/work',     label: 'Work',          Icon: ListChecks,      roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/calendar', label: 'Team calendar', Icon: CalendarDays,    roles: ['admin','marketer','sales','viewer'] },
+        { href: '/dashboard/calendar', label: 'Diary',         Icon: CalendarDays,    roles: ['admin','marketer','sales','viewer'] },
         { href: '/dashboard/news',     label: 'Industry news', Icon: TrendingUp,      roles: ['admin','marketer','sales','viewer'] },
       ],
     },

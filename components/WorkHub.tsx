@@ -37,7 +37,7 @@ import { applyView, type Viewer } from '@/lib/work/filter';
 import { isOverdue } from '@/lib/work/types';
 import {
   Alert, Badge, Button, Chip, IconButton, Label, RecordHead, SearchInput,
-  StatStrip, TabShell,
+  StatStrip, TabShell, Tabs,
 } from '@/components/kit/primitives';
 import { Select } from '@/components/kit/forms';
 import {
@@ -48,6 +48,10 @@ import { TaskDrawer, type Move } from '@/components/work/drawer';
 import { Compose, type NewTask } from '@/components/work/compose';
 import { ViewEditor } from '@/components/work/viewedit';
 import { Empty } from '@/components/work/parts';
+import { WorkDiary } from '@/components/work/diary';
+import type { CalendarEvent } from '@/lib/types';
+import type { DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
+import { diaryCounts, toEntries } from '@/lib/calendar/diary';
 
 const LAYOUTS: { key: Layout; label: string; Icon: typeof Columns3 }[] = [
   { key: 'board', label: 'Board', Icon: Columns3 },
@@ -77,7 +81,8 @@ export function viewSlug(name: string): string {
 
 export function WorkHub({
   initialTasks, views, people, departments, entities, projects, customers, trailers,
-  requests, viewer, capabilities, multiEntity, openView,
+  requests, viewer, capabilities, multiEntity, openView, openTab,
+  diaryEvents, diaryInvites, diaryPeople,
 }: {
   initialTasks: Task[];
   views: TaskView[];
@@ -94,8 +99,20 @@ export function WorkHub({
   multiEntity: boolean;
   /** The `?view=` slug the command bar arrived with, if any. */
   openView: string | null;
+  /** `?tab=diary` from the command bar, so a sentence can land on it. */
+  openTab: 'tasks' | 'diary';
+  /* Everything booked anywhere in the application. Read on the server
+     alongside the tasks so the tab draws once with real rows rather
+     than flashing an empty diary and filling it in. */
+  diaryEvents: CalendarEvent[];
+  diaryInvites: DiaryInvite[];
+  diaryPeople: DiaryPerson[];
 }) {
   const [tasks, setTasks] = useState(initialTasks);
+  /* Two halves of "what is on me": the work, and what is booked.
+     One tab rather than a saved view, because the diary is not a task
+     list filtered differently, it is a different table. */
+  const [tab, setTab] = useState<'tasks' | 'diary'>(openTab);
   const [viewId, setViewId] = useState(() => {
     const wanted = openView ? views.find((v) => viewSlug(v.name) === openView) : null;
     return (wanted ?? views[0])?.id ?? '';
@@ -169,6 +186,19 @@ export function WorkHub({
     }
     return bits.length ? bits.join(' ') : null;
   }, [search, entityFilter, entities]);
+
+  /* The diary's own numbers, off the same module the diary screen
+     reads, so the count on the tab and the count on that screen are
+     the same number by construction. */
+  const diary = useMemo(() => diaryCounts(
+    toEntries(diaryEvents, {
+      meId: viewer.userId,
+      invites: diaryInvites,
+      people: new Map(diaryPeople.map((p) => [p.id, p])),
+      companies: new Map(customers.map((c) => [c.id, c.company_name ?? 'Unnamed'])),
+    }),
+    viewer.userId,
+  ), [diaryEvents, diaryInvites, diaryPeople, customers, viewer.userId]);
 
   /* The numbers across the top. Counted here from the same rows the
      list draws, so a figure saying seven can never sit above four. */
@@ -422,15 +452,25 @@ export function WorkHub({
       <RecordHead
         icon={<ListChecks size={20} />}
         title="Work"
-        badges={<>
-          <Badge tone="neutral" dot>{view.name}</Badge>
-          {stats.overdue > 0 && <Badge tone="danger">{stats.overdue} overdue</Badge>}
-        </>}
-        sub={<>
-          Tasks, delegation and projects across the business.
-          {' '}{shown.length} of {tasks.length} shown.
-        </>}
-        actions={may('work.create')
+        badges={tab === 'tasks'
+          ? (
+            <>
+              <Badge tone="neutral" dot>{view.name}</Badge>
+              {stats.overdue > 0 && <Badge tone="danger">{stats.overdue} overdue</Badge>}
+            </>
+          )
+          : (diary.waitingOnMe > 0
+            ? <Badge tone="warning" dot>{diary.waitingOnMe} waiting on you</Badge>
+            : undefined)}
+        sub={tab === 'tasks'
+          ? (
+            <>
+              Tasks, delegation and projects across the business.
+              {' '}{shown.length} of {tasks.length} shown.
+            </>
+          )
+          : 'Every call, meeting, visit and inspection booked anywhere in the application.'}
+        actions={tab === 'tasks' && may('work.create')
           ? <Button size="sm" variant="primary"
               onClick={() => { setComposeError(null); setComposing(true); }}>
               <Plus size={13} /> New task
@@ -438,6 +478,29 @@ export function WorkHub({
           : undefined}
       />
 
+      {/* Two halves of the same question. The counts are on the tabs so
+          somebody can see there are five calls booked without having to
+          open the half that would tell them. */}
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { key: 'tasks' as const, label: 'Tasks', count: stats.mine },
+          { key: 'diary' as const, label: 'Meetings and calls', count: diary.ahead },
+        ]}
+      />
+
+      {tab === 'diary' && (
+        <WorkDiary
+          events={diaryEvents}
+          invites={diaryInvites}
+          people={diaryPeople}
+          companies={customers}
+          meId={viewer.userId}
+        />
+      )}
+
+      {tab === 'tasks' && (
       <StatStrip items={[
         { label: 'On me', value: stats.mine, note: 'still open' },
         { label: 'Overdue', value: stats.overdue, note: 'past the date' },
@@ -445,6 +508,7 @@ export function WorkHub({
         { label: 'Given out', value: stats.givenOut, note: 'on other people' },
         { label: 'Waiting on me', value: stats.onMe, note: 'to review or answer' },
       ]} />
+      )}
 
       {note && (
         <Alert tone="info">
@@ -453,6 +517,7 @@ export function WorkHub({
         </Alert>
       )}
 
+      {tab === 'tasks' && (
       <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
         <nav
           aria-label="Saved views"
@@ -616,6 +681,7 @@ export function WorkHub({
           </div>
         </div>
       </div>
+      )}
 
       {open && (
         <TaskDrawer
