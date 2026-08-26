@@ -411,8 +411,11 @@ export function Drawer({
           </button>
         </div>
 
-        <div ref={bodyRef} style={{
-          flex: 1, minHeight: 0, overflowY: 'auto',
+        {/* `kit-drawer-body` stops the panels inside from being shrunk to
+            fit. Without it this scrolls in theory and crops in practice.
+            See the note above the rule in globals.css. */}
+        <div ref={bodyRef} className="kit-drawer-body" style={{
+          flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain',
           padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14,
         }}>{children}</div>
 
