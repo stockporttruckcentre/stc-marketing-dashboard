@@ -1,0 +1,492 @@
+-- =============================================================
+-- The diary, and the invitation conversation nothing had ever run.
+--
+-- Migration 006 added the invitation tables and migration 021 added the
+-- operations over them, and until now no screen had called either. A
+-- feature that has never been exercised is a feature nobody can say
+-- works, so this exercises it end to end: booked, asked, countered,
+-- agreed, moved.
+--
+-- Everything below the ROLE line runs as `authenticated`. That is not
+-- decoration: `postgres` owns these tables and owners bypass row level
+-- security, so a file that stays superuser would write every row it
+-- claims to have blocked and report a stranger reading somebody's
+-- private diary.
+--
+-- Run with `npm run check:diary`.
+-- =============================================================
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+-- -------------------------------------------------------------
+-- Four people. Legacy roles and no role template, because that is
+-- every account in the live database.
+-- -------------------------------------------------------------
+INSERT INTO auth.users (id, email) VALUES
+  ('ee000000-0000-0000-0000-000000000001', 'cal.alex@example.test'),
+  ('ee000000-0000-0000-0000-000000000002', 'cal.tom@example.test'),
+  ('ee000000-0000-0000-0000-000000000003', 'cal.dave@example.test'),
+  ('ee000000-0000-0000-0000-000000000004', 'cal.viewer@example.test')
+ON CONFLICT DO NOTHING;
+
+UPDATE profiles SET role = 'admin',  role_template_id = NULL, full_name = 'Alex'
+  WHERE id = 'ee000000-0000-0000-0000-000000000001';
+UPDATE profiles SET role = 'sales',  role_template_id = NULL, full_name = 'Tom'
+  WHERE id = 'ee000000-0000-0000-0000-000000000002';
+UPDATE profiles SET role = 'sales',  role_template_id = NULL, full_name = 'Dave'
+  WHERE id = 'ee000000-0000-0000-0000-000000000003';
+UPDATE profiles SET role = 'viewer', role_template_id = NULL, full_name = 'Rama'
+  WHERE id = 'ee000000-0000-0000-0000-000000000004';
+
+CREATE OR REPLACE FUNCTION pg_temp.act_as(p_who UUID) RETURNS VOID
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', p_who::TEXT, TRUE);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
+END;
+$fn$;
+
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM profiles WHERE id::TEXT LIKE 'ee000000-%') <> 4 THEN
+    RAISE EXCEPTION 'fixture: expected four people, found %',
+      (SELECT count(*) FROM profiles WHERE id::TEXT LIKE 'ee000000-%');
+  END IF;
+END $$;
+
+SET LOCAL ROLE authenticated;
+
+-- =============================================================
+-- 1. Booking one.
+--
+-- The organiser is put on it inside the function rather than sent in,
+-- which is what stops a client booking a meeting in somebody else's
+-- diary.
+-- =============================================================
+DO $$
+DECLARE made JSONB; ev UUID; owner UUID;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('Site visit, Carrington',
+    NOW() + INTERVAL '3 days', 60, NULL, 'private');
+  ev := (made ->> 'id')::UUID;
+
+  SELECT created_by INTO owner FROM calendar_events WHERE id = ev;
+  IF owner <> 'ee000000-0000-0000-0000-000000000001' THEN
+    RAISE EXCEPTION 'the meeting was booked in somebody else''s name';
+  END IF;
+  IF (made ->> 'minutes')::INT <> 60 THEN
+    RAISE EXCEPTION 'the length did not stick: %', made ->> 'minutes';
+  END IF;
+
+  CREATE TEMP TABLE fixture_meeting ON COMMIT DROP AS SELECT ev AS id;
+  GRANT SELECT ON fixture_meeting TO authenticated;
+  RAISE NOTICE 'ok  a meeting is booked in the name of whoever booked it';
+END $$;
+
+-- A read only viewer cannot book anything.
+DO $$
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000004');
+  BEGIN
+    PERFORM command_create_meeting('Should not exist', NOW() + INTERVAL '1 day', 30, NULL, 'private');
+    RAISE EXCEPTION 'a read only viewer booked a meeting';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%crm.delegate%' THEN
+      RAISE NOTICE 'ok  a viewer cannot book a meeting';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- =============================================================
+-- 2. Asking somebody.
+-- =============================================================
+DO $$
+DECLARE ev UUID; sent JSONB; n INT;
+BEGIN
+  SELECT id INTO ev FROM fixture_meeting;
+
+  /* Not the organiser, so not their meeting to invite anybody to.
+
+     Refused twice over, and both are worth having. The meeting is
+     private, so Dave cannot see it at all and the function finds
+     nothing to invite anybody to. The named refusal is asserted
+     separately below against a meeting he can see, because that is the
+     branch that carries the rule rather than the row policy carrying
+     it by accident. */
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  BEGIN
+    PERFORM command_meeting_invite(ARRAY[ev], ARRAY['ee000000-0000-0000-0000-000000000002'::UUID], NULL);
+    RAISE EXCEPTION 'somebody invited people to a meeting they cannot even see';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%nothing has been changed%' OR SQLERRM LIKE '%only whoever booked%' THEN
+      RAISE NOTICE 'ok  a meeting somebody cannot see is not one they can invite to';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  sent := command_meeting_invite(
+    ARRAY[ev],
+    ARRAY['ee000000-0000-0000-0000-000000000002'::UUID,
+          'ee000000-0000-0000-0000-000000000003'::UUID],
+    'Bring the trailer spec.');
+
+  IF (sent ->> 'sent')::INT <> 2 THEN
+    RAISE EXCEPTION 'expected two invitations, sent %', sent ->> 'sent';
+  END IF;
+
+  SELECT count(*) INTO n FROM calendar_invites
+   WHERE event_id = ev AND status = 'pending' AND awaiting = user_id;
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'expected two invitations waiting on the people asked, found %', n;
+  END IF;
+
+  SELECT count(*) INTO n FROM calendar_invite_messages m
+    JOIN calendar_invites i ON i.id = m.invite_id
+   WHERE i.event_id = ev AND m.action = 'invited';
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'the asking was not written into the history: % rounds', n;
+  END IF;
+
+  RAISE NOTICE 'ok  two people are asked, and it is on both of them to answer';
+END $$;
+
+-- The named refusal, against a meeting the other person can see. This
+-- is the rule itself rather than the row policy standing in for it.
+DO $$
+DECLARE made JSONB; ev UUID;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('Handover, STC145505', NOW() + INTERVAL '7 days', 30, NULL, 'team');
+  ev := (made ->> 'id')::UUID;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  BEGIN
+    PERFORM command_meeting_invite(ARRAY[ev], ARRAY['ee000000-0000-0000-0000-000000000002'::UUID], NULL);
+    RAISE EXCEPTION 'somebody invited people to a meeting they did not book';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%only whoever booked%' THEN
+      RAISE NOTICE 'ok  only whoever booked a meeting can invite people to it';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- =============================================================
+-- 3. Being invited is a way into a private meeting.
+--
+-- Without this somebody gets a notification about a meeting they cannot
+-- open, which is the fourth branch of the select policy in migration
+-- 006 and the reason it exists.
+-- =============================================================
+DO $$
+DECLARE ev UUID; n INT;
+BEGIN
+  SELECT id INTO ev FROM fixture_meeting;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000002');
+  SELECT count(*) INTO n FROM calendar_events WHERE id = ev;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'somebody invited to a private meeting cannot see it';
+  END IF;
+  RAISE NOTICE 'ok  being invited lets you see the meeting';
+
+  -- And somebody neither on it nor invited sees nothing.
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000004');
+  SELECT count(*) INTO n FROM calendar_events WHERE id = ev;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'a private meeting is visible to somebody with nothing to do with it';
+  END IF;
+  SELECT count(*) INTO n FROM calendar_invites WHERE event_id = ev;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'somebody outside the meeting can read its invitations';
+  END IF;
+  RAISE NOTICE 'ok  and a private meeting stays private from everybody else';
+END $$;
+
+-- =============================================================
+-- 4. Answering somebody else's invitation.
+-- =============================================================
+DO $$
+DECLARE ev UUID; mine UUID;
+BEGIN
+  SELECT id INTO ev FROM fixture_meeting;
+  SELECT id INTO mine FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000002';
+
+  /* Refused twice over again, and the outer one is the row policy:
+     an invitation is visible only to the person asked and the person
+     who asked, so Dave cannot even read Tom's to answer it. The
+     function's own `not yours to answer` sits behind that as defence in
+     depth rather than as the thing doing the work, so either message
+     is the right answer here. */
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  BEGIN
+    PERFORM command_meeting_answer(mine, 'accept', NULL, NULL, NULL);
+    RAISE EXCEPTION 'somebody accepted an invitation that was not theirs';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%not yours to answer%' OR SQLERRM LIKE '%invitation is not there%' THEN
+      RAISE NOTICE 'ok  an invitation is not answerable, or even readable, by a bystander';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+END $$;
+
+-- Tom accepts his.
+DO $$
+DECLARE ev UUID; mine UUID; st TEXT; wait UUID;
+BEGIN
+  /* Act first, then read. Every one of these SELECTs runs under the row
+     policy of whoever is currently set, and a block that reads before
+     it acts is reading as the person the block before it left behind.
+     That is how this file first reported Tom unable to find his own
+     invitation. */
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000002');
+  SELECT id INTO ev FROM fixture_meeting;
+  SELECT id INTO mine FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000002';
+
+  PERFORM command_meeting_answer(mine, 'accept', NULL, NULL, NULL);
+
+  SELECT status, awaiting INTO st, wait FROM calendar_invites WHERE id = mine;
+  IF st <> 'accepted' OR wait IS NOT NULL THEN
+    RAISE EXCEPTION 'accepting left it at % waiting on %', st, wait;
+  END IF;
+  RAISE NOTICE 'ok  accepting settles it and stops waiting on anybody';
+END $$;
+
+-- =============================================================
+-- 5. Suggesting another time, and what it does NOT do.
+--
+-- The meeting stays where it is until somebody accepts. A proposal that
+-- moved the meeting on its own would move it in the diary of everybody
+-- who had already said yes, without asking any of them.
+-- =============================================================
+DO $$
+DECLARE ev UUID; his UUID; was TIMESTAMPTZ; now_at TIMESTAMPTZ; st TEXT; wait UUID; r INT;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT id INTO ev FROM fixture_meeting;
+  SELECT start_at INTO was FROM calendar_events WHERE id = ev;
+  SELECT id INTO his FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000003';
+
+  PERFORM command_meeting_answer(his, 'propose', was + INTERVAL '2 days',
+    was + INTERVAL '2 days 1 hour', 'Thursday would be better.');
+
+  SELECT status, awaiting, rounds INTO st, wait, r FROM calendar_invites WHERE id = his;
+  IF st <> 'proposed' THEN
+    RAISE EXCEPTION 'suggesting a time left the invitation at %', st;
+  END IF;
+  IF wait <> 'ee000000-0000-0000-0000-000000000001' THEN
+    RAISE EXCEPTION 'the ball did not go back to the organiser, it is with %', wait;
+  END IF;
+  IF r < 1 THEN
+    RAISE EXCEPTION 'the round was not counted';
+  END IF;
+
+  SELECT start_at INTO now_at FROM calendar_events WHERE id = ev;
+  IF now_at <> was THEN
+    RAISE EXCEPTION 'a suggestion moved the meeting on its own, from % to %', was, now_at;
+  END IF;
+  RAISE NOTICE 'ok  a suggestion goes back to the organiser and moves nothing';
+END $$;
+
+-- The organiser counters the counter, which is the same code again and
+-- the thing that makes it a conversation rather than one question.
+DO $$
+DECLARE ev UUID; his UUID; wait UUID; r INT;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT id INTO ev FROM fixture_meeting;
+  SELECT id INTO his FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000003';
+
+  PERFORM command_meeting_answer(his, 'propose',
+    (SELECT proposed_start_at FROM calendar_invites WHERE id = his) + INTERVAL '1 day',
+    NULL, 'Friday, not Thursday.');
+
+  SELECT awaiting, rounds INTO wait, r FROM calendar_invites WHERE id = his;
+  IF wait <> 'ee000000-0000-0000-0000-000000000003' THEN
+    RAISE EXCEPTION 'the ball did not come back, it is with %', wait;
+  END IF;
+  IF r < 2 THEN
+    RAISE EXCEPTION 'the second round was not counted: %', r;
+  END IF;
+  RAISE NOTICE 'ok  it goes back and forth, and every round is counted';
+END $$;
+
+-- =============================================================
+-- 6. Agreeing, which is the only thing that moves the meeting.
+-- =============================================================
+DO $$
+DECLARE ev UUID; his UUID; agreed TIMESTAMPTZ; was TIMESTAMPTZ; now_at TIMESTAMPTZ; st TEXT; n INT;
+BEGIN
+  /* Dave accepts what the organiser last suggested. Accepting is
+     accepting whatever time is on the table, which is why there is no
+     separate verb for it. */
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT id INTO ev FROM fixture_meeting;
+  SELECT start_at INTO was FROM calendar_events WHERE id = ev;
+  SELECT id, proposed_start_at INTO his, agreed FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000003';
+
+  PERFORM command_meeting_answer(his, 'accept', NULL, NULL, NULL);
+
+  SELECT status INTO st FROM calendar_invites WHERE id = his;
+  IF st <> 'accepted' THEN
+    RAISE EXCEPTION 'accepting left it at %', st;
+  END IF;
+
+  /* The invitee accepting does NOT move the meeting: the time on the
+     table was the organiser's own, so there is nothing to move to. */
+  SELECT start_at INTO now_at FROM calendar_events WHERE id = ev;
+  IF now_at <> was THEN
+    RAISE EXCEPTION 'the invitee accepting moved the meeting, from % to %', was, now_at;
+  END IF;
+  RAISE NOTICE 'ok  everybody has answered and the meeting is where it was';
+
+  /* Counted as the organiser, who is on both sides of both
+     invitations. Counted as Dave it comes to four, because the policy
+     on the history follows the invitation and Tom's exchange is none of
+     Dave's business. That is the policy working, not a gap: what the
+     drawer shows somebody is their own thread plus, for the organiser,
+     everybody's. */
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  SELECT count(*) INTO n FROM calendar_invite_messages m
+    JOIN calendar_invites i ON i.id = m.invite_id
+   WHERE i.event_id = ev;
+  IF n < 6 THEN
+    RAISE EXCEPTION 'the whole exchange is not on the record: % rounds', n;
+  END IF;
+  RAISE NOTICE 'ok  and how the time was arrived at is all there, % rounds', n;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT count(*) INTO n FROM calendar_invite_messages m
+    JOIN calendar_invites i ON i.id = m.invite_id
+   WHERE i.event_id = ev;
+  IF n >= 6 THEN
+    RAISE EXCEPTION 'one invitee can read the whole meeting''s exchange, including somebody else''s';
+  END IF;
+  RAISE NOTICE 'ok  and an invitee reads their own thread rather than everybody''s';
+END $$;
+
+-- The other direction: the organiser accepting a standing proposal is
+-- what moves it, and that is the branch worth proving because it is the
+-- one that changes other people's diaries.
+DO $$
+DECLARE made JSONB; ev UUID; inv UUID; want TIMESTAMPTZ; got TIMESTAMPTZ;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('Call Wilsons', NOW() + INTERVAL '5 days', 30, NULL, 'team');
+  ev := (made ->> 'id')::UUID;
+  PERFORM command_meeting_invite(ARRAY[ev], ARRAY['ee000000-0000-0000-0000-000000000002'::UUID], NULL);
+
+  SELECT id INTO inv FROM calendar_invites WHERE event_id = ev;
+  want := (NOW() + INTERVAL '6 days')::TIMESTAMPTZ;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000002');
+  PERFORM command_meeting_answer(inv, 'propose', want, want + INTERVAL '30 minutes', NULL);
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  PERFORM command_meeting_answer(inv, 'accept', NULL, NULL, NULL);
+
+  SELECT start_at INTO got FROM calendar_events WHERE id = ev;
+  IF got <> want THEN
+    RAISE EXCEPTION 'the organiser agreed and the meeting did not move: % rather than %', got, want;
+  END IF;
+  IF (SELECT proposed_start_at FROM calendar_invites WHERE id = inv) IS NOT NULL THEN
+    RAISE EXCEPTION 'the agreed time is on the meeting and still on the invitation, so two copies disagree';
+  END IF;
+  RAISE NOTICE 'ok  the organiser agreeing is what moves the meeting, and it moves once';
+END $$;
+
+-- =============================================================
+-- 7. Saying you cannot make it, and being taken off.
+-- =============================================================
+DO $$
+DECLARE made JSONB; ev UUID; inv UUID; st TEXT; n INT;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('Quarterly review', NOW() + INTERVAL '9 days', 60, NULL, 'team');
+  ev := (made ->> 'id')::UUID;
+  PERFORM command_meeting_invite(
+    ARRAY[ev],
+    ARRAY['ee000000-0000-0000-0000-000000000002'::UUID,
+          'ee000000-0000-0000-0000-000000000003'::UUID], NULL);
+
+  SELECT id INTO inv FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000002';
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000002');
+  PERFORM command_meeting_answer(inv, 'decline', NULL, NULL, 'On leave that week.');
+
+  SELECT status INTO st FROM calendar_invites WHERE id = inv;
+  IF st <> 'declined' THEN
+    RAISE EXCEPTION 'declining left it at %', st;
+  END IF;
+  IF (SELECT note FROM calendar_invites WHERE id = inv) IS NULL THEN
+    RAISE EXCEPTION 'the reason was not kept';
+  END IF;
+  RAISE NOTICE 'ok  declining keeps the reason where the organiser can see it';
+
+  -- Only the organiser can take an invitation back.
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000003');
+  SELECT id INTO inv FROM calendar_invites
+   WHERE event_id = ev AND user_id = 'ee000000-0000-0000-0000-000000000003';
+  BEGIN
+    PERFORM command_meeting_answer(inv, 'withdraw', NULL, NULL, NULL);
+    RAISE EXCEPTION 'somebody withdrew their own invitation';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%only the organiser%' THEN
+      RAISE NOTICE 'ok  only the organiser can take an invitation back';
+    ELSE
+      RAISE;
+    END IF;
+  END;
+
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  PERFORM command_meeting_answer(inv, 'withdraw', NULL, NULL, 'Not needed after all.');
+  SELECT count(*) INTO n FROM calendar_invites WHERE id = inv;
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'the invitation is still there after being withdrawn';
+  END IF;
+  RAISE NOTICE 'ok  and withdrawing takes it off';
+END $$;
+
+-- =============================================================
+-- 8. Moving one, which keeps its length.
+--
+-- Writing the start alone leaves a meeting that finishes before it
+-- begins, which is what dragging a block across a calendar must never
+-- produce.
+-- =============================================================
+DO $$
+DECLARE made JSONB; ev UUID; was INTERVAL; now_len INTERVAL; want TIMESTAMPTZ;
+BEGIN
+  PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
+  made := command_create_meeting('PMI inspection, C123456', NOW() + INTERVAL '2 days', 90, NULL, 'team');
+  ev := (made ->> 'id')::UUID;
+
+  SELECT end_at - start_at INTO was FROM calendar_events WHERE id = ev;
+  want := (NOW() + INTERVAL '4 days')::TIMESTAMPTZ;
+  PERFORM command_reschedule_meeting(ARRAY[ev], want);
+
+  SELECT end_at - start_at INTO now_len FROM calendar_events WHERE id = ev;
+  IF now_len <> was THEN
+    RAISE EXCEPTION 'moving it changed its length, from % to %', was, now_len;
+  END IF;
+  IF (SELECT start_at FROM calendar_events WHERE id = ev) <> want THEN
+    RAISE EXCEPTION 'moving it did not move it';
+  END IF;
+  RAISE NOTICE 'ok  moving a meeting keeps its length';
+END $$;
+
+ROLLBACK;

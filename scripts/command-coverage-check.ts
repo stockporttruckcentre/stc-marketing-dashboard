@@ -1086,6 +1086,68 @@ ok('a viewer is not offered discounting a contract',
 ok('an admin is offered discounting a contract',
   suggestActions('discount the maintenance contract', CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.discount'));
 
+/* ---------- the diary ----------
+
+   Two screens on one set of rows: the calendar, and the same list on
+   the Work tab. Both have to be reachable by the words somebody would
+   actually use, and the three views have to be reachable separately,
+   because "what have I got on" and "show me March" are different
+   questions and used to land on the same month grid. */
+for (const said of [
+  'diary', 'calendar', 'my diary', 'meetings', 'appointments', 'whats on',
+  'my calls', 'site visits', 'agenda', 'schedule',
+]) {
+  const reached = ROLES.some((r) =>
+    suggestActions(said, CAPS[r], 8).some((h) => h.action.path?.startsWith('/dashboard/calendar') ?? false));
+  ok(`"${said}" reaches the diary`, reached);
+}
+
+for (const [said, id] of [
+  ['what is next', 'cal.next'],
+  ['what have i got on', 'cal.next'],
+  ['my agenda', 'cal.next'],
+  ['this week', 'cal.week'],
+  ['my week', 'cal.week'],
+  ['my invitations', 'cal.answer'],
+  ['what have i not answered', 'cal.answer'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+/* The Work tab's half, by the words that say work or booked out loud.
+   The generic ones belong to the calendar and are asserted above. */
+for (const said of [
+  'meetings and calls', 'everything booked', 'the work diary', 'whats booked',
+  'what calls are booked',
+]) {
+  ok(`"${said}" reaches the diary on Work`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'nav.workDiary'));
+}
+
+/* Booking and answering, in both directions. Somebody who may not book
+   a meeting must not be offered it, and everybody may answer an
+   invitation sent to them: refusing that would mean a read only viewer
+   who cannot say they are unavailable. */
+ok('a viewer is not offered booking a meeting',
+  !suggestActions('book a meeting', CAPS.viewer, 8).some((h) => h.action.id === 'make.meeting'));
+ok('a sales user is offered booking a meeting',
+  suggestActions('book a meeting', CAPS.sales, 8).some((h) => h.action.id === 'make.meeting'));
+ok('a viewer is not offered inviting somebody',
+  !suggestActions('invite tom', CAPS.viewer, 8).some((h) => h.action.id === 'cal.invite'));
+ok('an admin is offered inviting somebody',
+  suggestActions('invite tom', CAPS.admin, 8).some((h) => h.action.id === 'cal.invite'));
+ok('a viewer can still accept an invitation',
+  suggestActions('that time works', CAPS.viewer, 8).some((h) => h.action.id === 'cal.accept'));
+ok('a viewer can still say they cannot make it',
+  suggestActions('i cannot make it', CAPS.viewer, 8).some((h) => h.action.id === 'cal.decline'));
+ok('a viewer can still suggest another time',
+  suggestActions('can we do thursday instead', CAPS.viewer, 8).some((h) => h.action.id === 'cal.propose'));
+ok('a viewer can still open the diary',
+  suggestActions('diary', CAPS.viewer, 8).some((h) => h.action.id === 'nav.calendar'));
+ok('a viewer can still see what is next',
+  suggestActions('what is next', CAPS.viewer, 8).some((h) => h.action.id === 'cal.next'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

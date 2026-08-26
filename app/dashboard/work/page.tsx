@@ -6,7 +6,8 @@ import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type {
   Task, TaskView, Person, Entity, DelegationRequest,
 } from '@/lib/work/types';
-import type { Profile } from '@/lib/types';
+import type { CalendarEvent, Profile } from '@/lib/types';
+import type { DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,7 @@ function missingTable(error: { code?: string } | null): boolean {
 export default async function WorkPage({
   searchParams,
 }: {
-  searchParams: { view?: string };
+  searchParams: { view?: string; tab?: string };
 }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -58,6 +59,27 @@ export default async function WorkPage({
     supabase.from('team_members').select('team_id').eq('user_id', user.id),
     supabase.from('crm_contacts').select('id, company_name').order('company_name').limit(2000),
     supabase.from('stock_trailers').select('id, stc_no').order('stc_no').limit(2000),
+  ]);
+
+  /* The other half of "what is on me". Read here rather than fetched by
+     the diary panel once it is opened, because a tab that says five
+     meetings and then takes a second to show them is a tab somebody
+     clicks twice.
+
+     The window is a month back and four months on, the same as the
+     diary screen's, so the two never disagree about what exists.
+     Everything is row level security scoped: `calendar_events` shows
+     what somebody may see and `calendar_invites` shows only the ones
+     they are on either side of. */
+  const now = new Date();
+  const [diaryRes, inviteRes, peopleRes2] = await Promise.all([
+    supabase.from('calendar_events').select('*')
+      .gte('start_at', new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString())
+      .lt('start_at', new Date(now.getFullYear(), now.getMonth() + 4, 1).toISOString())
+      .order('start_at').limit(1000),
+    supabase.from('calendar_invites')
+      .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
+    supabase.from('profiles').select('id, full_name, email').limit(200),
   ]);
 
   const profile = (profileRes.data as Profile) ?? null;
@@ -112,6 +134,10 @@ export default async function WorkPage({
       /* Only somebody on both companies is offered the switcher. */
       multiEntity={entityIds.length > 1}
       openView={searchParams?.view ?? null}
+      openTab={searchParams?.tab === 'diary' ? 'diary' : 'tasks'}
+      diaryEvents={(diaryRes.data ?? []) as CalendarEvent[]}
+      diaryInvites={(inviteRes.data ?? []) as DiaryInvite[]}
+      diaryPeople={(peopleRes2.data ?? []) as DiaryPerson[]}
     />
   );
 }

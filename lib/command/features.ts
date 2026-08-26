@@ -39,9 +39,9 @@ export const FEATURES: Feature[] = [
     ],
   },
   {
-    id: 'calendar', title: 'Team calendar', path: '/dashboard/calendar',
-    aliases: ['meeting', 'meetings', 'diary', 'appointment', 'appointments', 'calendar', 'schedule', 'events', 'availability', 'agenda'],
-    blurb: 'Meetings and events, with who can see them',
+    id: 'calendar', title: 'Diary', path: '/dashboard/calendar',
+    aliases: ['meeting', 'meetings', 'diary', 'appointment', 'appointments', 'calendar', 'schedule', 'events', 'availability', 'agenda', 'calls', 'site visits'],
+    blurb: 'Every call, meeting, visit and inspection, and who has answered',
     actions: [
       { label: 'Schedule a call', phrase: 'schedule a call for ' },
       { label: 'Show my meetings this week', phrase: 'show my meetings this week' },
