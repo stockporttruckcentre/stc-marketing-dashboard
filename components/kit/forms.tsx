@@ -239,6 +239,87 @@ export function Checkbox({ checked, onChange, label, hint }: {
 }
 
 /**
+ * A switch, for a setting that takes effect the moment it moves.
+ *
+ * The kit is explicit about the difference and it is worth keeping: a
+ * switch saves itself, a checkbox waits for a Save button. Anything
+ * behind a form with a Save is a checkbox, and every notification
+ * toggle is a switch, because there is nothing to save.
+ *
+ * Green rather than navy when it is on, which is the one place in the
+ * kit that green carries a control rather than a status. On and off
+ * have to be legible from across a screen of thirty of them, and navy
+ * against a navy ground is not.
+ */
+export function Switch({ checked, onChange, label, hint, size = 'md', disabled, lockedReason }: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  /** Optional: the settings rows draw their own label column. */
+  label?: ReactNode;
+  hint?: ReactNode;
+  size?: 'sm' | 'md';
+  disabled?: boolean;
+  /** Shown in place of the switch when something cannot be turned off. */
+  lockedReason?: string;
+}) {
+  const w = size === 'sm' ? 28 : 34;
+  const h = size === 'sm' ? 16 : 20;
+  const knob = size === 'sm' ? 12 : 16;
+
+  const control = (
+    <span
+      role="switch"
+      aria-checked={checked}
+      aria-disabled={disabled || undefined}
+      tabIndex={disabled ? -1 : 0}
+      title={lockedReason}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onChange(!checked); }
+      }}
+      style={{
+        flex: 'none', width: w, height: h, borderRadius: 'var(--r-full)',
+        background: checked ? 'var(--success)' : 'var(--border-strong)',
+        padding: 2, display: 'flex',
+        justifyContent: checked ? 'flex-end' : 'flex-start',
+        transition: `background 120ms ${EASE}`,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      <span style={{
+        width: knob, height: knob, borderRadius: 'var(--r-full)',
+        background: '#fff', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.3)',
+      }} />
+    </span>
+  );
+
+  if (!label && !hint) {
+    return (
+      <span
+        onClick={() => { if (!disabled) onChange(!checked); }}
+        style={{ display: 'inline-flex', opacity: disabled ? 0.45 : 1 }}
+      >{control}</span>
+    );
+  }
+
+  return (
+    <label
+      onClick={() => { if (!disabled) onChange(!checked); }}
+      style={{
+        display: 'inline-flex', alignItems: hint ? 'flex-start' : 'center', gap: 9,
+        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1,
+      }}
+    >
+      {control}
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        {label && <span style={{ fontSize: 13, color: 'var(--text)' }}>{label}</span>}
+        {hint && <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{hint}</span>}
+      </span>
+    </label>
+  );
+}
+
+/**
  * A dialog, for the times somebody genuinely has to decide before
  * carrying on. Anything that does not meet that bar belongs in a drawer
  * or an inline panel, which is the kit's rule and a good one.

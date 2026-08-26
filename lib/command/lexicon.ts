@@ -337,6 +337,18 @@ const RESERVED = new Set([
   'diary', 'calendar', 'meeting', 'meetings', 'call', 'calls', 'appointment',
   'appointments', 'invite', 'invites', 'invitation', 'invitations', 'attendee',
   'attendees', 'agenda', 'visit', 'visits',
+
+  /* Notifications, for the same reason once more. "Turn off notifications
+     from Dean" has to read Dean as the person and the rest as the
+     grammar, and without these it looks for a customer called
+     Notifications.
+
+     "Alert" and "reminder" are in for the same reason and are worth
+     naming: both are ordinary English that turns up mid sentence, and
+     "remind me about Dawson on Friday" was reading Reminder as a place
+     the moment a preposition ran into it. */
+  'notification', 'notifications', 'notif', 'notifs', 'alert', 'alerts',
+  'reminder', 'reminders', 'bell', 'unread', 'inbox', 'feed', 'quiet',
   ...Object.keys(BODY_TYPES),
 ]);
 

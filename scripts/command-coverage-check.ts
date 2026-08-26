@@ -1148,6 +1148,57 @@ ok('a viewer can still open the diary',
 ok('a viewer can still see what is next',
   suggestActions('what is next', CAPS.viewer, 8).some((h) => h.action.id === 'cal.next'));
 
+/* -------------------------------------------------------------
+   Notifications.
+
+   The bell was a button with no click handler until now, and the one
+   action pointing at it went to the dashboard, which showed five and
+   let you answer none. Three screens now, and the words below are the
+   ones people actually use for them.
+
+   The settings half matters more than the reach half. "Turn off
+   notifications" and "I get too many notifications" are the same
+   request said by somebody irritated, and a bar that answers the first
+   and not the second sends them looking through Settings.
+   ------------------------------------------------------------- */
+for (const said of [
+  'notifications', 'my notifications', 'notifs', 'unread', 'alerts',
+  'anything for me', 'what needs me', 'my bell', 'inbox',
+  'what is waiting on me', 'anything waiting on me', 'what have i missed',
+]) {
+  ok(`"${said}" reaches my notifications`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'me.notifications'));
+}
+
+for (const said of [
+  'notification settings', 'notification preferences', 'what i get told',
+  'quiet hours', 'turn off notifications', 'mute notifications',
+  'stop notifications', 'too many notifications', 'i get too many notifications',
+  'turn the noise down',
+]) {
+  ok(`"${said}" reaches the notification settings`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'notifications.settings'));
+}
+
+for (const said of [
+  'team notifications', 'business notifications', 'company feed', 'team feed',
+  'what the team is doing', 'what everybody is doing',
+]) {
+  ok(`"${said}" reaches the business feed`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'notifications.team'));
+}
+
+/* Everybody, in both directions. There is no role that does not get
+   notifications: a read only viewer is still invited to meetings and
+   still has to be able to find them, and a viewer who could not reach
+   their own settings could not turn anything off. */
+for (const role of ROLES) {
+  ok(`a ${role} can reach their notifications`,
+    suggestActions('notifications', CAPS[role], 8).some((h) => h.action.id === 'me.notifications'));
+  ok(`a ${role} can reach their notification settings`,
+    suggestActions('notification settings', CAPS[role], 8).some((h) => h.action.id === 'notifications.settings'));
+}
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
+import { tell } from '@/lib/notifications/server';
 import { commitImport, prepareImport, IMPORT_CEILING } from '@/lib/import/commit';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
      capability and was never consulted here. */
   const gate = await requireCapability('crm.import');
   if (!gate.ok) return gate.response;
-  const { supabase } = gate;
+  const { supabase, user } = gate;
 
   const body = await req.json().catch(() => ({}));
   const rows: unknown[] = Array.isArray(body.rows) ? body.rows : [];
@@ -65,6 +66,28 @@ export async function POST(req: NextRequest) {
     listId: body.list_id ?? null,
   });
   if (!done.ok) return NextResponse.json({ error: done.why, inserted: 0 }, { status: 500 });
+
+  /* An import is the one thing somebody starts and then walks away
+     from. It takes long enough that the tab is usually somewhere else
+     by the time it lands, and until now the only way to find out how
+     it went was to still be looking at the screen.
+
+     No trigger can raise this: the rows going in are the import
+     working, not the import finishing, and a trigger per row would say
+     it five thousand times. */
+  await tell(supabase, {
+    user: user.id,
+    kind: 'crm.import_finished',
+    title: done.inserted === 1
+      ? 'Your import put 1 customer in'
+      : `Your import put ${done.inserted} customers in`,
+    body: refused === 0
+      ? 'Every row went in.'
+      : `${refused} ${refused === 1 ? 'row was' : 'rows were'} skipped for having no company name.`,
+    link: body.list_id ? `/dashboard/crm?list=${body.list_id}` : '/dashboard/crm',
+    actor: user.id,
+    payload: { inserted: done.inserted, refused },
+  });
 
   return NextResponse.json({ inserted: done.inserted, refused });
 }

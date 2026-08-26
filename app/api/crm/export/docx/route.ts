@@ -5,6 +5,8 @@ import {
 } from 'docx';
 import { loadExportModel } from '@/lib/crm/load-export';
 import { exportStem } from '@/lib/crm/export-model';
+import { requireCapability } from '@/lib/api/guard';
+import { keepAndTell } from '@/lib/notifications/exports';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +65,12 @@ function fieldTable(rows: { label: string; value: string }[]) {
 }
 
 export async function GET(req: NextRequest) {
+  /* Same gap as the spreadsheet route: no capability check at all, on
+     a whole customer record in one file. See the note there. */
+  const gate = await requireCapability('crm.export');
+  if (!gate.ok) return gate.response;
+  const { supabase, user } = gate;
+
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
@@ -154,6 +162,16 @@ export async function GET(req: NextRequest) {
   });
 
   const buf = await Packer.toBuffer(doc);
+
+  await keepAndTell(supabase, user.id, {
+    bytes: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+    filename: `${exportStem(m.company)}.docx`,
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    company: m.company,
+    contactId: id,
+    what: 'a document',
+  });
+
   return new NextResponse(buf as any, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

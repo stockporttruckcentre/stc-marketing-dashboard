@@ -928,9 +928,26 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['target', 'my target', 'against target', 'booked this month', 'am i on track'],
     phrases: ['how far off target am i', 'how much left to hit target'] },
 
+  /* Was pointed at the dashboard, which showed five of them and had no
+     way to answer any. It goes to the screen now. */
   { id: 'me.notifications', label: 'My notifications', blurb: 'Anything unread and waiting', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'check', 'any'],
-    objects: ['notifications', 'unread', 'alerts', 'my bell', 'anything for me', 'messages'] },
+    capability: 'crm.view', path: '/dashboard/notifications', verbs: [...GO, 'check', 'any'],
+    objects: ['notifications', 'unread', 'alerts', 'my bell', 'anything for me', 'messages',
+      'notification', 'notifs', 'inbox', 'what have i missed', 'what needs me'],
+    phrases: ['what is waiting on me', 'anything waiting on me', 'what needs my attention'] },
+
+  { id: 'notifications.team', label: 'What the business is up to', blurb: 'Deals landing, contracts signed', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/notifications?tab=team', verbs: [...GO, 'what'],
+    objects: ['team notifications', 'business notifications', 'company feed', 'team feed',
+      'what everybody is doing', 'what the team is doing'] },
+
+  { id: 'notifications.settings', label: 'What I get told about', blurb: 'Every toggle, and quiet hours', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/notifications?tab=settings',
+    verbs: [...GO, 'change', 'set', 'turn', 'stop', 'mute', 'silence'],
+    objects: ['notification settings', 'notification preferences', 'what i get told',
+      'my alerts', 'quiet hours', 'notification toggles', 'stop notifications',
+      'turn off notifications', 'mute notifications', 'too many notifications'],
+    phrases: ['stop emailing me', 'i get too many notifications', 'turn the noise down'] },
 
   { id: 'me.inFlight', label: 'What is in flight', blurb: 'Open work split new against existing', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard', verbs: [...GO, 'what'],

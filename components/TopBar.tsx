@@ -1,8 +1,9 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { Hash, Bell, HelpCircle } from 'lucide-react';
+import { Hash, HelpCircle } from 'lucide-react';
 import { CommandBar } from '@/components/dashboard/CommandBar';
+import { NotificationBell } from '@/components/notifications/bell';
 import type { UserRole } from '@/lib/types';
 
 const CRUMBS: Record<string, [string, string]> = {
@@ -22,6 +23,7 @@ const CRUMBS: Record<string, [string, string]> = {
   '/dashboard/brand':     ['Marketing', 'Brand kit'],
   '/dashboard/admin':     ['Admin',     'Team'],
   '/dashboard/settings':  ['Admin',     'Settings'],
+  '/dashboard/notifications': ['Workspace', 'Notifications'],
 };
 
 export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
@@ -55,7 +57,7 @@ export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
       </div>
 
       <div className="topbar__right">
-        <button className="btn btn--icon" title="Notifications" aria-label="Notifications"><Bell size={14} /></button>
+        <NotificationBell />
         <button className="btn btn--icon" title="Help" aria-label="Help"><HelpCircle size={14} /></button>
       </div>
     </header>
