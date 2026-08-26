@@ -139,7 +139,12 @@ It can prove, and does, on every run:
 
 - that a database built from every migration in `order.txt` answers all
   36 functions the runtime calls, with the right argument names and
-  grants (`npm run check:rpc`)
+  grants, and holds all 274 columns the command runtime reads
+  (`npm run check:rpc`)
+- that every column this application asks any database for, in a select,
+  a filter or a write, is really there: 406 of them across 212 query
+  sites, read out of the source rather than from a list somebody
+  maintains (`npm run check:columns`)
 - that the same database carries out the sentences correctly, in real
   PostgreSQL, 276 assertions in `scripts/sql/validate-007.sql` and
   `npm run check:postgres`
@@ -152,6 +157,22 @@ It can prove, and does, on every run:
   to the database it had just built, finished with no error and no
   warning, left the two seeds at 103 and 38 rather than doubled, and
   still answered 36/36 functions and 276 assertions afterwards
+
+Why those last two exist is worth writing down. A function that is
+missing and a column that is missing fail in exactly the same way, and
+for a long time only the first was checked. Somebody marking two
+trailers sold got
+
+    column stock_trailers.sale_price does not exist
+
+The deal carries `sale_price` and the unit carries `sales_price`, one
+letter apart on two different tables, and the operation asked the unit
+for the deal's column. Two more of the same kind were behind it, one of
+which broke every Lusha lookup a sentence could reach.
+
+Nothing saw them because the fake PostgREST the checks run against
+handed back an empty cell for a column nothing holds. It refuses one
+now, the way the real thing does.
 
 It cannot prove anything about a particular Supabase project. No
 repository can: the project reference lives in a deployment's

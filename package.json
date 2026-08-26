@@ -31,6 +31,7 @@
     "check:postgres": "tsx scripts/command-postgres-check.ts",
     "gen:writable-columns": "tsx scripts/generate-writable-columns.ts",
     "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check",
+    "check:columns": "tsx scripts/column-usage-check.ts",
     "check:rpc": "tsx scripts/rpc-contract-check.ts",
     "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh"
   },
