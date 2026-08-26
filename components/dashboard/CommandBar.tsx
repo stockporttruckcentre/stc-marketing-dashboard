@@ -317,7 +317,11 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
           kind: 'feature' as const,
           label: c.company_name,
           sub: [c.contact_name, c.location, c.list_name].filter(Boolean).join(' · ') || 'Open this record',
-          path: `/dashboard/crm?list=${c.list_id}&contact=${c.id}`,
+          // A record on no list still opens. The CRM page falls back to the
+          // shared pipeline, which beats a link that carries `list=null`.
+          path: c.list_id
+            ? `/dashboard/crm?list=${c.list_id}&contact=${c.id}`
+            : `/dashboard/crm?contact=${c.id}`,
           score: 0,
         })));
       } catch { if (!cancelled) setRecords([]); }

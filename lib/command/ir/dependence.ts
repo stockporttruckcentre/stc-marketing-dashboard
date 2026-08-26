@@ -176,6 +176,9 @@ export function walkCond(c: Cond, v: Visitor): void {
          can name any field over there. */
       if (c.where) walkCond(c.where, v);
       return;
+    case 'onList':
+      // A list id and no expression. Nothing to walk.
+      return;
     case 'and':
     case 'or':
       c.of.forEach((x) => walkCond(x, v));

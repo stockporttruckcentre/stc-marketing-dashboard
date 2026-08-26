@@ -993,9 +993,15 @@ test('make a list of these called Tipper prospects', async () => {
   ok('with the name that was typed',
     db.tables.crm_lists?.[0]?.name === 'Tipper prospects',
     String(db.tables.crm_lists?.[0]?.name));
-  ok('and both records are in it',
-    db.tables.crm_contacts.filter((r) => r.list_id === db.tables.crm_lists?.[0]?.id).length === 2);
-  ok('the third one is not', db.tables.crm_contacts.find((r) => r.id === ID(3))?.list_id == null);
+  /* Memberships, not a column on the company. Writing the column used
+     to MOVE the company: making a list of two customers took them off
+     wherever they were, which nobody asked for and which is part of
+     why the same firm kept being entered again. */
+  const onIt = (db.tables.crm_list_contacts ?? [])
+    .filter((r) => String(r.list_id) === String(db.tables.crm_lists?.[0]?.id));
+  ok('and both records are in it', onIt.length === 2, JSON.stringify(onIt));
+  ok('the third one is not',
+    !onIt.some((r) => String(r.contact_id) === ID(3)), JSON.stringify(onIt));
 });
 
 test('a list with no name is refused rather than named for you', async () => {
@@ -1389,14 +1395,21 @@ const people = (): Row[] => [
 ];
 
 const onAList = (): Row[] => [
-  { id: 'c1', company_name: 'Dawson Group', trailers: 40, status: 'lead', location: 'Hyde', list_id: 'L1' },
-  { id: 'c2', company_name: 'Pollock Haulage', trailers: 25, status: 'lead', location: 'Hyde', list_id: 'L1' },
+  { id: 'c1', company_name: 'Dawson Group', trailers: 40, status: 'lead', location: 'Hyde' },
+  { id: 'c2', company_name: 'Pollock Haulage', trailers: 25, status: 'lead', location: 'Hyde' },
 ];
+
+/* Which of them are on the list, as rows in the join table. It was a
+   column on the company until migration 040, which is why one company
+   could only ever be on one list. */
+const membersOf = (list: string, ...ids: string[]): Row[] =>
+  ids.map((contact_id) => ({ list_id: list, contact_id }));
 
 test('sharing a selection with a colleague grants them access to it', async () => {
   const db = fakeDb({
     crm_contacts: onAList(),
     crm_lists: [{ id: 'L1', name: 'Fleet Prospects', is_global: false }],
+    crm_list_contacts: membersOf('L1', 'c1', 'c2'),
     profiles: people(),
   });
   const planning = planCommand('share the customers in Hyde with Dave and Tom', {
@@ -1439,6 +1452,7 @@ test('a name that fits two people is a question, not a guess', async () => {
   const db = fakeDb({
     crm_contacts: onAList(),
     crm_lists: [{ id: 'L1', name: 'Fleet Prospects', is_global: false }],
+    crm_list_contacts: membersOf('L1', 'c1', 'c2'),
     profiles: [
       { id: 'p1', full_name: 'Dave Smith', email: 'dave@stc.co.uk', role: 'sales' },
       { id: 'p3', full_name: 'Dave Ashworth', email: 'davea@stc.co.uk', role: 'sales' },
@@ -1512,8 +1526,8 @@ test('the four clause sentence makes the list, the file and the grant', async ()
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
   ok('the list was made over both customers',
-    db.tables.crm_contacts.filter((r) => r.list_id === 'list1').length === 2,
-    JSON.stringify(db.tables.crm_contacts.map((r) => r.list_id)));
+    (db.tables.crm_list_contacts ?? []).filter((r) => r.list_id === 'list1').length === 2,
+    JSON.stringify(db.tables.crm_list_contacts));
   ok('the file came back', done.artefactRows === 2, String(done.artefactRows));
   ok('and the message says who can see them now', /Dave Smith/.test(done.message), done.message);
   ok('and the grant really landed',
@@ -1601,12 +1615,16 @@ const selected = (ids: string[]) => ({
 test('records go onto a list that already exists, by its name', async () => {
   const db = fakeDb({
     crm_contacts: [
-      { id: 'c1', company_name: 'Dawson Group', status: 'lead', list_id: 'G1' },
-      { id: 'c2', company_name: 'Pollock Haulage', status: 'lead', list_id: 'G1' },
+      { id: 'c1', company_name: 'Dawson Group', status: 'lead' },
+      { id: 'c2', company_name: 'Pollock Haulage', status: 'lead' },
     ],
     crm_lists: [
       { id: 'G1', name: 'Global CRM', is_global: true },
       { id: 'L1', name: 'Fleet Prospects', is_global: false },
+    ],
+    crm_list_contacts: [
+      { list_id: 'G1', contact_id: 'c1' },
+      { list_id: 'G1', contact_id: 'c2' },
     ],
   });
   const text = 'add these to the Fleet Prospects list';
@@ -1638,9 +1656,15 @@ test('records go onto a list that already exists, by its name', async () => {
   });
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
-  ok('and both records really moved',
-    db.tables.crm_contacts.every((r) => r.list_id === 'L1'),
-    JSON.stringify(db.tables.crm_contacts.map((r) => r.list_id)));
+  const nowOn = (db.tables.crm_list_contacts ?? []).filter((r) => r.list_id === 'L1');
+  ok('and both records really went on', nowOn.length === 2, JSON.stringify(nowOn));
+  /* Adding to a list is not taking off another one. It used to be: the
+     move wrote `list_id`, so putting two customers on a prospect list
+     took them off the shared pipeline, where the rest of the business
+     was looking for them. */
+  ok('and they are still on the pipeline they came from',
+    (db.tables.crm_list_contacts ?? []).filter((r) => r.list_id === 'G1').length === 2,
+    JSON.stringify(db.tables.crm_list_contacts));
 });
 
 test('a list name that fits two lists moves nothing', async () => {
@@ -1867,13 +1891,14 @@ test('a selection smaller than the list it is on shares nothing', async () => {
   const many: Row[] = [];
   for (let i = 0; i < 100; i++) {
     many.push({
-      id: `c${i}`, company_name: `Customer ${i}`, status: 'lead', list_id: 'L1',
+      id: `c${i}`, company_name: `Customer ${i}`, status: 'lead',
       location: i < 2 ? 'Hyde' : 'Carrington',
     });
   }
   const db = fakeDb({
     crm_contacts: many,
     crm_lists: [{ id: 'L1', name: 'Everything', is_global: false }],
+    crm_list_contacts: membersOf('L1', ...many.map((r) => String(r.id))),
     profiles: people(),
   });
 
@@ -1891,11 +1916,12 @@ test('the database refuses the same overgrant on its own', async () => {
      caller that validates its own payload validates nothing. */
   const many: Row[] = [];
   for (let i = 0; i < 100; i++) {
-    many.push({ id: `c${i}`, company_name: `Customer ${i}`, status: 'lead', list_id: 'L1' });
+    many.push({ id: `c${i}`, company_name: `Customer ${i}`, status: 'lead' });
   }
   const db = fakeDb({
     crm_contacts: many,
     crm_lists: [{ id: 'L1', name: 'Everything', is_global: false }],
+    crm_list_contacts: membersOf('L1', ...many.map((r) => String(r.id))),
     profiles: people(),
   });
 
@@ -2665,10 +2691,16 @@ test('a stock unit goes onto the tracker from a sentence', async () => {
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
 
-  const lead = (db.tables.crm_contacts ?? []).find((r) => r.source === 'From Stock');
-  ok('a lead was made against the unit', !!lead, JSON.stringify(db.tables.crm_contacts));
-  ok('on the trailer sales side', lead?.side === 'trailer_sales', String(lead?.side));
+  const lead = (db.tables.crm_leads ?? []).find((r) => r.stock_trailer_id === 't1');
+  ok('a lead was made against the unit', !!lead, JSON.stringify(db.tables.crm_leads));
+  ok('on the trailer sales side', lead?.type === 'trailer_sales', String(lead?.type));
   ok('linked to the unit it came from', lead?.stock_trailer_id === 't1', String(lead?.stock_trailer_id));
+  /* And no company was invented to hold it. Putting a unit on your
+     tracker used to create an account called "Lead STC143580", so the
+     CRM gained a phantom customer nobody had ever spoken to per unit. */
+  ok('and the CRM gained no phantom customer',
+    (db.tables.crm_contacts ?? []).length === 0, JSON.stringify(db.tables.crm_contacts));
+  ok('because the lead names no customer yet', lead?.contact_id == null, String(lead?.contact_id));
 });
 
 test('a proposal is raised, on the side of the business the words said', async () => {
@@ -2702,13 +2734,19 @@ test('a proposal is raised, on the side of the business the words said', async (
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok) return;
 
-  const raised = db.tables.crm_contacts.find((r) => r.source === 'CRM proposal');
+  const raised = (db.tables.crm_leads ?? [])[0];
   ok('a quoted row was raised', raised?.status === 'quoted', String(raised?.status));
-  ok('on the maintenance side', raised?.side === 'maintenance', String(raised?.side));
-  /* Carried across so the dashboard can split proposals to prospects
-     from proposals to existing customers. */
-  ok('carrying the relationship across', raised?.relationship === 'existing',
-    String(raised?.relationship));
+  ok('on the maintenance side', raised?.type === 'maintenance', String(raised?.type));
+  ok('against the customer rather than beside them',
+    raised?.contact_id === 'c1', String(raised?.contact_id));
+  /* The prospect versus existing split lives on the account, where it
+     describes the relationship. It used to be copied onto every
+     proposal, which is how one customer became several. */
+  ok('and the account still says what the relationship is',
+    db.tables.crm_contacts[0]?.relationship === 'existing',
+    String(db.tables.crm_contacts[0]?.relationship));
+  ok('with one customer and not two',
+    db.tables.crm_contacts.length === 1, String(db.tables.crm_contacts.length));
 });
 
 test('a viewer cannot raise a proposal, from either direction', async () => {
@@ -4494,12 +4532,14 @@ test('a customer goes onto the tracker', async () => {
   const db = fakeDb({
     crm_contacts: [{
       id: 'c1', company_name: 'Dawson Group', contact_name: 'Sam Dawson',
-      status: 'lead', source: 'Cold call', list_id: 'l1',
+      status: 'lead', source: 'Cold call',
     }],
     crm_lists: [
       { id: 'l1', name: 'Everything', is_global: true },
       { id: 'l2', name: 'Sales tracker', owner_id: 'u1', is_global: false },
     ],
+    crm_list_contacts: [{ list_id: 'l1', contact_id: 'c1' }],
+    profiles: [{ id: 'u1', full_name: 'Alex Ellis', email: 'alex@stc.co.uk', role: 'sales' }],
   });
   const text = 'pull this customer from the CRM onto my tracker';
   const context = { record: { entity: 'contacts', id: 'c1' } };
@@ -4528,16 +4568,26 @@ test('a customer goes onto the tracker', async () => {
   });
   ok('it goes through', done.ok, done.ok ? '' : done.why);
 
+  /* NO COPY. That copy WAS the duplicate the business was looking at:
+     every time somebody used the CRM properly, "put Dawson on my
+     tracker" made a second Dawson carrying its own name, contact,
+     phone and fleet counts, and the two drifted apart the moment
+     either was edited. */
   const rows = db.tables.crm_contacts ?? [];
-  ok('a copy arrived', rows.length === 2, String(rows.length));
-  ok('on the tracker rather than the list it came from',
-    String(rows[1]?.list_id) === 'l2', String(rows[1]?.list_id));
-  ok('carrying what belongs to the business',
-    String(rows[1]?.company_name) === 'Dawson Group'
-      && String(rows[1]?.contact_name) === 'Sam Dawson',
-    JSON.stringify(rows[1]));
-  ok('and the original is untouched',
-    String(rows[0]?.list_id) === 'l1', String(rows[0]?.list_id));
+  ok('the CRM still holds one Dawson', rows.length === 1, String(rows.length));
+
+  const leads = db.tables.crm_leads ?? [];
+  ok('and a lead was raised against it', leads.length === 1, JSON.stringify(leads));
+  ok('pointing at the account rather than repeating it',
+    String(leads[0]?.contact_id) === 'c1', String(leads[0]?.contact_id));
+  ok('on the tracker of whoever asked for it',
+    String(leads[0]?.owner_id) === 'u1', String(leads[0]?.owner_id));
+  ok('carrying the customer name so a question can name it',
+    String(leads[0]?.company_name) === 'Dawson Group', String(leads[0]?.company_name));
+  ok('and the account is untouched',
+    String(rows[0]?.company_name) === 'Dawson Group'
+      && String(rows[0]?.contact_name) === 'Sam Dawson',
+    JSON.stringify(rows[0]));
 });
 
 test('a viewer cannot put a customer on a tracker', async () => {
@@ -5201,12 +5251,13 @@ test('what the finder found goes onto the list, and nothing else does', async ()
       /* A company already here whose name looks like one of the ones
          about to be found. Nothing may pick this up: the clause is
          about the rows the SEARCH returned. */
-      { id: 'old1', company_name: 'Pennine Waste Services', status: 'lead', list_id: 'l1' },
+      { id: 'old1', company_name: 'Pennine Waste Services', status: 'lead' },
     ],
     crm_lists: [
       { id: 'l1', name: 'Everything', is_global: true },
       { id: 'l2', name: 'Fleet Prospects' },
     ],
+    crm_list_contacts: [{ list_id: 'l1', contact_id: 'old1' }],
   });
   const text = 'find 20 waste companies within 20 miles of Hyde and put them on Fleet Prospects';
 
@@ -5254,17 +5305,20 @@ test('what the finder found goes onto the list, and nothing else does', async ()
     ok('it goes through', done.ok, done.ok ? '' : done.why);
     ok('and the search happened exactly once', calls === 1, String(calls));
 
-    const onList = db.tables.crm_contacts.filter((r) => r.list_id === 'l2');
+    const memberships = db.tables.crm_list_contacts ?? [];
+    const onList = memberships.filter((r) => r.list_id === 'l2')
+      .map((m) => db.tables.crm_contacts.find((c) => String(c.id) === String(m.contact_id)))
+      .filter(Boolean) as Row[];
     ok('both companies it found are on the list', onList.length === 2,
-      JSON.stringify(db.tables.crm_contacts.map((r) => [r.company_name, r.list_id])));
+      JSON.stringify(memberships));
     ok('by the names the search returned',
       onList.map((r) => r.company_name).sort().join('|') === 'Pennine Waste|Tameside Skips',
       JSON.stringify(onList.map((r) => r.company_name)));
 
     /* THE ROW THAT WAS ALREADY HERE IS NOT PART OF THE ANSWER. */
     ok('and the customer already here with a similar name was left alone',
-      db.tables.crm_contacts.find((r) => r.id === 'old1')?.list_id === 'l1',
-      String(db.tables.crm_contacts.find((r) => r.id === 'old1')?.list_id));
+      !memberships.some((r) => String(r.contact_id) === 'old1' && r.list_id === 'l2'),
+      JSON.stringify(memberships.filter((r) => String(r.contact_id) === 'old1')));
   } finally {
     FINDER.search = was;
     LUSHA_GATE.locked = wasLocked;

@@ -699,7 +699,7 @@ SELECT assert('the list is really there',
   (SELECT COUNT(*) FROM crm_lists WHERE name = 'TEST tipper prospects') = 1);
 
 SELECT assert('and both records point at it',
-  (SELECT COUNT(*) FROM crm_contacts c JOIN crm_lists l ON l.id = c.list_id
+  (SELECT COUNT(*) FROM crm_list_contacts lc JOIN crm_lists l ON l.id = lc.list_id
    WHERE l.name = 'TEST tipper prospects') = 2);
 
 -- One record that cannot be moved takes the list with it.
@@ -805,7 +805,7 @@ DECLARE glob UUID;
 BEGIN
   SELECT id INTO glob FROM crm_lists WHERE is_global LIMIT 1;
   PERFORM command_share_list(glob,
-    ARRAY(SELECT id FROM crm_contacts WHERE list_id = glob),
+    ARRAY(SELECT contact_id FROM crm_list_contacts WHERE list_id = glob),
     ARRAY['aaaaaaaa-0000-0000-0000-000000000001'::UUID], TRUE);
   PERFORM assert('the global list refuses to be shared', FALSE, 'it succeeded');
 EXCEPTION WHEN OTHERS THEN
@@ -835,8 +835,62 @@ END
 $$;
 
 SELECT assert('and they really are on it',
-  (SELECT COUNT(*) FROM crm_contacts
+  (SELECT COUNT(*) FROM crm_list_contacts
    WHERE list_id = 'e1111111-0000-0000-0000-000000000001') = 2);
+
+/* ADDING TO A LIST IS NOT TAKING OFF ANOTHER ONE.
+
+   It used to be. The move wrote `crm_contacts.list_id`, and a column
+   holds one answer, so putting two customers on a prospect list took
+   them off the list they were already on. Nobody asked for that, and a
+   company disappearing from the shared pipeline because somebody made
+   a list of it is part of why the same firm kept being entered again.
+   Migration 044. */
+SELECT assert('and they are still on the list they were already on',
+  (SELECT COUNT(*) FROM crm_list_contacts
+    WHERE list_id = (SELECT id FROM crm_lists WHERE name = 'TEST tipper prospects')) = 2);
+
+-- Records already on the list are not a failure and are not a move.
+DO $$
+DECLARE out JSONB;
+BEGIN
+  SELECT command_add_to_list('TEST second list',
+    ARRAY['b1111111-0000-0000-0000-000000000001'::UUID,
+          'b1111111-0000-0000-0000-000000000002'::UUID]) INTO out;
+  PERFORM assert('adding the same records again is not a failure',
+    (out ->> 'moved')::INT = 2, out::TEXT);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM assert('adding the same records again is not a failure', FALSE, SQLERRM);
+END
+$$;
+
+SELECT assert('and it did not put them on twice',
+  (SELECT COUNT(*) FROM crm_list_contacts
+   WHERE list_id = 'e1111111-0000-0000-0000-000000000001') = 2);
+
+/* DELETING A LIST TAKES THE LIST, NOT THE CUSTOMERS ON IT.
+
+   The memberships go with it, which the foreign key already does. The
+   companies stay: deleting somebody's private list is not a reason to
+   remove a customer the whole business is working. */
+DO $$
+DECLARE before INT; after_it INT;
+BEGIN
+  SELECT COUNT(*) INTO before FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
+  DELETE FROM crm_lists WHERE id = 'e1111111-0000-0000-0000-000000000001';
+  SELECT COUNT(*) INTO after_it FROM crm_contacts WHERE company_name LIKE 'TEST listed%';
+
+  PERFORM assert('deleting a list keeps its customers',
+    before = 2 AND after_it = 2, before::TEXT || ' then ' || after_it::TEXT);
+  PERFORM assert('and takes its memberships with it',
+    (SELECT COUNT(*) FROM crm_list_contacts
+      WHERE list_id = 'e1111111-0000-0000-0000-000000000001') = 0);
+END
+$$;
+
+INSERT INTO crm_lists (id, name, is_global)
+VALUES ('e1111111-0000-0000-0000-000000000001', 'TEST second list', FALSE)
+ON CONFLICT (id) DO NOTHING;
 
 -- A name that fits two lists is a question, not a choice made here.
 INSERT INTO crm_lists (id, name, is_global)
@@ -2940,9 +2994,11 @@ SELECT assert('the field changed',
   (SELECT location FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
 
 SELECT assert('and the operation ran',
-  (SELECT list_id FROM crm_contacts WHERE company_name = 'TEST Chain Mixed')
-    = 'c4444444-0000-0000-0000-000000000001',
-  (SELECT list_id::TEXT FROM crm_contacts WHERE company_name = 'TEST Chain Mixed'));
+  EXISTS (SELECT 1 FROM crm_list_contacts
+           WHERE list_id = 'c4444444-0000-0000-0000-000000000001'
+             AND contact_id = 'c4444444-0000-0000-0000-000000000009'),
+  (SELECT string_agg(list_id::TEXT, ', ') FROM crm_list_contacts
+    WHERE contact_id = 'c4444444-0000-0000-0000-000000000009'));
 
 -- AND THE WHOLE THING ROLLS BACK WHEN THE LAST STEP FAILS.
 DELETE FROM crm_contacts WHERE company_name = 'TEST Chain Rollback';
@@ -3138,26 +3194,38 @@ $$;
 
 DELETE FROM stock_trailers WHERE stc_no = 'TESTSTC1' AND id <> '11111111-1111-1111-1111-111111111111';
 
--- A DEAL: the conversation carries, the sale does not.
+-- A DEAL: the conversation carries, the sale does not, and the customer
+-- is not duplicated along with it.
+--
+-- Duplicating a deal used to copy the whole company row: name, contact,
+-- email, phone, address, links, fleet counts. That was the only way to
+-- say "another deal with these people" while a deal and a company were
+-- one row, and it is the last place that would still make a second
+-- Dawson. Migration 043.
 DELETE FROM crm_contacts WHERE company_name LIKE 'TEST dup%';
-INSERT INTO crm_contacts (id, company_name, contact_name, list_id, status, source,
-                          side, requirement, notes, stock_trailer_id,
-                          sale_price, profit, commission, order_date)
-VALUES ('e1111111-0000-0000-0000-000000000001', 'TEST dup buyer', 'Sam', test_global_list(),
-        'customer', 'manual', 'trailer_sales', 'two curtainsiders', 'rings on Fridays',
+INSERT INTO crm_contacts (id, company_name, contact_name, list_id, source)
+VALUES ('e0000000-0000-0000-0000-0000000000d0', 'TEST dup buyer', 'Sam',
+        test_global_list(), 'manual');
+INSERT INTO crm_leads (id, contact_id, owner_id, type, status,
+                       requirement, notes, stock_trailer_id,
+                       sale_price, profit, commission, order_date)
+VALUES ('e1111111-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-0000000000d0',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'customer',
+        'two curtainsiders', 'rings on Fridays',
         '11111111-1111-1111-1111-111111111111', 24000, 4000, 400, DATE '2026-08-01');
 
 DO $$
-DECLARE out JSONB; copy crm_contacts%ROWTYPE;
+DECLARE out JSONB; copy crm_leads%ROWTYPE; accounts INT;
 BEGIN
   SELECT command_duplicate_deal(ARRAY['e1111111-0000-0000-0000-000000000001']::UUID[]) INTO out;
-  SELECT * INTO copy FROM crm_contacts WHERE id = (out ->> 'id')::UUID;
+  SELECT * INTO copy FROM crm_leads WHERE id = ((out -> 'ids') ->> 0)::UUID;
 
   PERFORM assert('a deal can be duplicated', (out ->> 'made')::INT = 1, out::TEXT);
-  PERFORM assert('the copy is the same customer', copy.company_name = 'TEST dup buyer', copy.company_name);
+  PERFORM assert('the copy is against the same customer',
+    copy.contact_id = 'e0000000-0000-0000-0000-0000000000d0', copy.contact_id::TEXT);
   PERFORM assert('and carries what they want', copy.requirement = 'two curtainsiders', copy.requirement);
   PERFORM assert('and the notes', copy.notes = 'rings on Fridays', copy.notes);
-  PERFORM assert('and the side of the business', copy.side = 'trailer_sales', copy.side);
+  PERFORM assert('and the kind of work', copy.type = 'trailer_sales', copy.type);
 
   PERFORM assert('it is not against the same unit',
     copy.stock_trailer_id IS NULL, copy.stock_trailer_id::TEXT);
@@ -3168,6 +3236,9 @@ BEGIN
   PERFORM assert('and a deal already sold comes back as a quote rather than a second sale',
     copy.status = 'quoted', copy.status);
   PERFORM assert('dated today', copy.date_of_enquiry = CURRENT_DATE, copy.date_of_enquiry::TEXT);
+
+  SELECT COUNT(*) INTO accounts FROM crm_contacts WHERE company_name = 'TEST dup buyer';
+  PERFORM assert('and the customer is still one customer', accounts = 1, accounts::TEXT);
 END
 $$;
 
@@ -3292,7 +3363,7 @@ BEGIN
   PERFORM assert('the import says which rows it made',
     jsonb_typeof(ids) = 'array' AND jsonb_array_length(ids) = 2, COALESCE(ids::TEXT, 'nothing'));
 
-  SELECT COUNT(*) INTO onlist FROM crm_contacts
+  SELECT COUNT(*) INTO onlist FROM crm_list_contacts
    WHERE list_id = 'c5555555-0000-0000-0000-000000000001';
   PERFORM assert('and both of them went on the list', onlist = 2, onlist::TEXT);
 EXCEPTION WHEN OTHERS THEN

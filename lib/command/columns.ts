@@ -107,7 +107,8 @@ export const TABLES: TableSpec[] = [
       { name: 'notes', kind: 'longtext' },
       { name: 'assigned_to', kind: 'text' },
       { name: 'last_contact', kind: 'date' },
-      { name: 'list_id', kind: 'system', writable: false, why: 'moved with the move to list action, not typed' },
+      { name: 'list_id', kind: 'system', writable: false,
+        why: 'kept in step with the lists a company is on, which is crm_list_contacts' },
       { name: 'trucks', kind: 'number' },
       { name: 'trailers', kind: 'number' },
       { name: 'vans', kind: 'number' },
@@ -325,6 +326,19 @@ export const TABLES: TableSpec[] = [
       { name: 'owner_id', kind: 'system', writable: false, why: 'whoever made it' },
       { name: 'is_global', kind: 'bool', writable: false, why: 'there is exactly one, enforced by an index' },
       { name: 'color', kind: 'text' },
+    ],
+  },
+  {
+    /* Which companies are on which list. A row here is what used to be
+       `crm_contacts.list_id`, and moving it off the company is what
+       makes one Dawson able to appear on the pipeline and on two
+       trackers at once. */
+    table: 'crm_list_contacts', label: 'list membership',
+    columns: [
+      { name: 'list_id', kind: 'system', writable: false, why: 'which list' },
+      { name: 'contact_id', kind: 'system', writable: false, why: 'which company' },
+      { name: 'added_by', kind: 'system', writable: false, why: 'whoever put it there' },
+      { name: 'added_at', kind: 'system', writable: false, why: 'set on insert' },
     ],
   },
   {

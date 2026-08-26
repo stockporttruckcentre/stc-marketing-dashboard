@@ -626,7 +626,10 @@ export const RELATIONSHIPS: RelationshipDef[] = [
     label: 'lists it appears on',
     approximate: false,
     requires: ['crm.view'],
-    join: { via: 'through', table: 'crm_list_members', localKey: 'contact_id', remoteKey: 'list_id' },
+    // `crm_list_members` is who may SEE a list. Which companies are ON
+    // one is `crm_list_contacts`, and pointing at the wrong table meant
+    // "the lists Dawson appears on" answered with nothing at all.
+    join: { via: 'through', table: 'crm_list_contacts', localKey: 'contact_id', remoteKey: 'list_id' },
   },
   {
     id: 'contact.addresses',

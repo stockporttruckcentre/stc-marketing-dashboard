@@ -8,7 +8,7 @@ import {
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveLine } from '@nivo/line';
-import type { Profile, StockTrailer, CRMContact, CrmList } from '@/lib/types';
+import type { Profile, StockTrailer, CRMContact } from '@/lib/types';
 
 const STC_RED  = '#cf2417';
 const STC_NAVY = '#071458';
@@ -141,13 +141,12 @@ function canonicalRep(raw: string | null | undefined, idx: ReturnType<typeof bui
 //   MAIN VIEW
 // ============================================================
 export function AnalyticsView({
-  currentUser, teamProfiles, stock, tracker, lists,
+  currentUser, teamProfiles, stock, tracker,
 }: {
   currentUser: Profile | null;
   teamProfiles: Profile[];
   stock: StockTrailer[];
   tracker: CRMContact[];
-  lists: CrmList[];
 }) {
   const [period, setPeriod] = useState<Period>('ytd');
   const [repFilter, setRepFilter] = useState<string>('ALL');

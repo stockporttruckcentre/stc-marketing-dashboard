@@ -99,7 +99,6 @@ export async function POST(req: NextRequest) {
   }
 
   const payload: Record<string, any> = {
-    list_id: src.list_id,
     side,
     status: 'lead',
     source: 'Linked account',
@@ -118,6 +117,18 @@ export async function POST(req: NextRequest) {
     }, { status: 400 });
   }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  /* The twin goes wherever the account it was made from goes.
+
+     This used to be one column copied across. A company can be on the
+     shared pipeline and on somebody's own list at the same time now, so
+     the answer is every membership the source has, not the last one
+     written to it. */
+  const { data: sourceLists } = await supabase
+    .from('crm_list_contacts').select('list_id').eq('contact_id', src.id);
+  const rows = ((sourceLists ?? []) as { list_id: string }[])
+    .map((r) => ({ list_id: r.list_id, contact_id: (created as any).id }));
+  if (rows.length) await supabase.from('crm_list_contacts').insert(rows);
 
   // If the source was the head and had no link, it stays the head. Nothing
   // to do: the twin already points at it.
@@ -150,7 +161,10 @@ export async function GET(req: NextRequest) {
   const head = (me as any).parent_customer_id ?? id;
   const { data: group } = await supabase
     .from('crm_contacts')
-    .select('id, company_name, side, status, list_id, estimated_value, sale_price')
+    // Who the other account is, and nothing about what is being pitched
+    // to them. A value belongs to a lead now, and reading one off the
+    // account would show a figure that stopped being maintained.
+    .select('id, company_name, side, status')
     .or(`id.eq.${head},parent_customer_id.eq.${head}`);
 
   return NextResponse.json({

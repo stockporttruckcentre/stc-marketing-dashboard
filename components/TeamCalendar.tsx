@@ -92,7 +92,7 @@ export function TeamCalendar({ initialEvents, userId }: { initialEvents: Calenda
     const wantIds = Array.from(new Set(events.map(e => e.contact_id).filter(Boolean) as string[]))
       .filter(id => !(id in contactCache));
     if (!wantIds.length) return;
-    supabase.from('crm_contacts').select('id, company_name, contact_name, email, phone, list_id').in('id', wantIds)
+    supabase.from('crm_contacts').select('id, company_name, contact_name, email, phone').in('id', wantIds)
       .then(({ data }) => {
         if (!data) return;
         setContactCache(prev => {

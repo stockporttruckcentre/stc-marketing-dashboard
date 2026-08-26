@@ -51,5 +51,6 @@
 041_tracker_from_crm_makes_a_lead
 042_sales_and_proposals_on_leads
 043_account_status_follows_its_leads
+044_list_operations_on_memberships
 018_command_set_role
 019_last_admin

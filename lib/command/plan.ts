@@ -602,13 +602,15 @@ function planOneClause(
 
   /* And the same for the list the screen is showing. By its id, because
      a list renamed while somebody was looking at it is still the list
-     they were looking at. */
+     they were looking at.
+
+     A membership test rather than a comparison against `list_id`. That
+     column held the one list a company could be on, and a company can
+     be on the shared pipeline and on somebody's own list at the same
+     time now. Comparing the column would answer about the last list
+     anybody wrote to it and quietly leave out the rest. */
   if (openList && 'entity' in select.from && select.from.entity === 'contacts') {
-    const onList: Cond = {
-      kind: 'cmp', op: 'eq',
-      left: { kind: 'field', of: { entity: 'contacts', field: 'list_id' } },
-      right: { kind: 'literal', value: openList.id },
-    };
+    const onList: Cond = { kind: 'onList', list: openList.id };
     select.where = select.where ? { kind: 'and', of: [select.where, onList] } : onList;
   }
 

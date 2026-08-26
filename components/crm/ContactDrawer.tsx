@@ -84,6 +84,7 @@ export function ContactDrawer({
   const [linking, setLinking] = useState(false);
   const [leads, setLeads] = useState<LeadWithOwner[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
+  const [onLists, setOnLists] = useState<string[]>([]);
   const [addresses, setAddresses] = useState<ContactAddress[]>([]);
   const [showMap, setShowMap] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -239,19 +240,48 @@ export function ContactDrawer({
     setEdit(data as CRMContact); onChange(data as CRMContact);
   }
 
+  /**
+   * Which lists this company appears on.
+   *
+   * A column while a company could only be on one, and the reason the
+   * same haulier had to be entered again to appear anywhere else.
+   */
+  const loadMemberships = useCallback(async () => {
+    const { data } = await supabase.from('crm_list_contacts')
+      .select('list_id').eq('contact_id', contact.id);
+    setOnLists(((data ?? []) as { list_id: string }[]).map((r) => r.list_id));
+  }, [supabase, contact.id]);
+
+  useEffect(() => { loadMemberships(); }, [loadMemberships]);
+
+  /**
+   * Moving a company, and showing it in a second place.
+   *
+   * Copying used to insert a whole second company row, name, contact,
+   * phone, fleet counts and all, which is the duplicate this CRM was
+   * full of. Both are memberships now: one record, shown wherever it
+   * has been put, with one history behind it.
+   */
   async function moveToList(targetListId: string, mode: 'move' | 'duplicate') {
+    const { error } = await supabase.from('crm_list_contacts')
+      .upsert({ list_id: targetListId, contact_id: contact.id });
+    if (error) { setMessage(error.message); return; }
+
     if (mode === 'move') {
-      const { data, error } = await supabase.from('crm_contacts')
-        .update({ list_id: targetListId }).eq('id', contact.id).select('*').single();
-      if (error) { setMessage(error.message); return; }
-      onChange(data as CRMContact); setMovePickerOpen(null); onClose();
-    } else {
-      const { id, created_at, updated_at, ...rest } = contact as any;
-      const { error } = await supabase.from('crm_contacts').insert({ ...rest, list_id: targetListId });
-      if (error) { setMessage(error.message); return; }
+      const leaving = onLists.filter((l) => l !== targetListId);
+      if (leaving.length) {
+        const { error: off } = await supabase.from('crm_list_contacts')
+          .delete().eq('contact_id', contact.id).in('list_id', leaving);
+        if (off) { setMessage(off.message); return; }
+      }
       setMovePickerOpen(null);
-      setMessage(`Copied to ${lists.find((l) => l.id === targetListId)?.name}`);
+      onClose();
+      return;
     }
+
+    await loadMemberships();
+    setMovePickerOpen(null);
+    setMessage(`Also showing on ${lists.find((l) => l.id === targetListId)?.name}`);
   }
 
   const fleetTotal = (edit.trucks ?? 0) + (edit.trailers ?? 0) + (edit.vans ?? 0);
@@ -360,7 +390,7 @@ export function ContactDrawer({
                   }}>
                     {[
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
-                      { label: 'Copy to another list', on: () => setMovePickerOpen('duplicate') },
+                      { label: 'Also show on another list', on: () => setMovePickerOpen('duplicate') },
                     ].map((a) => (
                       <button key={a.label} onClick={() => { setOverflowOpen(false); a.on(); }}
                         style={menuItem}>{a.label}</button>
@@ -714,8 +744,8 @@ export function ContactDrawer({
         )}
         {movePickerOpen && (
           <ListPicker
-            title={movePickerOpen === 'move' ? 'Move to which list?' : 'Copy to which list?'}
-            lists={lists.filter((l) => l.id !== contact.list_id)}
+            title={movePickerOpen === 'move' ? 'Move to which list?' : 'Also show on which list?'}
+            lists={lists.filter((l) => !onLists.includes(l.id))}
             onPick={(id) => moveToList(id, movePickerOpen)}
             onClose={() => setMovePickerOpen(null)}
           />

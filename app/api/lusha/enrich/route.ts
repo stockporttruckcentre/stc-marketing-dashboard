@@ -82,8 +82,14 @@ export async function POST(req: NextRequest) {
     }
     contactRow = data;
   } else {
+    /* The account, then which list it is on.
+    
+       `status` is derived from the company's leads since migration 043,
+       and list membership is a row in `crm_list_contacts` rather than a
+       column, so an enriched company lands as one account that can sit
+       on as many lists as anybody puts it on. */
     const insert = {
-      list_id: listId, status: 'lead' as const, ...found.fields,
+      ...found.fields,
       company_name: found.fields.company_name ?? body.company_name ?? 'Unknown',
     };
     const { data, error } = await supabase
@@ -92,6 +98,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message, attempts: found.attempts }, { status: 500 });
     }
     contactRow = data;
+    await supabase.from('crm_list_contacts')
+      .insert({ list_id: listId, contact_id: (data as { id: string }).id });
   }
 
   /* The parts that are not columns on the record. */

@@ -241,8 +241,8 @@ test('a large export comes back whole, through the same route', async () => {
     file.bytes[0] === 0x50 && file.bytes[1] === 0x4b && file.bytes.length > 200_000,
     `${file.bytes.length} bytes`);
   ok('the list was made over all of them',
-    db.tables.crm_contacts.every((r) => r.list_id === 'list1'),
-    String(db.tables.crm_contacts.filter((r) => r.list_id !== 'list1').length));
+    (db.tables.crm_list_contacts ?? []).filter((r) => r.list_id === 'list1').length === 8000,
+    String((db.tables.crm_list_contacts ?? []).length));
 });
 
 /* =============================================================

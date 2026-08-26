@@ -238,20 +238,28 @@ const YARD = (): Record<string, DbRow[]> => ({
     { id: 'z1', content: 'One', platform: ['linkedin'], scheduled_date: '2026-09-01', status: 'pending_review', created_by: 'tester', hashtags: [] },
     { id: 'z2', content: 'Two', platform: ['linkedin'], scheduled_date: '2026-09-02', status: 'draft', created_by: 'tester', hashtags: [] },
   ],
-  /* Two of the four units are being sold to somebody, which is what a
-     sales tracker looks like. Without a deal on a unit there is nothing
-     to sell, and a fixture with none of them cannot observe a sale at
-     all. */
   /* A diary. Without one, every sentence about a meeting resolves to
      nothing, which scores as a failure to find a record and tells you
      nothing about whether the sentence was read correctly. Three
      meetings, on the days people refer to them by. */
   calendar_events: DIARY(),
+  /* THE COMPANIES. One record each, whatever is being pitched to them.
+     Two of them are being quoted for a unit in the yard, and that pitch
+     is a lead below rather than a second copy of the company. */
   crm_contacts: [
-    { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null, next_action: null, stock_trailer_id: null, sale_price: null, profit: null },
-    { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co', next_action: null, stock_trailer_id: null, sale_price: null, profit: null },
-    { id: 'c3', company_name: 'Dawson Group', assigned_to: 'Alex', status: 'quoted', email: 'd@d.co', next_action: null, stock_trailer_id: 'y1', sale_price: 22000, profit: 3000, commission_rate: 0.1 },
-    { id: 'c4', company_name: 'Culina', assigned_to: 'Lucy', status: 'quoted', email: 'c@c.co', next_action: null, stock_trailer_id: 'y2', sale_price: 26000, profit: 4000, commission_rate: 0.1 },
+    { id: 'c1', company_name: 'Ward Bros', assigned_to: 'Alex', status: 'lead', email: null },
+    { id: 'c2', company_name: 'Smith Logistics', assigned_to: 'Alex', status: 'quoted', email: 'a@b.co' },
+    { id: 'c3', company_name: 'Dawson Group', assigned_to: 'Alex', status: 'quoted', email: 'd@d.co' },
+    { id: 'c4', company_name: 'Culina', assigned_to: 'Lucy', status: 'quoted', email: 'c@c.co' },
+  ],
+  /* Two of the units are being sold to somebody, which is what a sales
+     tracker looks like. Without a lead on a unit there is nothing to
+     sell, and a fixture with none of them cannot observe a sale at all. */
+  crm_leads: [
+    { id: 'k1', contact_id: 'c3', company_name: 'Dawson Group', owner_id: 'u1', type: 'trailer_sales',
+      status: 'quoted', next_action: null, stock_trailer_id: 'y1', sale_price: 22000, profit: 3000, commission_rate: 0.1 },
+    { id: 'k2', contact_id: 'c4', company_name: 'Culina', owner_id: 'u1', type: 'trailer_sales',
+      status: 'quoted', next_action: null, stock_trailer_id: 'y2', sale_price: 26000, profit: 4000, commission_rate: 0.1 },
   ],
 });
 

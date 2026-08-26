@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const term = nameRef.trim();
     const { data } = await supabase
       .from('crm_contacts')
-      .select('id, company_name, contact_name, email, phone, status, list_id')
+      .select('id, company_name, contact_name, email, phone, status')
       .or(`company_name.ilike.%${term}%,contact_name.ilike.%${term}%`)
       .limit(8);
 

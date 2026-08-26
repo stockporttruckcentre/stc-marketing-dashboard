@@ -60,10 +60,14 @@ export async function GET() {
              COUNT(*) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${yearStart})        AS won_ytd,
              COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${yearStart}), 0)  AS revenue_ytd,
              COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${monthStart}), 0) AS revenue_mtd
-      FROM crm_lists l
-      JOIN profiles p     ON p.id = l.owner_id
-      JOIN crm_contacts cc ON cc.list_id = l.id
-      WHERE l.is_global = FALSE AND l.name ILIKE '%Sales tracker%'
+      -- WHOSE DEAL IT IS, AS A COLUMN.
+      --
+      -- This used to join through a crm_lists row whose NAME contained
+      -- "Sales tracker", so a rep who renamed their tracker vanished
+      -- from the exec view, and anybody who had never opened the tracker
+      -- page had no list to join to at all. A lead names its owner.
+      FROM profiles p
+      JOIN crm_leads cc ON cc.owner_id = p.id
       GROUP BY p.id, p.full_name, p.email
       ORDER BY revenue_ytd DESC`;
 

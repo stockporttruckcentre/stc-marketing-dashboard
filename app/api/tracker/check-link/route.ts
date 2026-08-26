@@ -21,12 +21,13 @@ export async function POST(req: NextRequest) {
   const sql = postgres(url!, { ssl: 'require', max: 1, idle_timeout: 5, prepare: false });
   try {
     const rows = await sql<any[]>`
-      SELECT cc.id AS tracker_row_id, cc.status, cc.sale_price, cc.commission, cc.dispatch_date,
-             cc.list_id, l.owner_id, l.name AS list_name,
+      -- Who is chasing this unit. Owner is a column on the deal now, so
+      -- there is no list in the middle of the question.
+      SELECT cc.id AS tracker_row_id, cc.status, cc.sale_price, cc.commission,
+             cc.dispatch_date, cc.owner_id,
              p.full_name, p.email
-      FROM crm_contacts cc
-      JOIN crm_lists l ON cc.list_id = l.id
-      JOIN profiles p ON l.owner_id = p.id
+      FROM crm_leads cc
+      JOIN profiles p ON cc.owner_id = p.id
       WHERE cc.stock_trailer_id = ${body.stock_trailer_id}`;
     const me = rows.find(r => r.owner_id === user.id);
     const others = rows.filter(r => r.owner_id !== user.id);
