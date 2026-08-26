@@ -531,13 +531,38 @@ ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_severity_check
 ALTER TABLE notifications ADD CONSTRAINT notifications_severity_check
   CHECK (severity IN ('info', 'attention', 'urgent'));
 
-/* The old kinds become the new ones.
+/* The constraint that listed the old kinds goes FIRST, before anything
+   is renamed.
 
-   Eleven strings in a CHECK constraint, written across two migrations,
-   and every one of them has a row in the catalogue above under a
-   dotted name. Anything unrecognised becomes a system alert rather
-   than being deleted: a notification whose kind nobody wrote down is
-   still a notification somebody was sent. */
+   The order matters and getting it wrong is what this comment is for.
+   `notifications_kind_check` allows eleven strings and none of the new
+   dotted ones, so renaming a row to `crm.account_assigned` while it is
+   still in force fails the whole migration on the first existing row:
+
+     new row for relation "notifications" violates check constraint
+     "notifications_kind_check"
+
+   Which is exactly what happened on the live database, on a demo row
+   left over from seeding, and did not happen on the disposable one
+   because that starts with an empty table and the rename touched
+   nothing. A migration that only works on a database with no data in
+   it is not a migration.
+
+   Dropped rather than replaced. Not a foreign key either: a kind being
+   retired should not take a person's history with it, and ON DELETE SET
+   NULL is not available on a NOT NULL column. `notify` checks the
+   catalogue itself and refuses, which is the check that matters,
+   because it happens before the row is written rather than after
+   somebody tidies the catalogue. */
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
+
+/* And now the old kinds become the new ones.
+
+   Eleven strings, written across two migrations, and every one of them
+   has a row in the catalogue above under a dotted name. Anything
+   unrecognised becomes a system alert rather than being deleted: a
+   notification whose kind nobody wrote down is still a notification
+   somebody was sent. */
 UPDATE notifications SET kind = CASE kind
   WHEN 'lead_assigned'     THEN 'crm.account_assigned'
   WHEN 'message'           THEN 'system.message'
@@ -556,15 +581,6 @@ WHERE kind NOT IN (SELECT key FROM notification_kinds);
 
 UPDATE notifications SET kind = 'system.alert'
 WHERE kind NOT IN (SELECT key FROM notification_kinds);
-
-/* And the constraint that listed them goes, replaced by the catalogue.
-
-   Not a foreign key. A kind being retired should not take a person's
-   history with it, and ON DELETE SET NULL is not available on a NOT
-   NULL column. `notify` checks the catalogue itself and refuses, which
-   is the check that matters: it happens before the row is written
-   rather than after somebody tries to tidy the catalogue. */
-ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
 
 -- What the bell asks for: mine, live, unread, newest first.
 CREATE INDEX IF NOT EXISTS idx_notifications_live
