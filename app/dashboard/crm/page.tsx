@@ -20,14 +20,31 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
       ? searchParams.list
       : allLists.find((l) => l.is_global)?.id ?? allLists[0]?.id;
 
+  /* WHICH COMPANIES ARE ON THIS LIST.
+
+     Through the join table rather than `crm_contacts.list_id`. A company
+     belonged to exactly one list while membership was a column, which is
+     why the same firm had to exist once per list it appeared on and why
+     the pipeline and somebody's tracker held different Dawsons.
+
+     A company on the pipeline and on three trackers is one company now,
+     and it shows on all four. */
   let contacts: CRMContact[] = [];
   if (selectedListId) {
-    const { data } = await supabase
-      .from('crm_contacts')
-      .select('*')
-      .eq('list_id', selectedListId)
-      .order('updated_at', { ascending: false });
-    contacts = (data ?? []) as CRMContact[];
+    const { data: onList } = await supabase
+      .from('crm_list_contacts')
+      .select('contact_id')
+      .eq('list_id', selectedListId);
+
+    const ids = (onList ?? []).map((r) => (r as { contact_id: string }).contact_id);
+    if (ids.length) {
+      const { data } = await supabase
+        .from('crm_contacts')
+        .select('*')
+        .in('id', ids)
+        .order('updated_at', { ascending: false });
+      contacts = (data ?? []) as CRMContact[];
+    }
   }
 
   // Load all profiles for share-with picker

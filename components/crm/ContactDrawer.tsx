@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
-  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine,
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Briefcase
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
@@ -15,7 +15,21 @@ import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { AddressMap } from './AddressMap';
-import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
+import type {
+  CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress, Lead, LeadType,
+} from '@/lib/types';
+
+/** A pitch with whose tracker it sits on, which is how it is listed. */
+type LeadWithOwner = Lead & { owner: { id: string; full_name: string | null; email: string } | null };
+
+const LEAD_TYPE_LABEL: Record<LeadType, string> = {
+  trailer_sales: 'Trailer sales',
+  maintenance:   'Maintenance',
+  rental:        'Rental & leasing',
+};
+
+/** Open means somebody is still working it. */
+const OPEN_LEAD = (l: Lead) => l.status !== 'customer' && l.status !== 'lost';
 
 /* =============================================================
    Contact drawer.
@@ -65,10 +79,11 @@ export function ContactDrawer({
   const [showAddLink, setShowAddLink] = useState<null | 'website' | 'linkedin' | 'other'>(null);
   const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
-  const [alsoOn, setAlsoOn] = useState<{ id: string; name: string; company: string; side: string; status: string }[]>([]);
   const [linked, setLinked] = useState<any[]>([]);
   const [linkAvailable, setLinkAvailable] = useState(true);
   const [linking, setLinking] = useState(false);
+  const [leads, setLeads] = useState<LeadWithOwner[]>([]);
+  const [loadingLeads, setLoadingLeads] = useState(true);
   const [addresses, setAddresses] = useState<ContactAddress[]>([]);
   const [showMap, setShowMap] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -79,6 +94,33 @@ export function ContactDrawer({
      something else, and closing on the first click throws away a half
      written note. First click arms, second closes, Escape closes now. */
   const dismiss = useDismissGuard(onClose);
+
+  /**
+   * Every pitch to this customer that you are allowed to see.
+   *
+   * Not filtered here. Row level security answers it: your own, ones
+   * shared with you, and for a role that can see other people's
+   * portfolios, everybody's. So a rep opens Dawson and sees their own
+   * quote, and an admin opens the same record and sees all four,
+   * without either screen deciding who deserves what.
+   *
+   * This is the question the CRM could not answer at all before. A
+   * customer's pitches were other rows of the same table on other
+   * people's lists, so "what is open with Dawson" meant hunting for
+   * copies of Dawson.
+   */
+  const loadLeads = useCallback(async () => {
+    setLoadingLeads(true);
+    const { data } = await supabase
+      .from('crm_leads')
+      .select('*, owner:profiles!crm_leads_owner_id_fkey ( id, full_name, email )')
+      .eq('contact_id', contact.id)
+      .order('status')
+      .order('date_of_enquiry', { ascending: false, nullsFirst: false });
+    setLeads((data ?? []) as unknown as LeadWithOwner[]);
+    setLoadingLeads(false);
+  }, [supabase, contact.id]);
+  useEffect(() => { loadLeads(); }, [loadLeads]);
 
   const loadAddresses = useCallback(async () => {
     const { data } = await supabase.from('contact_addresses').select('*')
@@ -114,29 +156,22 @@ export function ContactDrawer({
    * linked yet. Showing them together is what turns an accidental
    * duplicate into a decision rather than a mystery.
    */
+  /**
+   * Companies deliberately tied to this one as parent and child.
+   *
+   * This used to do a second job as well: hunt for other rows carrying
+   * the same name or email and offer to link them. That hunt existed
+   * because a customer on two lists WAS two rows, and it has nothing
+   * left to find. A genuine group, where "Dawson Vans" sits under
+   * "Dawson Group", is still a real relationship and is still here.
+   */
   const loadSameCustomer = useCallback(async () => {
     const res = await fetch(`/api/crm/link?id=${contact.id}`).then((r) => r.json()).catch(() => null);
     if (res) {
       setLinked(res.linked ?? []);
       setLinkAvailable(res.available !== false);
     }
-
-    const linkedIds = new Set<string>(((res?.linked ?? []) as any[]).map((r) => r.id));
-    let q = supabase.from('crm_contacts')
-      .select('id, company_name, list_id, side, status')
-      .neq('id', contact.id);
-    q = contact.email
-      ? q.eq('email', contact.email)
-      : q.eq('company_name', contact.company_name);
-    const { data } = await q;
-    setAlsoOn(((data ?? []) as any[])
-      .filter((r) => !linkedIds.has(r.id))
-      .map((r) => ({
-        id: r.id,
-        name: lists.find((l) => l.id === r.list_id)?.name ?? 'Another list',
-        company: r.company_name, side: r.side ?? 'trailer_sales', status: r.status,
-      })));
-  }, [supabase, contact.id, contact.email, contact.company_name, lists]);
+  }, [contact.id]);
 
   useEffect(() => { loadSameCustomer(); }, [loadSameCustomer]);
 
@@ -521,87 +556,103 @@ export function ContactDrawer({
           {/* ---- the same business, under more than one account ---- */}
           <section>
             <SectionHead
-              title="Same customer"
-              hint={linked.length ? `${linked.length + 1} accounts` : undefined}
+              title="Leads"
+              hint={leads.length
+                ? `${leads.filter(OPEN_LEAD).length} open of ${leads.length}`
+                : undefined}
             />
-            {!linkAvailable ? (
-              <NotProvisioned
-                what="Sales and maintenance accounts for one business, linked so nobody types the details twice."
-                needs="migration 003"
-              />
+
+            {/* WHAT IS BEING PITCHED TO THIS CUSTOMER, AND BY WHOM.
+
+                This replaces "Same customer", which existed because a
+                customer could be two records: one on the sales side, one
+                on maintenance, linked so nobody typed the details twice.
+                There is one record now, so the question worth asking on
+                it is not which other Dawsons exist, it is what is open
+                with Dawson.
+
+                Who appears here is row level security's answer rather
+                than this screen's. Your own leads and ones shared with
+                you always; everybody's if your role can see other
+                people's portfolios. So a rep and an admin open the same
+                customer and see different lists, and neither list is
+                decided by the browser. */}
+
+            {/* A genuine group, where one company sits under another.
+                Shown above the pitches because it says who you are
+                dealing with, not what is being pitched. */}
+            {linkAvailable && linked.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                <Label>Part of the same group</Label>
+                {linked.map((l: any) => (
+                  <div key={l.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 11,
+                    padding: '9px 12px', borderRadius: 'var(--r)',
+                    border: '1px solid var(--border)', background: 'var(--surface-sunken)',
+                  }}>
+                    <Building2 size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text)' }}>
+                      {l.company_name ?? l.company ?? 'Linked account'}
+                    </div>
+                    <Button size="sm" variant="ghost"
+                      onClick={() => window.location.assign(`/dashboard/crm?contact=${l.id}`)}>Open</Button>
+                    {canEdit && (
+                      <Button size="sm" variant="ghost" disabled={linking}
+                        onClick={() => linkAction('unlink', l.id)}>Unlink</Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {loadingLeads ? (
+              <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>Loading</div>
+            ) : leads.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>
+                Nothing open with them. Raise one from the tracker, or say
+                &ldquo;put {edit.company_name} on my tracker&rdquo;.
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                {linked.map((l: any) => (
+                {leads.map((l) => (
                   <div key={l.id} style={{
                     display: 'flex', alignItems: 'center', gap: 11,
                     padding: '10px 12px', borderRadius: 'var(--r)',
                     border: '1px solid var(--border)', background: 'var(--surface)',
-                    borderLeft: '2px solid var(--accent)',
+                    borderLeft: `2px solid ${OPEN_LEAD(l) ? 'var(--accent)' : 'var(--border-strong)'}`,
+                    opacity: OPEN_LEAD(l) ? 1 : 0.65,
                   }}>
-                    <Building2 size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                    <Briefcase size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
-                        {SIDE_LABEL[l.side] ?? l.side}
+                        {LEAD_TYPE_LABEL[l.type] ?? l.type}
+                        {l.what ? <span style={{ fontWeight: 400, color: 'var(--text-subtle)' }}> · {l.what}</span> : null}
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{l.status}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                        {[
+                          l.status,
+                          /* Whose tracker it is on. The thing a manager
+                             opens this record to find out. */
+                          l.owner_id === profile.id
+                            ? 'yours'
+                            : (l.owner?.full_name || l.owner?.email || 'unassigned'),
+                          l.estimated_value != null
+                            ? new Intl.NumberFormat('en-GB', {
+                                style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
+                              }).format(Number(l.estimated_value))
+                            : null,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
                     </div>
                     <Button size="sm" variant="ghost"
-                      onClick={() => window.location.assign(`/dashboard/crm?contact=${l.id}`)}>Open</Button>
+                      onClick={() => window.location.assign(`/dashboard/leads?lead=${l.id}`)}>Open</Button>
                   </div>
                 ))}
-
-                {canEdit && !linked.some((l: any) => l.side !== (edit.side ?? 'trailer_sales')) && (
-                  <Button variant="secondary" disabled={linking}
-                    onClick={() => linkAction('create_twin')}>
-                    <Plus size={13} />
-                    Create the {(edit.side ?? 'trailer_sales') === 'maintenance' ? 'sales and leasing' : 'maintenance'} account
-                  </Button>
-                )}
-
-                {alsoOn.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
-                    <Label>Looks like the same customer, not linked</Label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-                      {alsoOn.map((a) => (
-                        <div key={a.id} style={{
-                          display: 'flex', alignItems: 'center', gap: 11,
-                          padding: '9px 12px', borderRadius: 'var(--r)',
-                          border: '1px dashed var(--border-strong)', background: 'var(--surface-sunken)',
-                        }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {a.company}
-                            </div>
-                            <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-                              {SIDE_LABEL[a.side] ?? a.side} · {a.status} · {a.name}
-                            </div>
-                          </div>
-                          {canEdit && (
-                            <Button size="sm" variant="secondary" disabled={linking}
-                              onClick={() => linkAction('link', a.id)}>Link</Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {linked.length === 0 && alsoOn.length === 0 && (
-                  <EmptyState
-                    what="This is the only account for this business."
-                    why="Some customers need a sales and leasing account and a maintenance account, because they are separate entities in Protean. Creating the second one copies the details across."
-                  />
-                )}
-
-                {canEdit && edit.parent_customer_id && (
-                  <Button size="sm" variant="ghost" disabled={linking}
-                    onClick={() => linkAction('unlink')}>Unlink this account</Button>
-                )}
               </div>
             )}
           </section>
 
-          {/* ---- notes ---- */}
+
           <section>
             <SectionHead title="Notes and history" hint={notes.length ? `${notes.length}` : undefined} />
             {canEdit && (
