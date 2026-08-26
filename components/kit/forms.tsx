@@ -62,6 +62,12 @@ export function Field({ label, hint, error, children, style }: {
 type InputProps = {
   value: string;
   onChange?: (v: string) => void;
+  /* Written when the field is left, not on every keystroke.
+
+     The kit's inline edit behaviour, and what a drawer over a live
+     record needs: typing is local, leaving the field is the save. A
+     control with only `onChange` makes every character a round trip. */
+  onCommit?: (v: string) => void;
   type?: string;
   placeholder?: string;
   readOnly?: boolean;
@@ -73,7 +79,7 @@ type InputProps = {
 };
 
 export function TextInput({
-  value, onChange, type = 'text', placeholder, readOnly, invalid, list, trailing, onKeyDown, style,
+  value, onChange, onCommit, type = 'text', placeholder, readOnly, invalid, list, trailing, onKeyDown, style,
 }: InputProps) {
   const [focused, setFocused] = useState(false);
   return (
@@ -88,7 +94,7 @@ export function TextInput({
         onChange={(e) => onChange?.(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={(e) => { setFocused(false); onCommit?.(e.target.value); }}
         style={{ ...CONTROL, color: readOnly ? 'var(--text-muted)' : 'var(--text)' }}
       />
       {trailing && (
@@ -100,8 +106,9 @@ export function TextInput({
   );
 }
 
-export function TextArea({ value, onChange, placeholder, rows = 3, invalid }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; rows?: number; invalid?: boolean;
+export function TextArea({ value, onChange, onCommit, placeholder, rows = 3, invalid }: {
+  value: string; onChange: (v: string) => void; onCommit?: (v: string) => void;
+  placeholder?: string; rows?: number; invalid?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -110,7 +117,7 @@ export function TextArea({ value, onChange, placeholder, rows = 3, invalid }: {
         value={value} placeholder={placeholder} rows={rows}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={(e) => { setFocused(false); onCommit?.(e.target.value); }}
         style={{
           width: '100%', padding: '9px 10px', background: 'transparent', border: 0, outline: 0,
           resize: 'vertical', fontFamily: 'var(--inter)', fontSize: 13, color: 'var(--text)',
@@ -312,5 +319,118 @@ export function Modal({ title, description, onClose, footer, width = 520, childr
         )}
       </div>
     </div>
+  );
+}
+
+/* =============================================================
+   The right drawer, from `reference/05-feedback.html`.
+
+   The same shape as `Modal` and for the same reason: a record opened
+   over a table is one component, not a `.drawer-bg` in one file and a
+   `.drawer` in another. Elevation carries it, because a drawer
+   genuinely floats, and it still takes a hairline so its edge reads on
+   the dark ground.
+   ============================================================= */
+export function Drawer({
+  eyebrow, title, icon, onClose, backdropProps, hint, footer, width = 660, children,
+}: {
+  eyebrow?: string;
+  title: ReactNode;
+  icon?: ReactNode;
+  onClose: () => void;
+  /** From `useDismissGuard`, so a clipped click does not lose the record. */
+  backdropProps?: Record<string, unknown>;
+  hint?: ReactNode;
+  footer?: ReactNode;
+  width?: number;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="kit"
+      {...backdropProps}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 900,
+        background: 'rgba(5, 13, 38, 0.5)',
+        display: 'flex', justifyContent: 'flex-end',
+      }}
+    >
+      {hint}
+      <div
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: width, height: '100%',
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--surface)', borderLeft: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-4)',
+        }}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 13,
+          padding: '14px 18px', borderBottom: '1px solid var(--border)',
+          background: 'var(--surface)', flex: 'none',
+        }}>
+          {icon && (
+            <span style={{
+              width: 36, height: 36, borderRadius: 'var(--r)', flex: 'none',
+              background: 'var(--bg-subtle)', color: 'var(--accent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>{icon}</span>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {eyebrow && (
+              <div style={{
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+                letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+              }}>{eyebrow}</div>
+            )}
+            <h2 style={{
+              margin: eyebrow ? '2px 0 0' : 0, fontFamily: 'var(--panton)', fontWeight: 800,
+              fontSize: 18, letterSpacing: '-0.025em', color: 'var(--text)', lineHeight: 1.25,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{title}</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            border: 'none', background: 'transparent', color: 'var(--text-subtle)',
+            cursor: 'pointer', display: 'flex', padding: 4,
+          }}>
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div style={{
+          flex: 1, minHeight: 0, overflowY: 'auto',
+          padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14,
+        }}>{children}</div>
+
+        {footer && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+            padding: '12px 18px', borderTop: '1px solid var(--border)',
+            background: 'var(--bg-subtle)', flex: 'none',
+          }}>{footer}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Fields side by side, collapsing to one column when there is no room. */
+export function Split({ cols = 2, children }: { cols?: 2 | 3; children: ReactNode }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(auto-fit, minmax(${cols === 3 ? 150 : 190}px, 1fr))`,
+      gap: 12,
+    }}>{children}</div>
   );
 }

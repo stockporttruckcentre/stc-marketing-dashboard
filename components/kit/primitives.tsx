@@ -89,6 +89,40 @@ export function Button({
   );
 }
 
+/**
+ * A square button where a label would be noise.
+ *
+ * Inside a table row, where the meaning comes from the column it sits
+ * in. Always carries an `aria-label` and a title: an icon on its own is
+ * not a name, and a row of unlabelled glyphs is unusable to anybody
+ * reading the page rather than looking at it.
+ */
+export function IconButton({
+  label, onClick, danger, disabled, children,
+}: {
+  label: string; onClick: () => void; danger?: boolean; disabled?: boolean; children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 26, height: 26, borderRadius: 'var(--r-sm)',
+        border: '1px solid transparent', background: 'transparent',
+        color: disabled ? 'var(--text-subtle)' : danger ? 'var(--danger)' : 'var(--text-muted)',
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: `background 120ms ${EASE}, color 120ms ${EASE}`,
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >{children}</button>
+  );
+}
+
 /* ---------- status vocabulary ---------- */
 
 export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'accent';
@@ -115,6 +149,29 @@ export function Badge({ tone = 'neutral', dot, children }: { tone?: Tone; dot?: 
       color: TONE_FG[tone], background: TONE_BG[tone],
     }}>
       {dot && <span style={{ width: 5, height: 5, borderRadius: 'var(--r-full)', background: 'currentColor' }} />}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The kit's table badge, drawn for a grid cell rather than a page.
+ *
+ * A cell renderer cannot inherit `Badge`'s sizing without fighting the
+ * row's 36px line box, so this is the same vocabulary at the height a
+ * row can hold. It lived in CrmWorkspace, where the other two tabs
+ * could not reach it, and each grew its own status pill instead.
+ */
+export function GridBadge({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, height: 20, padding: '0 8px',
+      borderRadius: 'var(--r-sm)', color: TONE_FG[tone],
+      background: 'color-mix(in srgb, currentColor 13%, transparent)',
+      fontSize: 11, fontWeight: 600, letterSpacing: '0.01em',
+      textTransform: 'capitalize', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: 'var(--r-full)', background: 'currentColor' }} />
       {children}
     </span>
   );
@@ -296,6 +353,138 @@ export const compactMoney = (n: number) => {
   if (Math.abs(v) >= 1_000) return '£' + Math.round(v / 1_000) + 'k';
   return '£' + v;
 };
+
+/* ---------- the shapes a whole tab is built from ----------
+
+   The CRM pipeline tab had both of these written out inline, and the
+   tracker and the stock list had neither. Two tabs asked to look like a
+   third is not a styling job if the third one's shape lives in its own
+   file: they drift the first time one of them is touched. So the shape
+   moves here, once, and all three render the same markup.
+
+   From `reference/06-patterns.html` (record header) and
+   `reference/03-data.html` (stat strip). Recreated, not lifted. */
+
+/**
+ * The header a whole tab sits under.
+ *
+ * An icon tile, a Panton title, whatever badges qualify it, one line of
+ * context, and the actions that are always available on the right. The
+ * icon tile is `--bg-subtle` with an `--accent` glyph: the one place red
+ * appears without being a button, because it is identifying the screen
+ * rather than asking for anything.
+ */
+export function RecordHead({
+  icon, title, badges, sub, actions,
+}: {
+  icon: ReactNode;
+  title: ReactNode;
+  badges?: ReactNode;
+  sub?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--r-md)', padding: '14px 16px',
+      display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+    }}>
+      <span style={{
+        width: 40, height: 40, borderRadius: 'var(--r)', flex: 'none',
+        background: 'var(--bg-subtle)', color: 'var(--accent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>{icon}</span>
+
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <h1 style={{
+            margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
+            letterSpacing: '-0.03em', color: 'var(--text)', lineHeight: 1.2,
+          }}>{title}</h1>
+          {badges}
+        </div>
+        {sub && (
+          <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginTop: 3 }}>{sub}</div>
+        )}
+      </div>
+
+      {actions && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * The numbers across the top, as one card divided by rules.
+ *
+ * No colour on any value, deliberately. Colouring five numbers five ways
+ * breaks rule one twice over and makes a count of zero shout. The label
+ * is the kit's label step, the number is Panton at 24 with tabular
+ * figures so a column of them lines up, and any qualifier sits beside it
+ * as small subtle text rather than under it.
+ */
+export function StatStrip({
+  items,
+}: { items: { label: string; value: ReactNode; note?: string }[] }) {
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--r-md)', display: 'flex', flexWrap: 'wrap', overflow: 'hidden',
+    }}>
+      {items.map((f, i) => (
+        <div key={f.label} style={{
+          flex: '1 1 140px', minWidth: 0, padding: '13px 18px',
+          display: 'flex', flexDirection: 'column', gap: 4,
+          borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
+        }}>
+          <span style={{
+            fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+            letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+          }}>{f.label}</span>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+            <span style={{
+              fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 24,
+              letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums',
+              color: 'var(--text)', lineHeight: 1.1,
+            }}>{f.value}</span>
+            {f.note && (
+              <span style={{
+                fontSize: 11.5, color: 'var(--text-subtle)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{f.note}</span>
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The tab's own scope: one kit surface, full height, nothing else.
+ *
+ * Fixed height rather than natural flow so the table underneath gets
+ * everything left over. 52px top bar, 24px page padding above, 56px
+ * below. And exactly one `.kit` per tab: `.kit` paints `var(--bg)`, so a
+ * wrapper per cluster lays its own canvas over the page and every seam
+ * shows as a band of slightly different dark.
+ */
+export function TabShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="kit" style={{
+      height: 'calc(100vh - 132px)',
+      minHeight: 520,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      background: 'transparent',
+    }}>{children}</div>
+  );
+}
+
+/** The line under a grid saying what the mouse does. */
+export function GridHint({ children }: { children: ReactNode }) {
+  return <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{children}</div>;
+}
 
 /* ---------- controls added for the News surface ---------- */
 

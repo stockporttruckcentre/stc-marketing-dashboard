@@ -9,6 +9,15 @@ import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
+import {
+  Alert, Badge, Button, Card, Chip, EmptyState, GridBadge, GridHint, IconButton,
+  money, RecordHead, Row, SearchInput, SectionHead, StatStrip, TabShell, Tabs,
+} from '@/components/kit/primitives';
+import {
+  Drawer, Field, Modal, OptionCard, Select, Split, TextArea, TextInput,
+} from '@/components/kit/forms';
+import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule } from '@/components/kit/menus';
+import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { trackerFromCrm } from '@/lib/crm/tracker-operations';
 import { SALES_TRACKER } from '@/lib/import/dictionary';
@@ -235,7 +244,7 @@ export function SalesTracker({
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
         cellRenderer: (p: ICellRendererParams<TrackerRow, ContactStatus>) => p.value
-          ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{p.value}</span> : null },
+          ? <GridBadge tone={STATUS_TONE[p.value] ?? 'neutral'}>{STATUS_LABEL[p.value]}</GridBadge> : null },
       { field: 'notes', headerName: 'Latest update', flex: 1.5, minWidth: 200, editable: true, valueSetter: saveCell },
     ];
     const base = [...commonStart, ...(isMaintenance ? maintMid : salesMid), ...commonEnd];
@@ -257,17 +266,21 @@ export function SalesTracker({
     base.push({
       headerName: '', width: 56, pinned: 'right', sortable: false, filter: false, editable: false,
       cellRenderer: (p: ICellRendererParams<TrackerRow>) => (
-        <div className="row" style={{ gap: 4 }}>
-          <button onClick={() => setEditingRow(p.data!)} className="btn btn--icon btn--sm" title="Edit"><Edit2 size={12} /></button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: '100%' }}>
+          <IconButton label="Open the lead" onClick={() => setEditingRow(p.data!)}>
+            <Edit2 size={13} />
+          </IconButton>
           {/* Removes the pitch, never the customer. Dropping a quote is
               not the same as saying you have never heard of them, and
               before leads existed those were the same button. */}
-          <button onClick={async () => {
+          <IconButton label="Drop this lead" danger onClick={async () => {
             if (!confirm(`Drop this ${TYPE_LABEL[p.data!.type].toLowerCase()} lead for "${p.data!.company_name}"?\n\nThe customer stays in the CRM.`)) return;
             const { error } = await supabase.from('crm_leads').delete().eq('id', p.data!.id);
             if (error) { setMessage(error.message); return; }
             setRows(r => r.filter(x => x.id !== p.data!.id));
-          }} className="btn btn--icon btn--sm" style={{ color: 'var(--stc-red-300)' }} title="Drop this lead"><Trash2 size={12} /></button>
+          }}>
+            <Trash2 size={13} />
+          </IconButton>
         </div>
       ),
     });
@@ -423,25 +436,53 @@ export function SalesTracker({
   }
 
 
+  const firstName = (profile?.full_name ?? 'My').split(' ')[0];
+
   return (
-    <div>
-      <div className="page-head">
-        <div>
-          <div className="page-head__eyebrow">Sales · Personal tracker</div>
-          <h1 className="page-head__title">
-            <TrendingUp size={26} style={{ color: 'var(--stc-red)' }} />
-            <span>{(profile?.full_name ?? 'My').split(' ')[0]}&rsquo;s leads<span style={{ color: 'var(--stc-red)' }}>.</span></span>
-          </h1>
-          <div className="page-head__sub">
-            Your own and any shared with you. {sideRows.length} {TYPE_LABEL[side].toLowerCase()} lead{sideRows.length === 1 ? '' : 's'}
-            {!isMaintenance && <> · Pipeline est: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalEstValue)}</strong> · Customer revenue: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCustomerRevenue)}</strong> · Commission: <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totalCommission)}</strong></>}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => setShowImport(true)} className="btn"><Upload size={14} /> Import</button>
-          <button onClick={() => setShowNewLead(true)} className="btn btn--primary"><Plus size={14} /> New lead</button>
-        </div>
-      </div>
+    <TabShell>
+
+      {/* Same header shape the CRM pipeline uses: icon tile, Panton
+          title, what qualifies it, one line of context, and the two
+          actions that are always available. */}
+      <RecordHead
+        icon={<TrendingUp size={20} />}
+        title={`${firstName}’s leads`}
+        badges={<>
+          <Badge tone="neutral" dot>{TYPE_LABEL[side]}</Badge>
+          {tab !== 'all' && <Badge tone="neutral">{TAB_LABEL[tab]}</Badge>}
+        </>}
+        sub={<>
+          Your own and any shared with you.
+          {' '}{sideRows.length} {TYPE_LABEL[side].toLowerCase()} lead{sideRows.length === 1 ? '' : 's'}
+          {filtered.length !== sideRows.length ? `, ${filtered.length} showing.` : '.'}
+        </>}
+        actions={<>
+          <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
+            <Upload size={13} /> Import
+          </Button>
+          <Button size="sm" variant="primary" onClick={() => setShowNewLead(true)}>
+            <Plus size={13} /> New lead
+          </Button>
+        </>}
+      />
+
+      {/* The pipeline at a glance, in the kit's stat strip. These were
+          bold figures crammed into the sub-line, where three sums ran
+          together and none of them could be read at a glance. No colour
+          on any value: rule one. */}
+      <StatStrip items={isMaintenance ? [
+        { label: 'Total', value: counts.all, note: 'on this side' },
+        { label: 'Working', value: counts.working, note: 'jobs in hand' },
+        { label: 'Customers', value: counts.customer, note: 'ongoing' },
+        { label: 'Lost', value: counts.lost, note: 'not pursuing' },
+        { label: 'Kinds', value: whatValues.length, note: 'of work' },
+      ] : [
+        { label: 'Total', value: counts.all, note: 'on this side' },
+        { label: 'Working', value: counts.working, note: 'chasing the deal' },
+        { label: 'Pipeline', value: fmtMoney(totalEstValue) || '—', note: 'estimated' },
+        { label: 'Revenue', value: fmtMoney(totalCustomerRevenue) || '—', note: `${counts.customer} won` },
+        { label: 'Commission', value: fmtMoney(totalCommission) || '—', note: 'yours' },
+      ]} />
 
       {showImport && (
         <ImportDialog
@@ -455,57 +496,75 @@ export function SalesTracker({
 
       {/* The three kinds of work a lead can be for. Rental and leasing
           is here because a lead type is a value, not a column that has
-          to be widened to hold a third thing. */}
-      <div className="side-toggle">
-        <button onClick={() => { setSide('trailer_sales'); setWhatFilter(null); }}
-          className={`side-toggle__btn ${side === 'trailer_sales' ? 'is-active' : ''}`}>
-          <Container size={14} /> <span>Trailer Sales</span>
-          <span className="side-toggle__count">{sideCounts.trailer_sales}</span>
-        </button>
-        <button onClick={() => setSide('maintenance')}
-          className={`side-toggle__btn ${side === 'maintenance' ? 'is-active' : ''}`}>
-          <Wrench size={14} /> <span>Maintenance</span>
-          <span className="side-toggle__count">{sideCounts.maintenance}</span>
-        </button>
-        <button onClick={() => { setSide('rental'); setWhatFilter(null); }}
-          className={`side-toggle__btn ${side === 'rental' ? 'is-active' : ''}`}>
-          <Truck size={14} /> <span>Rental &amp; Leasing</span>
-          <span className="side-toggle__count">{sideCounts.rental}</span>
-        </button>
-      </div>
+          to be widened to hold a third thing.
 
-      {isMaintenance && whatValues.length > 0 && (
-        <div className="toolbar" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>WHAT:</span>
-          <button onClick={() => setWhatFilter(null)} className={`news-chip ${whatFilter === null ? 'is-active' : ''}`}>All</button>
-          {whatValues.map(w => (
-            <button key={w} onClick={() => setWhatFilter(w === whatFilter ? null : w)} className={`news-chip ${whatFilter === w ? 'is-active' : ''}`}>
-              {w}
-            </button>
-          ))}
-        </div>
-      )}
+          Underline tabs, from the kit's navigation page: this is the
+          tab's own navigation, and the chips below it are filters
+          within whichever one is open. Two rows of identical looking
+          pills could not say which was which. */}
+      <Tabs
+        value={side}
+        onChange={(v) => { setSide(v); if (v !== 'maintenance') setWhatFilter(null); }}
+        tabs={[
+          { key: 'trailer_sales' as LeadType, label: 'Trailer sales', count: sideCounts.trailer_sales },
+          { key: 'maintenance' as LeadType, label: 'Maintenance', count: sideCounts.maintenance },
+          { key: 'rental' as LeadType, label: 'Rental & leasing', count: sideCounts.rental },
+        ]}
+      />
 
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {/* One toolbar, like the CRM's. Status filters, the kind of work
+          where there is one to pick, and a search, all on a line. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+        padding: '10px 14px', borderRadius: 'var(--r-md)',
+        background: 'var(--surface)', border: '1px solid var(--border)',
+      }}>
         {(['working', 'customer', 'lost', 'all', 'commission'] as TrackerTab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`news-chip ${t === 'commission' ? 'news-chip--commission' : ''} ${tab === t ? 'is-active' : ''}`}
-            title={TAB_HINT[t]}>
-            {TAB_LABEL[t]} <span className="news-chip__count">{counts[t]}</span>
-          </button>
+          <Chip key={t} active={tab === t} count={counts[t]} title={TAB_HINT[t]}
+            onClick={() => setTab(t)}>
+            {TAB_LABEL[t]}
+          </Chip>
         ))}
-        <div className="news-search" style={{ marginLeft: 'auto' }}>
-          <Search size={14} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search company, contact, requirement…" />
+
+        {isMaintenance && whatValues.length > 0 && (
+          <>
+            <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
+            <Chip active={whatFilter === null} onClick={() => setWhatFilter(null)}>All work</Chip>
+            {whatValues.map(w => (
+              <Chip key={w} active={whatFilter === w}
+                onClick={() => setWhatFilter(w === whatFilter ? null : w)}>{w}</Chip>
+            ))}
+          </>
+        )}
+
+        {(query || tab !== 'working' || whatFilter) && (
+          <button onClick={() => { setQuery(''); setTab('working'); setWhatFilter(null); }} style={{
+            background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+            color: 'var(--accent)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+            textDecoration: 'underline', textUnderlineOffset: 3,
+          }}>Clear</button>
+        )}
+
+        <span style={{ flex: 1 }} />
+
+        <div style={{ width: 260, maxWidth: '100%' }}>
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search company, contact, requirement"
+            icon={<Search size={14} />}
+          />
         </div>
       </div>
 
-      {message && <div className="alert alert--info" style={{ marginTop: 12 }}>{message}</div>}
+      {message && <Alert tone="info">{message}</Alert>}
 
       {tab === 'commission' ? (
-        <CommissionView rows={sideRows} />
+        <div style={{ flex: 1, minHeight: 260, overflowY: 'auto' }}>
+          <CommissionView rows={sideRows} />
+        </div>
       ) : (
-      <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 320px)', marginTop: 14, minHeight: 480 }}>
+      <div className="kit-grid ag-theme-quartz" style={{ flex: 1, minHeight: 260 }}>
         <AgGridReact<TrackerRow>
           rowData={filtered}
           columnDefs={columnDefs}
@@ -517,6 +576,11 @@ export function SalesTracker({
         />
       </div>
       )}
+
+      <GridHint>
+        Double click a row to open it. A lead belongs to a customer in the CRM,
+        so deleting one leaves the customer where it is.
+      </GridHint>
 
       {showNewLead && (
         <NewLeadModal
@@ -537,7 +601,7 @@ export function SalesTracker({
           }}
         />
       )}
-    </div>
+    </TabShell>
   );
 }
 
@@ -607,177 +671,179 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
   const dismiss = useDismissGuard(onClose);
 
   return (
-    <div className="drawer-bg" {...dismiss.backdropProps}>
-      {dismiss.hint}
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer__head">
-          <div>
-            <div className="page-head__eyebrow">Sales · {tab.toUpperCase()}</div>
-            <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Container size={20} style={{ color: 'var(--stc-red)' }} />
-              {edit.company_name || 'Untitled lead'}
-            </h2>
-          </div>
-          <button onClick={onClose} className="btn btn--icon"><X size={16} /></button>
-        </div>
-        <div className="drawer__body">
-          <div className="split-2">
+    <Drawer
+      eyebrow={`Sales · ${TAB_LABEL[tab]}`}
+      title={edit.company_name || 'Untitled lead'}
+      icon={<Container size={18} />}
+      onClose={onClose}
+      backdropProps={dismiss.backdropProps as Record<string, unknown>}
+      hint={dismiss.hint}
+      footer={<>
+        <span style={{ flex: 1 }} />
+        {saving && <Loader size={14} className="spin" />}
+        <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
+      </>}
+    >
+          <Split>
             <Field label="Contact">
-              <input className="input" value={edit.contact_name ?? ''} onChange={(e) => setEdit(s => ({ ...s, contact_name: e.target.value }))} onBlur={(e) => saveField('contact_name', e.target.value)} />
+              <TextInput value={edit.contact_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, contact_name: v }))} onCommit={(v) => saveField('contact_name', v)} />
             </Field>
             <Field label="Company">
-              <input className="input" value={edit.company_name ?? ''} onChange={(e) => setEdit(s => ({ ...s, company_name: e.target.value }))} onBlur={(e) => saveField('company_name', e.target.value)} />
+              <TextInput value={edit.company_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, company_name: v }))} onCommit={(v) => saveField('company_name', v)} />
             </Field>
-          </div>
-          <div className="split-2">
+          </Split>
+          <Split>
             <Field label="Phone">
-              <input className="input" value={edit.phone ?? ''} onChange={(e) => setEdit(s => ({ ...s, phone: e.target.value }))} onBlur={(e) => saveField('phone', e.target.value)} />
+              <TextInput value={edit.phone ?? ''} onChange={(v) => setEdit(s => ({ ...s, phone: v }))} onCommit={(v) => saveField('phone', v)} />
             </Field>
             <Field label="Email">
-              <input className="input" value={edit.email ?? ''} onChange={(e) => setEdit(s => ({ ...s, email: e.target.value }))} onBlur={(e) => saveField('email', e.target.value)} />
+              <TextInput value={edit.email ?? ''} onChange={(v) => setEdit(s => ({ ...s, email: v }))} onCommit={(v) => saveField('email', v)} />
             </Field>
-          </div>
-          <div className="split-2">
+          </Split>
+          <Split>
             <Field label="Date of enquiry">
-              <input type="date" className="input" value={edit.date_of_enquiry ?? ''} onChange={(e) => saveField('date_of_enquiry', e.target.value || null)} />
+              <TextInput type="date" value={edit.date_of_enquiry ?? ''} onChange={(v) => saveField('date_of_enquiry', v || null)} />
             </Field>
             <Field label="New / Used">
-              <select className="input" value={edit.new_or_used ?? ''} onChange={(e) => saveField('new_or_used', e.target.value || null)}>
+              <Select value={edit.new_or_used ?? ''} onChange={(v) => saveField('new_or_used', v || null)}>
                 <option value="">—</option>
                 <option>New</option><option>Used</option><option>New/Used</option><option>Used/Refurb</option><option>Refurb</option>
-              </select>
+              </Select>
             </Field>
-          </div>
-          <div className="split-2">
+          </Split>
+          <Split>
             <Field label="Source">
-              <input className="input" placeholder="LinkedIn, Prospect call, Website enquiry, Walk-in…" value={edit.source ?? ''} onChange={(e) => setEdit(s => ({ ...s, source: e.target.value }))} onBlur={(e) => saveField('source', e.target.value || '')} />
+              <TextInput placeholder="LinkedIn, Prospect call, Website enquiry, Walk-in" value={edit.source ?? ''} onChange={(v) => setEdit(s => ({ ...s, source: v }))} onCommit={(v) => saveField('source', v || '')} />
             </Field>
             <Field label="Estimated sales value">
-              <input type="number" step="100" className="input" value={edit.estimated_value ?? ''} onChange={(e) => saveField('estimated_value', e.target.value === '' ? null : Number(e.target.value))} />
+              <TextInput type="number" value={edit.estimated_value == null ? '' : String(edit.estimated_value)} onChange={(v) => saveField('estimated_value', v === '' ? null : Number(v))} />
             </Field>
-          </div>
+          </Split>
           <Field label="Description">
-            <input className="input" placeholder="e.g. 4.7m curtain, PSK flats, drawbar" value={edit.description ?? ''} onChange={(e) => setEdit(s => ({ ...s, description: e.target.value }))} onBlur={(e) => saveField('description', e.target.value || null)} />
+            <TextInput placeholder="4.7m curtain, PSK flats, drawbar" value={edit.description ?? ''} onChange={(v) => setEdit(s => ({ ...s, description: v }))} onCommit={(v) => saveField('description', v || null)} />
           </Field>
           <Field label="Requirement">
-            <textarea className="input" rows={2} value={edit.requirement ?? ''} onChange={(e) => setEdit(s => ({ ...s, requirement: e.target.value }))} onBlur={(e) => saveField('requirement', e.target.value || null)} />
+            <TextArea rows={2} value={edit.requirement ?? ''} onChange={(v) => setEdit(s => ({ ...s, requirement: v }))} onCommit={(v) => saveField('requirement', v || null)} />
           </Field>
           <Field label="Action / next step">
-            <textarea className="input" rows={2} value={edit.action ?? ''} onChange={(e) => setEdit(s => ({ ...s, action: e.target.value }))} onBlur={(e) => saveField('action', e.target.value || null)} />
+            <TextArea rows={2} value={edit.action ?? ''} onChange={(v) => setEdit(s => ({ ...s, action: v }))} onCommit={(v) => saveField('action', v || null)} />
           </Field>
           <Field label="Status">
-            <select className="input" value={edit.status} onChange={(e) => saveField('status', e.target.value as ContactStatus)}>
+            <Select value={edit.status} onChange={(v) => saveField('status', v as ContactStatus)}>
               <option value="lead">Lead</option>
               <option value="contacted">Contacted</option>
               <option value="quoted">Quoted</option>
               <option value="won">Won (just closed)</option>
               <option value="customer">Customer (active)</option>
               <option value="lost">Lost</option>
-            </select>
+            </Select>
           </Field>
 
-          {/* Scheduled meetings tied to this contact */}
-          <div className="card" style={{ padding: 14 }}>
-            <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-              <div className="field__label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Calendar size={14} /> SCHEDULED MEETINGS
-              </div>
-              <button onClick={handleSchedule} className="btn btn--sm btn--primary"><CalendarPlus size={12} /> Schedule</button>
-            </div>
-            {loadingMeetings ? (
-              <div className="row" style={{ gap: 6, color: 'var(--fg-3)', fontSize: 12 }}><Loader size={12} className="spin" /> Loading…</div>
-            ) : meetings.length === 0 ? (
-              <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>No meetings scheduled with this contact yet.</div>
-            ) : (
-              <div className="col" style={{ gap: 6 }}>
-                {meetings.map(m => {
-                  const date = new Date(m.start_at);
-                  const isPast = date.getTime() < Date.now();
-                  return (
-                    <div key={m.id} className="row" style={{ gap: 8, padding: '6px 8px', background: 'var(--bg-3)', borderRadius: 6, opacity: isPast ? 0.55 : 1 }}>
-                      <Calendar size={14} style={{ color: isPast ? 'var(--fg-4)' : 'var(--stc-red)', flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                          {date.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                          {isPast && ' · (past)'}
-                        </div>
+          {/* Every meeting with this company, whichever pitch prompted it.
+              Read by company rather than by lead: a visit to Dawson is a
+              visit to Dawson, and closing one quote should not hide it. */}
+          <Card padded={false}>
+            <SectionHead
+              title="Scheduled meetings"
+              action={
+                <Button size="sm" variant="secondary" onClick={handleSchedule}>
+                  <CalendarPlus size={12} /> Schedule
+                </Button>
+              }
+            />
+            <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {loadingMeetings ? (
+                <div style={{ display: 'flex', gap: 7, alignItems: 'center', color: 'var(--text-subtle)', fontSize: 12.5 }}>
+                  <Loader size={12} className="spin" /> Loading
+                </div>
+              ) : meetings.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
+                  Nothing booked with this customer yet.
+                </div>
+              ) : meetings.map((m) => {
+                const date = new Date(m.start_at);
+                const isPast = date.getTime() < Date.now();
+                return (
+                  <div key={m.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '7px 9px', borderRadius: 'var(--r)',
+                    background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+                    opacity: isPast ? 0.6 : 1,
+                  }}>
+                    <Calendar size={14} style={{
+                      color: isPast ? 'var(--text-subtle)' : 'var(--accent)', flexShrink: 0,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{m.title}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                        {date.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    {isPast && <Badge tone="neutral">Past</Badge>}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
           <Field label="Latest update / notes">
-            <textarea className="input" rows={3} value={edit.notes ?? ''} onChange={(e) => setEdit(s => ({ ...s, notes: e.target.value }))} onBlur={(e) => saveField('notes', e.target.value || null)} />
+            <TextArea rows={3} value={edit.notes ?? ''}
+              onChange={(v) => setEdit(s => ({ ...s, notes: v }))}
+              onCommit={(v) => saveField('notes', v || null)} />
           </Field>
 
-          {/* Closing financials - only relevant for Customer or Won */}
+          {/* Only once there is a sale to describe. */}
           {(edit.status === 'customer' || edit.status === 'won') && (
-            <div className="card" style={{ padding: 14, marginTop: 8 }}>
-              <div className="field__label" style={{ marginBottom: 10, color: 'var(--stc-red)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <DollarSign size={14} /> CLOSING DETAILS
+            <Card padded={false}>
+              <SectionHead title="Closing details" hint="What the sale was worth" />
+              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Split>
+                  <Field label="Order date">
+                    <TextInput type="date" value={edit.order_date ?? ''} onChange={(v) => saveField('order_date', v || null)} />
+                  </Field>
+                  <Field label="Dispatch date">
+                    <TextInput type="date" value={edit.dispatch_date ?? ''} onChange={(v) => saveField('dispatch_date', v || null)} />
+                  </Field>
+                </Split>
+                <Split>
+                  <Field label="Sale price (£)">
+                    <TextInput type="number" value={edit.sale_price == null ? '' : String(edit.sale_price)} onChange={(v) => saveField('sale_price', v === '' ? null : Number(v))} />
+                  </Field>
+                  <Field label="Profit (£)">
+                    <TextInput type="number" value={edit.profit == null ? '' : String(edit.profit)} onChange={(v) => saveField('profit', v === '' ? null : Number(v))} />
+                  </Field>
+                </Split>
+                <Split>
+                  <Field label="Profit rate" hint="0.15 is 15%">
+                    <TextInput type="number" value={edit.profit_pct == null ? '' : String(edit.profit_pct)} onChange={(v) => saveField('profit_pct', v === '' ? null : Number(v))} />
+                  </Field>
+                  <Field label="Commission (£)">
+                    <TextInput type="number" value={edit.commission == null ? '' : String(edit.commission)} onChange={(v) => saveField('commission', v === '' ? null : Number(v))} />
+                  </Field>
+                </Split>
               </div>
-              <div className="split-2">
-                <Field label="Order date">
-                  <input type="date" className="input" value={edit.order_date ?? ''} onChange={(e) => saveField('order_date', e.target.value || null)} />
-                </Field>
-                <Field label="Dispatch date">
-                  <input type="date" className="input" value={edit.dispatch_date ?? ''} onChange={(e) => saveField('dispatch_date', e.target.value || null)} />
-                </Field>
-              </div>
-              <div className="split-2">
-                <Field label="Sale price (£)">
-                  <input type="number" step="0.01" className="input" value={edit.sale_price ?? ''} onChange={(e) => saveField('sale_price', e.target.value === '' ? null : Number(e.target.value))} />
-                </Field>
-                <Field label="Profit (£)">
-                  <input type="number" step="0.01" className="input" value={edit.profit ?? ''} onChange={(e) => saveField('profit', e.target.value === '' ? null : Number(e.target.value))} />
-                </Field>
-              </div>
-              <div className="split-2">
-                <Field label="Profit % (e.g. 0.15 = 15%)">
-                  <input type="number" step="0.01" className="input" value={edit.profit_pct ?? ''} onChange={(e) => saveField('profit_pct', e.target.value === '' ? null : Number(e.target.value))} />
-                </Field>
-                <Field label="Commission (£)">
-                  <input type="number" step="0.01" className="input" value={edit.commission ?? ''} onChange={(e) => saveField('commission', e.target.value === '' ? null : Number(e.target.value))} />
-                </Field>
-              </div>
-            </div>
+            </Card>
           )}
-        </div>
-        <div className="drawer__foot">
-          <div className="toolbar__spacer" />
-          {saving && <Loader size={14} className="spin" />}
-          <button onClick={onClose} className="btn">Close</button>
-        </div>
 
-        {conflictMeeting && (
-          <div className="modal-bg" onClick={() => setConflictMeeting(null)} style={{ zIndex: 1100 }}>
-            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
-              <div className="modal__head">
-                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AlertTriangle size={16} style={{ color: 'var(--stc-warning, #d4a017)' }} /> Existing meeting found
-                </h3>
+          {conflictMeeting && (
+          <Modal
+            title="There is already a meeting booked"
+            description={`With ${edit.company_name} in the next fortnight.`}
+            width={460}
+            onClose={() => setConflictMeeting(null)}
+            footer={<>
+              <Button size="sm" variant="ghost" onClick={() => setConflictMeeting(null)}>View the existing one</Button>
+              <Button size="sm" variant="primary"
+                onClick={() => { setConflictMeeting(null); setShowSchedule(true); }}>Book another anyway</Button>
+            </>}
+          >
+            <Card>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{conflictMeeting.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>
+                {new Date(conflictMeeting.start_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
               </div>
-              <div style={{ padding: 16 }}>
-                <p style={{ marginTop: 0, color: 'var(--fg-2)', fontSize: 13.5 }}>
-                  You already have a meeting with <strong style={{ color: 'var(--fg-1)' }}>{edit.company_name}</strong> within the next 14 days:
-                </p>
-                <div className="card" style={{ padding: 10, marginBottom: 12 }}>
-                  <div style={{ fontWeight: 600 }}>{conflictMeeting.title}</div>
-                  <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 4 }}>
-                    {new Date(conflictMeeting.start_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                </div>
-                <p style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>Schedule another anyway, or close this dialog to view the existing one?</p>
-              </div>
-              <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
-                <button onClick={() => setConflictMeeting(null)} className="btn btn--ghost">View existing</button>
-                <button onClick={() => { setConflictMeeting(null); setShowSchedule(true); }} className="btn btn--primary">Schedule anyway</button>
-              </div>
-            </div>
-          </div>
+            </Card>
+          </Modal>
         )}
 
         {showSchedule && (
@@ -793,17 +859,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
             }}
           />
         )}
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="field" style={{ flex: 1 }}>
-      <div className="field__label">{label}</div>
-      {children}
-    </div>
+    </Drawer>
   );
 }
 
@@ -896,125 +952,134 @@ function NewLeadModal({ profile, onCreate, onClose }: {
   const delegated = owner !== profile.id;
 
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Plus size={16} style={{ color: 'var(--stc-red)' }} /> New lead
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
+    <Modal
+      title="New lead"
+      description="A lead belongs to a customer in the CRM. Find them, or add them here."
+      width={560}
+      onClose={onClose}
+      footer={<>
+        {delegated && (
+          <span style={{ flex: 1, fontSize: 12, color: 'var(--text-subtle)' }}>
+            This goes onto their tracker rather than yours.
+          </span>
+        )}
+        <Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+      </>}
+    >
+      <Field label="What are you pitching for?">
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <OptionCard
+            selected={type === 'trailer_sales'}
+            onSelect={() => setType('trailer_sales')}
+            icon={<Container size={14} />}
+            title="Trailer sales"
+            description="A deal on trailers or vehicles"
+          />
+          <OptionCard
+            selected={type === 'maintenance'}
+            onSelect={() => setType('maintenance')}
+            icon={<Wrench size={14} />}
+            title="Maintenance"
+            description="Trukplan, MOT, servicing, repairs"
+          />
+          <OptionCard
+            selected={type === 'rental'}
+            onSelect={() => setType('rental')}
+            icon={<Truck size={14} />}
+            title="Rental & leasing"
+            description="Hire, contract hire, leasing"
+          />
         </div>
+      </Field>
 
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="field">
-            <div className="field__label">What are you pitching for?</div>
-            <div className="side-picker">
-              <button type="button" onClick={() => setType('trailer_sales')}
-                className={`side-picker__opt ${type === 'trailer_sales' ? 'is-active' : ''}`}>
-                <Container size={14} /> <strong>Trailer Sales</strong>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Pursuing a deal on trailer or vehicle sales</span>
-              </button>
-              <button type="button" onClick={() => setType('maintenance')}
-                className={`side-picker__opt ${type === 'maintenance' ? 'is-active' : ''}`}>
-                <Wrench size={14} /> <strong>Maintenance</strong>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Trukplan, MOT, servicing, repairs</span>
-              </button>
-              <button type="button" onClick={() => setType('rental')}
-                className={`side-picker__opt ${type === 'rental' ? 'is-active' : ''}`}>
-                <Truck size={14} /> <strong>Rental &amp; Leasing</strong>
-                <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Hire, contract hire, leasing</span>
-              </button>
+      {type === 'maintenance' && (
+        <Field label="What kind of maintenance work?">
+          <Select value={what} onChange={setWhat}>
+            <option>Maintenance</option>
+            <option>Trukplan</option>
+            <option>All Services</option>
+            <option>Maintenance and MOT</option>
+            <option>Maintenance and Trukplan</option>
+            <option>Van Maintenance and Repair</option>
+            <option>Accident Repair</option>
+            <option>All Services and Parking</option>
+            <option>MOT only</option>
+          </Select>
+        </Field>
+      )}
+
+      <Field label="Which customer?" hint="Search as you type. The CRM is the only way in.">
+        <TextInput value={company} onChange={setCompany}
+          placeholder="Start typing a company in the CRM" />
+      </Field>
+
+      {company.trim().length >= 2 && (
+        <Card padded={false}>
+          {searching ? (
+            <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '12px 14px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              <Loader size={12} className="spin" /> Looking in the CRM
             </div>
-          </div>
-
-          {type === 'maintenance' && (
-            <Field label="What kind of maintenance work?">
-              <select className="input" value={what} onChange={(e) => setWhat(e.target.value)}>
-                <option>Maintenance</option>
-                <option>Trukplan</option>
-                <option>All Services</option>
-                <option>Maintenance and MOT</option>
-                <option>Maintenance and Trukplan</option>
-                <option>Van Maintenance and Repair</option>
-                <option>Accident Repair</option>
-                <option>All Services and Parking</option>
-                <option>MOT only</option>
-              </select>
-            </Field>
-          )}
-
-          <Field label="Which customer?">
-            <input className="input" value={company} onChange={(e) => setCompany(e.target.value)}
-              placeholder="Start typing a company in the CRM" autoFocus />
-          </Field>
-
-          {company.trim().length >= 2 && (
-            <div className="card" style={{ padding: 10 }}>
-              {searching ? (
-                <div className="row" style={{ gap: 6, fontSize: 12.5, color: 'var(--fg-2)' }}>
-                  <Loader size={12} className="spin" /> Looking in the CRM
-                </div>
-              ) : matches.length > 0 ? (
-                <>
-                  <div className="field__label" style={{ marginBottom: 8 }}>
-                    {matches.length} account{matches.length === 1 ? '' : 's'} in the CRM
-                  </div>
-                  <div className="col" style={{ gap: 6, maxHeight: 240, overflowY: 'auto' }}>
-                    {matches.map(m => (
-                      <div key={m.id} className="row" style={{ gap: 8, padding: 8, background: 'var(--bg-3)', borderRadius: 6 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>{m.company_name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                            {[m.contact_name, m.email, m.location].filter(Boolean).join(' · ') || 'No contact details yet'}
-                          </div>
-                        </div>
-                        <button onClick={() => onCreate(m.id, m.company_name, '', type, type === 'maintenance' ? what : null, owner)}
-                          className="btn btn--sm btn--primary">
-                          <LinkIcon size={11} /> Start lead
-                        </button>
+          ) : matches.length > 0 ? (
+            <>
+              <SectionHead title={`${matches.length} in the CRM`} hint="Pick the one you mean" />
+              <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                {matches.map((m) => (
+                  <div key={m.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '8px 10px', borderRadius: 'var(--r)',
+                    background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{m.company_name}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                        {[m.contact_name, m.email, m.location].filter(Boolean).join(' · ') || 'No contact details yet'}
                       </div>
-                    ))}
+                    </div>
+                    <Button size="sm" variant="primary"
+                      onClick={() => onCreate(m.id, m.company_name, '', type, type === 'maintenance' ? what : null, owner)}>
+                      <LinkIcon size={11} /> Start lead
+                    </Button>
                   </div>
-                </>
-              ) : searched ? (
-                <div style={{ fontSize: 12.5 }}>
-                  <strong>Not in the CRM.</strong>
-                  <div style={{ fontSize: 11.5, color: 'var(--fg-2)', margin: '4px 0 10px' }}>
-                    Creating the lead adds <strong>{company.trim()}</strong> to the CRM as a new account first,
-                    so everybody can see them and the next quote attaches to the same record.
-                  </div>
-                  <Field label="Website (optional)">
-                    <input className="input" value={website} onChange={(e) => setWebsite(e.target.value)}
-                      placeholder="customer.com" />
-                  </Field>
-                  <button onClick={() => onCreate(null, company, website, type, type === 'maintenance' ? what : null, owner)}
-                    className="btn btn--primary" style={{ marginTop: 8 }}>
-                    <Plus size={12} /> Add to the CRM and start the lead
-                  </button>
-                </div>
-              ) : null}
+                ))}
+              </div>
+            </>
+          ) : searched ? (
+            <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Alert tone="info">
+                <span>
+                  <strong style={{ color: 'var(--text)' }}>{company.trim()}</strong> is not in the CRM.
+                  Starting the lead adds them as an account first, so everybody can find them
+                  and the next quote attaches to the same record.
+                </span>
+              </Alert>
+              <Field label="Website" hint="Optional, and used to spot the same firm later">
+                <TextInput value={website} onChange={setWebsite} placeholder="customer.com" />
+              </Field>
+              <div>
+                <Button size="sm" variant="primary"
+                  onClick={() => onCreate(null, company, website, type, type === 'maintenance' ? what : null, owner)}>
+                  <Plus size={12} /> Add to the CRM and start the lead
+                </Button>
+              </div>
             </div>
-          )}
+          ) : null}
+        </Card>
+      )}
 
-          <Field label="Whose tracker does it go on?">
-            <select className="input" value={owner} onChange={(e) => setOwner(e.target.value)}>
-              {people.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name || p.email}{p.id === profile.id ? ' (you)' : ''}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {delegated && (
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-2)' }}>
-              This goes straight onto their tracker rather than yours.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
+      <Field label="Whose tracker does it go on?"
+        hint="Anybody can raise a lead and hand it to somebody else.">
+        <Select value={owner} onChange={setOwner}>
+          {people.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.full_name || p.email}{p.id === profile.id ? ' (you)' : ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </Modal>
   );
 }
+
 
 
 
@@ -1041,36 +1106,47 @@ function StockTrailerPicker({ onPick, onClose }: { onPick: (t: StockTrailer | nu
   }, [q, supabase]);
 
   return (
-    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Truck size={16} style={{ color: 'var(--stc-red)' }} /> Link a stock trailer
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input className="input" autoFocus placeholder="Search by STC No, chassis, make, model…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="col" style={{ gap: 6, maxHeight: 340, overflowY: 'auto' }}>
-            {searching && <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>Searching…</div>}
-            {!searching && q.trim().length >= 2 && results.length === 0 && (
-              <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>No matches</div>
-            )}
-            {results.map(t => (
-              <button key={t.id} onClick={() => onPick(t)} className="btn" style={{ justifyContent: 'flex-start', textAlign: 'left', height: 'auto', padding: 10 }}>
-                <Truck size={14} style={{ flexShrink: 0, color: 'var(--stc-red)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{t.stc_no || t.chassis_number} · {t.year} {t.make} {t.model}</div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                    {t.category} · {t.status} {t.location && `· ${t.location}`}
-                  </div>
-                </div>
-              </button>
-            ))}
+    <Modal
+      title="Link a stock trailer"
+      description="Search by stock number, chassis, make or model."
+      width={560}
+      onClose={onClose}
+      footer={<Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>}
+    >
+      <SearchInput value={q} onChange={setQ}
+        placeholder="STC number, chassis, make, model" icon={<Search size={14} />} />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' }}>
+        {searching && (
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5, color: 'var(--text-subtle)' }}>
+            <Loader size={12} className="spin" /> Searching
           </div>
-        </div>
+        )}
+        {!searching && q.trim().length >= 2 && results.length === 0 && (
+          <div style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
+            Nothing in stock matches that.
+          </div>
+        )}
+        {results.map((t) => (
+          <button key={t.id} onClick={() => onPick(t)} style={{
+            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+            padding: '9px 11px', borderRadius: 'var(--r)',
+            border: '1px solid var(--border)', background: 'var(--surface-sunken)',
+            color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
+          }}>
+            <Truck size={14} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {t.stc_no || t.chassis_number} · {t.year} {t.make} {t.model}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                {[t.category, t.status, t.location].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+          </button>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1085,58 +1161,66 @@ function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
   const sp = Number(salePrice) || 0;
   const profit = sp - totalNbv;
   const commission = profit * rate;
+  const unit = trailer.stc_no || trailer.chassis_number;
+
   return (
-    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <PoundSterling size={16} style={{ color: 'var(--stc-red)' }} /> Mark as Sold
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <form onSubmit={(e) => { e.preventDefault(); if (sp > 0) onConfirm(sp, dispatchDate || null); }}
-          style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
-            Trailer <strong style={{ color: 'var(--fg-1)' }}>{trailer.stc_no || trailer.chassis_number}</strong> ({trailer.year} {trailer.make} {trailer.model})
-          </div>
-          <div className="card" style={{ padding: 10, background: 'var(--bg-3)' }}>
-            <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
-              <span style={{ color: 'var(--fg-3)' }}>Total NBV (locked from stock)</span>
-              <span className="tnum" style={{ fontWeight: 600 }}>£{totalNbv.toLocaleString()}</span>
+    <Modal
+      title="Mark as sold"
+      description={`${unit} · ${[trailer.year, trailer.make, trailer.model].filter(Boolean).join(' ')}`}
+      width={480}
+      onClose={onClose}
+      footer={<>
+        <Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button size="sm" variant="accent" disabled={sp <= 0}
+          onClick={() => { if (sp > 0) onConfirm(sp, dispatchDate || null); }}>
+          <PoundSterling size={13} /> Confirm the sale
+        </Button>
+      </>}
+    >
+      <Row>
+        <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)' }}>
+          Total book value, locked from stock
+        </span>
+        <span className="tnum" style={{ fontWeight: 600, color: 'var(--text)' }}>
+          {money(totalNbv)}
+        </span>
+      </Row>
+
+      <Split>
+        <Field label="Sale price (£)">
+          <TextInput type="number" value={salePrice} onChange={setSalePrice} />
+        </Field>
+        <Field label="Dispatch date" hint="Optional">
+          <TextInput type="date" value={dispatchDate} onChange={setDispatchDate} />
+        </Field>
+      </Split>
+
+      {sp > 0 && (
+        <Card padded={false}>
+          <SectionHead title="What this earns" />
+          <div style={{ padding: '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Profit</span>
+              <span className="tnum" style={{ color: 'var(--text)' }}>{money(profit)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+              <span style={{ color: 'var(--text-muted)' }}>
+                Your commission, {(rate * 100).toFixed(0)}% of profit
+              </span>
+              <span className="tnum" style={{ fontWeight: 600, color: 'var(--text)' }}>
+                {money(commission)}
+              </span>
             </div>
           </div>
-          <div className="field">
-            <div className="field__label">Sale price (£)</div>
-            <input className="input" type="number" step="0.01" required autoFocus value={salePrice} onChange={(e) => setSalePrice(e.target.value)} />
-          </div>
-          <div className="field">
-            <div className="field__label">Dispatch date (optional)</div>
-            <input className="input" type="date" value={dispatchDate} onChange={(e) => setDispatchDate(e.target.value)} />
-          </div>
-          {sp > 0 && (
-            <div className="card" style={{ padding: 10, background: 'rgba(46,160,67,0.08)', borderColor: 'rgba(46,160,67,0.3)' }}>
-              <div className="row" style={{ justifyContent: 'space-between', fontSize: 12 }}>
-                <span style={{ color: 'var(--fg-3)' }}>Profit</span>
-                <span className="tnum">£{profit.toLocaleString()}</span>
-              </div>
-              <div className="row" style={{ justifyContent: 'space-between', fontSize: 12, marginTop: 4 }}>
-                <span style={{ color: 'var(--fg-3)' }}>Your commission ({(rate * 100).toFixed(0)}% of profit)</span>
-                <span className="tnum" style={{ fontWeight: 600, color: '#5fb572' }}>£{commission.toLocaleString()}</span>
-              </div>
-            </div>
-          )}
-          <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
-            This will mark <strong>{trailer.stc_no}</strong> as Sold on the global stock list (customer + sales rep + sale price + dispatch date all pushed). Your commission stays private to your tracker.
-          </div>
-          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" onClick={onClose} className="btn btn--ghost">Cancel</button>
-            <button type="submit" className="btn btn--primary" disabled={sp <= 0}>
-              <PoundSterling size={14} /> Confirm sale
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </Card>
+      )}
+
+      <Alert tone="warning">
+        This marks {unit} sold on the stock list everybody reads: the customer, the
+        rep, the price and the dispatch date all go with it. Your commission stays
+        on your own tracker.
+      </Alert>
+    </Modal>
   );
 }
 
@@ -1149,43 +1233,28 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
   onMoveStatus: (s: ContactStatus) => void;
   onDuplicate: () => void; onDelete: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useEffect(() => {
-    const el = ref.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    const m = 8;
-    let l = x, t = y;
-    if (x + r.width + m > window.innerWidth) l = Math.max(m, x - r.width);
-    if (y + r.height + m > window.innerHeight) t = Math.max(m, y - r.height);
-    setPos({ left: l, top: t });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [x, y]);
-
-  const STATUSES: ContactStatus[] = ['lead','contacted','quoted','won','customer','lost'];
+  const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
 
   return (
-    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">
-        {row.company_name}
-        {row.contact_name && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.contact_name}</span>}
-      </div>
-      <button onClick={onView}><Eye size={12} /> Open full view</button>
-      <button onClick={onEditCell}><Edit2 size={12} /> Edit this cell</button>
+    <EdgeAwareCtxMenu x={x} y={y}>
+      <MenuHead>
+        {row.company_name}{row.contact_name ? ` · ${row.contact_name}` : ''}
+      </MenuHead>
+      <MenuItem icon={<Eye size={13} />} label="Open the lead" onClick={onView} />
+      <MenuItem icon={<Edit2 size={13} />} label="Edit this cell" onClick={onEditCell} />
       {row.type === 'trailer_sales' && row.status !== 'customer' && (
-        <button onClick={onMarkSold}><PoundSterling size={12} /> Mark as Sold…</button>
+        <MenuItem icon={<PoundSterling size={13} />} label="Mark as sold" onClick={onMarkSold} />
       )}
-      <hr />
-      <div className="ctx-menu__head" style={{ marginTop: 4 }}>Move to status</div>
-      {STATUSES.filter(s => s !== row.status).map(s => (
-        <button key={s} onClick={() => onMoveStatus(s)}>
-          <span className={`pill pill--${s}`} style={{ fontSize: 10 }}><span className="pill__dot" />{s}</span>
-        </button>
+      <MenuRule />
+      <MenuHead>Move to</MenuHead>
+      {STATUSES.filter((st) => st !== row.status).map((st) => (
+        <MenuItem key={st} label={<Badge tone={STATUS_TONE[st]} dot>{STATUS_LABEL[st]}</Badge>}
+          onClick={() => onMoveStatus(st)} />
       ))}
-      <hr />
-      <button onClick={onDuplicate}><Copy size={12} /> Duplicate</button>
-      <button onClick={onDelete} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
-    </div>
+      <MenuRule />
+      <MenuItem icon={<Copy size={13} />} label="Duplicate the pitch" onClick={onDuplicate} />
+      <MenuItem icon={<Trash2 size={13} />} label="Delete the lead" onClick={onDelete} danger />
+    </EdgeAwareCtxMenu>
   );
 }
 
@@ -1232,90 +1301,104 @@ function CommissionView({ rows }: { rows: TrackerRow[] }) {
   const QUARTER_LABEL = `Q${thisQuarter + 1} ${thisYear}`;
 
   return (
-    <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* KPI tiles */}
-      <div className="stats-grid stats-grid--5">
-        <KpiTile label="This month" value={fmtMoney(thisMonth)} sub={now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} accent="red" />
-        <KpiTile label="This quarter" value={fmtMoney(quarter)} sub={QUARTER_LABEL} accent="warning" />
-        <KpiTile label="Year to date" value={fmtMoney(ytd)} sub={String(thisYear)} accent="info" />
-        <KpiTile label="All time" value={fmtMoney(allTime)} sub={`${sales.length} closed deal${sales.length === 1 ? '' : 's'}`} accent="success" />
-        <KpiTile label="Avg / deal" value={fmtMoney(avgPerDeal)} sub="Across all closed deals" />
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* The same stat strip the pipeline uses. These were five coloured
+          tiles, each with its own accent bar, which is rule one broken
+          four times: nothing on the screen was more important than
+          anything else, so nothing read as important at all. */}
+      <StatStrip items={[
+        { label: 'This month', value: fmtMoney(thisMonth) || '—',
+          note: now.toLocaleDateString('en-GB', { month: 'long' }) },
+        { label: 'This quarter', value: fmtMoney(quarter) || '—', note: QUARTER_LABEL },
+        { label: 'Year to date', value: fmtMoney(ytd) || '—', note: String(thisYear) },
+        { label: 'All time', value: fmtMoney(allTime) || '—',
+          note: `${sales.length} closed` },
+        { label: 'Average', value: fmtMoney(avgPerDeal) || '—', note: 'per deal' },
+      ]} />
 
-      {/* Last 12 months bar chart */}
-      <div className="card" style={{ padding: 16 }}>
-        <div className="field__label" style={{ marginBottom: 12 }}>LAST 12 MONTHS</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 180, padding: '0 4px' }}>
-          {monthly.map(m => {
-            const h = Math.max(2, (m.total / maxMonthly) * 150);
-            const isThisMonth = m.key === thisMonthKey;
-            return (
-              <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', minHeight: 14 }}>
-                  {m.total > 0 ? `£${(m.total/1000).toFixed(1)}k` : ''}
+      {/* Twelve months, drawn from the kit's chart palette. Navy carries
+          the series and the current month is the one bar in red: the
+          series carrying the message, which is the only thing red is
+          for on a chart. */}
+      <Card padded={false}>
+        <SectionHead title="Last twelve months" hint="Commission earned" />
+        <div style={{ padding: '14px 16px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 180 }}>
+            {monthly.map(m => {
+              const h = Math.max(2, (m.total / maxMonthly) * 148);
+              const isThisMonth = m.key === thisMonthKey;
+              return (
+                <div key={m.key} style={{
+                  flex: 1, display: 'flex', flexDirection: 'column',
+                  alignItems: 'center', gap: 5, minWidth: 0,
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+                    fontVariantNumeric: 'tabular-nums', minHeight: 14,
+                    color: isThisMonth ? 'var(--accent)' : 'var(--text-subtle)',
+                  }}>
+                    {m.total > 0 ? `${(m.total / 1000).toFixed(1)}k` : ''}
+                  </span>
+                  <div style={{
+                    width: '100%', maxWidth: 40, height: h,
+                    background: isThisMonth ? 'var(--accent)' : 'var(--chart-1, var(--primary))',
+                    opacity: isThisMonth ? 1 : 0.75,
+                    borderRadius: 'var(--r-sm) var(--r-sm) 0 0',
+                  }} />
+                  <span style={{
+                    fontSize: 10.5, letterSpacing: '0.02em',
+                    color: isThisMonth ? 'var(--text)' : 'var(--text-subtle)',
+                    fontWeight: isThisMonth ? 700 : 500,
+                  }}>{m.label}</span>
                 </div>
-                <div style={{
-                  width: '100%', maxWidth: 40,
-                  height: h,
-                  background: isThisMonth ? 'var(--stc-red)' : 'rgba(91,141,239,0.5)',
-                  borderRadius: '4px 4px 0 0',
-                  transition: 'height .25s ease',
-                }} />
-                <div style={{ fontSize: 10.5, color: isThisMonth ? 'var(--stc-red)' : 'var(--fg-3)', fontWeight: isThisMonth ? 700 : 500 }}>
-                  {m.label}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      </Card>
 
-      {/* Per-sale list */}
-      <div className="card">
-        <div className="card__head"><h3 style={{ margin: 0 }}>Every closed deal · {sales.length}</h3></div>
-        <div style={{ padding: 0 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: 'var(--bg-3)', textAlign: 'left' }}>
-                <th style={{ padding: 10 }}>Dispatch / Order</th>
-                <th style={{ padding: 10 }}>Company</th>
-                <th style={{ padding: 10 }}>Sale price</th>
-                <th style={{ padding: 10 }}>Profit</th>
-                <th style={{ padding: 10, color: 'var(--stc-red)' }}>Commission</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.map(r => (
-                <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="mono" style={{ padding: 10, fontSize: 11.5, color: 'var(--fg-3)' }}>
-                    {(r.dispatch_date || r.order_date || '').slice(0,10) || '—'}
-                  </td>
-                  <td style={{ padding: 10 }}>{r.company_name}</td>
-                  <td className="tnum" style={{ padding: 10 }}>{fmtMoney(r.sale_price)}</td>
-                  <td className="tnum" style={{ padding: 10 }}>{fmtMoney(r.profit)}</td>
-                  <td className="tnum" style={{ padding: 10, fontWeight: 600, color: 'var(--stc-red)' }}>{fmtMoney(r.commission)}</td>
+      <Card padded={false}>
+        <SectionHead title="Every closed deal" hint={`${sales.length} in all`} />
+        {sales.length === 0 ? (
+          <div style={{ padding: '10px 16px 16px' }}>
+            <EmptyState
+              what="commission"
+              why="Nothing has been marked sold on this tracker yet."
+            />
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {['Dispatched', 'Customer', 'Sale price', 'Profit', 'Commission'].map((h, i) => (
+                    <th key={h} style={{
+                      padding: '9px 14px', textAlign: i > 1 ? 'right' : 'left',
+                      background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
+                      fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+                      letterSpacing: '0.13em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+                      whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-              {sales.length === 0 && (
-                <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)' }}>
-                  No closed deals yet. Commission rolls in here as you Mark-as-Sold from the tracker.
-                </td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'red'|'success'|'warning'|'info' }) {
-  return (
-    <div className={`stat ${accent ? `stat--${accent}` : ''}`}>
-      <div className="stat__bar" />
-      <div className="stat__label">{label}</div>
-      <div className="stat__value tnum">{value}</div>
-      {sub && <div className="stat__sub">{sub}</div>}
+              </thead>
+              <tbody>
+                {sales.map(r => (
+                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '9px 14px', color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      {fmtDate(r.dispatch_date || r.order_date) || '—'}
+                    </td>
+                    <td style={{ padding: '9px 14px', color: 'var(--text)' }}>{r.company_name}</td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.sale_price)}</td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.profit)}</td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', color: 'var(--text)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.commission)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
