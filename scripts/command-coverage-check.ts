@@ -947,6 +947,84 @@ ok('a viewer is not offered moving a deadline',
 ok('a viewer can still leave a note',
   suggestActions('leave a note on this task', CAPS.viewer, 8).some((h) => h.action.id === 'work.note'));
 
+/* ---------- the social planner ----------
+
+   The screen it replaces was reached by a handful of words. It is now
+   five surfaces behind one route, and every one of them has to be
+   reachable by the words somebody would actually use. A phrasing listed
+   in actions.ts is a guess; one asserted here is a promise. */
+for (const said of [
+  'social', 'social planner', 'planner', 'posts', 'socials',
+  'content', 'the content planner', 'content calendar', 'social calendar',
+  'linkedin', 'instagram', 'facebook', 'marketing', 'campaign',
+]) {
+  const reached = ROLES.some((r) =>
+    suggestActions(said, CAPS[r], 8).some((h) => h.action.path?.startsWith('/dashboard/social') ?? false));
+  ok(`"${said}" reaches the social planner`, reached);
+}
+
+// The surfaces inside it, each by the words somebody would use.
+for (const [said, id] of [
+  ['queue', 'nav.contentQueue'],
+  ['posting times', 'nav.contentQueue'],
+  ['posting slots', 'nav.contentQueue'],
+  ['library', 'nav.contentLibrary'],
+  ['content library', 'nav.contentLibrary'],
+  ['media library', 'nav.contentLibrary'],
+  ['approvals', 'nav.contentApprovals'],
+  ['what needs approving', 'nav.contentApprovals'],
+  ['posts waiting', 'nav.contentApprovals'],
+  ['the approval queue', 'nav.contentApprovals'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+// Writing.
+for (const said of ['new post', 'create a post', 'new linkedin post', 'new draft']) {
+  ok(`"${said}" starts a post`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'make.post'));
+}
+for (const said of ['new campaign', 'add a channel']) {
+  ok(`"${said}" reaches the planner`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.path?.startsWith('/dashboard/social') ?? false));
+}
+
+/* Nothing you cannot do is ever offered. These are the assertions that
+   matter: a read only viewer typing "publish this now" must see nothing,
+   because an action that appears and then refuses teaches people the
+   tool is unreliable.
+
+   The marketer lines are the interesting ones. A marketer writes,
+   schedules, tags and fills the library, and does not approve, publish
+   or connect an account. That is what `social.*` says and what the
+   routes ask for, and it is narrower than the old `marketing.edit`,
+   which is the point of moving to them. */
+ok('a viewer is not offered a new post',
+  !suggestActions('new post', CAPS.viewer, 8).some((h) => h.action.id === 'make.post'));
+ok('a marketer is offered a new post',
+  suggestActions('new post', CAPS.marketer, 8).some((h) => h.action.id === 'make.post'));
+ok('a viewer is not offered publish now',
+  !suggestActions('publish this post now', CAPS.viewer, 8).some((h) => h.action.id === 'social.publishNow'));
+ok('a marketer is not offered publish now',
+  !suggestActions('publish this post now', CAPS.marketer, 8).some((h) => h.action.id === 'social.publishNow'));
+ok('an admin is offered publish now',
+  suggestActions('publish this post now', CAPS.admin, 8).some((h) => h.action.id === 'social.publishNow'));
+ok('a marketer is not offered approving a post',
+  !suggestActions('approve this post', CAPS.marketer, 8).some((h) => h.action.id === 'social.approve'));
+ok('an admin is offered approving a post',
+  suggestActions('approve this post', CAPS.admin, 8).some((h) => h.action.id === 'social.approve'));
+ok('a marketer is not offered adding a channel',
+  !suggestActions('add a channel', CAPS.marketer, 8).some((h) => h.action.id === 'make.channel'));
+ok('an admin is offered adding a channel',
+  suggestActions('add a channel', CAPS.admin, 8).some((h) => h.action.id === 'make.channel'));
+ok('a marketer can still schedule a post',
+  suggestActions('schedule this for monday', CAPS.marketer, 8).some((h) => h.action.id === 'social.schedule'));
+ok('a viewer can still open the planner',
+  suggestActions('social planner', CAPS.viewer, 8).some((h) => h.action.id === 'nav.social'));
+ok('a sales user can still open the planner',
+  suggestActions('social planner', CAPS.sales, 8).some((h) => h.action.id === 'nav.social'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

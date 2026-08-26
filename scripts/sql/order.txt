@@ -66,6 +66,7 @@
 056_work_and_tasks
 057_entity_membership
 058_work_workflow
+060_existing_posts_get_a_channel
 018_command_set_role
 019_last_admin
 059_work_role_templates

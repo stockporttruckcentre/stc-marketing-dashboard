@@ -305,6 +305,16 @@ const RESERVED = new Set([
   'overdue', 'deadline', 'due', 'priority', 'board', 'view', 'views',
   'note', 'notes', 'comment', 'comments', 'project', 'projects', 'department',
   'somebody', 'someone', 'anybody', 'anyone', 'nobody', 'everybody', 'everyone',
+
+  /* The social planner's own vocabulary, for the same reason. "Post it
+     to LinkedIn" was reading LinkedIn as a customer and "add a picture
+     to the library" was reading Library as a depot: both are words that
+     mean something in that grammar, so neither can be a name or a
+     place. */
+  'post', 'posts', 'content', 'channel', 'channels', 'library', 'campaign',
+  'campaigns', 'template', 'templates', 'queue', 'slot', 'slots',
+  'approval', 'approvals', 'caption', 'hashtag', 'hashtags', 'preview',
+  'linkedin', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube',
   ...Object.keys(BODY_TYPES),
 ]);
 

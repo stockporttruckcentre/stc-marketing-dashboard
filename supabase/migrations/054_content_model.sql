@@ -194,10 +194,10 @@ GRANT SELECT ON social_networks TO authenticated;
 -- -------------------------------------------------------------
 -- 2. The channels.
 --
--- A connected account. One per network per handle, and both entities
--- can have their own: Frame posts as Frame, TCC posts as TCC, and the
--- planner shows both without either being able to publish as the other
--- by accident.
+-- A connected account. One per network per handle, and both companies
+-- can have their own: STC posts as STC, STC Sales and Leasing posts as
+-- itself, and the planner shows both without either being able to
+-- publish as the other by accident.
 --
 -- ---- Credentials ----
 --
@@ -221,7 +221,11 @@ CREATE TABLE IF NOT EXISTS social_channels (
 
   -- The queue posts in this. A channel with a US audience and a channel
   -- with a European one do not share a best time to post.
-  timezone       TEXT NOT NULL DEFAULT 'America/New_York',
+  -- Europe/London, because that is where the audience is and because a
+  -- queue that fires at the wrong nine in the morning is worse than no
+  -- queue. Per channel, so a future account with a different audience
+  -- does not have to share this one's clock.
+  timezone       TEXT NOT NULL DEFAULT 'Europe/London',
 
   state          TEXT NOT NULL DEFAULT 'disconnected'
                  CHECK (state IN ('connected', 'needs_reauth', 'disconnected')),
@@ -332,7 +336,7 @@ CREATE INDEX IF NOT EXISTS idx_template_shared ON social_templates (is_shared, n
 --
 -- ---- No color column, deliberately ----
 --
--- The TCC kit's third rule is that color never carries data. A palette
+-- The STC kit's rule is that colour never carries data on its own. A palette
 -- of tag colors is exactly that, and it also fails the moment there are
 -- more than eight tags. Tags are words.
 -- -------------------------------------------------------------
