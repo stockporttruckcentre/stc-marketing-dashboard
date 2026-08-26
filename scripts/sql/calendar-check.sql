@@ -498,7 +498,7 @@ END $$;
 -- the diary, the CRM, or anybody else's invitation.
 -- =============================================================
 DO $$
-DECLARE made JSONB; ev UUID; g calendar_guests;
+DECLARE made JSONB; ev UUID; g calendar_guests; again calendar_guests;
 BEGIN
   PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000001');
   made := command_create_meeting('Site visit with Dawson', NOW() + INTERVAL '11 days', 60, NULL, 'team');
@@ -520,13 +520,22 @@ BEGIN
   GRANT SELECT ON fixture_guest TO authenticated, anon;
   RAISE NOTICE 'ok  a guest is asked, and the link is 64 characters of randomness';
 
-  -- Asking the same address again is the same invitation, not a second.
-  PERFORM calendar_invite_guest(ev, 'OPS@DawsonGroup.test', 'Julie', NULL, NULL);
+  /* Asking the same address again is the same invitation, not a second.
+
+     The token is compared off what the function returns rather than off
+     the table, because the table no longer lets a signed in session
+     read that column and this file runs as one. A composite a function
+     returns is not subject to column privileges, which is exactly why
+     the token comes back that way and nowhere else. */
+  again := calendar_invite_guest(ev, 'OPS@DawsonGroup.test', 'Julie', NULL, NULL);
   IF (SELECT count(*) FROM calendar_guests WHERE event_id = ev) <> 1 THEN
     RAISE EXCEPTION 'the same address in a different case made a second guest';
   END IF;
-  IF (SELECT token FROM calendar_guests WHERE event_id = ev) <> g.token THEN
+  IF again.token <> g.token THEN
     RAISE EXCEPTION 'asking again changed the link, so the first email stopped working';
+  END IF;
+  IF again.id <> g.id THEN
+    RAISE EXCEPTION 'asking again made a second guest row';
   END IF;
   RAISE NOTICE 'ok  the same address twice is one guest, and the link does not change';
 END $$;
@@ -565,6 +574,25 @@ BEGIN
       RAISE;
     END IF;
   END;
+END $$;
+
+/* The token is not readable by a signed in browser.
+
+   Asserted because the first version of this migration granted SELECT
+   on the table and then revoked the column, which does nothing at all:
+   a table level grant covers every column, and Postgres accepts the
+   revoke and changes nothing. It looked right in the file and was
+   wrong in the database. */
+DO $$
+BEGIN
+  IF has_column_privilege('authenticated', 'calendar_guests', 'token', 'SELECT') THEN
+    RAISE EXCEPTION
+      'a signed in browser can read the guest tokens, so it can answer anybody''s invitation';
+  END IF;
+  IF NOT has_column_privilege('authenticated', 'calendar_guests', 'status', 'SELECT') THEN
+    RAISE EXCEPTION 'the guest list is not readable at all, so nobody can see who is coming';
+  END IF;
+  RAISE NOTICE 'ok  the link token cannot be read off the table, and the rest of it can';
 END $$;
 
 -- Everybody on the meeting sees the guest, not just whoever asked.
