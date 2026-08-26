@@ -32,7 +32,7 @@
    ============================================================= */
 import { WRITABLE_FIELDS, type WritableField, type WritableEntity } from './fields';
 import { parseQuery } from './query';
-import { condForFilters } from './ir/conditions';
+import { condForFilters, referenceMatchAny } from './ir/conditions';
 import { capability, entity as entityDef } from './ir/registry';
 import type { Cardinality, Cond } from './ir/types';
 import type { ColumnKind } from './columns';
@@ -1006,10 +1006,27 @@ export function parseEdit(
   } else {
     named = [...refs.stc];
     const numeric = spec.kind === 'money' || spec.kind === 'number';
-    if (!numeric || named.length) {
-      for (const b of refs.bare) if (!named.some((t) => t.endsWith(b))) named.push(b);
-      if (!numeric) for (const c of refs.coded) named.push(c);
+
+    /* A BARE NUMBER IS A RECORD UNLESS IT IS THE AMOUNT.
+
+       Stock numbers are not written down consistently. One real yard
+       holds STC148909 and 145602, the same kind of number with and
+       without the prefix, so somebody reading a number off the stock
+       list types it bare and means a trailer.
+
+       This used to refuse every bare number on a money field, to stop
+       "set refurb 143980 on STC1" reading the amount as a second
+       trailer. That is the right worry and the wrong guard: it threw
+       away the reference along with the amount. The amount is already
+       known by the time this runs, so it can be excluded by name
+       instead, and everything else is what it looks like. */
+    const asAmount = typeof value === 'number' ? String(value) : null;
+    for (const b of refs.bare) {
+      if (numeric && asAmount !== null && b === asAmount) continue;
+      if (named.some((t) => t.endsWith(b))) continue;
+      named.push(b);
     }
+    if (!numeric) for (const c of refs.coded) named.push(c);
     if (!named.length && spec.entity === 'contacts') {
       const name = findCompany(raw, field.alias, value, opWord);
       if (name) named = [name];
@@ -1029,12 +1046,9 @@ export function parseEdit(
   let matchLabel = '';
 
   if (named.length && title) {
-    const conds: Cond[] = named.map((t) => ({
-      kind: 'cmp', op: 'contains',
-      left: { kind: 'field', of: { entity: spec.entity, field: title } },
-      right: { kind: 'literal', value: t },
-    }));
-    match = conds.length === 1 ? conds[0] : { kind: 'or', of: conds };
+    /* Matched on the digits where the value is a reference, so a unit
+       stored as 145602 is found by somebody typing STC145602. */
+    match = referenceMatchAny(spec.entity, title, named);
     matchLabel = named.join(' and ');
   } else if (!named.length) {
     /* WHAT IS ON THE SCREEN, WHEN THE SENTENCE POINTS AT IT.

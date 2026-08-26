@@ -216,7 +216,10 @@ test('a sentence that matches nothing says so', async () => {
   const preview = planned?.preview;
   ok('the preview refuses', !!preview && !preview.ok);
   if (!preview || preview.ok) return;
-  ok('and says nothing matched', /matches/.test(preview.why), preview.why);
+  /* And says WHICH unit it could not find. "Nothing matched" on its own
+     is the same sentence whether the yard is empty or a digit is wrong. */
+  ok('and says which unit it could not find', /000000/.test(preview.why), preview.why);
+  ok('naming what it looked in', /trailer/.test(preview.why), preview.why);
   ok('nothing was written', db.writes.length === 0);
 });
 
@@ -612,7 +615,10 @@ test('a stock number that is not here says so, and what is near it', async () =>
   ok('it refuses', !!preview && !preview.ok, 'it previewed');
   if (!preview || preview.ok) return;
 
-  ok('naming what it looked for', /stock number STC143585/.test(preview.why), preview.why);
+  /* On the digits, because one real yard holds STC148909 and 145602:
+     the same kind of number written two ways, and a prefix nobody can
+     rely on. */
+  ok('naming what it looked for', /stock number with 143585 in it/.test(preview.why), preview.why);
   ok('and what is actually here',
     /STC143580/.test(preview.why) && /closest/.test(preview.why), preview.why);
   ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
@@ -625,6 +631,50 @@ test('and when nothing is close it says that rather than listing the yard', asyn
   ok('it refuses', !!preview && !preview.ok, 'it previewed');
   if (!preview || preview.ok) return;
   ok('saying nothing is close', /nothing here is close/.test(preview.why), preview.why);
+});
+
+test('a unit stored without the STC prefix is still found by typing it', async () => {
+  /* THE YARD THIS IS HERE FOR.
+
+     Stock numbers are not written down consistently and never will be.
+     One real stock list holds
+
+       STC148909        typed with the prefix
+       145602           the same kind of number, without it
+       DEMO-STC90121    seeded, and prefixed twice over
+
+     Somebody types STC145602, the column holds 145602, and a match on
+     the text finds nothing. What came back was "nothing here matches
+     that", so a trailer sitting in the yard looked to everybody like a
+     broken command bar. Matching on the digits covers every spelling
+     at once, including prefixes nobody has thought of yet. */
+  const db = fakeDb({
+    stock_trailers: [
+      { id: 'u1', stc_no: 'STC148909', status: 'in_stock', category: 'Curtainsider', refurb_costs: 0 },
+      { id: 'u2', stc_no: '145602', status: 'in_stock', category: 'Flatbed', refurb_costs: 0 },
+      { id: 'u3', stc_no: 'DEMO-STC90121', status: 'in_stock', category: 'Fridge', refurb_costs: 0 },
+    ],
+  });
+
+  for (const [text, unit] of [
+    ['add £500 refurb cost to STC145602', 'u2'],
+    ['add £500 refurb cost to 145602', 'u2'],
+    ['add £500 refurb cost to STC148909', 'u1'],
+    ['add £500 refurb cost to STC90121', 'u3'],
+  ] as const) {
+    const planned = await plan(text, 'admin', db);
+    const preview = planned?.preview;
+    ok(`"${text}" finds one unit`, preview?.ok === true && preview.count === 1,
+      preview?.ok ? String(preview.count) : preview?.why ?? 'no preview');
+  }
+
+  /* And the amount is still the amount. This is the case the old guard
+     existed for: it refused every bare number on a money field to stop
+     one being read as a trailer, and threw away the reference with it. */
+  const planned = await plan('set refurb cost on STC148909 to 143980', 'admin', db);
+  ok('a bare number that is the amount stays the amount',
+    planned?.preview?.ok === true && planned.preview.count === 1,
+    planned?.preview?.ok ? String(planned.preview.count) : planned?.preview?.why ?? 'no preview');
 });
 
 test('a stock number is not a price', async () => {

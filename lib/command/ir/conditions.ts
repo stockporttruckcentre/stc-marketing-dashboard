@@ -33,6 +33,54 @@ export function literal(v: string | number): Expr {
  * with the structure visible rather than implied by a convention the
  * executor had to know about.
  */
+/* =============================================================
+   A record named by its reference, matched however it is stored.
+
+   Stock numbers are not written down consistently and never will be.
+   One real yard holds
+
+     STC148909        typed with the prefix
+     145602           the same kind of number, without it
+     DEMO-STC90121    seeded, and prefixed twice over
+
+   Somebody types STC145602, the column holds 145602, and an exact or
+   even a "contains STC145602" match finds nothing. The answer that came
+   back was "nothing here matches that", so a unit that is sitting in
+   the yard looked to everybody like a broken command bar.
+
+   Matching on the digits fixes every one of those spellings at once,
+   including prefixes nobody has thought of yet, because the digits are
+   the part a person actually reads out. If two units share a digit run
+   the runtime asks which, which is the right answer to a real
+   ambiguity and is not the same as refusing.
+
+   Only for values that ARE a reference. A company called "24 Seven
+   Logistics" is a name, not a code, and is matched as written.
+   ============================================================= */
+
+/** A stock number, chassis number or supplier reference, however written. */
+const LOOKS_LIKE_A_REFERENCE = /^[A-Za-z]{0,4}[-\s_]?\d{3,10}$/;
+
+export function referenceMatch(entityId: string, column: string, value: string): Cond {
+  const trimmed = String(value).trim();
+  const digits = LOOKS_LIKE_A_REFERENCE.test(trimmed)
+    ? (trimmed.match(/\d{3,10}/)?.[0] ?? null)
+    : null;
+
+  return {
+    kind: 'cmp', op: 'contains',
+    left: { kind: 'field', of: { entity: entityId, field: column } },
+    right: { kind: 'literal', value: digits ?? trimmed },
+  };
+}
+
+/** The same, over several named records, as one condition. */
+export function referenceMatchAny(entityId: string, column: string, values: string[]): Cond | null {
+  const each = values.map((v) => referenceMatch(entityId, column, v));
+  if (!each.length) return null;
+  return each.length === 1 ? each[0] : { kind: 'or', of: each };
+}
+
 export function condFor(entityId: string, f: PlanFilter): Cond {
   const target = fieldExpr(entityId, f.column);
   let base: Cond;

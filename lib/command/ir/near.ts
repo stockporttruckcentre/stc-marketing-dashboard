@@ -78,7 +78,15 @@ function stem(value: string): string | null {
   const firstWord = trimmed.split(/\s+/)[0];
   if (trimmed.includes(' ') && firstWord.length >= 4) return firstWord;
 
-  return trimmed.slice(0, Math.max(4, trimmed.length - 2));
+  /* On a reference, drop the prefix before shortening. A yard where
+     one unit is STC148909 and the next is 145602 has no prefix worth
+     searching on, and "STC14" would find the first and miss the
+     second. */
+  const digits = /^[A-Za-z]{0,4}[-\s_]?\d{3,10}$/.test(trimmed)
+    ? trimmed.match(/\d{3,10}/)?.[0] ?? trimmed
+    : trimmed;
+
+  return digits.slice(0, Math.max(4, digits.length - 2));
 }
 
 /** Records whose identifier looks like the one that was asked for. */
@@ -144,7 +152,13 @@ export async function whyNothingMatched(opts: {
      is the middle of a sentence. */
   const label0 = opts.fieldLabel?.(named.column) ?? named.column.replace(/_/g, ' ');
   const what = label0.charAt(0).toLowerCase() + label0.slice(1);
-  const head = `no ${label.replace(/s$/, '')} here has the ${what} ${named.value}`;
+  /* A reference is matched on its digits, because the prefix is
+     written three different ways in one yard. Say so, rather than
+     quoting a number back that is not quite what anybody typed. */
+  const onDigits = /^\d{3,10}$/.test(named.value);
+  const head = onDigits
+    ? `no ${label.replace(/s$/, '')} here has a ${what} with ${named.value} in it`
+    : `no ${label.replace(/s$/, '')} here has the ${what} ${named.value}`;
 
   if (!(await anyAtAll(store, table))) {
     return `${head}, because there are no ${label} here at all yet`;
