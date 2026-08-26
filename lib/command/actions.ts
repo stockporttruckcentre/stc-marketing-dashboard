@@ -108,9 +108,34 @@ export const ACTIONS: CommandActionSpec[] = [
     path: '/dashboard/finder', verbs: GO,
     objects: ['finder', 'companies', 'company', 'firms', 'businesses', 'hauliers', 'company finder', 'lusha', 'prospecting', 'find companies', 'lead search', 'new business', 'search companies', 'cold leads'] },
 
+  /* `social.view` rather than `marketing.edit`, which is what it asked
+     for before. The screen is readable by everybody who can read
+     content, and gating navigation on the permission to WRITE meant a
+     viewer could see the planner in the sidebar and not reach it by
+     typing its own name. */
   { id: 'nav.social', label: 'Social planner', blurb: 'Posts, approvals and schedule', kind: 'navigate',
-    path: '/dashboard/social', verbs: GO, capability: 'marketing.edit',
-    objects: ['social', 'social planner', 'posts', 'marketing', 'linkedin', 'content', 'campaign', 'facebook', 'instagram', 'socials'] },
+    path: '/dashboard/social', verbs: GO, capability: 'social.view',
+    objects: ['social', 'social planner', 'planner', 'posts', 'marketing', 'linkedin',
+              'content', 'campaign', 'facebook', 'instagram', 'socials',
+              'content calendar', 'social calendar', 'the content planner'] },
+
+  { id: 'nav.contentQueue', label: 'The posting queue', blurb: 'Posting times per channel', kind: 'navigate',
+    path: '/dashboard/social?tab=queue', verbs: GO, capability: 'social.view',
+    objects: ['queue', 'posting queue', 'posting times', 'slots', 'posting slots'] },
+
+  { id: 'nav.contentLibrary', label: 'The content library', blurb: 'Pictures the company keeps', kind: 'navigate',
+    path: '/dashboard/social?tab=library', verbs: GO, capability: 'social.view',
+    objects: ['library', 'content library', 'media library', 'the pictures'] },
+
+  { id: 'nav.contentApprovals', label: 'Posts waiting for approval', blurb: 'Everything sat with an approver', kind: 'navigate',
+    path: '/dashboard/social?needs=review', verbs: [...GO, 'show', 'list'], capability: 'social.view',
+    objects: ['approvals', 'posts waiting', 'pending posts', 'what needs approving',
+              'the approval queue', 'posts for review', 'outstanding posts'],
+    phrases: ['what content needs approving', 'show me the posts waiting for approval'] },
+
+  { id: 'nav.contentChannels', label: 'Channels', blurb: 'The accounts content goes out to', kind: 'navigate',
+    path: '/dashboard/social?tab=channels', verbs: GO, capability: 'social.channels',
+    objects: ['channels', 'connected accounts', 'social accounts', 'the handles'] },
 
   { id: 'nav.brand', label: 'Brand kit', blurb: 'Logos, fonts and templates', kind: 'navigate',
     path: '/dashboard/brand', verbs: GO,
@@ -157,8 +182,18 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['generate a proposal', 'quote them for'] },
 
   { id: 'make.post', label: 'New social post', blurb: 'Draft for approval', kind: 'create',
-    capability: 'marketing.edit', path: '/dashboard/social', verbs: MAKE,
-    objects: ['post', 'social post', 'flyer', 'advert', 'ad', 'linkedin post'] },
+    capability: 'social.draft', path: '/dashboard/social?new=1', verbs: MAKE,
+    objects: ['post', 'social post', 'flyer', 'advert', 'ad', 'linkedin post',
+              'tweet', 'thread', 'draft'] },
+
+  { id: 'make.campaign', label: 'New campaign', blurb: 'Structure above the post', kind: 'create',
+    capability: 'social.draft', path: '/dashboard/social', verbs: MAKE,
+    objects: ['campaign', 'content campaign', 'launch'] },
+
+  { id: 'make.channel', label: 'Add a channel', blurb: 'An account content goes out to', kind: 'create',
+    capability: 'social.channels', path: '/dashboard/social?tab=channels',
+    verbs: [...MAKE, 'connect', 'link', 'hook up'],
+    objects: ['channel', 'social account', 'handle', 'linkedin page', 'x account'] },
 
   /* ---------- doing things to a record ---------- */
   { id: 'rec.assign', label: 'Assign an account', blurb: 'Put it in somebody’s portfolio', kind: 'record',
@@ -500,57 +535,90 @@ export const ACTIONS: CommandActionSpec[] = [
 
      The tab that had nothing at all, which is what prompted the sweep. */
 
-  { id: 'social.platform', label: 'Pick platforms for a post', blurb: 'Facebook, Instagram, LinkedIn or X', kind: 'record',
-    capability: 'marketing.edit', path: '/dashboard/social', verbs: [...CHANGE, 'pick', 'choose', 'target'],
+  { id: 'social.platform', label: 'Pick channels for a post', blurb: 'Where it goes', kind: 'record',
+    capability: 'social.draft', path: '/dashboard/social', verbs: [...CHANGE, 'pick', 'choose', 'target'],
     // Not a bare "x": one character is below the matcher's floor, so the
     // platform was listed and unreachable.
     objects: ['facebook', 'instagram', 'linkedin', 'twitter', 'on x', 'to x', 'platforms', 'channels'],
     phrases: ['post it to linkedin', 'put this on instagram'] },
 
   { id: 'social.image', label: 'Add an image to a post', blurb: 'Uploaded and shown in the preview', kind: 'record',
-    capability: 'marketing.edit', path: '/dashboard/social', verbs: [...MAKE, ...PUSH],
+    capability: 'social.draft', path: '/dashboard/social', verbs: [...MAKE, ...PUSH],
     objects: ['image', 'picture', 'photo', 'graphic', 'artwork', 'image to the post'] },
 
   { id: 'social.removeImage', label: 'Remove a post image', blurb: 'Back to text only', kind: 'record',
-    capability: 'marketing.edit', verbs: REMOVE,
+    capability: 'social.draft', verbs: REMOVE,
     objects: ['image', 'picture', 'photo', 'the graphic'] },
 
   { id: 'social.schedule', label: 'Schedule a post', blurb: 'When it goes out', kind: 'record',
-    capability: 'marketing.edit', verbs: [...CHANGE, 'schedule', 'queue', 'plan', 'book in'],
+    capability: 'social.schedule', verbs: [...CHANGE, 'schedule', 'queue', 'plan', 'book in'],
     objects: ['post for', 'it for friday', 'the post date', 'posting date', 'when it goes out'],
     phrases: ['schedule this for monday', 'put it out on friday'] },
 
-  { id: 'social.preview', label: 'Preview a post', blurb: 'How it looks on each platform', kind: 'record',
-    capability: 'marketing.edit', path: '/dashboard/social', verbs: [...GO, 'preview'],
+  { id: 'social.preview', label: 'Preview a post', blurb: 'How it looks on each channel', kind: 'record',
+    capability: 'social.view', path: '/dashboard/social', verbs: [...GO, 'preview'],
     objects: ['post', 'how it looks', 'the preview', 'on instagram', 'the mock up'],
     phrases: ['what will it look like'] },
 
   { id: 'social.submit', label: 'Send a post for approval', blurb: 'Into somebody else’s queue', kind: 'record',
-    capability: 'marketing.edit', verbs: [...SEND, 'submit', 'put in'],
+    capability: 'social.draft', verbs: [...SEND, 'submit', 'put in'],
     objects: ['for approval', 'to be approved', 'for review', 'to review'],
     phrases: ['send this for approval', 'put it in for review'] },
 
   { id: 'social.approve', label: 'Approve a social post', blurb: 'Clears it to be scheduled', kind: 'record',
-    capability: 'marketing.approve', verbs: ['approve', 'sign off', 'ok', 'clear', 'pass', 'accept'],
+    capability: 'social.approve', verbs: ['approve', 'sign off', 'ok', 'clear', 'pass', 'accept'],
     objects: ['post', 'posts', 'social post', 'the drafts', 'everything outstanding', 'the queue'],
     phrases: ['approve all the outstanding posts', 'sign off the social posts'] },
 
-  { id: 'social.reject', label: 'Send a post back', blurb: 'Back to draft for another go', kind: 'record',
-    capability: 'marketing.approve', verbs: ['reject', 'send back', 'bounce', 'refuse', 'knock back'],
+  { id: 'social.reject', label: 'Send a post back', blurb: 'Back to draft, with a reason', kind: 'record',
+    capability: 'social.approve', verbs: ['reject', 'send back', 'bounce', 'refuse', 'knock back'],
     objects: ['post', 'social post', 'to draft', 'the draft'],
     phrases: ['send it back to draft', 'that post is not right'] },
 
-  { id: 'social.queue', label: 'Queue an approved post', blurb: 'Into the schedule', kind: 'record',
-    capability: 'marketing.edit', verbs: ['queue', 'schedule', 'line up', 'set live'],
+  { id: 'social.queue', label: 'Queue an approved post', blurb: 'Into the next free slot', kind: 'record',
+    capability: 'social.schedule', verbs: ['queue', 'schedule', 'line up', 'set live'],
     objects: ['approved posts', 'the post', 'it for posting'] },
 
   { id: 'social.markPosted', label: 'Mark a post as posted', blurb: 'It has gone out', kind: 'record',
     capability: 'marketing.edit', verbs: [...CHANGE, 'mark'],
     objects: ['as posted', 'as published', 'as live', 'posted', 'it as gone out'] },
 
-  { id: 'social.delete', label: 'Delete a social post', blurb: 'Off the planner entirely', kind: 'record',
-    capability: 'marketing.edit', verbs: REMOVE,
+  { id: 'social.delete', label: 'Delete a social post', blurb: 'Off the planner. Recoverable.', kind: 'record',
+    capability: 'social.delete', verbs: REMOVE,
     objects: ['post', 'social post', 'the draft', 'this post'] },
+
+  { id: 'social.publishNow', label: 'Publish a post now', blurb: 'Skips the queue. No undo.', kind: 'record',
+    capability: 'social.publishNow', verbs: ['publish', 'push out', 'go live with'],
+    objects: ['now', 'immediately', 'straight away', 'this post now', 'it now', 'right now'],
+    phrases: ['publish this post now', 'publish it now', 'send it out immediately',
+              'push this out now', 'go live with this post'] },
+
+  { id: 'social.unschedule', label: 'Take a post out of the queue', blurb: 'Still approved, no longer booked', kind: 'record',
+    capability: 'social.schedule', verbs: ['unschedule', 'pull', 'take out', 'hold', 'pause'],
+    objects: ['the queue', 'from the queue', 'the schedule', 'this post from the queue'],
+    phrases: ['take this out of the queue', 'pull it from the queue', 'unschedule this post'] },
+
+  { id: 'social.tag', label: 'Tag a post', blurb: 'How it is grouped and reported on', kind: 'record',
+    capability: 'social.tags', verbs: [...CHANGE, 'tag', 'label', 'file under'],
+    objects: ['tag', 'tags', 'a tag on this post', 'as stock', 'as hiring'] },
+
+  { id: 'social.firstComment', label: 'Set a first comment', blurb: 'Links kept out of the post', kind: 'record',
+    capability: 'social.draft', verbs: [...CHANGE, ...MAKE],
+    objects: ['first comment', 'the comment', 'a first comment on this post'] },
+
+  { id: 'social.slots', label: 'Change a channel\u2019s posting times', blurb: 'What the queue fills', kind: 'record',
+    capability: 'social.channels', path: '/dashboard/social?tab=queue',
+    verbs: [...CHANGE, 'set'],
+    objects: ['the queue times', 'when we post', 'the posting week'] },
+
+  { id: 'social.libraryAdd', label: 'Add to the content library', blurb: 'A picture the company keeps', kind: 'record',
+    capability: 'social.library', path: '/dashboard/social?tab=library', verbs: [...PUSH, ...MAKE],
+    objects: ['to the library', 'an asset', 'a picture to the library'] },
+
+  { id: 'social.approveAsset', label: 'Sign off a library asset', blurb: 'Before it reaches a public account', kind: 'record',
+    capability: 'social.approve', path: '/dashboard/social?tab=library',
+    verbs: ['sign off', 'clear'],
+    objects: ['asset', 'the picture', 'library asset', 'this image'] },
 
   /* ---------- brand kit ---------- */
 
@@ -848,6 +916,84 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.export', verbs: ['print', 'save as', 'pdf'],
     objects: ['pdf', 'to paper', 'the export', 'a hard copy'],
     phrases: ['save it as a pdf'] },
+
+  /* ---------- Work ----------
+
+     The task system is meant to be how the business runs, so the bar
+     has to reach it however somebody says it. Every one of these names
+     the capability it needs, so a viewer typing "assign this to Dean"
+     sees nothing rather than an action that appears and then refuses.
+
+     "task list" is deliberately absent from the first entry. It
+     collides with the CRM's own list actions and loses to them, so it
+     would be an object word that never wins. "tasks" and "work" already
+     carry the intent. */
+
+  { id: 'nav.work', label: 'Work', blurb: 'Tasks, delegation and projects', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work', verbs: GO,
+    objects: ['work', 'tasks', 'task', 'todo', 'to do', 'to-do', 'my work',
+              'the work tab', 'jobs', 'workload'] },
+
+  { id: 'nav.myWork', label: 'My work', blurb: 'Everything on you right now', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=my-work', verbs: [...GO, 'show'],
+    objects: ['my work', 'my tasks', 'my todo', 'what am i doing', 'what do i have on',
+              'my jobs', 'my list'] },
+
+  { id: 'nav.blockedWork', label: 'Blocked work', blurb: 'Everything stuck, oldest first', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=blocked', verbs: [...GO, 'show'],
+    objects: ['blocked', 'blocked work', 'blocked tasks', 'stuck', 'what is stuck',
+              'blockers', 'held up'] },
+
+  { id: 'nav.overdueWork', label: 'Overdue work', blurb: 'Past its date and not finished', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=overdue', verbs: [...GO, 'show'],
+    objects: ['overdue work', 'late work', 'late tasks', 'overdue tasks', 'past due work'] },
+
+  { id: 'nav.assignedByMe', label: 'Work I assigned', blurb: 'What you put on other people', kind: 'navigate',
+    capability: 'work.assignOthers', path: '/dashboard/work?view=assigned-by-me', verbs: [...GO, 'show'],
+    objects: ['work i assigned', 'tasks i assigned', 'what i delegated', 'what i gave out',
+              'assigned by me', 'my delegations'] },
+
+  { id: 'make.task', label: 'Raise a task', blurb: 'Work for you or for somebody else', kind: 'create',
+    capability: 'work.create', path: '/dashboard/work', verbs: MAKE, seed: 'add task ',
+    objects: ['task', 'todo', 'to do', 'job', 'piece of work', 'ticket'] },
+
+  { id: 'work.assign', label: 'Assign a task', blurb: 'Put work on a person or a department', kind: 'record',
+    capability: 'work.assignOthers', path: '/dashboard/work',
+    verbs: ['assign', 'give', 'hand', 'put', 'task', 'delegate'],
+    objects: ['task', 'work', 'job', 'this task', 'it'] },
+
+  { id: 'work.release', label: 'Ask to be let off a task', blurb: 'Cancel it, pass it on, or move the date', kind: 'record',
+    capability: 'work.requestRelease', path: '/dashboard/work',
+    verbs: ['hand back', 'give back', 'pass on', 'reassign', 'cannot do', 'ask off', 'push back'],
+    objects: ['task', 'this task', 'work', 'this', 'it'],
+    phrases: ['i cannot do this task', 'hand this task back', 'ask for more time on this',
+              'pass this task to somebody else'] },
+
+  { id: 'work.decide', label: 'Answer a release request', blurb: 'Grant or refuse work being handed back', kind: 'record',
+    capability: 'work.decideRelease', path: '/dashboard/work?view=waiting-for-me',
+    verbs: ['approve', 'grant', 'refuse', 'decline', 'answer'],
+    objects: ['release request', 'handback', 'the request', 'release'] },
+
+  { id: 'work.savedView', label: 'Build a view of work', blurb: 'Your own filters, layout and columns', kind: 'create',
+    capability: 'work.views', path: '/dashboard/work', verbs: [...MAKE, ...CHANGE],
+    objects: ['work view', 'task view', 'saved view', 'my own view', 'work filter',
+              'board view', 'task board', 'work layout'],
+    phrases: ['make my own work view', 'save this view', 'customise this view'] },
+
+  { id: 'work.due', label: 'Change when work is due', blurb: 'Move a deadline on a task', kind: 'record',
+    capability: 'work.setDue', path: '/dashboard/work', verbs: [...CHANGE, 'push', 'extend'],
+    objects: ['due date', 'deadline', 'when it is due', 'task date'],
+    phrases: ['push this task back', 'move the deadline', 'give this another week'] },
+
+  /* Deliberately narrow. Bare "note" belongs to the CRM's file note and
+     bare "comment" to a post's first comment, and both were here before
+     this was. An object word two actions claim is an object word neither
+     one wins on, so this one says "task" out loud. */
+  { id: 'work.note', label: 'Add a note to a task', blurb: 'Why it moved, what you found', kind: 'record',
+    capability: 'work.view', path: '/dashboard/work', verbs: [...MAKE, 'log'],
+    objects: ['task note', 'note on a task', 'note on this task', 'task comment',
+              'comment on a task', 'work note'],
+    phrases: ['leave a note on this task', 'comment on this task', 'note on this task'] },
 ];
 
 /* =============================================================

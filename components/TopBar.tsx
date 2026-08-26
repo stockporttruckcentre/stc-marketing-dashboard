@@ -7,6 +7,7 @@ import type { UserRole } from '@/lib/types';
 
 const CRUMBS: Record<string, [string, string]> = {
   '/dashboard':           ['Workspace', 'Dashboard'],
+  '/dashboard/work':      ['Workspace', 'Work'],
   '/dashboard/calendar':  ['Workspace', 'Team calendar'],
   '/dashboard/news':      ['Workspace', 'Industry news'],
   // Analytics and the tracker were missing, so both showed the fallback

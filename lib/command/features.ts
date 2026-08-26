@@ -26,6 +26,19 @@ export type Feature = {
 
 export const FEATURES: Feature[] = [
   {
+    id: 'work', title: 'Work', path: '/dashboard/work',
+    /* Not "jobs" alone: in a workshop a job is a booked in vehicle, and
+       that word will want to mean the other thing later. "Job" is still
+       an object word on the action itself, which is where it can lose a
+       fair fight rather than claiming the screen outright. */
+    aliases: ['work', 'tasks', 'todo', 'to do', 'my work', 'my tasks', 'workload'],
+    blurb: 'Tasks, delegation and projects, through saved views',
+    actions: [
+      { label: 'Raise a task', phrase: 'add task ' },
+      { label: 'What is stuck', phrase: 'blocked work' },
+    ],
+  },
+  {
     id: 'calendar', title: 'Team calendar', path: '/dashboard/calendar',
     aliases: ['meeting', 'meetings', 'diary', 'appointment', 'appointments', 'calendar', 'schedule', 'events', 'availability', 'agenda'],
     blurb: 'Meetings and events, with who can see them',

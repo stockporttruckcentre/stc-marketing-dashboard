@@ -49,6 +49,20 @@ that has already been asserted against is a database whose state nobody can
 describe, and two of the assertions here passed for the wrong reason on a
 second run before that was true.
 
+The Work tab has its own file, which rebuilds the database itself and reports
+one line either way:
+
+```bash
+su postgres -c "bash scripts/sql/work-check.sh"    # or: npm run check:work
+```
+
+63 assertions, covering the three claims migrations 056 to 058 make: the
+status, assignee and due date columns refuse a direct write, granting a
+release request applies it in the same transaction, and the company split
+lets STC task STC Sales and Leasing without leaking work to people who are
+not on it. It fails loudly rather than quietly: every assertion raises, so a
+broken one comes back as `ERROR: FAILED: <the claim>`.
+
 ## What the prelude is, and what it is not
 
 `test-prelude.sql` is the smallest set of roles, schemas and functions this

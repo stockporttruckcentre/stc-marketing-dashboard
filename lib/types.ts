@@ -20,6 +20,16 @@ export interface Profile {
   role: UserRole;
   theme: 'dark' | 'light';
   created_at: string;
+
+  /* Added to the table by migration 048, which is why every one of them
+     is optional here. A database that has not had 046 to 059 run
+     against it does not have these columns, and a required field would
+     make every existing `as Profile` cast a lie. */
+  entity_id?: string | null;
+  department_id?: string | null;
+  manager_id?: string | null;
+  job_title?: string | null;
+  is_active?: boolean;
 }
 
 export interface CrmList {

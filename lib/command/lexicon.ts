@@ -291,6 +291,30 @@ const RESERVED = new Set([
   'about', 'roughly', 'approximately', 'around', 'mainly', 'mostly',
   'outstanding', 'pending', 'remaining', 'left', 'still', 'other', 'others',
   'blue', 'red', 'white', 'black', 'green', 'silver', 'grey', 'gray', 'yellow',
+
+  /* The Work tab's own vocabulary. Every one of these means something
+     in that grammar, so none of them can be read as a person or a
+     place. "Pass this task to somebody else" was the sentence that
+     needed it: without "task" and "somebody" here, a preposition runs
+     into them and the bar decides there is a customer called Somebody
+     Else at a depot called Task.
+
+     The indefinite people are here for the same reason and are worth
+     spelling out: nobody is ever called Anybody. */
+  'work', 'task', 'tasks', 'job', 'jobs', 'todo', 'backlog', 'blocked',
+  'overdue', 'deadline', 'due', 'priority', 'board', 'view', 'views',
+  'note', 'notes', 'comment', 'comments', 'project', 'projects', 'department',
+  'somebody', 'someone', 'anybody', 'anyone', 'nobody', 'everybody', 'everyone',
+
+  /* The social planner's own vocabulary, for the same reason. "Post it
+     to LinkedIn" was reading LinkedIn as a customer and "add a picture
+     to the library" was reading Library as a depot: both are words that
+     mean something in that grammar, so neither can be a name or a
+     place. */
+  'post', 'posts', 'content', 'channel', 'channels', 'library', 'campaign',
+  'campaigns', 'template', 'templates', 'queue', 'slot', 'slots',
+  'approval', 'approvals', 'caption', 'hashtag', 'hashtags', 'preview',
+  'linkedin', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube',
   ...Object.keys(BODY_TYPES),
 ]);
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { capabilitiesFor, type CrmCapabilities, type CrmCapability } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
+import { CAPABILITY_BY_KEY } from '@/lib/platform/permissions/catalog';
 
 /* =============================================================
    The check every write route was missing.
@@ -62,7 +63,36 @@ export async function requireCapability(capability?: CrmCapability): Promise<Gat
   const role = ((profile as { role?: UserRole } | null)?.role ?? 'viewer') as UserRole;
   const fullName = (profile as { full_name?: string } | null)?.full_name
     ?? user.email?.split('@')[0] ?? 'Somebody';
-  const caps = capabilitiesFor({ role });
+  /* ---- What this person may actually do ----
+
+     `capabilitiesFor(role)` answers from the role column alone, which
+     was the whole model when this file was written. It is no longer:
+     migration 049 lets one person be granted or refused a single
+     capability without their role changing, which is the shape the user
+     asked for. Two Marketers, one of them allowed to approve.
+
+     Deriving from the role here would refuse that person at the route
+     while the database allowed them, so the interface would say no to
+     something the data layer says yes to, which is the worst of both.
+
+     `capability_report` is the same resolution `command_may` performs,
+     asked once rather than reimplemented, and `check:capabilities`
+     asserts the two cannot disagree.
+
+     The role derivation stays as the fallback for a deployment whose
+     database is older than this build. It is what the routes did until
+     now, so falling back to it cannot take access from anybody. */
+  let caps: CrmCapabilities = capabilitiesFor({ role });
+  const { data: report } = await supabase.rpc('capability_report', { p_user: user.id });
+  if (Array.isArray(report) && report.length) {
+    const resolved = new Set<CrmCapability>();
+    for (const row of report as { key: string; granted: boolean }[]) {
+      if (row.granted && CAPABILITY_BY_KEY[row.key as CrmCapability]) {
+        resolved.add(row.key as CrmCapability);
+      }
+    }
+    caps = resolved;
+  }
 
   if (capability && !caps.has(capability)) {
     return {
@@ -104,6 +134,25 @@ const DENIALS: Partial<Record<CrmCapability, string>> = {
   'stock.edit': 'Changing the stock list needs more access than you have.',
   'marketing.edit': 'Changing marketing content needs more access than you have.',
   'marketing.approve': 'Approving content needs more access than you have.',
+  /* ---- Content ----
+     Named per capability for the same reason as the rest: "you do not
+     have access" tells somebody nothing about what to ask for. These
+     say which switch an administrator would turn on. */
+  'social.view': 'Content is not one of the screens you can open.',
+  'social.draft': 'Writing content needs more access than you have.',
+  'social.editAny': 'You can edit your own drafts, not somebody else\u2019s.',
+  'social.templates': 'Changing the shared templates needs more access than you have.',
+  'social.tags': 'Managing tags needs more access than you have.',
+  'social.schedule': 'Putting content in the queue needs more access than you have.',
+  'social.approve': 'Approving content needs more access than you have.',
+  'social.approveOwn': 'You wrote this, so somebody else has to approve it.',
+  'social.publishNow': 'Publishing immediately needs more access than you have. It can still be scheduled.',
+  'social.delete': 'Deleting content needs more access than you have.',
+  'social.channels': 'Connecting and disconnecting accounts is an administrator\u2019s job.',
+  'social.library': 'Changing the library needs more access than you have.',
+  'social.analytics': 'Seeing how content performed needs more access than you have.',
+  'social.metricSets': 'Building metric sets needs more access than you have.',
+  'social.analyticsExport': 'Exporting a report needs more access than you have.',
 };
 
 /** For the routes that only need to know somebody is signed in. */

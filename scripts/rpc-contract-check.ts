@@ -105,8 +105,26 @@ function fromSource(): Expected[] {
 
   for (const file of [...walk('lib'), ...walk('app')]) {
     const body = readFileSync(file, 'utf8');
-    for (const m of body.matchAll(/\.rpc\(\s*'([a-z_]+)'\s*,\s*\{([\s\S]{0,600}?)\}\s*\)/g)) {
-      const [, name, payload] = m;
+
+    /* Which client each call is made on.
+
+       Some functions are deliberately not granted to `authenticated`,
+       and checking them against that role reports a failure where the
+       design is working: `content_record_lint` refuses anybody but the
+       service role, because a verdict a browser could write is a
+       verdict that always says clean.
+
+       The name was the old signal and it does not survive contact with
+       a real codebase. The receiver does: a call on a variable that was
+       assigned from `createServiceRoleClient()` is a service role call,
+       whatever the function is called. */
+    const elevated = new Set(
+      [...body.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(?:await\s+)?createServiceRoleClient\s*\(/g)]
+        .map((m) => m[1]),
+    );
+
+    for (const m of body.matchAll(/(\w+)\.rpc\(\s*'([a-z_]+)'\s*,\s*\{([\s\S]{0,600}?)\}\s*\)/g)) {
+      const [, receiver, name, payload] = m;
       /* Top level keys only: a nested object's keys are values, not
          arguments. Counting braces is enough for a payload this shape. */
       const args: string[] = [];
@@ -119,7 +137,8 @@ function fromSource(): Expected[] {
       out.push({
         name,
         args,
-        role: /external|note_orphan/.test(name) ? 'service_role' : 'authenticated',
+        role: elevated.has(receiver) || /external|note_orphan/.test(name)
+          ? 'service_role' : 'authenticated',
         where: file,
       });
     }

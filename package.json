@@ -33,7 +33,10 @@
     "check:writable-columns": "tsx scripts/generate-writable-columns.ts --check",
     "check:columns": "tsx scripts/column-usage-check.ts",
     "check:rpc": "tsx scripts/rpc-contract-check.ts",
-    "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh"
+    "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh",
+    "check:work": "bash scripts/sql/work-check.sh",
+    "check:content": "bash scripts/sql/content-check.sh",
+    "check:workflow": "bash scripts/sql/workflow-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

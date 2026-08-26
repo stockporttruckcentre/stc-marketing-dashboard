@@ -64,7 +64,123 @@ export type CrmCapability =
   /** Social planner and brand kit. */
   | 'marketing.edit'
   /** Approve social posts for publishing. */
-  | 'marketing.approve';
+  | 'marketing.approve'
+  /** Change what the whole installation is called and how it behaves. */
+  | 'admin.settings'
+  /** Read the audit log. */
+  | 'admin.audit'
+  /* ---- Content ----
+     The social planner, rebuilt, and the reason these are fifteen
+     capabilities rather than the two above them. `marketing.edit` says
+     "can touch marketing", which cannot express a person who writes and
+     schedules but must not connect the company's LinkedIn account.
+
+     They are listed here as well as in
+     `supabase/migrations/048_capability_catalog.sql` because this file
+     is what generates the legacy role seed, and the legacy seed is what
+     still authorizes every account in this installation. Without them
+     here, Content would work only for accounts that hold a role
+     template, and none does yet. */
+  /** Open Content: the planner, the calendar and the library. */
+  | 'social.view'
+  /** Write and edit their own drafts. */
+  | 'social.draft'
+  /** Edit somebody else's draft. */
+  | 'social.editAny'
+  /** Create and change the templates everybody starts from. */
+  | 'social.templates'
+  /** Create, rename and merge tags. */
+  | 'social.tags'
+  /** Put content in the queue and choose when it goes out. */
+  | 'social.schedule'
+  /** Approve or reject content. The gate before anything goes public. */
+  | 'social.approve'
+  /** Approve their own work. Not an approval step, where it is granted. */
+  | 'social.approveOwn'
+  /** Send something now, skipping the queue. No undo. */
+  | 'social.publishNow'
+  /** Remove a draft or a scheduled post. */
+  | 'social.delete'
+  /** Connect and disconnect the accounts content goes out to. */
+  | 'social.channels'
+  /** Upload and manage assets. */
+  | 'social.library'
+  /** See how content performed. */
+  | 'social.analytics'
+  /** Create the saved metric sets everybody reports on. */
+  | 'social.metricSets'
+  /** Download performance reports. */
+  | 'social.analyticsExport'
+  /* ---- Work ----
+     Scope sections 9 and 14. Listed here as well as in
+     `supabase/migrations/051_work_and_tasks.sql` for the same reason
+     Content is: this file generates the legacy role seed, and the
+     legacy seed is what still authorizes every account. Without them
+     here, Work would function only for accounts holding a role
+     template, and none does yet. */
+  /** Open the Work tab. */
+  | 'work.view'
+  /** See every task in the company rather than their own and their department's. */
+  | 'work.viewAll'
+  /** See everything assigned to their own department. */
+  | 'work.viewDepartment'
+  /** Raise work for themselves. */
+  | 'work.create'
+  /** Put a task on somebody else. What makes them a delegator. */
+  | 'work.assignOthers'
+  /** Task a whole department rather than a named person. */
+  | 'work.assignDepartment'
+  /** Edit a task they can see. */
+  | 'work.edit'
+  /** Edit a task they neither raised nor were assigned. */
+  | 'work.editAny'
+  /** Take a task off one person and give it to another. */
+  | 'work.reassign'
+  /** Move a deadline somebody else committed to. */
+  | 'work.setDue'
+  /** Delete a task. Recoverable, but it leaves every list. */
+  | 'work.delete'
+  /** Ask whoever assigned it to cancel it, pass it on, or move the date. */
+  | 'work.requestRelease'
+  /** Answer those requests on work they delegated. */
+  | 'work.decideRelease'
+  /** Decide one on somebody else's delegated task, when they have left. */
+  | 'work.forceRelease'
+  /** Accept or send back a task that is in review. */
+  | 'work.review'
+  /** Give the approval a task is waiting on. */
+  | 'work.approve'
+  /** See projects, workstreams and milestones. */
+  | 'work.projects'
+  /** Create and change them, and set project health. */
+  | 'work.manageProjects'
+  /** Put a project or milestone on the public tracker. */
+  | 'work.publishProject'
+  /** Build saved views. */
+  | 'work.views'
+  /** Share one with a person, a team or a department. */
+  | 'work.shareViews'
+  /** Define new fields on tasks. */
+  | 'work.manageFields'
+  /** Edit the views everybody starts with. */
+  | 'work.manageSystemViews'
+  /** Set up work that repeats. */
+  | 'work.schedule'
+  /** Reverse a set of tasks created in one action. */
+  | 'work.rollback'
+  /** Throughput, cycle time, and who is carrying what. */
+  | 'work.analytics'
+  /** The same figures across every department. */
+  | 'work.analyticsAll'
+  /* ---- the company split ---- */
+  /** Records belonging to every company in the group. */
+  | 'entity.viewAll'
+  /** Set which companies they work for, in their own settings. */
+  | 'entity.setOwn'
+  /** Set somebody else's. */
+  | 'entity.setOthers'
+  /** Read records flagged as commercially sensitive. */
+  | 'compliance.sensitive';
 
 export type CrmCapabilities = Set<CrmCapability>;
 
@@ -98,19 +214,75 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
-    'admin.users', 'stock.edit', 'marketing.edit', 'marketing.approve',
+    'admin.users', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',
+    /* Every Content capability, including the three the role templates
+       withhold by default.
+
+       `social.approveOwn` is here because it describes what already
+       happens: `command_create_post` puts an administrator's post
+       straight to approved, and the planner shows them the Approve
+       button on their own work. Taking that away would be a removal
+       dressed as a tightening. The role templates in migration 048 are
+       where the safer default lives, and an installation that wants the
+       stricter rule gets it by giving people templates. */
+    'social.view', 'social.draft', 'social.editAny', 'social.templates', 'social.tags',
+    'social.schedule', 'social.approve', 'social.approveOwn', 'social.publishNow',
+    'social.delete', 'social.channels', 'social.library',
+    'social.analytics', 'social.metricSets', 'social.analyticsExport',
+    /* Every Work capability. An administrator is the person who
+       delegates, decides release requests and runs projects. */
+    'work.view', 'work.viewAll', 'work.viewDepartment', 'work.create',
+    'work.assignOthers', 'work.assignDepartment', 'work.edit', 'work.editAny',
+    'work.reassign', 'work.setDue', 'work.delete', 'work.requestRelease',
+    'work.decideRelease', 'work.forceRelease', 'work.review', 'work.approve',
+    'work.projects', 'work.manageProjects', 'work.publishProject',
+    'work.views', 'work.shareViews', 'work.manageFields', 'work.manageSystemViews',
+    'work.schedule', 'work.rollback', 'work.analytics', 'work.analyticsAll',
+    'entity.viewAll', 'entity.setOwn', 'entity.setOthers', 'compliance.sensitive',
   ],
   sales: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.create', 'crm.delete',
     'crm.assign', 'crm.delegate', 'crm.manageLists', 'crm.proposal',
     'crm.enrich', 'crm.import', 'crm.export', 'stock.edit',
+    /* Sales could read the planner before, and still can. Nothing else
+       about Content is theirs. */
+    'social.view', 'social.analytics',
+    /* Work for themselves, and the right to hand something back. That
+       last one is not a courtesy: work that cannot be refused gets done
+       badly or not at all, and neither is visible until it is late. */
+    'work.view', 'work.viewDepartment', 'work.create', 'work.edit',
+    'work.requestRelease', 'work.views', 'work.shareViews',
+    'work.projects', 'work.analytics', 'entity.setOwn',
   ],
   marketer: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.export',
     'stock.edit', 'marketing.edit',
+    /* What `marketing.edit` already let them do, said precisely.
+
+       The policy it replaces was `current_role_safe() IN ('admin','marketer')`
+       on insert and on update, with no test of authorship, so a
+       marketer could already edit anybody's post: `social.editAny` is a
+       description of today rather than a widening.
+
+       What they did NOT have is delete, which was administrator only,
+       approval, which the planner gated on `isAdmin`, and connecting a
+       channel, which did not exist. None of those three is here. */
+    'social.view', 'social.draft', 'social.editAny', 'social.templates',
+    'social.tags', 'social.schedule', 'social.library', 'social.analytics',
+    'work.view', 'work.viewDepartment', 'work.create', 'work.edit',
+    'work.requestRelease', 'work.review', 'work.views', 'work.shareViews',
+    'work.projects', 'work.analytics', 'entity.setOwn',
   ],
   viewer: [
     'crm.view', 'crm.viewGlobal', 'crm.export',
+    /* The old planner policy was `auth.role() = 'authenticated'`: every
+       signed in person could read every post. Reading stays open. */
+    'social.view', 'social.analytics',
+    /* A viewer reads work and builds views over it. They can be given a
+       task and can ask to be let off one, because somebody with no way
+       to say no is somebody whose "yes" means nothing. */
+    'work.view', 'work.viewDepartment', 'work.requestRelease',
+    'work.views', 'work.projects', 'work.analytics',
   ],
 };
 
