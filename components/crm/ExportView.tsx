@@ -6,6 +6,7 @@ import {
   X, ClipboardCheck, AlertTriangle,
 } from 'lucide-react';
 import { Button, Label, Badge, Alert } from '@/components/kit/primitives';
+import { useToast } from '@/components/kit/toast';
 import { exportEmailHtml } from '@/lib/crm/export-email-html';
 import type { ExportModel } from '@/lib/crm/export-model';
 
@@ -24,6 +25,7 @@ const TONE: Record<string, 'info' | 'warning' | 'accent' | 'success' | 'neutral'
 };
 
 export function ExportView({ model: m, contactId }: { model: ExportModel; contactId: string }) {
+  const { say } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -44,6 +46,17 @@ export function ExportView({ model: m, contactId }: { model: ExportModel; contac
     a.href = `/api/crm/export/${format}?id=${contactId}`;
     a.download = '';
     a.click();
+
+    /* Say so out loud. The tick on the button was the only confirmation
+       and it is 900ms of an icon changing on the thing you just pressed,
+       which is the one place you are no longer looking once the browser
+       starts saving a file. */
+    say({
+      tone: 'success',
+      title: format === 'xlsx' ? 'Exporting as a spreadsheet' : 'Exporting as a document',
+      body: `${m.company}. It is kept for a month, so you can get it again from the bell.`,
+    });
+
     setTimeout(() => { setBusy(null); flash(format); }, 900);
   }
 

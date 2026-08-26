@@ -45,7 +45,11 @@ export async function keepAndTell(
       ? `${args.filename}. Kept here for a month, so you can download it again if you lose it.`
       : `${args.filename}. The copy could not be kept, so this is a note rather than the file. `
         + 'Open the record to run it again.',
-    link: `/dashboard/crm?id=${args.contactId}`,
+    /* The export page, not the CRM grid. It pointed at the grid, which
+       does nothing visible except re-sort itself around the row, so the
+       notification read as broken. This is the screen the export came
+       from and the one place it can be run again. */
+    link: `/export/crm/${args.contactId}`,
     actor: userId,
     subjectKind: 'account',
     subjectId: args.contactId,

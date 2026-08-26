@@ -6,6 +6,7 @@ import { Bell, CheckCheck, Settings2 } from 'lucide-react';
 import { useNotifications } from '@/lib/notifications/client';
 import type { NotificationAction, NotificationRow } from '@/lib/notifications/types';
 import { NotificationCard } from '@/components/notifications/card';
+import { KeptExports } from '@/components/notifications/exports';
 import { Button, EmptyState, Tabs } from '@/components/kit/primitives';
 import { useToast } from '@/components/kit/toast';
 
@@ -39,14 +40,14 @@ export function NotificationBell() {
   const router = useRouter();
   const { say } = useToast();
   const [open, setOpen] = useState(false);
-  const [which, setWhich] = useState<'personal' | 'team'>('personal');
+  const [which, setWhich] = useState<'personal' | 'team' | 'exports'>('personal');
   const wrap = useRef<HTMLDivElement>(null);
 
   const feed = useNotifications('all');
   const { counts, items, markRead, markAllRead, dismiss, acted, answerInvite, provisioned } = feed;
 
   const shown = useMemo(
-    () => items.filter((n) => n.audience === which),
+    () => (which === 'exports' ? [] : items.filter((n) => n.audience === which)),
     [items, which],
   );
 
@@ -165,7 +166,7 @@ export function NotificationBell() {
               letterSpacing: '-0.02em', color: 'var(--text)', flex: 1,
             }}>Notifications</span>
 
-            {shown.some((n) => !n.read_at) && (
+            {which !== 'exports' && shown.some((n) => !n.read_at) && (
               <button
                 onClick={() => markAllRead(which)}
                 title="Mark everything read"
@@ -189,9 +190,14 @@ export function NotificationBell() {
             <Tabs
               value={which}
               onChange={setWhich}
+              /* Exports get their own tab rather than a card in the
+                 list. Announced once and then buried under a fortnight
+                 of meeting invitations, a kept export is one nobody can
+                 find again, which defeats the point of keeping it. */
               tabs={[
                 { key: 'personal' as const, label: 'Yours', count: counts.personal },
                 { key: 'team' as const, label: 'The business', count: counts.team },
+                { key: 'exports' as const, label: 'Exports' },
               ]}
             />
           </div>
@@ -205,7 +211,9 @@ export function NotificationBell() {
             maxHeight: 'min(60vh, 460px)', overflowY: 'auto', overscrollBehavior: 'contain',
             flex: 1, minHeight: 0,
           }}>
-            {!provisioned ? (
+            {which === 'exports' ? (
+              <KeptExports />
+            ) : !provisioned ? (
               <Pad>The notifications tables are not in this database yet.</Pad>
             ) : feed.loading && shown.length === 0 ? (
               <Pad>Looking.</Pad>
@@ -235,9 +243,11 @@ export function NotificationBell() {
             borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)',
           }}>
             <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
-              {shown.length === 0
-                ? 'Cleared ones do not come back.'
-                : `${shown.length} here. Clearing one takes it off the list for good.`}
+              {which === 'exports'
+                ? 'Every export you still have a copy of.'
+                : shown.length === 0
+                  ? 'Cleared ones do not come back.'
+                  : `${shown.length} here. Clearing one takes it off the list for good.`}
             </span>
             <span style={{ flex: 1 }} />
             <Button
