@@ -848,6 +848,84 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.export', verbs: ['print', 'save as', 'pdf'],
     objects: ['pdf', 'to paper', 'the export', 'a hard copy'],
     phrases: ['save it as a pdf'] },
+
+  /* ---------- Work ----------
+
+     The task system is meant to be how the business runs, so the bar
+     has to reach it however somebody says it. Every one of these names
+     the capability it needs, so a viewer typing "assign this to Dean"
+     sees nothing rather than an action that appears and then refuses.
+
+     "task list" is deliberately absent from the first entry. It
+     collides with the CRM's own list actions and loses to them, so it
+     would be an object word that never wins. "tasks" and "work" already
+     carry the intent. */
+
+  { id: 'nav.work', label: 'Work', blurb: 'Tasks, delegation and projects', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work', verbs: GO,
+    objects: ['work', 'tasks', 'task', 'todo', 'to do', 'to-do', 'my work',
+              'the work tab', 'jobs', 'workload'] },
+
+  { id: 'nav.myWork', label: 'My work', blurb: 'Everything on you right now', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=my-work', verbs: [...GO, 'show'],
+    objects: ['my work', 'my tasks', 'my todo', 'what am i doing', 'what do i have on',
+              'my jobs', 'my list'] },
+
+  { id: 'nav.blockedWork', label: 'Blocked work', blurb: 'Everything stuck, oldest first', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=blocked', verbs: [...GO, 'show'],
+    objects: ['blocked', 'blocked work', 'blocked tasks', 'stuck', 'what is stuck',
+              'blockers', 'held up'] },
+
+  { id: 'nav.overdueWork', label: 'Overdue work', blurb: 'Past its date and not finished', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=overdue', verbs: [...GO, 'show'],
+    objects: ['overdue work', 'late work', 'late tasks', 'overdue tasks', 'past due work'] },
+
+  { id: 'nav.assignedByMe', label: 'Work I assigned', blurb: 'What you put on other people', kind: 'navigate',
+    capability: 'work.assignOthers', path: '/dashboard/work?view=assigned-by-me', verbs: [...GO, 'show'],
+    objects: ['work i assigned', 'tasks i assigned', 'what i delegated', 'what i gave out',
+              'assigned by me', 'my delegations'] },
+
+  { id: 'make.task', label: 'Raise a task', blurb: 'Work for you or for somebody else', kind: 'create',
+    capability: 'work.create', path: '/dashboard/work', verbs: MAKE, seed: 'add task ',
+    objects: ['task', 'todo', 'to do', 'job', 'piece of work', 'ticket'] },
+
+  { id: 'work.assign', label: 'Assign a task', blurb: 'Put work on a person or a department', kind: 'record',
+    capability: 'work.assignOthers', path: '/dashboard/work',
+    verbs: ['assign', 'give', 'hand', 'put', 'task', 'delegate'],
+    objects: ['task', 'work', 'job', 'this task', 'it'] },
+
+  { id: 'work.release', label: 'Ask to be let off a task', blurb: 'Cancel it, pass it on, or move the date', kind: 'record',
+    capability: 'work.requestRelease', path: '/dashboard/work',
+    verbs: ['hand back', 'give back', 'pass on', 'reassign', 'cannot do', 'ask off', 'push back'],
+    objects: ['task', 'this task', 'work', 'this', 'it'],
+    phrases: ['i cannot do this task', 'hand this task back', 'ask for more time on this',
+              'pass this task to somebody else'] },
+
+  { id: 'work.decide', label: 'Answer a release request', blurb: 'Grant or refuse work being handed back', kind: 'record',
+    capability: 'work.decideRelease', path: '/dashboard/work?view=waiting-for-me',
+    verbs: ['approve', 'grant', 'refuse', 'decline', 'answer'],
+    objects: ['release request', 'handback', 'the request', 'release'] },
+
+  { id: 'work.savedView', label: 'Build a view of work', blurb: 'Your own filters, layout and columns', kind: 'create',
+    capability: 'work.views', path: '/dashboard/work', verbs: [...MAKE, ...CHANGE],
+    objects: ['work view', 'task view', 'saved view', 'my own view', 'work filter',
+              'board view', 'task board', 'work layout'],
+    phrases: ['make my own work view', 'save this view', 'customise this view'] },
+
+  { id: 'work.due', label: 'Change when work is due', blurb: 'Move a deadline on a task', kind: 'record',
+    capability: 'work.setDue', path: '/dashboard/work', verbs: [...CHANGE, 'push', 'extend'],
+    objects: ['due date', 'deadline', 'when it is due', 'task date'],
+    phrases: ['push this task back', 'move the deadline', 'give this another week'] },
+
+  /* Deliberately narrow. Bare "note" belongs to the CRM's file note and
+     bare "comment" to a post's first comment, and both were here before
+     this was. An object word two actions claim is an object word neither
+     one wins on, so this one says "task" out loud. */
+  { id: 'work.note', label: 'Add a note to a task', blurb: 'Why it moved, what you found', kind: 'record',
+    capability: 'work.view', path: '/dashboard/work', verbs: [...MAKE, 'log'],
+    objects: ['task note', 'note on a task', 'note on this task', 'task comment',
+              'comment on a task', 'work note'],
+    phrases: ['leave a note on this task', 'comment on this task', 'note on this task'] },
 ];
 
 /* =============================================================

@@ -856,6 +856,97 @@ for (const o of OPERATIONS) {
   }
 }
 
+/* ---------- Work ----------
+
+   The task system is meant to be how the business runs, so the bar has
+   to reach it however somebody says it. A phrasing listed in actions.ts
+   is a guess. One asserted here is a promise, which is why these are
+   words people actually use rather than the words on the screen: nobody
+   types "work item".
+
+   The permission assertions below matter more than the reach ones. A
+   viewer typing "assign this to Dean" must see nothing, because an
+   action that appears and then refuses teaches people the tool lies. */
+
+for (const said of [
+  'work', 'tasks', 'my work', 'my tasks', 'todo', 'to do', 'to-do',
+  'the work tab', 'what do i have on', 'my list', 'workload',
+]) {
+  const reached = ROLES.some((r) =>
+    suggestActions(said, CAPS[r], 8).some((h) => h.action.path?.startsWith('/dashboard/work') ?? false));
+  ok(`"${said}" reaches Work`, reached);
+}
+
+// The saved views, each by the words somebody would use to ask for it.
+for (const [said, id] of [
+  ['my work', 'nav.myWork'],
+  ['my tasks', 'nav.myWork'],
+  ['what am i doing', 'nav.myWork'],
+  ['blocked', 'nav.blockedWork'],
+  ['what is stuck', 'nav.blockedWork'],
+  ['blocked tasks', 'nav.blockedWork'],
+  ['overdue work', 'nav.overdueWork'],
+  ['late tasks', 'nav.overdueWork'],
+  ['what i delegated', 'nav.assignedByMe'],
+  ['work i assigned', 'nav.assignedByMe'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+// Raising work.
+for (const said of ['new task', 'add a task', 'create a task', 'new job', 'raise a ticket']) {
+  ok(`"${said}" raises a task`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'make.task'));
+}
+
+/* Delegation, both directions. Being handed work you cannot do is the
+   case the whole feature exists for, so the words for handing it back
+   are asserted rather than hoped for. */
+for (const said of [
+  'i cannot do this task', 'hand this task back', 'pass this task to somebody else',
+  'ask for more time on this',
+]) {
+  ok(`"${said}" reaches the release request`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'work.release'));
+}
+
+ok('a viewer is not offered assigning work to somebody else',
+  !suggestActions('assign this task to Dean', CAPS.viewer, 8).some((h) => h.action.id === 'work.assign'));
+ok('a sales user is not offered assigning work to somebody else',
+  !suggestActions('assign this task to Dean', CAPS.sales, 8).some((h) => h.action.id === 'work.assign'));
+ok('an admin is offered assigning work',
+  suggestActions('assign this task to Dean', CAPS.admin, 8).some((h) => h.action.id === 'work.assign'));
+ok('a viewer is not offered answering a release request',
+  !suggestActions('approve this release request', CAPS.viewer, 8).some((h) => h.action.id === 'work.decide'));
+ok('an admin is offered answering a release request',
+  suggestActions('approve this release request', CAPS.admin, 8).some((h) => h.action.id === 'work.decide'));
+ok('a viewer is not offered work I assigned',
+  !suggestActions('what i delegated', CAPS.viewer, 8).some((h) => h.action.id === 'nav.assignedByMe'));
+ok('a viewer can still open Work',
+  suggestActions('work', CAPS.viewer, 8).some((h) => h.action.id === 'nav.work'));
+ok('a viewer can still ask to be let off a task',
+  suggestActions('i cannot do this task', CAPS.viewer, 8).some((h) => h.action.id === 'work.release'));
+
+/* Building a view is the reason this is not a to-do list, so the words
+   for it are a promise rather than a guess. */
+for (const said of ['save this view', 'customise this view', 'make my own work view', 'saved view']) {
+  ok(`"${said}" reaches the view builder`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'work.savedView'));
+}
+for (const said of ['move the deadline', 'push this task back', 'change the due date']) {
+  ok(`"${said}" reaches changing a due date`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'work.due'));
+}
+for (const said of ['leave a note on this task', 'comment on this task']) {
+  ok(`"${said}" reaches adding a note`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'work.note'));
+}
+ok('a viewer is not offered moving a deadline',
+  !suggestActions('move the deadline', CAPS.viewer, 8).some((h) => h.action.id === 'work.due'));
+ok('a viewer can still leave a note',
+  suggestActions('leave a note on this task', CAPS.viewer, 8).some((h) => h.action.id === 'work.note'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);
