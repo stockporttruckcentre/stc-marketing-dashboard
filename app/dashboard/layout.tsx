@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
-import { Toasts } from '@/components/kit/toast';
 import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -37,18 +36,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     created_at: new Date().toISOString(),
   };
 
-  /* The toast provider wraps the whole shell rather than a screen, so
-     anything anywhere can confirm what it just did. It renders nothing
-     until something is said. */
   return (
-    <Toasts>
-      <div className="app">
-        <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
-        <div className="main">
-          <TopBar role={p.role} />
-          <main className="page">{children}</main>
-        </div>
+    <div className="app">
+      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
+      <div className="main">
+        <TopBar role={p.role} />
+        <main className="page">{children}</main>
       </div>
-    </Toasts>
+    </div>
   );
 }

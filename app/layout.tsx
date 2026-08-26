@@ -5,6 +5,7 @@ import './globals.css';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import type { Metadata } from 'next';
+import { Toasts } from '@/components/kit/toast';
 
 export const metadata: Metadata = {
   title: 'STC Marketing Dashboard',
@@ -23,7 +24,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           document.documentElement.setAttribute('data-theme', t ? t[1] : 'dark');
         } catch(e) { document.documentElement.setAttribute('data-theme', 'dark'); }
       ` }} />
-      {children}</body>
+      {/* Every screen, not just the dashboard.
+
+          This started in the dashboard layout, which meant the customer
+          export page, at /export rather than /dashboard, had no provider
+          above it. `useToast` returns a no-op outside one by design, so
+          pressing Word confirmed nothing and raised nothing: the export
+          downloaded and the screen said the same as it had before.
+
+          It renders nothing until something is said, so there is no cost
+          to it being here. */}
+      <Toasts>{children}</Toasts></body>
     </html>
   );
 }
