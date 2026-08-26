@@ -672,9 +672,12 @@ test('a unit stored without the STC prefix is still found by typing it', async (
      existed for: it refused every bare number on a money field to stop
      one being read as a trailer, and threw away the reference with it. */
   const planned = await plan('set refurb cost on STC148909 to 143980', 'admin', db);
+  const amountPreview = planned?.preview;
   ok('a bare number that is the amount stays the amount',
-    planned?.preview?.ok === true && planned.preview.count === 1,
-    planned?.preview?.ok ? String(planned.preview.count) : planned?.preview?.why ?? 'no preview');
+    amountPreview?.ok === true && amountPreview.count === 1,
+    amountPreview
+      ? (amountPreview.ok ? String(amountPreview.count) : amountPreview.why)
+      : 'no preview');
 });
 
 test('a stock number is not a price', async () => {
