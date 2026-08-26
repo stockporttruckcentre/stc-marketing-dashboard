@@ -9,6 +9,7 @@
    Radius: 4 default, 6 cards and panels, 8 dialogs.
    Borders carry structure. Elevation is only for things that float.
    ============================================================= */
+import type React from 'react';
 import type { ReactNode, CSSProperties, ButtonHTMLAttributes } from 'react';
 
 const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
@@ -353,6 +354,32 @@ export const compactMoney = (n: number) => {
   if (Math.abs(v) >= 1_000) return '£' + Math.round(v / 1_000) + 'k';
   return '£' + v;
 };
+
+/**
+ * A button on the filled bulk bar.
+ *
+ * The bar is `--primary`, which the kit inverts between themes: navy in
+ * light, white in dark. So everything drawn on it has to invert the
+ * other way or the hairlines vanish, which is what `--bar-line` and
+ * `--bar-danger` are for. See `.crm-bulk-bar` in kit-tokens.css.
+ */
+export function InverseButton({ icon, label, onClick, danger }: {
+  icon: ReactNode; label: string;
+  onClick: (e: React.MouseEvent) => void; danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
+        background: 'transparent', cursor: 'pointer', borderRadius: 'var(--r)',
+        color: danger ? 'var(--bar-danger)' : 'inherit',
+        border: `1px solid ${danger ? 'var(--bar-danger)' : 'var(--bar-line)'}`,
+        fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+      }}
+    >{icon}{label}</button>
+  );
+}
 
 /* ---------- the shapes a whole tab is built from ----------
 

@@ -11,6 +11,7 @@
    Recreated from reference/02-forms.html and reference/05-feedback.html,
    per CLAUDE.md. The reference HTML is a prototype and is never lifted.
    ============================================================= */
+import type React from 'react';
 import { useEffect, useState } from 'react';
 import type { ReactNode, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 
@@ -332,7 +333,7 @@ export function Modal({ title, description, onClose, footer, width = 520, childr
    the dark ground.
    ============================================================= */
 export function Drawer({
-  eyebrow, title, icon, onClose, backdropProps, hint, footer, width = 660, children,
+  eyebrow, title, icon, onClose, backdropProps, hint, footer, bodyRef, width = 660, children,
 }: {
   eyebrow?: string;
   title: ReactNode;
@@ -342,6 +343,9 @@ export function Drawer({
   backdropProps?: Record<string, unknown>;
   hint?: ReactNode;
   footer?: ReactNode;
+  /* So a caller can scroll the body to the field somebody right clicked.
+     The scrolling element is in here, not in the caller. */
+  bodyRef?: React.RefObject<HTMLDivElement>;
   width?: number;
   children: ReactNode;
 }) {
@@ -407,7 +411,7 @@ export function Drawer({
           </button>
         </div>
 
-        <div style={{
+        <div ref={bodyRef} style={{
           flex: 1, minHeight: 0, overflowY: 'auto',
           padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14,
         }}>{children}</div>

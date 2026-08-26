@@ -18,7 +18,7 @@ import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker'
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
-import { Figure, Button, Alert, Badge, GridBadge, RecordHead, StatStrip, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
+import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
 import { STATUS_TONE } from '@/lib/crm/status';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox } from '@/components/kit/forms';
@@ -1080,24 +1080,6 @@ export function CrmWorkspace({
 // ============ subcomponents ============
 
 /** A button on the navy bulk bar. Borders only, so the bar stays one object. */
-function InverseButton({ icon, label, onClick, danger }: {
-  icon: React.ReactNode; label: string;
-  onClick: (e: React.MouseEvent) => void; danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
-        background: 'transparent', cursor: 'pointer', borderRadius: 'var(--r)',
-        color: danger ? 'var(--bar-danger)' : 'inherit',
-        border: `1px solid ${danger ? 'var(--bar-danger)' : 'var(--bar-line)'}`,
-        fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-      }}
-    >{icon}{label}</button>
-  );
-}
-
 /**
  * Which list.
  *

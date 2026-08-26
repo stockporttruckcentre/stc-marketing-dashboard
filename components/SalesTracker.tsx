@@ -231,7 +231,8 @@ export function SalesTracker({
       { field: 'category', headerName: 'Cat', width: 70, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'A', 'B', 'C'] },
         cellRenderer: (p: ICellRendererParams<TrackerRow, string>) => p.value
-          ? <span className={`maint-cat maint-cat--${p.value.toLowerCase()}`}>{p.value}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span> },
+          ? <GridBadge tone="neutral">{p.value}</GridBadge>
+          : <span style={{ color: 'var(--text-subtle)' }}>—</span> },
       { field: 'account_manager', headerName: 'Manager', width: 100, editable: true, valueSetter: saveCell },
       { field: 'source', headerName: 'Source', width: 130, editable: true, valueSetter: saveCell },
       { field: 'vehicles', headerName: 'Vehicles', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
