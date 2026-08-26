@@ -230,6 +230,49 @@ word that silently changed whose numbers a question answered.
 
 ---
 
+## Finished work goes to main without being asked
+
+Supabase does not load on a preview branch, so anything the user has to look at
+to judge has to be on `main`. A branch they cannot open is a branch they cannot
+give an opinion on, and asking permission every time turns a two second look
+into a round trip.
+
+So the sequence, every time, unprompted:
+
+1. Commit on the feature branch.
+2. `git push -u origin <branch>`.
+3. `git checkout main && git merge --no-ff <branch>` and push it.
+4. Go back to the feature branch and carry on.
+
+**Then say what to undo it with.** A merge to main without a stated way back is
+the thing that makes this rule risky, and naming the commit is the whole of what
+makes it safe:
+
+```bash
+git revert -m 1 <merge-sha>     # take one merge back out, keeping the history
+git reset --hard <sha> && git push --force-with-lease origin main   # last resort
+```
+
+Every merge is `--no-ff`, so each one is a single revertible commit rather than
+a handful of loose ones. The feature branch is left in place afterwards, which
+is what makes a revert recoverable rather than a loss.
+
+## Any SQL to run goes into the chat as a file
+
+Never only into the repository. A migration committed and not handed over is a
+migration nobody runs, and the screen that needs it says "not wired up yet"
+until somebody notices.
+
+Two files each time: the migrations, and a second one that reads back what the
+first one did. Both as `.txt` so they open rather than download. Say plainly
+that they go into the Supabase SQL editor and in which order.
+
+Generate the first with `scripts/sql/bundle-migrations.sh --since <migration>`
+rather than by hand, and prove it with
+`scripts/sql/bundle-twice-check.sh --since <migration>` before handing it over:
+the note in that file says the bundle is safe to run twice, and that claim is
+worth nothing unless it has just been carried out.
+
 ## Rebranding is gradual and user-ordered
 
 The rebrand happens in the order the user sets, one piece at a time.
