@@ -18,7 +18,9 @@ import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker'
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
-import { Figure, Button, Alert, Badge, type Tone } from '@/components/kit/primitives';
+import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
+import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
+import { STATUS_TONE } from '@/lib/crm/status';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
@@ -28,35 +30,6 @@ import { ukDateShort } from '@/lib/format/date';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
-const STATUS_TONE: Record<string, Tone> = {
-  lead: 'info', contacted: 'warning', quoted: 'accent',
-  won: 'success', customer: 'success', lost: 'neutral',
-};
-
-const TONE_COLOR: Record<Tone, string> = {
-  neutral: 'var(--text-subtle)', info: 'var(--info)', success: 'var(--success)',
-  warning: 'var(--warning)', danger: 'var(--danger)', accent: 'var(--accent)',
-};
-
-/**
- * The kit's table badge, drawn inline because an AG Grid cell renderer
- * cannot inherit the kit's own Badge sizing without fighting the row's
- * 36px line box.
- */
-function GridBadge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5, height: 20, padding: '0 8px',
-      borderRadius: 'var(--r-sm)', color: TONE_COLOR[tone],
-      background: 'color-mix(in srgb, currentColor 13%, transparent)',
-      fontSize: 11, fontWeight: 600, letterSpacing: '0.01em',
-      textTransform: 'capitalize', whiteSpace: 'nowrap',
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: 'var(--r-full)', background: 'currentColor' }} />
-      {children}
-    </span>
-  );
-}
 
 type Member = { list_id: string; user_id: string; can_edit: boolean };
 
@@ -729,60 +702,28 @@ export function CrmWorkspace({
   const listOwnerName = profiles.find((p) => p.id === selectedList?.owner_id)?.full_name;
 
   return (
-    /* One kit scope for the whole tab, and only one.
-       Putting `.kit` on individual clusters is what produced the bands of
-       slightly-different dark: `.kit` paints `var(--bg)`, so every wrapper
-       laid its own canvas over the page and every seam showed. The page is
-       kit or it is not. This one is.
-
-       Fixed height rather than natural flow so the table gets everything
-       left over. 52px top bar, 24px page padding above, 56px below. */
-    <div className="kit" style={{
-      height: 'calc(100vh - 132px)',
-      minHeight: 520,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 12,
-      background: 'transparent',
-    }}>
+    <TabShell>
 
       {/* ---- header. Title left, the actions that are always available
               right, which is the kit's own header shape and the reason the
               top right no longer sits empty. ---- */}
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 'var(--r-md)', padding: '14px 16px',
-        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-      }}>
-        <span style={{
-          width: 40, height: 40, borderRadius: 'var(--r)', flex: 'none',
-          background: 'var(--bg-subtle)', color: 'var(--accent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Users size={20} />
-        </span>
-
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-            <h1 style={{
-              margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
-              letterSpacing: '-0.03em', color: 'var(--text)', lineHeight: 1.2,
-            }}>{selectedList?.name ?? 'CRM'}</h1>
-            {listIsGlobal
-              ? <Badge tone="info" dot>Shared</Badge>
-              : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
-            <Badge tone="neutral">{roleLabel(profile.role)}</Badge>
-          </div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginTop: 3 }}>
-            {scope.kind === 'all'
-              ? `${rows.length} contacts.`
-              : `${scopeLabel}: ${visibleRows.length} of ${rows.length} contacts.`}
-            {' '}
-            {listIsGlobal ? 'Everyone can see this list.' : 'Only the owner and anyone it is shared with.'}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <RecordHead
+        icon={<Users size={20} />}
+        title={selectedList?.name ?? 'CRM'}
+        badges={<>
+          {listIsGlobal
+            ? <Badge tone="info" dot>Shared</Badge>
+            : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
+          <Badge tone="neutral">{roleLabel(profile.role)}</Badge>
+        </>}
+        sub={<>
+          {scope.kind === 'all'
+            ? `${rows.length} contacts.`
+            : `${scopeLabel}: ${visibleRows.length} of ${rows.length} contacts.`}
+          {' '}
+          {listIsGlobal ? 'Everyone can see this list.' : 'Only the owner and anyone it is shared with.'}
+        </>}
+        actions={<>
           {caps.has('crm.import') && (
             <Button size="sm" variant="secondary" onClick={openImport} disabled={importing}>
               {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
@@ -798,8 +739,8 @@ export function CrmWorkspace({
               <Plus size={13} /> Add contact
             </Button>
           )}
-        </div>
-      </div>
+        </>}
+      />
 
       {/* ---- pipeline at a glance.
 
@@ -808,40 +749,13 @@ export function CrmWorkspace({
               qualifier as small subtle text beside it. Colouring five
               numbers five ways was rule one broken twice over, and it
               made a quoted count of zero shout in red. ---- */}
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 'var(--r-md)', display: 'flex', flexWrap: 'wrap', overflow: 'hidden',
-      }}>
-        {[
-          { label: 'Total', value: counts.all, note: 'in this view' },
-          { label: 'Leads', value: counts.lead, note: 'not yet approached' },
-          { label: 'Contacted', value: counts.contacted, note: 'in conversation' },
-          { label: 'Quoted', value: counts.quoted, note: 'awaiting a decision' },
-          { label: 'Won', value: counts.won, note: `${counts.lost} lost` },
-        ].map((f, i) => (
-          <div key={f.label} style={{
-            flex: '1 1 140px', minWidth: 0, padding: '13px 18px',
-            display: 'flex', flexDirection: 'column', gap: 4,
-            borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
-          }}>
-            <span style={{
-              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
-              letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
-            }}>{f.label}</span>
-            <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-              <span style={{
-                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 24,
-                letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums',
-                color: 'var(--text)', lineHeight: 1.1,
-              }}>{f.value}</span>
-              <span style={{
-                fontSize: 11.5, color: 'var(--text-subtle)',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{f.note}</span>
-            </span>
-          </div>
-        ))}
-      </div>
+      <StatStrip items={[
+        { label: 'Total', value: counts.all, note: 'in this view' },
+        { label: 'Leads', value: counts.lead, note: 'not yet approached' },
+        { label: 'Contacted', value: counts.contacted, note: 'in conversation' },
+        { label: 'Quoted', value: counts.quoted, note: 'awaiting a decision' },
+        { label: 'Won', value: counts.won, note: `${counts.lost} lost` },
+      ]} />
 
       {/* ---- one toolbar. Whose accounts, which list, and a search, all on
               a single line. This was three stacked rows and it read as
@@ -986,9 +900,9 @@ export function CrmWorkspace({
         />
       </div>
 
-      <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+      <GridHint>
         Click a row to open it. Right click any cell to edit, enrich, move or delete it.
-      </div>
+      </GridHint>
 
       {assignMenu && (
         <AssignMenu
@@ -1159,31 +1073,13 @@ export function CrmWorkspace({
           }}
         />
       )}
-    </div>
+    </TabShell>
   );
 }
 
 // ============ subcomponents ============
 
 /** A button on the navy bulk bar. Borders only, so the bar stays one object. */
-function InverseButton({ icon, label, onClick, danger }: {
-  icon: React.ReactNode; label: string;
-  onClick: (e: React.MouseEvent) => void; danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
-        background: 'transparent', cursor: 'pointer', borderRadius: 'var(--r)',
-        color: danger ? 'var(--bar-danger)' : 'inherit',
-        border: `1px solid ${danger ? 'var(--bar-danger)' : 'var(--bar-line)'}`,
-        fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-      }}
-    >{icon}{label}</button>
-  );
-}
-
 /**
  * Which list.
  *
@@ -1558,102 +1454,6 @@ function ShareModal({ list, profiles, members, onShare, onUnshare, onClose }: {
   );
 }
 
-
-// Viewport-aware positioning hook for floating menus. Returns a ref to attach to the menu.
-// After mount, measures the menu and pushes it up/left if it would overflow the viewport.
-function useEdgeAwarePosition(x: number, y: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const margin = 8;
-    let nextLeft = x;
-    let nextTop = y;
-    if (x + rect.width + margin > window.innerWidth) {
-      nextLeft = Math.max(margin, x - rect.width);
-    }
-    if (y + rect.height + margin > window.innerHeight) {
-      nextTop = Math.max(margin, y - rect.height);
-    }
-    if (nextLeft !== pos.left || nextTop !== pos.top) {
-      setPos({ left: nextLeft, top: nextTop });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [x, y]);
-  return { ref, pos };
-}
-
-
-/* =============================================================
-   Floating menus.
-
-   One shell for all of them, so a right click on a row and a right click
-   on empty space produce the same object rather than two near misses.
-   The kit's own rule applies: a 1px border and a real elevation, because
-   this is a thing that genuinely floats.
-   ============================================================= */
-function EdgeAwareCtxMenu({ x, y, width = 220, children }: {
-  x: number; y: number; width?: number; children: React.ReactNode;
-}) {
-  const { ref, pos } = useEdgeAwarePosition(x, y);
-  return (
-    <div
-      ref={ref}
-      className="kit"
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: 'fixed', left: pos.left, top: pos.top, zIndex: 70, width,
-        background: 'var(--surface-raised)', border: '1px solid var(--border)',
-        borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 5,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function MenuHead({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      padding: '7px 9px 8px', fontFamily: 'var(--panton)', fontWeight: 700,
-      fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase',
-      color: 'var(--text-subtle)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    }}>{children}</div>
-  );
-}
-
-function MenuItem({ icon, label, onClick, disabled, danger, title }: {
-  icon?: React.ReactNode; label: React.ReactNode; onClick: () => void;
-  disabled?: boolean; danger?: boolean; title?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
-        border: 'none', background: 'transparent', padding: '7px 9px',
-        borderRadius: 'var(--r-sm)', fontFamily: 'var(--inter)', fontSize: 13,
-        letterSpacing: '-0.01em',
-        color: disabled ? 'var(--text-subtle)' : danger ? 'var(--danger)' : 'var(--text)',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-      }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--surface-sunken)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      {icon && <span style={{ display: 'flex', flexShrink: 0, color: 'currentColor', opacity: 0.75 }}>{icon}</span>}
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-    </button>
-  );
-}
-
-function MenuRule() {
-  return <div style={{ height: 1, background: 'var(--border)', margin: '5px 0' }} />;
-}
 
 function ContextMenu({ x, y, row, field, canEdit, enrichAllowed, onView, onEdit, onEnrich, onDelete, onMove }: any) {
   // What Lusha can actually return, so the option is not offered where it cannot work.

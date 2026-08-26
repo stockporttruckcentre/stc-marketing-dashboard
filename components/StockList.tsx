@@ -12,6 +12,15 @@ import { ImportDialog } from '@/components/crm/ImportDialog';
 import { STOCK_TRAILERS } from '@/lib/import/dictionary';
 import { commitStockImport as writeStock, prepareStock } from '@/lib/import/stock';
 import type { StockTrailer, StockStatus, Profile } from '@/lib/types';
+import {
+  Alert, Badge, Button, Card, Chip, EmptyState, GridBadge, GridHint, IconButton,
+  InverseButton, money, RecordHead, Row, SearchInput, SectionHead, StatStrip,
+  TabShell, Tabs, type Tone,
+} from '@/components/kit/primitives';
+import {
+  Drawer, Field, Modal, OptionCard, Select, Split, TextArea, TextInput,
+} from '@/components/kit/forms';
+import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule } from '@/components/kit/menus';
 
 type StatusTab = 'all' | StockStatus;
 
@@ -20,6 +29,14 @@ const STATUS_LABEL: Record<StockStatus, string> = {
   sold: 'Sold', rental: 'Rental', scrap: 'Scrap',
 };
 const STATUS_ORDER: StockStatus[] = ['in_stock','new_build','sales_order','rental','sold','scrap'];
+
+/* What a unit's state looks like. Sold is the success, scrap is the end
+   of the line, and everything between is neutral or waiting: colouring
+   all six would be rule one broken five times. */
+const STOCK_TONE: Record<StockStatus, Tone> = {
+  in_stock: 'info', new_build: 'warning', sales_order: 'accent',
+  rental: 'neutral', sold: 'success', scrap: 'neutral',
+};
 
 const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
 const fmtMoney = (v: number | null | undefined) => (v == null ? '' : GBP.format(Number(v)));
@@ -110,12 +127,12 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
       { field: 'stc_no', headerName: 'STC No', width: 100, pinned: 'left', editable: canEdit, valueSetter: saveCell },
       { field: 'category', headerName: 'Category', width: 110, editable: canEdit, valueSetter: saveCell,
         cellRenderer: (p: ICellRendererParams<StockTrailer, string>) => p.value
-          ? <span className="pill" style={{ fontSize: 10.5 }}>{p.value}</span> : null },
+          ? <GridBadge tone="neutral">{p.value}</GridBadge> : null },
       { field: 'status', headerName: 'Status', width: 110, editable: canEdit, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: STATUS_ORDER },
         cellRenderer: (p: ICellRendererParams<StockTrailer, StockStatus>) => p.value
-          ? <span className={`pill pill--${p.value}`}><span className="pill__dot" />{STATUS_LABEL[p.value]}</span> : null },
+          ? <GridBadge tone={STOCK_TONE[p.value] ?? 'neutral'}>{STATUS_LABEL[p.value]}</GridBadge> : null },
       { field: 'year', headerName: 'Year', width: 75, editable: canEdit, valueSetter: saveCell,
         valueParser: p => p.newValue === '' ? null : Number(p.newValue) },
       { field: 'make', headerName: 'Make', width: 110, editable: canEdit, valueSetter: saveCell },
@@ -153,15 +170,17 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     base.push({
       headerName: '', width: 56, pinned: 'right', sortable: false, filter: false, editable: false,
       cellRenderer: (p: ICellRendererParams<StockTrailer>) => (
-        <div className="row" style={{ gap: 4 }}>
-          <button onClick={() => setEditing({ row: p.data! })} className="btn btn--icon btn--sm" title="Full view"><Edit2 size={12} /></button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: '100%' }}>
+          <IconButton label="Open the unit" onClick={() => setEditing({ row: p.data! })}>
+            <Edit2 size={13} />
+          </IconButton>
           {canEdit && (
-            <button onClick={async () => {
+            <IconButton label="Delete this unit" danger onClick={async () => {
               if (!confirm(`Delete trailer ${p.data!.stc_no || p.data!.chassis_number || p.data!.id}?`)) return;
               const { error } = await supabase.from('stock_trailers').delete().eq('id', p.data!.id);
               if (error) { setMessage(error.message); return; }
               setRows(r => r.filter(x => x.id !== p.data!.id));
-            }} className="btn btn--icon btn--sm" style={{ color: 'var(--stc-red-300)' }} title="Delete"><Trash2 size={12} /></button>
+            }}><Trash2 size={13} /></IconButton>
           )}
         </div>
       ),
@@ -322,30 +341,46 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
   }
 
   return (
-    <div>
-      <div className="page-head">
-        <div>
-          <div className="page-head__eyebrow">Sales · Trailer stock</div>
-          <h1 className="page-head__title"><Truck size={26} style={{ color: 'var(--stc-red)' }} /><span>Stock<span style={{ color: 'var(--stc-red)' }}>.</span></span></h1>
-          <div className="page-head__sub">
-            {totals.count} units in view · Total NBV <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totals.totalNbv)}</strong>
-            {isSoldOrOrder && (
-              <>
-                {' '}· Sale value <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totals.totalSale)}</strong>
-                {' '}· Profit <strong style={{ color: 'var(--fg-1)' }}>{fmtMoney(totals.totalProfit)}</strong>
-              </>
-            )}
-          </div>
-        </div>
-        {canEdit && (
-          <button onClick={() => setShowImport(true)} className="btn">
-            <Upload size={14} /> Import
-          </button>
-        )}
-        {canEdit && <button onClick={addRow} className="btn btn--primary"><Plus size={14} /> Add trailer</button>}
-      </div>
+    <TabShell>
 
-      {/* Status tabs */}
+      {/* The same header shape the CRM pipeline uses. */}
+      <RecordHead
+        icon={<Truck size={20} />}
+        title="Trailer stock"
+        badges={<>
+          <Badge tone="neutral" dot>{tab === 'all' ? 'Everything' : STATUS_LABEL[tab as StockStatus]}</Badge>
+          {category && <Badge tone="neutral">{category}</Badge>}
+        </>}
+        sub={<>
+          {totals.count} unit{totals.count === 1 ? '' : 's'} in view
+          {filtered.length !== rows.length ? `, of ${rows.length} in the yard.` : '.'}
+        </>}
+        actions={canEdit ? <>
+          <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
+            <Upload size={13} /> Import
+          </Button>
+          <Button size="sm" variant="primary" onClick={addRow}>
+            <Plus size={13} /> Add trailer
+          </Button>
+        </> : undefined}
+      />
+
+      {/* What the units in view are worth. These were bold figures run
+          together in the sub-line, where three sums read as one. */}
+      <StatStrip items={isSoldOrOrder ? [
+        { label: 'Units', value: totals.count, note: 'in view' },
+        { label: 'Book value', value: fmtMoney(totals.totalNbv) || '—', note: 'total NBV' },
+        { label: 'Sale value', value: fmtMoney(totals.totalSale) || '—', note: 'invoiced' },
+        { label: 'Profit', value: fmtMoney(totals.totalProfit) || '—', note: 'on these units' },
+        { label: 'Categories', value: categoriesInTab.length, note: 'of trailer' },
+      ] : [
+        { label: 'Units', value: totals.count, note: 'in view' },
+        { label: 'Book value', value: fmtMoney(totals.totalNbv) || '—', note: 'total NBV' },
+        { label: 'In stock', value: counts.in_stock, note: 'ready to sell' },
+        { label: 'New build', value: counts.new_build, note: 'being built' },
+        { label: 'Categories', value: categoriesInTab.length, note: 'of trailer' },
+      ]} />
+
       {showImport && (
         <ImportDialog
           dict={STOCK_TRAILERS}
@@ -360,54 +395,83 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
         />
       )}
 
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <button onClick={() => { setTab('all'); setCategory(null); }} className={`news-chip ${tab === 'all' ? 'is-active' : ''}`}>
-          All <span className="news-chip__count">{counts.all}</span>
-        </button>
-        {STATUS_ORDER.map(s => (
-          <button key={s} onClick={() => { setTab(s); setCategory(null); }} className={`news-chip ${tab === s ? 'is-active' : ''}`}>
-            {s === 'in_stock' && <Package size={11} />}
-            {s === 'new_build' && <Wrench size={11} />}
-            {s === 'sales_order' && <ShoppingCart size={11} />}
-            {s === 'sold' && <Briefcase size={11} />}
-            {s === 'scrap' && <Archive size={11} />}
-            {STATUS_LABEL[s]} <span className="news-chip__count">{counts[s]}</span>
-          </button>
-        ))}
-        <div className="news-search" style={{ marginLeft: 'auto' }}>
-          <Search size={14} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="STC no, chassis, make, model, customer, location..." />
-        </div>
-      </div>
+      {/* Where a unit is in its life. The tab's own navigation, so
+          underline tabs, and the category chips below filter within
+          whichever one is open. */}
+      <Tabs
+        value={tab}
+        onChange={(v) => { setTab(v); setCategory(null); }}
+        tabs={[
+          { key: 'all' as StatusTab, label: 'All', count: counts.all },
+          ...STATUS_ORDER.map((st) => ({
+            key: st as StatusTab, label: STATUS_LABEL[st], count: counts[st],
+          })),
+        ]}
+      />
 
-      {/* Category sub-filter (especially useful on the In Stock tab where the original sheets group by category) */}
-      {categoriesInTab.length > 1 && (
-        <div className="toolbar" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 600 }}>CATEGORY:</span>
-          <button onClick={() => setCategory(null)} className={`news-chip ${category === null ? 'is-active' : ''}`}>All</button>
-          {categoriesInTab.map(c => (
-            <button key={c} onClick={() => setCategory(c === category ? null : c)}
-              className={`news-chip ${category === c ? 'is-active' : ''}`}>{c}</button>
-          ))}
-        </div>
-      )}
-
-      {selectedCount > 0 && canEdit && (
-        <div className="card" style={{ padding: 10, marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(207,36,23,0.06)', borderColor: 'rgba(207,36,23,0.3)' }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--fg-1)' }}>
-            {selectedCount} selected
+      {/* One toolbar, like the CRM's: the sub filter, a way back, and a
+          search, all on a line. */}
+      {selectedCount > 0 && canEdit ? (
+        <div className="crm-bulk-bar" style={{
+          display: 'flex', alignItems: 'center', gap: 11, flexWrap: 'wrap',
+          padding: '9px 14px', borderRadius: 'var(--r-md)',
+          background: 'var(--primary)', color: 'var(--primary-fg)',
+        }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {selectedCount} {selectedCount === 1 ? 'unit' : 'units'} selected
           </span>
-          <div className="toolbar__spacer" />
-          <button onClick={() => setBulkMove(true)} className="btn btn--sm"><Move size={12} /> Move to status…</button>
-          <button onClick={() => setBulkLocation(true)} className="btn btn--sm"><MapPin size={12} /> Change location…</button>
-          <button onClick={bulkDelete} className="btn btn--sm" style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
-          <button onClick={() => gridRef.current?.api.deselectAll()} className="btn btn--sm btn--ghost"><X size={12} /> Clear</button>
+          <span style={{ width: 1, height: 18, background: 'var(--bar-line)' }} />
+          <InverseButton icon={<Move size={13} />} label="Move to status"
+            onClick={() => setBulkMove(true)} />
+          <InverseButton icon={<MapPin size={13} />} label="Change location"
+            onClick={() => setBulkLocation(true)} />
+          <InverseButton icon={<Trash2 size={13} />} label="Delete" onClick={bulkDelete} danger />
+          <span style={{ flex: 1 }} />
+          <button onClick={() => gridRef.current?.api.deselectAll()} aria-label="Clear selection"
+            style={{ display: 'flex', border: 'none', background: 'transparent', color: 'inherit', opacity: 0.75, cursor: 'pointer' }}>
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+          padding: '10px 14px', borderRadius: 'var(--r-md)',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+        }}>
+          {categoriesInTab.length > 1 && (
+            <>
+              <Chip active={category === null} onClick={() => setCategory(null)}>All categories</Chip>
+              {categoriesInTab.map((c) => (
+                <Chip key={c} active={category === c}
+                  onClick={() => setCategory(c === category ? null : c)}>{c}</Chip>
+              ))}
+            </>
+          )}
+
+          {(query || category || tab !== 'all') && (
+            <button onClick={() => { setQuery(''); setCategory(null); setTab('all'); }} style={{
+              background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
+              color: 'var(--accent)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+              textDecoration: 'underline', textUnderlineOffset: 3,
+            }}>Clear</button>
+          )}
+
+          <span style={{ flex: 1 }} />
+
+          <div style={{ width: 280, maxWidth: '100%' }}>
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Stock number, chassis, make, customer, location"
+              icon={<Search size={14} />}
+            />
+          </div>
         </div>
       )}
 
-      {message && <div className="alert alert--info" style={{ marginTop: 12 }}>{message}</div>}
+      {message && <Alert tone="info">{message}</Alert>}
 
-      <div className="ag-theme-quartz-dark" style={{ height: 'calc(100vh - 350px)', marginTop: 14, minHeight: 480 }}>
+      <div className="kit-grid ag-theme-quartz" style={{ flex: 1, minHeight: 260 }}>
         <AgGridReact<StockTrailer>
           ref={gridRef}
           rowData={filtered}
@@ -502,7 +566,12 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
         setRows(r => r.map(x => x.id === editing.row.id ? { ...x, ...patch } : x));
         setEditing({ ...editing, row: { ...editing.row, ...patch } });
       }} />}
-    </div>
+
+      <GridHint>
+        Double click a unit to open it. Right click any cell to edit, move or
+        delete it.
+      </GridHint>
+    </TabShell>
   );
 }
 
@@ -583,136 +652,127 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
   const computedProfitPct = edit.sales_price ? computedProfit / Number(edit.sales_price) : null;
 
   return (
-    <div className="drawer-bg" {...dismiss.backdropProps}>
-      {dismiss.hint}
-      <div className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer__head">
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="page-head__eyebrow">Stock · {edit.category ?? edit.status}</div>
-            <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              <Truck size={20} style={{ color: 'var(--stc-red)', flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {edit.stc_no || edit.chassis_number || 'Untitled trailer'}
-              </span>
-            </h2>
-            {(edit.year || edit.make || edit.model) && (
-              <div style={{ color: 'var(--fg-3)', fontSize: 13, marginTop: 4 }}>
-                {[edit.year, edit.make, edit.model].filter(Boolean).join(' ')}
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} className="btn btn--icon" style={{ flexShrink: 0 }}><X size={16} /></button>
-        </div>
-        <div ref={bodyRef} className="drawer__body">
-          {/* Tracker linkage banner: yours, or someone else's */}
+    <Drawer
+      eyebrow={`Stock · ${[edit.year, edit.make, edit.model].filter(Boolean).join(' ') || (edit.category ?? edit.status)}`}
+      title={edit.stc_no || edit.chassis_number || 'Untitled trailer'}
+      icon={<Truck size={18} />}
+      onClose={onClose}
+      backdropProps={dismiss.backdropProps as Record<string, unknown>}
+      hint={dismiss.hint}
+      bodyRef={bodyRef}
+      footer={<>
+        <span style={{ flex: 1 }} />
+        {saving && <Loader size={14} className="spin" />}
+        <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
+      </>}
+    >
+          {/* Whose pipeline this unit is in: yours, or somebody else's. */}
           {myTrackerRow && (
-            <div className="card" style={{ padding: 12, background: 'rgba(46,160,67,0.08)', borderColor: 'rgba(46,160,67,0.35)' }}>
-              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
-                <Send size={16} style={{ color: '#5fb572', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
-                  This trailer is on <strong>your Sales tracker</strong> at status <strong>{myTrackerRow.status}</strong>.
-                </div>
-                <button onClick={() => router?.push(`/dashboard/leads?contact=${myTrackerRow.tracker_row_id}`)} className="btn btn--sm btn--primary">
-                  View in tracker <ArrowRight size={12} />
-                </button>
-              </div>
-            </div>
+            <Row>
+              <Send size={15} style={{ color: 'var(--success)', flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text)' }}>
+                On your tracker, at <strong>{myTrackerRow.status}</strong>.
+              </span>
+              <Button size="sm" variant="secondary"
+                onClick={() => router?.push(`/dashboard/leads?contact=${myTrackerRow.tracker_row_id}`)}>
+                Open it <ArrowRight size={12} />
+              </Button>
+            </Row>
           )}
           {!myTrackerRow && othersTracking.length > 0 && (
-            <div className="card" style={{ padding: 12, background: 'rgba(91,141,239,0.06)', borderColor: 'rgba(91,141,239,0.3)' }}>
-              <div style={{ fontSize: 12.5 }}>
-                Tracked by: {othersTracking.map((o, i) => (
-                  <span key={i} className="mono" style={{ marginRight: 8 }}>
-                    <strong>{o.owner_name}</strong> ({o.status}){i < othersTracking.length - 1 ? ',' : ''}
+            <Alert tone="info">
+              <span>
+                On {othersTracking.map((o, i) => (
+                  <span key={i}>
+                    <strong style={{ color: 'var(--text)' }}>{o.owner_name}</strong>&apos;s tracker at {o.status}
+                    {i < othersTracking.length - 1 ? ', ' : ''}
                   </span>
-                ))}
-              </div>
-            </div>
+                ))}.
+              </span>
+            </Alert>
           )}
 
           {/* Sold by panel - visible to anyone when status is sold (no commission shown) */}
           {edit.status === 'sold' && soldBy && (
-            <div className="card" style={{ padding: 14, background: 'rgba(127,127,127,0.08)', borderColor: 'var(--border-strong)' }}>
-              <div className="field__label" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--fg-2)' }}>
-                <PoundSterling size={12} /> SALE RECORD
-              </div>
-              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                <strong>{soldBy.sold_by}</strong> sold this trailer
+            <Card padded={false}>
+              <SectionHead title="Sale record" />
+              <div style={{ padding: '12px 14px 14px', fontSize: 13, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                <strong style={{ color: 'var(--text)' }}>{soldBy.sold_by}</strong> sold this trailer
                 {soldBy.dispatch_date ? ` on ${new Date(soldBy.dispatch_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : soldBy.order_date ? ` on ${new Date(soldBy.order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}
-                {soldBy.customer ? <> to <strong>{soldBy.customer}</strong></> : ''}
-                {soldBy.sale_price ? <> for <strong>£{Number(soldBy.sale_price).toLocaleString()}</strong></> : ''}.
+                {soldBy.customer ? <> to <strong style={{ color: 'var(--text)' }}>{soldBy.customer}</strong></> : ''}
+                {soldBy.sale_price ? <> for <strong style={{ color: 'var(--text)' }}>{money(Number(soldBy.sale_price))}</strong></> : ''}.
               </div>
-            </div>
+            </Card>
           )}
 
           {/* IDENTITY */}
           <Section title="Identity">
-            <div className="split-2">
+            <Split>
               <Field label="STC No"><Input v={edit.stc_no} onSave={(v) => save('stc_no', v)} disabled={!canEdit} /></Field>
               <Field label="Chassis No"><Input v={edit.chassis_number} onSave={(v) => save('chassis_number', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Ministry No"><Input v={edit.ministry_no} onSave={(v) => save('ministry_no', v)} disabled={!canEdit} /></Field>
               <Field label="Supplier No"><Input v={edit.supplier_no} onSave={(v) => save('supplier_no', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Supplier"><Input v={edit.supplier} onSave={(v) => save('supplier', v)} disabled={!canEdit} /></Field>
               <Field label="Trade In?">
-                <select className="input" disabled={!canEdit} value={edit.trade_in == null ? '' : (edit.trade_in ? 'yes' : 'no')} onChange={(e) => save('trade_in', e.target.value === '' ? null : e.target.value === 'yes')}>
+                <Select value={edit.trade_in == null ? '' : (edit.trade_in ? 'yes' : 'no')} onChange={(v) => { if (canEdit) save('trade_in', v === '' ? null : v === 'yes'); }}>
                   <option value="">—</option><option value="yes">Yes</option><option value="no">No</option>
-                </select>
+                </Select>
               </Field>
-            </div>
+            </Split>
           </Section>
 
           {/* VEHICLE */}
           <Section title="Trailer">
-            <div className="split-3">
+            <Split cols={3}>
               <Field label="Year"><Input type="number" v={edit.year} onSave={(v) => save('year', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
               <Field label="Make"><Input v={edit.make} onSave={(v) => save('make', v)} disabled={!canEdit} /></Field>
               <Field label="Model"><Input v={edit.model} onSave={(v) => save('model', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Side Aperture"><Input v={edit.side_aperture} onSave={(v) => save('side_aperture', v)} disabled={!canEdit} /></Field>
               <Field label="Door Type"><Input v={edit.door_type} onSave={(v) => save('door_type', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Colour"><Input v={edit.colour} onSave={(v) => save('colour', v)} disabled={!canEdit} /></Field>
               <Field label="Axle Type"><Input v={edit.axle_type} onSave={(v) => save('axle_type', v)} disabled={!canEdit} /></Field>
-            </div>
+            </Split>
             <Field label="Description"><Input v={edit.description} onSave={(v) => save('description', v)} disabled={!canEdit} /></Field>
-            <div className="split-3">
+            <Split cols={3}>
               <Field label="MOT Date"><Input type="date" v={edit.mot_date} onSave={(v) => save('mot_date', v || null)} disabled={!canEdit} /></Field>
               <Field label="Received Date"><Input type="date" v={edit.received_date} onSave={(v) => save('received_date', v || null)} disabled={!canEdit} /></Field>
               <Field label="Paid?"><Input v={edit.paid_status} onSave={(v) => save('paid_status', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Location"><Input v={edit.location} onSave={(v) => save('location', v)} disabled={!canEdit} /></Field>
               <Field label="Sales Rep"><Input v={edit.sales_rep} onSave={(v) => save('sales_rep', v)} disabled={!canEdit} /></Field>
-            </div>
+            </Split>
           </Section>
 
           {/* STATUS + CATEGORY */}
           <Section title="Status & Category">
-            <div className="split-3">
+            <Split cols={3}>
               <Field label="Status">
-                <select className="input" disabled={!canEdit} value={edit.status} onChange={(e) => save('status', e.target.value as StockStatus)}>
+                <Select value={edit.status} onChange={(v) => { if (canEdit) save('status', v as StockStatus); }}>
                   {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                </select>
+                </Select>
               </Field>
               <Field label="Category"><Input v={edit.category} onSave={(v) => save('category', v)} disabled={!canEdit} /></Field>
               <Field label="Status text (paint condition etc.)"><Input v={edit.status_text} onSave={(v) => save('status_text', v)} disabled={!canEdit} /></Field>
-            </div>
+            </Split>
           </Section>
 
           {/* FINANCIALS */}
           <Section title="Financials">
-            <div className="split-3">
+            <Split cols={3}>
               <Field label="NBV (£)"><Input type="number" step="0.01" v={edit.nbv} onSave={(v) => save('nbv', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
               <Field label="Refurb costs (£)"><Input type="number" step="0.01" v={edit.refurb_costs} dataField="refurb_costs" onSave={(v) => save('refurb_costs', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
               <Field label="Refurb at sale (£)"><Input type="number" step="0.01" v={edit.refurb_costs_at_sale} onSave={(v) => save('refurb_costs_at_sale', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
-            </div>
-            <div className="card" style={{ padding: 10, background: 'var(--bg-3)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            </Split>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
               <ComputedBox label="Total NBV" value={fmtMoney(totalNbv)} />
               <ComputedBox label="Computed profit" value={edit.sales_price ? fmtMoney(computedProfit) : '—'} />
               <ComputedBox label="Profit %" value={computedProfitPct != null ? `${(computedProfitPct * 100).toFixed(1)}%` : '—'} />
@@ -721,45 +781,45 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
 
           {/* SALE */}
           <Section title="Sale">
-            <div className="split-2">
+            <Split>
               <Field label="Customer"><Input v={edit.customer} onSave={(v) => save('customer', v)} disabled={!canEdit} /></Field>
               <Field label="New / Used"><Input v={edit.new_or_used} onSave={(v) => save('new_or_used', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-3">
+            </Split>
+            <Split cols={3}>
               <Field label="Order date"><Input type="date" v={edit.order_date} onSave={(v) => save('order_date', v || null)} disabled={!canEdit} /></Field>
               <Field label="Dispatch date"><Input type="date" v={edit.dispatch_date} onSave={(v) => save('dispatch_date', v || null)} disabled={!canEdit} /></Field>
               <Field label="Sales price (£)"><Input type="number" step="0.01" v={edit.sales_price} onSave={(v) => save('sales_price', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Profit (£)"><Input type="number" step="0.01" v={edit.profit} onSave={(v) => save('profit', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
               <Field label="Profit %"><Input type="number" step="0.0001" v={edit.profit_pct} onSave={(v) => save('profit_pct', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Deposit received?"><Input v={edit.deposit_received} onSave={(v) => save('deposit_received', v)} disabled={!canEdit} /></Field>
               <Field label="Paid in full?"><Input v={edit.paid_in_full} onSave={(v) => save('paid_in_full', v)} disabled={!canEdit} /></Field>
-            </div>
-            <div className="split-2">
+            </Split>
+            <Split>
               <Field label="Trailer docs"><Input v={edit.trailer_docs} onSave={(v) => save('trailer_docs', v)} disabled={!canEdit} /></Field>
               <Field label="Signed order"><Input v={edit.signed_order} onSave={(v) => save('signed_order', v)} disabled={!canEdit} /></Field>
-            </div>
+            </Split>
           </Section>
 
           {/* NEW BUILD SPECIFICS */}
           {(edit.status === 'new_build' || edit.expected_delivery || edit.chassis_colour || edit.body_colour) && (
             <Section title="New build">
-              <div className="split-2">
+              <Split>
                 <Field label="Chassis colour"><Input v={edit.chassis_colour} onSave={(v) => save('chassis_colour', v)} disabled={!canEdit} /></Field>
                 <Field label="Body colour"><Input v={edit.body_colour} onSave={(v) => save('body_colour', v)} disabled={!canEdit} /></Field>
-              </div>
-              <div className="split-3">
+              </Split>
+              <Split cols={3}>
                 <Field label="Expected delivery"><Input type="date" v={edit.expected_delivery} onSave={(v) => save('expected_delivery', v || null)} disabled={!canEdit} /></Field>
                 <Field label="Retail price (£)"><Input type="number" step="0.01" v={edit.retail_price} onSave={(v) => save('retail_price', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
                 <Field label="Sold price (£)"><Input type="number" step="0.01" v={edit.sold_price} onSave={(v) => save('sold_price', v === '' ? null : Number(v))} disabled={!canEdit} /></Field>
-              </div>
-              <div className="split-2">
+              </Split>
+              <Split>
                 <Field label="Quote No."><Input v={edit.quote_no} onSave={(v) => save('quote_no', v)} disabled={!canEdit} /></Field>
                 <Field label="Hyperlink"><Input v={edit.hyperlink} onSave={(v) => save('hyperlink', v)} disabled={!canEdit} /></Field>
-              </div>
+              </Split>
             </Section>
           )}
 
@@ -774,45 +834,70 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
             <Field label="Documents"><Textarea v={edit.documents} onSave={(v) => save('documents', v)} disabled={!canEdit} /></Field>
             <Field label="Fleet Serve link"><Input v={edit.fleet_serve_link} onSave={(v) => save('fleet_serve_link', v)} disabled={!canEdit} /></Field>
           </Section>
-        </div>
-        <div className="drawer__foot">
-          <div className="toolbar__spacer" />
-          {saving && <Loader size={14} className="spin" />}
-          <button onClick={onClose} className="btn">Close</button>
-        </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="card" style={{ padding: 14 }}>
-      <div className="field__label" style={{ marginBottom: 10, color: 'var(--stc-red)' }}>{title.toUpperCase()}</div>
-      <div className="col" style={{ gap: 10 }}>{children}</div>
-    </div>
+    <Card padded={false}>
+      <SectionHead title={title} />
+      <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>{children}</div>
+    </Card>
   );
 }
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div className="field" style={{ flex: 1 }}><div className="field__label">{label}</div>{children}</div>;
-}
-function Input({ v, onSave, disabled, type, step, dataField }: { v: any; onSave: (s: string) => void; disabled?: boolean; type?: string; step?: string; dataField?: string }) {
+/* The drawer's fifty odd fields are written as `<Input v= onSave= />`,
+   so these three stay as that shape and render the kit underneath. The
+   alternative was rewriting every call site to say the same thing in
+   the kit's words, which changes nothing anybody can see. */
+function Input({ v, onSave, disabled, type, step, dataField }: {
+  v: any; onSave: (s: string) => void; disabled?: boolean;
+  type?: string; step?: string; dataField?: string;
+}) {
   const [local, setLocal] = useState(v ?? '');
   useMemo(() => setLocal(v ?? ''), [v]);
-  return <input className="input" type={type || 'text'} step={step} disabled={disabled} data-field={dataField}
-    value={local} onChange={(e) => setLocal(e.target.value)} onBlur={(e) => onSave(e.target.value)} />;
+  return (
+    <TextInput
+      type={type || 'text'}
+      readOnly={disabled}
+      value={String(local ?? '')}
+      onChange={setLocal}
+      onCommit={onSave}
+    />
+  );
 }
-function Textarea({ v, onSave, disabled }: { v: any; onSave: (s: string | null) => void; disabled?: boolean }) {
+
+function Textarea({ v, onSave, disabled }: {
+  v: any; onSave: (s: string | null) => void; disabled?: boolean;
+}) {
   const [local, setLocal] = useState(v ?? '');
   useMemo(() => setLocal(v ?? ''), [v]);
-  return <textarea className="input" rows={2} disabled={disabled}
-    value={local} onChange={(e) => setLocal(e.target.value)} onBlur={(e) => onSave(e.target.value || null)} />;
+  return (
+    <TextArea
+      rows={2}
+      value={String(local ?? '')}
+      onChange={disabled ? () => {} : setLocal}
+      onCommit={(x) => { if (!disabled) onSave(x || null); }}
+    />
+  );
 }
+
+/** A number the record works out for itself, shown rather than typed. */
 function ComputedBox({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)' }}>{label.toUpperCase()}</div>
-      <div className="tnum" style={{ fontSize: 16, fontWeight: 600 }}>{value}</div>
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 3,
+      padding: '9px 11px', borderRadius: 'var(--r)',
+      background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+    }}>
+      <span style={{
+        fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+        letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+      }}>{label}</span>
+      <span style={{
+        fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 17,
+        letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+      }}>{value}</span>
     </div>
   );
 }
@@ -828,95 +913,79 @@ function StockContextMenu({ x, y, row, canEdit, onView, onEditCell, onAddRefurb,
   onDuplicate: () => void; onDelete: () => void; onClose: () => void;
 }) {
   // Viewport-aware position
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useEffect(() => {
-    const el = ref.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    const m = 8;
-    let l = x, t = y;
-    if (x + r.width + m > window.innerWidth) l = Math.max(m, x - r.width);
-    if (y + r.height + m > window.innerHeight) t = Math.max(m, y - r.height);
-    setPos({ left: l, top: t });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [x, y]);
+  const STATUS_ICON: Record<StockStatus, React.ReactNode> = {
+    in_stock: <Package size={13} />, new_build: <Wrench size={13} />,
+    sales_order: <ShoppingCart size={13} />, rental: <Truck size={13} />,
+    sold: <Briefcase size={13} />, scrap: <Archive size={13} />,
+  };
 
   return (
-    <div ref={ref} className="ctx-menu" style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-      <div className="ctx-menu__head">{row.stc_no || row.chassis_number || 'Trailer'}{row.year && <span className="mono" style={{ marginLeft: 6, color: 'var(--fg-4)' }}>· {row.year} {row.make}</span>}</div>
-      <button onClick={onView}><Eye size={12} /> Open full view</button>
-      <button onClick={onEditCell} disabled={!canEdit}><Edit2 size={12} /> Edit this cell</button>
-      <button onClick={onSendToTracker}><Send size={12} /> Send to my Sales tracker</button>
-      <button onClick={onAddRefurb} disabled={!canEdit}><Paintbrush size={12} /> Add refurb cost</button>
-      <button onClick={() => onMoveStatus('sold')} disabled={!canEdit || row.status === 'sold'}><PoundSterling size={12} /> Mark as Sold</button>
-      <hr />
-      <div className="ctx-menu__head" style={{ marginTop: 4 }}>Move to status</div>
-      {STATUS_ORDER.map(s => (
-        <button key={s} onClick={() => onMoveStatus(s)} disabled={!canEdit || s === row.status}>
-          {s === 'in_stock' && <Package size={12} />}
-          {s === 'new_build' && <Wrench size={12} />}
-          {s === 'sales_order' && <ShoppingCart size={12} />}
-          {s === 'rental' && <Truck size={12} />}
-          {s === 'sold' && <Briefcase size={12} />}
-          {s === 'scrap' && <Archive size={12} />}
-          {STATUS_LABEL[s]}
-        </button>
+    <EdgeAwareCtxMenu x={x} y={y}>
+      <MenuHead>
+        {row.stc_no || row.chassis_number || 'Trailer'}
+        {row.year ? ` · ${row.year} ${row.make ?? ''}`.trimEnd() : ''}
+      </MenuHead>
+      <MenuItem icon={<Eye size={13} />} label="Open the unit" onClick={onView} />
+      <MenuItem icon={<Edit2 size={13} />} label="Edit this cell" onClick={onEditCell} disabled={!canEdit} />
+      <MenuItem icon={<Send size={13} />} label="Send to my tracker" onClick={onSendToTracker} />
+      <MenuItem icon={<Paintbrush size={13} />} label="Add refurb cost" onClick={onAddRefurb} disabled={!canEdit} />
+      <MenuItem icon={<PoundSterling size={13} />} label="Mark as sold"
+        onClick={() => onMoveStatus('sold')} disabled={!canEdit || row.status === 'sold'} />
+      <MenuRule />
+      <MenuHead>Move to</MenuHead>
+      {STATUS_ORDER.map((st) => (
+        <MenuItem key={st} icon={STATUS_ICON[st]} label={STATUS_LABEL[st]}
+          onClick={() => onMoveStatus(st)} disabled={!canEdit || st === row.status} />
       ))}
-      <hr />
-      <button onClick={onDuplicate} disabled={!canEdit}><Copy size={12} /> Duplicate</button>
-      <button onClick={onDelete} disabled={!canEdit} style={{ color: 'var(--stc-red-300)' }}><Trash2 size={12} /> Delete</button>
-    </div>
+      <MenuRule />
+      <MenuItem icon={<Copy size={13} />} label="Duplicate" onClick={onDuplicate} disabled={!canEdit} />
+      <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} disabled={!canEdit} danger />
+    </EdgeAwareCtxMenu>
   );
 }
 
 function BulkStatusModal({ currentSelectionCount, onPick, onClose }: { currentSelectionCount: number; onPick: (s: StockStatus) => void; onClose: () => void }) {
+  const ICON: Record<StockStatus, React.ReactNode> = {
+    in_stock: <Package size={14} />, new_build: <Wrench size={14} />,
+    sales_order: <ShoppingCart size={14} />, rental: <Truck size={14} />,
+    sold: <Briefcase size={14} />, scrap: <Archive size={14} />,
+  };
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0 }}>Move {currentSelectionCount} trailer{currentSelectionCount === 1 ? '' : 's'} to…</h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {STATUS_ORDER.map(s => (
-            <button key={s} onClick={() => onPick(s)} className="btn" style={{ justifyContent: 'flex-start', height: 40 }}>
-              {s === 'in_stock' && <Package size={14} />}
-              {s === 'new_build' && <Wrench size={14} />}
-              {s === 'sales_order' && <ShoppingCart size={14} />}
-              {s === 'rental' && <Truck size={14} />}
-              {s === 'sold' && <Briefcase size={14} />}
-              {s === 'scrap' && <Archive size={14} />}
-              {STATUS_LABEL[s]}
-            </button>
-          ))}
-        </div>
+    <Modal
+      title={`Move ${currentSelectionCount} ${currentSelectionCount === 1 ? 'unit' : 'units'}`}
+      description="Pick where they go."
+      width={460}
+      onClose={onClose}
+      footer={<Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>}
+    >
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+        {STATUS_ORDER.map((st) => (
+          <OptionCard key={st} selected={false} onSelect={() => onPick(st)}
+            icon={ICON[st]} title={STATUS_LABEL[st]} />
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
 function BulkLocationModal({ currentSelectionCount, onSave, onClose }: { currentSelectionCount: number; onSave: (location: string) => void; onClose: () => void }) {
   const [v, setV] = useState('');
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0 }}>Change location for {currentSelectionCount} trailer{currentSelectionCount === 1 ? '' : 's'}</h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <form onSubmit={(e) => { e.preventDefault(); onSave(v); }} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="field">
-            <div className="field__label">New location</div>
-            <input className="input" autoFocus value={v} onChange={(e) => setV(e.target.value)} placeholder="e.g. Hyde, Bredbury, Atherton" />
-            <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 4 }}>Leave blank to clear location on all selected rows.</div>
-          </div>
-          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" onClick={onClose} className="btn btn--ghost">Cancel</button>
-            <button type="submit" className="btn btn--primary"><MapPin size={14} /> Apply to {currentSelectionCount}</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <Modal
+      title={`Change location for ${currentSelectionCount} ${currentSelectionCount === 1 ? 'unit' : 'units'}`}
+      width={460}
+      onClose={onClose}
+      footer={<>
+        <Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button size="sm" variant="primary" onClick={() => onSave(v)}>
+          <MapPin size={13} /> Apply to {currentSelectionCount}
+        </Button>
+      </>}
+    >
+      <Field label="New location" hint="Leave it blank to clear the location on all of them.">
+        <TextInput value={v} onChange={setV} placeholder="Hyde, Bredbury, Atherton" />
+      </Field>
+    </Modal>
   );
 }
 
@@ -927,43 +996,35 @@ function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
   onProceed: () => void; onClose: () => void;
 }) {
   return (
-    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertCircle size={16} style={{ color: 'var(--stc-warning, #d4a017)' }} /> Already on a tracker
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <p style={{ margin: 0, fontSize: 13.5 }}>
-            <strong>{row.stc_no || row.chassis_number}</strong> ({row.year} {row.make} {row.model})
-          </p>
-          {myEntry && (
-            <div className="card" style={{ padding: 10, borderColor: 'var(--stc-warning, #d4a017)' }}>
-              <div style={{ fontSize: 12.5 }}>
-                <strong>This trailer is already on your tracker</strong> at status <strong style={{ color: 'var(--stc-red)' }}>{myEntry.status}</strong>.
-              </div>
-            </div>
-          )}
-          {others.map((o, i) => (
-            <div key={i} className="card" style={{ padding: 10, borderColor: 'rgba(91,141,239,0.4)', background: 'rgba(91,141,239,0.06)' }}>
-              <div style={{ fontSize: 12.5 }}>
-                On <strong>{o.owner_name}&apos;s</strong> tracker at status <strong style={{ color: 'var(--stc-red)' }}>{o.status}</strong>.
-                {o.status === 'customer' && <span style={{ color: 'var(--fg-3)' }}> (deal in progress)</span>}
-              </div>
-            </div>
-          ))}
-          <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
-            You can still add it to your tracker. Several reps can have the same trailer in their pipeline, and whoever marks it Sold first gets the commission.
-          </div>
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
-          <button onClick={onClose} className="btn btn--ghost">Cancel</button>
-          <button onClick={onProceed} className="btn btn--primary"><Send size={14} /> Add anyway</button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      title="Already on a tracker"
+      description={`${row.stc_no || row.chassis_number} · ${[row.year, row.make, row.model].filter(Boolean).join(' ')}`}
+      width={480}
+      onClose={onClose}
+      footer={<>
+        <Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button size="sm" variant="primary" onClick={onProceed}>
+          <Send size={13} /> Add it anyway
+        </Button>
+      </>}
+    >
+      {myEntry && (
+        <Alert tone="warning">
+          This unit is already on your own tracker, at <strong style={{ color: 'var(--text)' }}>{myEntry.status}</strong>.
+        </Alert>
+      )}
+      {others.map((o, i) => (
+        <Alert key={i} tone="info">
+          On <strong style={{ color: 'var(--text)' }}>{o.owner_name}</strong>&apos;s tracker,
+          at <strong style={{ color: 'var(--text)' }}>{o.status}</strong>
+          {o.status === 'customer' ? ', with a deal in progress' : ''}.
+        </Alert>
+      ))}
+      <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.5 }}>
+        Several reps can have the same unit in their pipeline. Whoever marks it
+        sold first takes the commission.
+      </p>
+    </Modal>
   );
 }
 
@@ -973,41 +1034,36 @@ function SoldTransitionWarning({ row, targetStatus, entries, onProceed, onClose 
   onProceed: () => void; onClose: () => void;
 }) {
   const top = entries[0];
+  const when = top.dispatch_date || top.order_date;
   return (
-    <div className="modal-bg" onClick={onClose} style={{ zIndex: 1100 }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-        <div className="modal__head">
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertCircle size={18} style={{ color: 'var(--stc-red)' }} /> Confirm undo of sale
-          </h3>
-          <button onClick={onClose} className="btn btn--icon btn--sm"><X size={14} /></button>
-        </div>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <p style={{ margin: 0, fontSize: 13.5 }}>
-            <strong>{row.stc_no || row.chassis_number}</strong> ({row.year} {row.make} {row.model}) is currently <strong style={{ color: 'var(--stc-red)' }}>Sold</strong>.
-          </p>
-          <div className="card" style={{ padding: 12, background: 'rgba(207,36,23,0.06)', borderColor: 'rgba(207,36,23,0.3)' }}>
-            <div style={{ fontSize: 13 }}>
-              <strong>{top.owner_first}</strong> sold this trailer{top.dispatch_date ? ` on ${new Date(top.dispatch_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : top.order_date ? ` on ${new Date(top.order_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}
-              {top.sale_price ? ` for £${Number(top.sale_price).toLocaleString()}` : ''}.
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 6 }}>
-              Moving this trailer back to <strong style={{ color: 'var(--fg-1)' }}>{STATUS_LABEL[targetStatus]}</strong> will:
-              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                <li>Affect Sales &amp; Leasing&apos;s revenue figures for the period</li>
-                <li>Reverse any commission allocated to {top.owner_first}</li>
-                <li>The tracker rows linked to this trailer stay as customer. The sale happened: only the trailer status changes</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end', padding: '0 16px 16px', gap: 8 }}>
-          <button onClick={onClose} className="btn btn--ghost">Cancel</button>
-          <button onClick={onProceed} className="btn btn--primary" style={{ background: 'var(--stc-red)' }}>
-            Yes, change status anyway
-          </button>
-        </div>
+    <Modal
+      title="This unit has been sold"
+      description={`${row.stc_no || row.chassis_number} · ${[row.year, row.make, row.model].filter(Boolean).join(' ')}`}
+      width={520}
+      onClose={onClose}
+      footer={<>
+        <Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button size="sm" variant="accent" onClick={onProceed}>
+          Change it to {STATUS_LABEL[targetStatus]} anyway
+        </Button>
+      </>}
+    >
+      <Alert tone="danger">
+        <span>
+          <strong style={{ color: 'var(--text)' }}>{top.owner_first}</strong> sold it
+          {when ? ` on ${new Date(when).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}
+          {top.sale_price ? ` for ${money(Number(top.sale_price))}` : ''}.
+        </span>
+      </Alert>
+
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        Moving it back to <strong style={{ color: 'var(--text)' }}>{STATUS_LABEL[targetStatus]}</strong> will:
+        <ul style={{ margin: '6px 0 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <li>change Sales and Leasing&apos;s revenue for that period</li>
+          <li>reverse the commission allocated to {top.owner_first}</li>
+          <li>leave the lead as a customer, because the sale did happen. Only the unit&apos;s status changes</li>
+        </ul>
       </div>
-    </div>
+    </Modal>
   );
 }
