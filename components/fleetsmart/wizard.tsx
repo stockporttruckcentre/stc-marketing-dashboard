@@ -19,6 +19,7 @@ import {
   type ContractExtras, type WordingKey,
 } from '@/lib/fleetsmart/contract';
 import type { ContractInput, FleetAsset, PricedAsset } from '@/lib/fleetsmart/types';
+import { fillFrom, filledWords, type PickableAccount } from '@/lib/fleetsmart/account';
 import { ContractDocument, ContractPrintRules } from './document';
 import {
   Alert, Badge, Button, Chip, EmptyState, IconButton, Label, SearchInput,
@@ -95,7 +96,7 @@ export type SaveResult = { ok: true; id: string; ref: string | null } | { ok: fa
 export function ContractWizard({
   accounts, leads, initial, contractId, reference, may, onClose, onSaved,
 }: {
-  accounts: { id: string; company_name: string | null; contact_name: string | null; location: string | null }[];
+  accounts: PickableAccount[];
   leads: { id: string; contact_id: string | null; company_name: string | null; requirement: string | null }[];
   initial: { input: ContractInput; extras: ContractExtras; accountId: string | null; leadId: string | null };
   /** Set when reopening a draft, so saving updates rather than duplicates. */
@@ -115,6 +116,11 @@ export function ContractWizard({
   const [error, setError] = useState<string | null>(null);
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(contractId);
+  /* The account somebody just picked, so the step can say what it took
+     off the CRM record. Reopening a draft leaves this null: the fields
+     are already filled and saying where they came from a week ago is
+     noise. */
+  const [picked, setPicked] = useState<PickableAccount | null>(null);
 
   const set = useCallback(<K extends keyof ContractInput>(k: K, v: ContractInput[K]) => {
     setInput((s) => ({ ...s, [k]: v }));
@@ -296,13 +302,21 @@ export function ContractWizard({
           onPick={(a) => {
             setAccountId(a.id);
             setLeadId(null);
-            setInput((s) => ({
-              ...s,
-              customerName: a.company_name ?? s.customerName,
-              customerContact: a.contact_name ?? s.customerContact,
-              customerAddress: a.location ?? s.customerAddress,
+            setPicked(a);
+            /* Everything the CRM already holds, rather than the town it
+               used to fill and the address somebody then typed out by
+               hand on every contract. `fillFrom` keeps anything already
+               in the box: see `lib/fleetsmart/account.ts`. */
+            setInput((s) => ({ ...s, ...fillFrom(a, s) }));
+            setExtras((e) => ({
+              ...e,
+              /* Their email and number, so the copy of the contract has
+                 somewhere to go without going back to the CRM for it. */
+              customerEmail: e.customerEmail || (a.email ?? ''),
+              customerPhone: e.customerPhone || (a.phone ?? ''),
             }));
           }}
+          picked={picked}
           onLead={setLeadId}
           onClear={() => { setAccountId(null); setLeadId(null); }}
           extras={extras} setExtras={setExtras}
@@ -339,9 +353,9 @@ export function ContractWizard({
 
 function CustomerStep({
   accounts, query, onQuery, accountId, leads, leadId, input, set,
-  onPick, onLead, onClear, extras, setExtras,
+  onPick, picked, onLead, onClear, extras, setExtras,
 }: {
-  accounts: { id: string; company_name: string | null; contact_name: string | null; location: string | null }[];
+  accounts: PickableAccount[];
   query: string;
   onQuery: (v: string) => void;
   accountId: string | null;
@@ -349,7 +363,9 @@ function CustomerStep({
   leadId: string | null;
   input: ContractInput;
   set: <K extends keyof ContractInput>(k: K, v: ContractInput[K]) => void;
-  onPick: (a: { id: string; company_name: string | null; contact_name: string | null; location: string | null }) => void;
+  onPick: (a: PickableAccount) => void;
+  /** The account just picked, so the step can say what it filled in. */
+  picked: PickableAccount | null;
   onLead: (id: string | null) => void;
   onClear: () => void;
   extras: ContractExtras;
@@ -395,6 +411,15 @@ function CustomerStep({
         ))}
       </div>
 
+      {picked && picked.id === accountId && (
+        <p style={{
+          margin: 0, fontSize: 12, color: 'var(--text-subtle)', fontFamily: 'var(--inter)',
+        }}>
+          {filledWords(picked)} Anything below can be typed over and only what is
+          below prints on the contract.
+        </p>
+      )}
+
       {accountId && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
           <Badge tone="neutral" dot>Attached to a CRM account</Badge>
@@ -438,9 +463,24 @@ function CustomerStep({
         </Field>
       </Split>
 
-      <Field label="Address">
-        <TextArea rows={2} value={input.customerAddress} onChange={(v) => set('customerAddress', v)} />
+      <Field label="Address" hint="Filled from the CRM where it holds one.">
+        <TextArea rows={3} value={input.customerAddress} onChange={(v) => set('customerAddress', v)} />
       </Field>
+
+      <Split>
+        <Field label="Their email" hint="What the Send box opens on.">
+          <TextInput
+            value={extras.customerEmail}
+            onChange={(v) => setExtras({ ...extras, customerEmail: v })}
+          />
+        </Field>
+        <Field label="Their phone">
+          <TextInput
+            value={extras.customerPhone}
+            onChange={(v) => setExtras({ ...extras, customerPhone: v })}
+          />
+        </Field>
+      </Split>
 
       <Field
         label="Registered address"

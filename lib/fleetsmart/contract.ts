@@ -53,6 +53,12 @@ export const WORDING_LABEL: Record<WordingKey, string> = {
 export type ContractExtras = {
   companyNumber: string;
   registeredAddress: string;
+  /* The customer's own email and number, filled from the CRM when an
+     account is picked. The email is what the Send box opens on, so
+     sending a contract to a customer already in the CRM is one press
+     rather than a trip back to the record to copy an address. */
+  customerEmail: string;
+  customerPhone: string;
   maximumMileage: number | null;
   accountManagerName: string;
   accountManagerPhone: string;
@@ -65,6 +71,8 @@ export function blankExtras(): ContractExtras {
   return {
     companyNumber: '',
     registeredAddress: '',
+    customerEmail: '',
+    customerPhone: '',
     maximumMileage: 100_000,
     accountManagerName: '',
     accountManagerPhone: '',

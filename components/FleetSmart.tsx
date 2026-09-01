@@ -9,6 +9,7 @@ import {
 import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
 import { blankContract, blankExtras, type ContractExtras } from '@/lib/fleetsmart/contract';
+import type { PickableAccount } from '@/lib/fleetsmart/account';
 import { priceContract } from '@/lib/fleetsmart/price';
 import { ContractDocument, ContractPrintRules } from '@/components/fleetsmart/document';
 import { ContractWizard } from '@/components/fleetsmart/wizard';
@@ -74,9 +75,10 @@ export type ContractRow = {
   updated_at: string;
 };
 
-type Account = {
-  id: string; company_name: string | null; contact_name: string | null; location: string | null;
-};
+/* Everything the CRM holds that the builder can fill a contract from.
+   See `lib/fleetsmart/account.ts`: the address in particular is three
+   possible columns and picking between them is not a thing to do twice. */
+type Account = PickableAccount;
 type Lead = {
   id: string; contact_id: string | null; company_name: string | null; requirement: string | null;
 };
@@ -254,9 +256,15 @@ export function FleetSmart({
   }
 
   async function send(row: ContractRow) {
+    /* Who it went to. The customer's email where the builder filled one
+       off the CRM record, and their contact's name where it did not.
+       This used to be the contact name in every case, so a record of
+       where a price was sent said "Kieren Richards" and not an address
+       anybody could check. */
+    const to = row.extras?.customerEmail?.trim() || row.input.customerContact;
     const ok = await post(
       `/api/fleetsmart/contracts/${row.id}/send`,
-      { to: row.input.customerContact },
+      { to },
       row.id,
     );
     if (ok) {

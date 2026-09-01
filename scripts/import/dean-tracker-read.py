@@ -122,6 +122,20 @@ for sheet, status in [('Trailer Sales prospects', 'contacted'),
 
 # ---- Contract pipeline ----
 CONTRACT_TYPE = {'rental/hire': 'rental'}
+
+# FPM and Trukplan are the same maintenance product under two older
+# names, and FleetSmart+ replaced both. Left as they were typed, each one
+# raises its own filter chip on the maintenance tracker for a product
+# nobody sells any more, so somebody filtering by kind of work is offered
+# three names for one thing.
+#
+# The sheet's own word is kept in the notes, so this renames the product
+# without losing what the row said. To put them back:
+#
+#   UPDATE crm_leads SET what = split_part(notes, ': ', 2)
+#    WHERE notes LIKE 'Contract pipeline: %';
+PRODUCT = {'fpm': 'FleetSmart+', 'trukplan': 'FleetSmart+'}
+
 for r in rows(wb['Contract pipeline']):
     co = clean(r.get('Customer'))
     if not co: continue
@@ -130,7 +144,7 @@ for r in rows(wb['Contract pipeline']):
         contact=None, email=None, phone=None, location=clean(r.get('Main Depot')),
         type=CONTRACT_TYPE.get(kind, 'maintenance'),
         status='quoted',
-        what=clean(r.get('Contract type')),
+        what=PRODUCT.get(kind, clean(r.get('Contract type'))),
         requirement=(f"{clean(r.get('Volume of assets'))} assets"
                      if r.get('Volume of assets') else None),
         estimated_value=money(r.get('Contract Value')),

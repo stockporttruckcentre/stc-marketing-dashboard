@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { FleetSmart, type ContractRow } from '@/components/FleetSmart';
 import { capabilitiesFor } from '@/lib/crm/permissions';
+import { ACCOUNT_COLUMNS, type PickableAccount } from '@/lib/fleetsmart/account';
 import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type { Profile } from '@/lib/types';
 
@@ -36,14 +37,41 @@ export default async function FleetSmartPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, contractRes, accountRes, leadRes] = await Promise.all([
+  const [profileRes, contractRes, accountRes, addressRes, leadRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('fleetsmart_contracts').select('*').order('updated_at', { ascending: false }).limit(300),
-    supabase.from('crm_contacts').select('id, company_name, contact_name, location')
-      .order('company_name').limit(2000),
+    supabase.from('crm_contacts').select(ACCOUNT_COLUMNS).order('company_name').limit(2000),
+    /* The primary address per account, read alongside rather than
+       embedded, because PostgREST would give one nested array per
+       account and the builder wants one line. Ordered so the primary
+       comes first and the merge below takes it. */
+    supabase.from('contact_addresses').select('contact_id, address, city, is_primary')
+      .is('deleted_at', null)
+      .order('is_primary', { ascending: false })
+      .limit(4000),
     supabase.from('crm_leads').select('id, contact_id, company_name, requirement')
       .order('created_at', { ascending: false }).limit(2000),
   ]);
+
+  /* One address per account, the primary where there is one. The table
+     may not be in an older database, in which case there is simply no
+     structured address and `addressOf` falls back to the account's own
+     column. */
+  const bestAddress = new Map<string, { address: string | null; city: string | null }>();
+  for (const row of (addressRes.data ?? []) as {
+    contact_id: string | null; address: string | null; city: string | null;
+  }[]) {
+    if (!row.contact_id || bestAddress.has(row.contact_id)) continue;
+    bestAddress.set(row.contact_id, { address: row.address, city: row.city });
+  }
+
+  const accounts: PickableAccount[] = ((accountRes.data ?? []) as Omit<
+    PickableAccount, 'primary_address' | 'primary_city'
+  >[]).map((a) => ({
+    ...a,
+    primary_address: bestAddress.get(a.id)?.address ?? null,
+    primary_city: bestAddress.get(a.id)?.city ?? null,
+  }));
 
   const profile = (profileRes.data as Profile) ?? null;
   const capabilities = [...capabilitiesFor(profile ?? { role: 'viewer' } as Profile)];
@@ -66,9 +94,7 @@ export default async function FleetSmartPage() {
   return (
     <FleetSmart
       contracts={(contractRes.data ?? []) as ContractRow[]}
-      accounts={(accountRes.data ?? []) as {
-        id: string; company_name: string | null; contact_name: string | null; location: string | null;
-      }[]}
+      accounts={accounts}
       leads={(leadRes.data ?? []) as {
         id: string; contact_id: string | null; company_name: string | null; requirement: string | null;
       }[]}

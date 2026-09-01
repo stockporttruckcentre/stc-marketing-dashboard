@@ -152,24 +152,77 @@ export function SalesTracker({
     maintenance:   rows.filter(r => r.type === 'maintenance').length,
     rental:        rows.filter(r => r.type === 'rental').length,
   }), [rows]);
-  // Unique "What" values present in current side (for the maintenance filter chips)
-  const whatValues = useMemo(() => {
+  /* Does a row survive everything except the kind-of-work filter.
+     Pulled out so the chips can be counted against the same rules the
+     grid uses, which is the whole of what stops a chip claiming rows
+     that are not there. */
+  const passesExceptWork = useCallback((r: TrackerRow) => {
+    if (tab !== 'all' && STATUS_TO_TAB[r.status] !== tab) return false;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return ([r.company_name, r.contact_name, r.email, r.phone, r.description, r.requirement, r.action, r.what, r.vehicles]
+      .filter(Boolean).join(' ').toLowerCase().includes(q));
+  }, [tab, query]);
+
+  /* The kinds of work on the maintenance side, each with the number of
+     rows it would actually show.
+
+     Two things were wrong with the old version and both produced a chip
+     that finds nothing.
+
+     It counted across every status, so on the Customers tab a chip for
+     work that only exists on quoted rows sat there offering zero. A
+     filter that empties the grid and does not say why reads as a broken
+     screen rather than as an empty set, so a chip with nothing behind it
+     is not drawn at all now, and every chip carries its count.
+
+     And it grouped on the exact string, so "All Services" and "All
+     services" were two chips for one kind of work. They fold together
+     here rather than being corrected in the data: the spelling on the
+     record is the spelling on the spreadsheet it came from, and a filter
+     is the wrong place to start rewriting somebody's typing. The most
+     common spelling is the one that gets shown. */
+  const whatChips = useMemo(() => {
     if (side !== 'maintenance') return [];
-    const set = new Set<string>();
-    for (const r of sideRows) if (r.what) set.add(r.what);
-    return Array.from(set).sort();
+
+    const groups = new Map<string, { label: string; count: number; spellings: Map<string, number> }>();
+    for (const r of sideRows) {
+      if (!r.what) continue;
+      const key = r.what.trim().toLowerCase();
+      if (!key) continue;
+      const g = groups.get(key) ?? { label: r.what.trim(), count: 0, spellings: new Map() };
+      g.spellings.set(r.what.trim(), (g.spellings.get(r.what.trim()) ?? 0) + 1);
+      if (passesExceptWork(r)) g.count++;
+      groups.set(key, g);
+    }
+
+    return [...groups.entries()]
+      .map(([key, g]) => ({
+        key,
+        label: [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0],
+        count: g.count,
+      }))
+      /* Zero means this filter would empty the grid. The one exception
+         is the filter somebody has already picked: hiding that would
+         leave them looking at nothing with no way to see why or undo
+         it. */
+      .filter((c) => c.count > 0 || c.key === whatFilter)
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [side, sideRows, passesExceptWork, whatFilter]);
+
+  /* Kinds of work on this side, however they are spelled, for the stat
+     strip. Counted over the whole side rather than the open tab so the
+     figure does not move as somebody clicks between statuses. */
+  const whatKinds = useMemo(() => {
+    if (side !== 'maintenance') return 0;
+    return new Set(sideRows.map((r) => r.what?.trim().toLowerCase()).filter(Boolean)).size;
   }, [side, sideRows]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return sideRows.filter(r => {
-      if (tab !== 'all' && STATUS_TO_TAB[r.status] !== tab) return false;
-      if (side === 'maintenance' && whatFilter && (r.what || '').toLowerCase() !== whatFilter.toLowerCase()) return false;
-      if (!q) return true;
-      return ([r.company_name, r.contact_name, r.email, r.phone, r.description, r.requirement, r.action, r.what, r.vehicles]
-        .filter(Boolean).join(' ').toLowerCase().includes(q));
-    });
-  }, [sideRows, side, whatFilter, tab, query]);
+  const filtered = useMemo(() => sideRows.filter((r) => {
+    if (!passesExceptWork(r)) return false;
+    if (side === 'maintenance' && whatFilter && (r.what || '').trim().toLowerCase() !== whatFilter) return false;
+    return true;
+  }), [sideRows, side, whatFilter, passesExceptWork]);
 
   const totalEstValue = useMemo(() =>
     sideRows.filter(r => STATUS_TO_TAB[r.status] === 'working').reduce((sum, r) => sum + (Number(r.estimated_value) || 0), 0),
@@ -476,7 +529,7 @@ export function SalesTracker({
         { label: 'Working', value: counts.working, note: 'jobs in hand' },
         { label: 'Customers', value: counts.customer, note: 'ongoing' },
         { label: 'Lost', value: counts.lost, note: 'not pursuing' },
-        { label: 'Kinds', value: whatValues.length, note: 'of work' },
+        { label: 'Kinds', value: whatKinds, note: 'of work' },
       ] : [
         { label: 'Total', value: counts.all, note: 'on this side' },
         { label: 'Working', value: counts.working, note: 'chasing the deal' },
@@ -527,13 +580,13 @@ export function SalesTracker({
           </Chip>
         ))}
 
-        {isMaintenance && whatValues.length > 0 && (
+        {isMaintenance && whatChips.length > 0 && (
           <>
             <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
             <Chip active={whatFilter === null} onClick={() => setWhatFilter(null)}>All work</Chip>
-            {whatValues.map(w => (
-              <Chip key={w} active={whatFilter === w}
-                onClick={() => setWhatFilter(w === whatFilter ? null : w)}>{w}</Chip>
+            {whatChips.map(w => (
+              <Chip key={w.key} active={whatFilter === w.key} count={w.count}
+                onClick={() => setWhatFilter(w.key === whatFilter ? null : w.key)}>{w.label}</Chip>
             ))}
           </>
         )}
