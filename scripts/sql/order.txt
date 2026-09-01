@@ -75,6 +75,7 @@
 066_notifications_wiring
 067_fleetsmart_is_a_lead
 068_fleetsmart_capabilities_exist
+070_fleetsmart_rate_card
 018_command_set_role
 019_last_admin
 059_work_role_templates
