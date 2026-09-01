@@ -81,15 +81,37 @@ export async function requireCapability(capability?: CrmCapability): Promise<Gat
 
      The role derivation stays as the fallback for a deployment whose
      database is older than this build. It is what the routes did until
-     now, so falling back to it cannot take access from anybody. */
+     now, so falling back to it cannot take access from anybody.
+
+     ---- Why the report is merged and not simply taken ----
+
+     It used to replace the role derived set outright, and that shipped a
+     real bug: an administrator pressing Save draft in FleetSmart+ was
+     told they did not have access.
+
+     `capability_report` answers from `capability_catalog`, the register
+     migration 053 introduced, and the four FleetSmart+ capabilities were
+     never added to it. So the report returned no row for them, replacing
+     dropped them, and every FleetSmart+ route refused everybody while
+     the screen went on offering the buttons. Migration 068 adds the
+     rows, and `npm run check:capabilities` now asserts the register and
+     `lib/platform/permissions/catalog.ts` cannot drift apart again.
+
+     Merging rather than replacing is the other half, and it is the half
+     that makes the next one harmless. A capability the report mentions
+     is decided by the report, because an override has to be able to take
+     one away. A capability it does not mention at all is one the
+     register has never heard of, so the report holds no opinion on it
+     and the role's answer stands. */
   let caps: CrmCapabilities = capabilitiesFor({ role });
   const { data: report } = await supabase.rpc('capability_report', { p_user: user.id });
   if (Array.isArray(report) && report.length) {
-    const resolved = new Set<CrmCapability>();
+    const resolved = new Set<CrmCapability>(caps);
     for (const row of report as { key: string; granted: boolean }[]) {
-      if (row.granted && CAPABILITY_BY_KEY[row.key as CrmCapability]) {
-        resolved.add(row.key as CrmCapability);
-      }
+      const key = row.key as CrmCapability;
+      if (!CAPABILITY_BY_KEY[key]) continue;
+      if (row.granted) resolved.add(key);
+      else resolved.delete(key);
     }
     caps = resolved;
   }
