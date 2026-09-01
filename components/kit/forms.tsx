@@ -438,7 +438,12 @@ export function Drawer({
 
   return (
     <div
-      className="kit"
+      /* The class is not decoration. Print rules have to be able to name
+         this element: it is `position: fixed`, so anything absolutely
+         positioned inside the drawer lays out against the viewport
+         rather than the page, and a contract printed out of here ends
+         one sheet short. See `ContractPrintRules`. */
+      className="kit kit-drawer-backdrop"
       {...backdropProps}
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
