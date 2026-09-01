@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { publishSelection, publishOpenList } from '@/lib/command/selection';
+import { useToast } from '@/components/kit/toast';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams, CellContextMenuEvent, RowClickedEvent } from 'ag-grid-community';
 import Papa from 'papaparse';
 import {
   Plus, Upload, Download, Loader, Trash2, X, Mail, Edit2, MoreHorizontal,
-  Globe, Users, UserPlus, Send, Star, Search, ChevronDown, SearchX,
+  Globe, Users, UserPlus, Send, Star, Search, ChevronDown, SearchX, Tag,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
@@ -45,6 +46,7 @@ export function CrmWorkspace({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const { say } = useToast();
   const searchParams = useSearchParams();
   const gridRef = useRef<AgGridReact<CRMContact>>(null);
 
@@ -89,6 +91,7 @@ export function CrmWorkspace({
   const [moveTargetMenu, setMoveTargetMenu] = useState<{ x: number; y: number; rowIds: string[]; mode?: 'move' | 'duplicate' } | null>(null);
   const [emptyAreaMenu, setEmptyAreaMenu] = useState<{ x: number; y: number } | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
+  const [statusMenu, setStatusMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
   const [listPickerFor, setListPickerFor] = useState<{ purpose: 'enrich'; email: string } | null>(null);
   const [enrichConfirm, setEnrichConfirm] = useState<{ row: CRMContact; field: string } | null>(null);
   const [enriching, setEnriching] = useState(false);
@@ -299,11 +302,23 @@ export function CrmWorkspace({
     { field: 'email', headerName: 'Email', flex: 1.1, minWidth: 190, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
         p.value ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{p.value}</span>
-                : <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
+                /* The placeholder glyph, the same one the Fleet column
+                   uses. This said "Right-click to enrich", and Lusha is
+                   switched off until a policy is agreed for who may
+                   spend credits, so `crm.enrich` is held off every role
+                   and the gesture it advertised does nothing for
+                   anybody. An empty cell is an empty cell. */
+                : <span style={{ color: 'var(--text-subtle)' }}>—</span> },
     { field: 'phone', headerName: 'Phone', width: 140, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
         p.value ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{p.value}</span>
-                : <span style={{ color: 'var(--text-subtle)', fontStyle: 'italic', fontSize: 12 }}>Right-click to enrich</span> },
+                /* The placeholder glyph, the same one the Fleet column
+                   uses. This said "Right-click to enrich", and Lusha is
+                   switched off until a policy is agreed for who may
+                   spend credits, so `crm.enrich` is held off every role
+                   and the gesture it advertised does nothing for
+                   anybody. An empty cell is an empty cell. */
+                : <span style={{ color: 'var(--text-subtle)' }}>—</span> },
     { field: 'location', headerName: 'Location', width: 120, editable: canEdit, valueSetter: saveCell },
     { field: 'fleet_size', headerName: 'Fleet', width: 80, editable: false,
       valueGetter: (p) => {
@@ -573,6 +588,56 @@ export function CrmWorkspace({
   }
 
   // ---- bulk actions ----
+  /* Setting the status on everything selected.
+
+     Through a route rather than a direct update, because deciding
+     which of them may be written is not a decision a grid can make:
+     an account whose status is derived from its leads has to be left
+     alone and said out loud, and that needs a read of `crm_leads`
+     first. See the header of `app/api/crm/status/route.ts`. */
+  async function bulkStatus(ids: string[], status: string) {
+    setStatusMenu(null);
+    if (!ids.length) return;
+
+    const res = await fetch('/api/crm/status', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids, status }),
+    });
+    const json = await res.json();
+
+    if (!json.ok) {
+      say({ tone: 'danger', title: 'That did not go through', body: json.message });
+      return;
+    }
+
+    /* Re-read rather than patch the rows here. The route decides which
+       of them may be written, and reconstructing that decision in the
+       browser would be a second implementation of the same rule, which
+       is how the grid and the database start disagreeing. */
+    router.refresh();
+
+    const label = STATUS_CHOICES.find((c) => c.value === status)?.label ?? status;
+    if (json.changed === 0) {
+      say({
+        tone: 'warning',
+        title: 'Nothing changed',
+        body: json.derivedCount > 0
+          ? `${namesOf(json.derivedNames, json.derivedCount)} take their status from their deals on the tracker.`
+          : 'None of those were yours to change.',
+      });
+      return;
+    }
+
+    say({
+      tone: 'success',
+      title: `${json.changed} set to ${label}`,
+      body: json.derivedCount > 0
+        ? `${namesOf(json.derivedNames, json.derivedCount)} were left alone: their status comes from their deals.`
+        : undefined,
+    });
+  }
+
   async function bulkDelete() {
     const sel = gridRef.current?.api.getSelectedRows() ?? [];
     if (!sel.length) return;
@@ -772,6 +837,10 @@ export function CrmWorkspace({
           </span>
           <span style={{ width: 1, height: 18, background: 'var(--bar-line)' }} />
           {caps.has('crm.enrich') && <InverseButton icon={<Mail size={13} />} label="Enrich" onClick={bulkEnrich} />}
+          {caps.has('crm.edit') && (
+            <InverseButton icon={<Tag size={13} />} label="Status"
+              onClick={(e) => setStatusMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds() })} />
+          )}
           {caps.has('crm.assign') && (
             <InverseButton icon={<UserPlus size={13} />} label="Assign"
               onClick={(e) => setAssignMenu({ x: e.clientX, y: e.clientY + 20, rowIds: selectedIds() })} />
@@ -903,6 +972,14 @@ export function CrmWorkspace({
       <GridHint>
         Click a row to open it. Right click any cell to edit, enrich, move or delete it.
       </GridHint>
+
+      {statusMenu && (
+        <StatusMenu
+          x={statusMenu.x} y={statusMenu.y} count={statusMenu.rowIds.length}
+          onPick={(status) => bulkStatus(statusMenu.rowIds, status)}
+          onClose={() => setStatusMenu(null)}
+        />
+      )}
 
       {assignMenu && (
         <AssignMenu
@@ -1285,6 +1362,60 @@ function ScopeSwitch({ scope, onChange, profiles, me, caps, unassignedCount }: {
         </div>
       )}
     </div>
+  );
+}
+
+/* =============================================================
+   Setting the status on everything selected.
+
+   The six the column allows, with the one line that stops somebody
+   wondering why four of their six changed: an account with leads takes
+   its status from those leads, so the place to change it is the deal.
+   Said before they pick rather than after, because a warning that
+   arrives with the result reads as a failure.
+   ============================================================= */
+const STATUS_CHOICES: { value: string; label: string; note: string }[] = [
+  { value: 'lead',      label: 'Lead',            note: 'not approached yet' },
+  { value: 'contacted', label: 'Contacted',       note: 'in conversation' },
+  { value: 'quoted',    label: 'Quoted',          note: 'awaiting a decision' },
+  { value: 'won',       label: 'Won',             note: 'deal agreed' },
+  { value: 'customer',  label: 'Customer',        note: 'trading with us' },
+  { value: 'lost',      label: 'Lost',            note: 'went elsewhere' },
+];
+
+/** "Dawson Group and Stobart", or "Dawson Group and 4 others". */
+function namesOf(names: string[], total: number): string {
+  if (names.length === 0) return `${total} ${total === 1 ? 'account' : 'accounts'}`;
+  if (total === 1) return names[0];
+  if (total === 2 && names.length === 2) return `${names[0]} and ${names[1]}`;
+  const rest = total - 1;
+  return `${names[0]} and ${rest} ${rest === 1 ? 'other' : 'others'}`;
+}
+
+function StatusMenu({ x, y, count, onPick, onClose }: {
+  x: number; y: number; count: number;
+  onPick: (status: string) => void; onClose: () => void;
+}) {
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 69 }} />
+      <EdgeAwareCtxMenu x={x} y={y} width={252}>
+        <MenuHead>Set {count} {count === 1 ? 'account' : 'accounts'} to</MenuHead>
+        {STATUS_CHOICES.map((c) => (
+          <MenuItem
+            key={c.value}
+            label={c.label}
+            title={c.note}
+            onClick={() => onPick(c.value)}
+          />
+        ))}
+        <MenuRule />
+        <div style={{ padding: '7px 11px', fontSize: 11, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+          An account with deals on the tracker takes its status from them.
+          Those are left alone and named afterwards.
+        </div>
+      </EdgeAwareCtxMenu>
+    </>
   );
 }
 
