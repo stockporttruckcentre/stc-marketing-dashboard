@@ -754,6 +754,324 @@ BEGIN
 END $$;
 
 -- =============================================================
+-- 11. Ending, editing, deleting and amending.
+--
+-- Migrations 071 and 072.
+-- =============================================================
+RESET ROLE;
+
+-- A live contract, its lead, and everything that can be done to it.
+DO $$
+DECLARE acct UUID; made UUID; lead UUID; st TEXT; n INT; gone JSONB;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Amendable Haulage', 'lead', 'manual') RETURNING id INTO acct;
+
+  INSERT INTO fleetsmart_contracts (
+    account_id, customer_name, plan, term_months, starts_on, priced, owner_id, created_by
+  ) VALUES (
+    acct, 'Amendable Haulage', 'Silver', 36, DATE '2026-01-01',
+    pg_temp.snapshot(4800, 2),
+    'ff000000-0000-0000-0000-000000000002',
+    'ff000000-0000-0000-0000-000000000002'
+  ) RETURNING id INTO made;
+
+  SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
+  IF lead IS NULL THEN RAISE EXCEPTION 'the contract made no lead'; END IF;
+
+  IF NOT (SELECT made_its_lead FROM fleetsmart_contracts WHERE id = made) THEN
+    RAISE EXCEPTION 'the contract does not know it made its own lead';
+  END IF;
+  RAISE NOTICE 'ok  a contract records that the lead is its own';
+
+  -- A draft cannot be ended, and neither can one only sent.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  BEGIN
+    PERFORM fleetsmart_end(made, NULL);
+    RAISE EXCEPTION 'a draft was ended';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%accepted can be ended%' THEN
+      RAISE NOTICE 'ok  only a contract the customer accepted can be ended';
+    ELSE RAISE; END IF;
+  END;
+
+  -- Nor amended.
+  BEGIN
+    PERFORM fleetsmart_amend(made, '{}'::JSONB, pg_temp.snapshot(9000, 3),
+                             '[]'::JSONB, DATE '2026-06-01', NULL, NULL);
+    RAISE EXCEPTION 'a draft was amended';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%Only a live contract can be amended%' THEN
+      RAISE NOTICE 'ok  a draft is edited, not amended';
+    ELSE RAISE; END IF;
+  END;
+
+  PERFORM fleetsmart_send(made, 'transport@amendable.test');
+  PERFORM fleetsmart_decide(made, 'accepted', 'Signed.');
+  RESET ROLE;
+
+  SELECT status INTO st FROM crm_leads WHERE id = lead;
+  IF st <> 'customer' THEN RAISE EXCEPTION 'accepting left the lead at %', st; END IF;
+END $$;
+
+-- Amending it: the numbering, the snapshot of what it was, and the money.
+DO $$
+DECLARE made UUID; a fleetsmart_amendments; n INT; before NUMERIC;
+BEGIN
+  SELECT id INTO made FROM fleetsmart_contracts WHERE customer_name = 'Amendable Haulage';
+  SELECT annual_total INTO before FROM fleetsmart_contracts WHERE id = made;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+
+  -- An amendment cannot start before the contract does.
+  BEGIN
+    PERFORM fleetsmart_amend(made, '{"plan":"Gold"}'::JSONB, pg_temp.snapshot(9000, 3),
+                             '[]'::JSONB, DATE '2025-06-01', NULL, NULL);
+    RAISE EXCEPTION 'an amendment took effect before the contract started';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%before the contract started%' THEN
+      RAISE NOTICE 'ok  an amendment cannot take effect before the thing it amends';
+    ELSE RAISE; END IF;
+  END;
+
+  -- Nor leave the contract with nothing on it.
+  BEGIN
+    PERFORM fleetsmart_amend(made, '{"plan":"Gold"}'::JSONB,
+                             '{"annual":0,"monthly":0,"assets":[]}'::JSONB,
+                             '[]'::JSONB, DATE '2026-06-01', NULL, NULL);
+    RAISE EXCEPTION 'an amendment emptied the fleet';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%no assets on it%' THEN
+      RAISE NOTICE 'ok  an amendment cannot leave a contract covering nothing';
+    ELSE RAISE; END IF;
+  END;
+
+  a := fleetsmart_amend(made, '{"plan":"Gold","termMonths":36}'::JSONB,
+                        pg_temp.snapshot(9000, 3),
+                        '[{"what":"Upgraded from FleetSmart+ Silver to Gold","delta":null,"kind":"plan"}]'::JSONB,
+                        DATE '2026-06-01', 'They wanted the C service.', NULL);
+  RESET ROLE;
+
+  IF a.seq <> 1 THEN RAISE EXCEPTION 'the first amendment is number %', a.seq; END IF;
+
+  -- Version 0 is the contract as first agreed, captured on the way past.
+  SELECT count(*) INTO n FROM fleetsmart_amendments WHERE contract_id = made;
+  IF n <> 2 THEN RAISE EXCEPTION 'there are % amendment rows and there should be 2', n; END IF;
+
+  IF (SELECT annual_total FROM fleetsmart_amendments
+       WHERE contract_id = made AND seq = 0) IS DISTINCT FROM before THEN
+    RAISE EXCEPTION 'version 0 does not hold what the contract was worth before';
+  END IF;
+  RAISE NOTICE 'ok  amending captures the contract as first agreed, then the change';
+
+  -- The contract itself became what the amendment says.
+  IF (SELECT plan FROM fleetsmart_contracts WHERE id = made) <> 'Gold' THEN
+    RAISE EXCEPTION 'the contract did not move to the amended plan';
+  END IF;
+  IF (SELECT annual_total FROM fleetsmart_contracts WHERE id = made) IS DISTINCT FROM 9000 THEN
+    RAISE EXCEPTION 'the contract total did not follow the amendment';
+  END IF;
+  RAISE NOTICE 'ok  the contract becomes what the amendment says, in the same statement';
+
+  -- A second one numbers itself 2, without a gap.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  a := fleetsmart_amend(made, '{"plan":"Gold"}'::JSONB, pg_temp.snapshot(11000, 4),
+                        '[]'::JSONB, DATE '2026-09-01', 'A fourth trailer.', NULL);
+  RESET ROLE;
+  IF a.seq <> 2 THEN RAISE EXCEPTION 'the second amendment is number %', a.seq; END IF;
+
+  -- And the history reads as periods rather than events.
+  SELECT count(*) INTO n FROM fleetsmart_amendment_history(made) WHERE until IS NULL;
+  IF n <> 1 THEN
+    RAISE EXCEPTION '% versions claim to be the one in force, and exactly one can be', n;
+  END IF;
+  RAISE NOTICE 'ok  the history reads as periods, with one in force';
+END $$;
+
+/* An applied amendment cannot be rewritten or removed.
+ *
+ * Asserted against the catalogue rather than by trying an UPDATE as a
+ * signed in user, and that is not a weaker test, it is the correct one.
+ * `pg_temp.act_as` sets the JWT claim, which is session scoped and
+ * survives, and issues SET ROLE inside a function, where a configuration
+ * change is rolled back when the function returns. So `command_may`
+ * answers as the right person while the actual role goes back to the
+ * owner, and the owner bypasses row level security. An UPDATE written
+ * that way tests nothing and passes, which is exactly the quiet pass
+ * everything else here exists to stop.
+ *
+ * The two things that actually make it true are checked instead: no
+ * write policy exists, and the write privileges are not granted. */
+DO $$
+DECLARE policies INT; grants INT;
+BEGIN
+  SELECT count(*) INTO policies FROM pg_policy
+   WHERE polrelid = 'fleetsmart_amendments'::regclass
+     AND polcmd IN ('a', 'w', 'd');
+  IF policies > 0 THEN
+    RAISE EXCEPTION '% write policies exist on the amendments, and there should be none', policies;
+  END IF;
+
+  SELECT count(*) INTO grants FROM information_schema.role_table_grants
+   WHERE table_name = 'fleetsmart_amendments'
+     AND grantee IN ('authenticated', 'anon')
+     AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE');
+  IF grants > 0 THEN
+    RAISE EXCEPTION
+      '% write privileges are granted on the amendments, so the only thing stopping a rewrite is a missing policy',
+      grants;
+  END IF;
+
+  SELECT count(*) INTO grants FROM information_schema.role_table_grants
+   WHERE table_name = 'fleetsmart_rate_cards'
+     AND grantee IN ('authenticated', 'anon')
+     AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE');
+  IF grants > 0 THEN
+    RAISE EXCEPTION '% write privileges are granted on the rate cards', grants;
+  END IF;
+
+  RAISE NOTICE 'ok  an applied amendment cannot be rewritten or deleted, only amended again';
+  RAISE NOTICE 'ok  and neither the amendments nor the rate cards are writable from a browser';
+END $$;
+
+-- Ending it, and what that does to the lead.
+DO $$
+DECLARE made UUID; lead UUID; st TEXT;
+BEGIN
+  SELECT id, lead_id INTO made, lead
+    FROM fleetsmart_contracts WHERE customer_name = 'Amendable Haulage';
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  PERFORM fleetsmart_end(made, 'Fleet went in house.');
+  RESET ROLE;
+
+  SELECT status INTO st FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'ended' THEN RAISE EXCEPTION 'ending left it at %', st; END IF;
+  IF (SELECT ended_at FROM fleetsmart_contracts WHERE id = made) IS NULL THEN
+    RAISE EXCEPTION 'ending stamped no date';
+  END IF;
+
+  SELECT status INTO st FROM crm_leads WHERE id = lead;
+  IF st <> 'customer' THEN
+    RAISE EXCEPTION 'ending the contract moved its lead to %, and it should stay won', st;
+  END IF;
+  RAISE NOTICE 'ok  ending stamps the date and leaves the customer won';
+
+  -- Ended once.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  BEGIN
+    PERFORM fleetsmart_end(made, NULL);
+    RAISE EXCEPTION 'a contract was ended twice';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%already ended%' THEN
+      RAISE NOTICE 'ok  and only once';
+    ELSE RAISE; END IF;
+  END;
+  RESET ROLE;
+END $$;
+
+-- Taking one back for editing.
+DO $$
+DECLARE acct UUID; made UUID; st TEXT; came_from TEXT;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Editable Ltd', 'lead', 'manual') RETURNING id INTO acct;
+  INSERT INTO fleetsmart_contracts (account_id, customer_name, plan, term_months, priced, owner_id, created_by)
+  VALUES (acct, 'Editable Ltd', 'Gold', 24, pg_temp.snapshot(4800, 2),
+          'ff000000-0000-0000-0000-000000000002', 'ff000000-0000-0000-0000-000000000002')
+  RETURNING id INTO made;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  PERFORM fleetsmart_send(made, 'them@editable.test');
+
+  -- A salesman may build and send, and may not edit what a customer has.
+  BEGIN
+    PERFORM fleetsmart_reopen(made);
+    RAISE EXCEPTION 'a salesman edited a contract the customer already has';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%permission that sets prices%' THEN
+      RAISE NOTICE 'ok  a salesman cannot edit a contract that has gone out';
+    ELSE RAISE; END IF;
+  END;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  PERFORM fleetsmart_reopen(made);
+  RESET ROLE;
+
+  SELECT status, reopened_from INTO st, came_from
+    FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'draft' THEN RAISE EXCEPTION 'reopening left it at %', st; END IF;
+  IF came_from <> 'sent' THEN
+    RAISE EXCEPTION 'the row does not say it came back from sent, it says %', came_from;
+  END IF;
+  IF (SELECT reopened_at FROM fleetsmart_contracts WHERE id = made) IS NULL THEN
+    RAISE EXCEPTION 'reopening left no record of when';
+  END IF;
+  RAISE NOTICE 'ok  an administrator can take one back, and the row says where from';
+END $$;
+
+-- Deleting, and the lead.
+DO $$
+DECLARE acct UUID; mine UUID; made UUID; lead UUID; gone JSONB; n INT;
+BEGIN
+  -- One the contract made itself: it goes.
+  SELECT id, lead_id INTO made, lead
+    FROM fleetsmart_contracts WHERE customer_name = 'Amendable Haulage';
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  BEGIN
+    PERFORM fleetsmart_delete(made);
+    RAISE EXCEPTION 'a salesman deleted a contract that had been to a customer';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%permission that sets prices%' THEN
+      RAISE NOTICE 'ok  a contract that has been to a customer needs more than build to delete';
+    ELSE RAISE; END IF;
+  END;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  gone := fleetsmart_delete(made);
+  RESET ROLE;
+
+  IF (gone ->> 'lead_deleted')::BOOLEAN IS NOT TRUE THEN
+    RAISE EXCEPTION 'deleting the contract kept a lead it had created';
+  END IF;
+  IF EXISTS (SELECT 1 FROM crm_leads WHERE id = lead) THEN
+    RAISE EXCEPTION 'the lead the contract made is still there';
+  END IF;
+  SELECT count(*) INTO n FROM fleetsmart_amendments WHERE contract_id = made;
+  IF n <> 0 THEN RAISE EXCEPTION '% amendments outlived their contract', n; END IF;
+  RAISE NOTICE 'ok  deleting takes the lead it made and its amendments with it';
+
+  -- One somebody opened first: it stays.
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Kept Lead Ltd', 'lead', 'manual') RETURNING id INTO acct;
+  INSERT INTO crm_leads (contact_id, owner_id, created_by, type, status, requirement)
+  VALUES (acct, 'ff000000-0000-0000-0000-000000000002',
+          'ff000000-0000-0000-0000-000000000002', 'maintenance', 'lead',
+          'Asked at the truck show')
+  RETURNING id INTO mine;
+  INSERT INTO fleetsmart_contracts (account_id, lead_id, customer_name, plan, term_months, priced, owner_id, created_by)
+  VALUES (acct, mine, 'Kept Lead Ltd', 'Silver', 12, pg_temp.snapshot(1200, 1),
+          'ff000000-0000-0000-0000-000000000002', 'ff000000-0000-0000-0000-000000000002')
+  RETURNING id INTO made;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  gone := fleetsmart_delete(made);
+  RESET ROLE;
+
+  IF (gone ->> 'lead_deleted')::BOOLEAN IS TRUE THEN
+    RAISE EXCEPTION 'deleting the contract took a lead somebody else had opened';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM crm_leads WHERE id = mine) THEN
+    RAISE EXCEPTION 'the pitch somebody opened first is gone';
+  END IF;
+  IF (SELECT requirement FROM crm_leads WHERE id = mine) <> 'Asked at the truck show' THEN
+    RAISE EXCEPTION 'the pitch was rewritten on the way past';
+  END IF;
+  RAISE NOTICE 'ok  a pitch somebody opened first survives its contract';
+END $$;
+
+-- =============================================================
 -- 8. The constraint that stops a contract being sent with no date.
 -- =============================================================
 RESET ROLE;

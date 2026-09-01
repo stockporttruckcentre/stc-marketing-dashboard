@@ -72,15 +72,37 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ ok: true, contract: data });
 }
 
+/* Removing a contract from the application entirely.
+ *
+ * Through `fleetsmart_delete` rather than a delete on the table, because
+ * deleting a contract is not only deleting a row. Migration 067 made a
+ * contract and its tracker lead one record, so this has to settle what
+ * happens to the lead, and the answer is not the same in both cases: a
+ * lead the contract created goes with it, a pitch somebody had already
+ * opened stays. Only the function knows which, and only the function can
+ * take the notifications pointing at it with it.
+ *
+ * The permission is also not the same in both cases. A draft is its
+ * owner's to throw away. Anything that has been to a customer is a
+ * record of what STC offered and what they agreed to, so it needs the
+ * permission that sets prices. Both rules are in the function, where
+ * they cannot be reached around. */
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const gate = await requireCapability('fleetsmart.build');
   if (!gate.ok) return gate.response;
 
-  const { error } = await gate.supabase
-    .from('fleetsmart_contracts').delete().eq('id', params.id);
+  const { data, error } = await gate.supabase.rpc('fleetsmart_delete', {
+    p_contract: params.id,
+  });
 
   if (error) {
-    return NextResponse.json({ ok: false, error: 'delete_failed', message: error.message }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: 'refused', message: error.message.replace(/^ERROR:\s*/, '') },
+      { status: 400 },
+    );
   }
-  return NextResponse.json({ ok: true });
+  /* What went, so the screen can say it rather than only that something
+     happened. A contract whose lead went with it is worth saying out
+     loud: somebody's tracker just got shorter. */
+  return NextResponse.json({ ok: true, gone: data });
 }

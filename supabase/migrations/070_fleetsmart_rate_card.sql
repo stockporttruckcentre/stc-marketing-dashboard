@@ -111,6 +111,12 @@ CREATE POLICY "fleetsmart_cards_read" ON fleetsmart_rate_cards
    that can make a version current, so there is no path that writes a
    card without also settling which one is in use. */
 
+/* Taken away rather than left to the absence of a policy: Supabase
+   grants `authenticated` everything on every table in `public`, so row
+   level security is the only thing standing between a signed in browser
+   and a rewritten price list. Saving goes through
+   `fleetsmart_save_rate_card`, which runs as the owner. */
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON fleetsmart_rate_cards FROM authenticated, anon;
 GRANT SELECT ON fleetsmart_rate_cards TO authenticated;
 
 -- -------------------------------------------------------------
