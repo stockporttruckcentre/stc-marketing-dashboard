@@ -4,7 +4,8 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Check, Copy, FileText, Plus, Printer, Search, Send, ShieldCheck, Trash2, X,
+  AlertTriangle, Check, Copy, FileText, Pencil, Plus, Printer, Search, Send,
+  ShieldCheck, Square, Trash2, X,
 } from 'lucide-react';
 import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
@@ -60,7 +61,7 @@ export type ContractRow = {
   plan: Plan;
   term_months: number;
   starts_on: string | null;
-  status: 'draft' | 'sent' | 'accepted' | 'declined' | 'expired';
+  status: 'draft' | 'sent' | 'accepted' | 'declined' | 'expired' | 'ended';
   input: ContractInput;
   priced: PricedContract;
   extras: ContractExtras;
@@ -93,6 +94,10 @@ const STATUS_TONE: Record<ContractRow['status'], Tone> = {
   accepted: 'success',
   declined: 'danger',
   expired: 'warning',
+  /* Neutral rather than danger. An ended contract was won and was paid;
+     it is over, not lost, and colouring it like a refusal would read as
+     one everywhere the list is scanned. */
+  ended: 'neutral',
 };
 
 const STATUS_LABEL: Record<ContractRow['status'], string> = {
@@ -101,6 +106,7 @@ const STATUS_LABEL: Record<ContractRow['status'], string> = {
   accepted: 'Accepted',
   declined: 'Declined',
   expired: 'Expired',
+  ended: 'Ended',
 };
 
 const money = (n: number) =>
@@ -150,6 +156,15 @@ export function FleetSmart({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  /* An action that needs asking first. One at a time, so the screen can
+     never be waiting on two answers. */
+  const [asking, setAsking] = useState<
+    | { kind: 'delete'; row: ContractRow }
+    | { kind: 'end'; row: ContractRow }
+    | { kind: 'reopen'; row: ContractRow }
+    | null
+  >(null);
+
   /* One of the two things that can be open over the list: the wizard on
      a draft, or the document on a contract that has gone out. Never
      both, so they are one piece of state rather than two booleans that
@@ -165,7 +180,8 @@ export function FleetSmart({
     drafts: contracts.filter((c) => c.status === 'draft').length,
     sent: contracts.filter((c) => c.status === 'sent').length,
     won: contracts.filter((c) => c.status === 'accepted').length,
-    closed: contracts.filter((c) => c.status === 'declined' || c.status === 'expired').length,
+    closed: contracts.filter((c) => c.status === 'declined' || c.status === 'expired'
+      || c.status === 'ended').length,
   }), [contracts]);
 
   const shown = useMemo(() => {
@@ -176,7 +192,7 @@ export function FleetSmart({
         if (tab === 'drafts') return c.status === 'draft';
         if (tab === 'sent') return c.status === 'sent';
         if (tab === 'won') return c.status === 'accepted';
-        return c.status === 'declined' || c.status === 'expired';
+        return c.status === 'declined' || c.status === 'expired' || c.status === 'ended';
       })
       .filter((c) => !q || `${c.ref ?? ''} ${c.customer_name} ${c.plan}`.toLowerCase().includes(q));
   }, [contracts, tab, query]);
@@ -289,6 +305,58 @@ export function FleetSmart({
     );
     if (ok) {
       setNotice(`${row.ref ?? row.customer_name} is marked as sent. Print the document and attach it.`);
+    }
+  }
+
+  /* Ending a live contract.
+   *
+   * Its own state rather than declined or expired. Both of those mean a
+   * contract that was never won, so folding a completed one into either
+   * puts a paying customer in the lost column and takes real revenue out
+   * of every figure that reads it. */
+  async function end(row: ContractRow, note: string) {
+    setAsking(null);
+    const ok = await post(`/api/fleetsmart/contracts/${row.id}/end`, { note }, row.id);
+    if (ok) setNotice(`${row.ref ?? row.customer_name} is recorded as ended.`);
+  }
+
+  /* Taking a contract back so the builder can edit it.
+   *
+   * A hole in the rule from migration 061 that a sent contract is
+   * frozen, opened deliberately and recorded on the row: the state it
+   * came back from is kept, so a price that changed after the customer
+   * saw it is a fact anybody can read. */
+  async function reopen(row: ContractRow) {
+    setAsking(null);
+    const ok = await post(`/api/fleetsmart/contracts/${row.id}/reopen`, {}, row.id);
+    if (ok) {
+      setNotice(`${row.ref ?? row.customer_name} is a draft again. Open it to make the change.`);
+      setOpen(null);
+    }
+  }
+
+  async function remove(row: ContractRow) {
+    setAsking(null);
+    setBusy(row.id); setError(null);
+    try {
+      const res = await fetch(`/api/fleetsmart/contracts/${row.id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!json.ok) { setError(json.message ?? 'That would not delete.'); return; }
+
+      /* What went, said out loud. A contract whose tracker lead went
+         with it means somebody's tracker just got shorter, and finding
+         that out later is worse than being told now. */
+      const gone = json.gone as { lead_deleted?: boolean } | null;
+      setNotice(
+        `${row.ref ?? 'That contract'} is gone`
+        + (gone?.lead_deleted ? ', and the maintenance lead it made on the tracker with it.' : '.'),
+      );
+      setOpen(null);
+      router.refresh();
+    } catch {
+      setError('That did not reach the server.');
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -467,13 +535,41 @@ export function FleetSmart({
                             </IconButton>
                           </>
                         )}
+                        {c.status === 'accepted' && may('fleetsmart.build') && (
+                          <IconButton
+                            label="End this contract"
+                            disabled={busy === c.id}
+                            onClick={() => setAsking({ kind: 'end', row: c })}
+                          >
+                            <Square size={14} />
+                          </IconButton>
+                        )}
+                        {c.status !== 'draft' && may('fleetsmart.discount') && (
+                          <IconButton
+                            label="Take it back to edit it"
+                            disabled={busy === c.id}
+                            onClick={() => setAsking({ kind: 'reopen', row: c })}
+                          >
+                            <Pencil size={14} />
+                          </IconButton>
+                        )}
                         {may('fleetsmart.build') && (
                           <IconButton label="Copy into a new contract" onClick={() => copyRow(c)}>
                             <Copy size={14} />
                           </IconButton>
                         )}
-                        {c.status === 'draft' && may('fleetsmart.build') && (
-                          <IconButton label="Delete this draft" danger disabled={busy === c.id} onClick={() => discard(c)}>
+                        {/* Delete, on every row rather than only a draft.
+                            What it takes with it and who may do it are
+                            different for a draft and for something that
+                            has been to a customer, and both rules live in
+                            `fleetsmart_delete` rather than here. */}
+                        {(c.status === 'draft' ? may('fleetsmart.build') : may('fleetsmart.discount')) && (
+                          <IconButton
+                            label={c.status === 'draft' ? 'Delete this draft' : 'Delete this contract'}
+                            danger
+                            disabled={busy === c.id}
+                            onClick={() => setAsking({ kind: 'delete', row: c })}
+                          >
                             <Trash2 size={14} />
                           </IconButton>
                         )}
@@ -518,6 +614,17 @@ export function FleetSmart({
         />
       )}
 
+      {asking && (
+        <ActionConfirm
+          asking={asking}
+          busy={busy === asking.row.id}
+          onCancel={() => setAsking(null)}
+          onEnd={(note) => end(asking.row, note)}
+          onReopen={() => reopen(asking.row)}
+          onDelete={() => remove(asking.row)}
+        />
+      )}
+
       {open?.kind === 'document' && (
         <ContractDocumentDrawer
           row={open.row}
@@ -526,6 +633,9 @@ export function FleetSmart({
           onClose={() => setOpen(null)}
           onDecide={(status) => decide(open.row, status)}
           onCopy={() => copyRow(open.row)}
+          onEnd={() => setAsking({ kind: 'end', row: open.row })}
+          onReopen={() => setAsking({ kind: 'reopen', row: open.row })}
+          onDelete={() => setAsking({ kind: 'delete', row: open.row })}
         />
       )}
     </TabShell>
@@ -543,7 +653,7 @@ export function FleetSmart({
    development case rather than a live one.
    ============================================================= */
 function ContractDocumentDrawer({
-  row, busy, may, onClose, onDecide, onCopy,
+  row, busy, may, onClose, onDecide, onCopy, onEnd, onReopen, onDelete,
 }: {
   row: ContractRow;
   busy: boolean;
@@ -551,6 +661,12 @@ function ContractDocumentDrawer({
   onClose: () => void;
   onDecide: (status: 'accepted' | 'declined') => void;
   onCopy: () => void;
+  /* The three that need asking first. The dialog lives on the list
+     rather than in here, so a record and a row ask the same question in
+     the same words. */
+  onEnd: () => void;
+  onReopen: () => void;
+  onDelete: () => void;
 }) {
   /* The snapshot, always, where there is one. A contract that has gone
      out prints the prices it went out at, whatever the rate card says
@@ -595,6 +711,21 @@ function ContractDocumentDrawer({
               </Button>
             </>
           )}
+          {row.status === 'accepted' && may('fleetsmart.build') && (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={onEnd}>
+              <Square size={13} /> End it
+            </Button>
+          )}
+          {row.status !== 'draft' && may('fleetsmart.discount') && (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={onReopen}>
+              <Pencil size={13} /> Edit
+            </Button>
+          )}
+          {may('fleetsmart.discount') && (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={onDelete}>
+              <Trash2 size={13} /> Delete
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={() => window.print()}>
             <Printer size={13} /> Print
           </Button>
@@ -624,5 +755,156 @@ function ContractDocumentDrawer({
 
       <ContractPrintRules />
     </Drawer>
+  );
+}
+
+/* =============================================================
+   Asking before ending, editing or deleting.
+
+   One dialog for the three, so a row and an open record ask the same
+   question in the same words. Somebody who learns what Delete does from
+   the list should not have to learn it again from the drawer.
+
+   ---- What each one says, and why it says that ----
+
+   Every warning names the specific thing that is about to happen to
+   this contract rather than a general caution. "This cannot be undone"
+   is true of most buttons and stops nobody; "the maintenance lead on
+   Dean's tracker goes with it" is the sentence that makes somebody
+   pause, because it names a consequence they had not thought of.
+
+   The destructive action is never the button under the cursor. Cancel
+   sits where the eye lands and Delete sits at the far end, in the ghost
+   style rather than as a red primary, because rule one of the kit is
+   that red points at the most important action on a screen and the most
+   important action here is not deleting a signed contract.
+   ============================================================= */
+function ActionConfirm({
+  asking, busy, onCancel, onEnd, onReopen, onDelete,
+}: {
+  asking:
+    | { kind: 'delete'; row: ContractRow }
+    | { kind: 'end'; row: ContractRow }
+    | { kind: 'reopen'; row: ContractRow };
+  busy: boolean;
+  onCancel: () => void;
+  onEnd: (note: string) => void;
+  onReopen: () => void;
+  onDelete: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const { row } = asking;
+  const named = row.ref ? `${row.ref}, ${row.customer_name}` : row.customer_name || 'this contract';
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+
+  const copy = {
+    end: {
+      title: 'End this contract',
+      body: `${named} stops being a live contract from today. It keeps its price, its history and its `
+        + 'document, and the customer stays a customer on the tracker: they were won and they paid, '
+        + 'so ending the cover does not un-win them.',
+      confirm: 'End it',
+    },
+    reopen: {
+      title: 'Take it back to edit it',
+      body: `${named} goes back to a draft so the builder can change it. The customer already has `
+        + 'the version that went out, so anything changed here will differ from the copy in their '
+        + 'inbox. The record keeps the date and the state it came back from, so the difference is '
+        + 'explainable later. To change a live contract without doing that, amend it instead.',
+      confirm: 'Take it back',
+    },
+    delete: {
+      title: 'Delete this contract',
+      body: `${named} is removed from the application entirely, along with every amendment on it and `
+        + 'any notification pointing at it. '
+        + (row.status === 'draft'
+          ? 'It is a draft, so nothing has been to a customer.'
+          : 'It has been to a customer, so this removes the record of what was offered and what '
+            + 'they agreed to. There is no copy left here.')
+        + ' The maintenance lead it created on the tracker goes with it. A pitch somebody opened '
+        + 'before the contract existed stays where it is.',
+      confirm: 'Delete it',
+    },
+  }[asking.kind];
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 950,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        background: 'rgba(5, 13, 38, 0.55)',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        style={{
+          width: '100%', maxWidth: 460, padding: '20px 22px 18px',
+          background: 'var(--surface-raised)', border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)',
+        }}
+      >
+        <h3 style={{
+          display: 'flex', alignItems: 'center', gap: 8, margin: 0,
+          fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 17,
+          letterSpacing: '-0.01em', color: 'var(--text)',
+        }}>
+          {asking.kind === 'delete' && <AlertTriangle size={16} style={{ color: 'var(--accent)' }} />}
+          {copy.title}
+        </h3>
+
+        <p style={{
+          margin: '9px 0 0', fontFamily: 'var(--inter)', fontSize: 13,
+          lineHeight: 1.6, color: 'var(--text-muted)',
+        }}>{copy.body}</p>
+
+        {asking.kind === 'end' && (
+          <div style={{ marginTop: 14 }}>
+            <label style={{
+              display: 'block', marginBottom: 5,
+              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11.5,
+              letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+            }}>Why, for the record</label>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Fleet went in house, sold the business, moved supplier"
+              style={{
+                width: '100%', height: 32, padding: '0 11px',
+                background: 'var(--surface)', color: 'var(--text)',
+                border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+                fontFamily: 'var(--inter)', fontSize: 13,
+              }}
+            />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center' }}>
+          <Button size="md" variant="secondary" onClick={onCancel}>Keep it</Button>
+          <span style={{ flex: 1 }} />
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              if (asking.kind === 'end') onEnd(note);
+              else if (asking.kind === 'reopen') onReopen();
+              else onDelete();
+            }}
+          >
+            {busy ? 'Working' : copy.confirm}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
