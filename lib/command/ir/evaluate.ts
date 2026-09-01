@@ -49,18 +49,29 @@ function shiftDate(iso: unknown, n: number, unit: string, back: boolean): Evalua
 /**
  * A number, or a stated reason why not.
  *
- * An empty column is not zero and a word is not a number. Both refuse,
- * because the alternative is writing a figure the instruction never
- * contained.
+ * A word is not a number, and an empty column is usually not a number
+ * either, because the alternative is writing a figure the instruction
+ * never contained.
+ *
+ * `emptyIsZero` is the one exception, and it is narrow on purpose. See
+ * the note in the binary case below.
  */
-function numeric(v: unknown, where: string): { ok: true; n: number } | { ok: false; why: string } {
+function numeric(
+  v: unknown, where: string, emptyIsZero = false,
+): { ok: true; n: number } | { ok: false; why: string } {
   if (v === null || v === undefined || v === '') {
+    if (emptyIsZero) return { ok: true, n: 0 };
     return { ok: false, why: `${where} is empty, so there is nothing to calculate from` };
   }
   if (typeof v === 'boolean') return { ok: false, why: `${where} is not a number` };
   const n = typeof v === 'number' ? v : Number(v);
   if (!Number.isFinite(n)) return { ok: false, why: `${where} is not a number` };
   return { ok: true, n };
+}
+
+/** A column on the row being written, as opposed to a literal or a hop. */
+function isRowField(e: Expr): boolean {
+  return e.kind === 'field' && !('via' in e.of);
 }
 
 function describe(e: Expr): string {
@@ -96,9 +107,30 @@ export function evaluate(e: Expr, ctx: EvalContext, at = 'to'): Evaluated {
       const right = evaluate(e.right, ctx, `${at}.right`);
       if (!right.ok) return right;
 
-      const a = numeric(left.value, describe(e.left));
+      /* AN EMPTY ACCUMULATOR IS ZERO, AND ONLY UNDER + AND -.
+
+         "Add £1,000 refurb to 143074" on a trailer with nothing in
+         `refurb_costs` means the refurb cost is now £1,000. It was
+         being refused with "refurb_costs is empty, so there is nothing
+         to calculate from", which is the rule above applied one step
+         too widely: an empty column is genuinely not a number you can
+         take five per cent OF, and it is obviously a number you can
+         add TO. Every trailer starts with no refurb on it, so the
+         commonest instruction in the whole vocabulary was the one that
+         could never run.
+
+         Still refused for * / and %, because a percentage of an
+         unknown base is a figure the instruction never contained,
+         which is the thing the original rule exists to prevent.
+
+         Only for a column on this row, never for a literal or a value
+         read across a relationship. A missing literal is a parse
+         failure and should still say so. */
+      const accumulating = e.op === '+' || e.op === '-';
+
+      const a = numeric(left.value, describe(e.left), accumulating && isRowField(e.left));
       if (!a.ok) return { ok: false, why: a.why };
-      const b = numeric(right.value, describe(e.right));
+      const b = numeric(right.value, describe(e.right), accumulating && isRowField(e.right));
       if (!b.ok) return { ok: false, why: b.why };
 
       if ((e.op === '/' || e.op === '%') && b.n === 0) {

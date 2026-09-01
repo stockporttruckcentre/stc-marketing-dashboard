@@ -24,6 +24,7 @@ import { evaluate } from '../lib/command/ir/evaluate';
 import { validate } from '../lib/command/ir/validate';
 import type { Expr, Mutate, Plan, Select } from '../lib/command/ir/types';
 import { writableColumns } from './generate-writable-columns';
+import { madeWhat } from '../lib/command/server/mutation';
 
 /* =============================================================
    Cases are independent.
@@ -232,7 +233,20 @@ test('arithmetic is worked out per row', async () => {
    Arithmetic refuses rather than assuming
    ============================================================= */
 
-test('an empty column is not zero', async () => {
+/* This test used to assert the opposite, and it was wrong.
+
+   "An empty column is not zero" is a good principle that was applied
+   one step too widely, and then frozen here so nothing could correct
+   it. Every trailer starts with no refurb cost, so "add £1,000 refurb
+   to 143074" answered "Nothing was changed. refurb_costs is empty, so
+   there is nothing to calculate from", which is the commonest
+   instruction in the vocabulary refusing to run on the commonest state
+   of the record.
+
+   Adding to nothing is not an assumption. It is addition. The
+   principle survives where it belongs, in the multiplication case
+   below and in the one under it. */
+test('adding to an empty column writes what was added', async () => {
   const db = fakeDb({ stock_trailers: trailerRows() });
   db.tables.stock_trailers.find((r) => r.id === 't1')!.refurb_costs = null;
   const plan = update('one', byStc('STC143580'), [{
@@ -240,7 +254,19 @@ test('an empty column is not zero', async () => {
     to: { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(250) },
   }]);
   const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
-  ok('adding to nothing refuses rather than writing 250',
+  ok('adding 250 to nothing gives 250 rather than refusing',
+    preview.ok, preview.ok ? '' : preview.why);
+});
+
+test('but a percentage of an empty column is still refused', async () => {
+  const db = fakeDb({ stock_trailers: trailerRows() });
+  db.tables.stock_trailers.find((r) => r.id === 't1')!.refurb_costs = null;
+  const plan = update('one', byStc('STC143580'), [{
+    field: trailer('refurb_costs'),
+    to: { kind: 'binary', op: '*', left: f('refurb_costs'), right: lit(1.05) },
+  }]);
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('five per cent of nothing refuses rather than writing 0',
     !preview.ok && /empty/.test(preview.why), preview.ok ? 'it resolved' : preview.why);
   ok('and nothing was written', db.writes.length === 0);
 });
@@ -288,10 +314,74 @@ test('the evaluator never turns a failure into a value', async () => {
   const ctx = { row: {}, references: new Map(), now: '2026-08-14' };
   ok('an aggregate over one row has no answer',
     evaluate({ kind: 'agg', fn: 'count' } as Expr, ctx).ok === false);
-  ok('a null operand has no answer',
+  ok('a null LITERAL operand has no answer',
     evaluate({ kind: 'binary', op: '+', left: lit(null), right: lit(1) } as Expr, ctx).ok === false);
   ok('but an ordinary sum does',
     evaluate({ kind: 'binary', op: '+', left: lit(2), right: lit(3) } as Expr, ctx).ok === true);
+});
+
+/* -------------------------------------------------------------
+   Adding to a column that is empty.
+
+   Reported from the live bar: "add refurb to 143074" answered
+   "Nothing was changed. refurb_costs is empty, so there is nothing to
+   calculate from". Every trailer starts with no refurb on it, so the
+   commonest instruction in the vocabulary was the one that could never
+   run.
+
+   An empty column is a number you can add TO. It is not a number you
+   can take five per cent OF, and that half still refuses, because a
+   percentage of an unknown base is a figure the instruction never
+   contained.
+   ------------------------------------------------------------- */
+test('an empty accumulator is zero, and only for plus and minus', async () => {
+  const empty = { row: { refurb_costs: null }, references: new Map(), now: '2026-08-14' };
+  const held = { row: { refurb_costs: 250 }, references: new Map(), now: '2026-08-14' };
+
+  const add = { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(1000) } as Expr;
+  const got = evaluate(add, empty);
+  ok('adding 1000 to an empty refurb gives 1000',
+    got.ok && got.value === 1000, got.ok ? String(got.value) : got.why);
+
+  const onTop = evaluate(add, held);
+  ok('and adding to one that has 250 still gives 1250',
+    onTop.ok && onTop.value === 1250, onTop.ok ? String(onTop.value) : onTop.why);
+
+  const takeAway = evaluate(
+    { kind: 'binary', op: '-', left: f('refurb_costs'), right: lit(100) } as Expr, empty);
+  ok('taking 100 off an empty one gives -100 rather than refusing',
+    takeAway.ok && takeAway.value === -100, takeAway.ok ? String(takeAway.value) : takeAway.why);
+
+  /* The half that must not move. */
+  const times = evaluate(
+    { kind: 'binary', op: '*', left: f('refurb_costs'), right: lit(1.05) } as Expr, empty);
+  ok('five per cent of an empty column is still refused, by name',
+    !times.ok && /refurb_costs is empty/.test(times.why), times.ok ? 'it resolved' : times.why);
+
+  const over = evaluate(
+    { kind: 'binary', op: '/', left: f('refurb_costs'), right: lit(2) } as Expr, empty);
+  ok('and dividing an empty column is still refused',
+    !over.ok, over.ok ? 'it resolved' : over.why);
+
+  /* A literal that is null is a parse failure, not an empty column, and
+     must keep saying so however the operator reads. */
+  const nothing = evaluate(
+    { kind: 'binary', op: '+', left: lit(null), right: f('refurb_costs') } as Expr, empty);
+  ok('a null literal is still refused under plus',
+    !nothing.ok, nothing.ok ? 'it resolved' : nothing.why);
+});
+
+test('adding to an empty column actually writes', async () => {
+  const rows = trailerRows();
+  rows[0]!.refurb_costs = null;
+  const db = fakeDb({ stock_trailers: rows });
+  const plan = update('one', byStc(String(rows[0]!.stc_no)), [{
+    field: trailer('refurb_costs'),
+    to: { kind: 'binary', op: '+', left: f('refurb_costs'), right: lit(1000) },
+  }]);
+  const preview = await resolveProgramme(plan, { store: postgrestStore(db.supabase) });
+  ok('it resolves rather than saying nothing was changed',
+    preview.ok, preview.ok ? '' : preview.why);
 });
 
 /* =============================================================
@@ -1164,4 +1254,45 @@ main().then(() => {
     console.log();
   }
   if (failedAssertions) process.exitCode = 1;
+});
+
+/* =============================================================
+   A create says it created.
+
+   Reported from the live bar: "create a lead for maxwell haulage"
+   answered "Company name changed on one record". The plan was right
+   and the record was made correctly. The sentence describing it was
+   wrong, and it read as though an existing customer had been renamed,
+   which sends somebody to check whether they have just damaged a
+   record. A tool that makes people verify its own confirmations has
+   failed whatever the database holds.
+   ============================================================= */
+test('a create is described as a create, by name', async () => {
+  const one = madeWhat([{
+    op: 'create', id: 'c1', target: { entity: 'contacts' },
+    set: [{ field: { entity: 'contacts', field: 'company_name' }, to: lit('Maxwell Haulage') }],
+    produces: { kind: 'record', entity: 'contacts' },
+  } as unknown as Mutate]);
+  ok('it names the company rather than the column',
+    one === 'Maxwell Haulage added to the CRM.', one);
+  ok('and never says anything changed',
+    !/changed/i.test(one), one);
+
+  const two = madeWhat([
+    { op: 'create', id: 'c1', target: { entity: 'contacts' },
+      set: [{ field: { entity: 'contacts', field: 'company_name' }, to: lit('A Haulage') }],
+      produces: { kind: 'record', entity: 'contacts' } },
+    { op: 'create', id: 'c2', target: { entity: 'contacts' },
+      set: [{ field: { entity: 'contacts', field: 'company_name' }, to: lit('B Haulage') }],
+      produces: { kind: 'record', entity: 'contacts' } },
+  ] as unknown as Mutate[]);
+  ok('two of them count rather than listing', two === '2 customers added to the CRM.', two);
+
+  const unnamed = madeWhat([{
+    op: 'create', id: 'c1', target: { entity: 'deals' },
+    set: [{ field: { entity: 'deals', field: 'estimated_value' }, to: lit(1000) }],
+    produces: { kind: 'record', entity: 'deals' },
+  } as unknown as Mutate]);
+  ok('a create with no name falls back to the entity, not to a column',
+    unnamed === 'One lead created.', unnamed);
 });

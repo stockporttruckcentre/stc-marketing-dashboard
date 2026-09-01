@@ -22,7 +22,10 @@
    npx tsx scripts/command-what-works.ts --list
    npx tsx scripts/command-what-works.ts --audit
    ============================================================= */
-import { ACTIONS, suggestActions, type Action } from '../lib/command/actions';
+import { ACTIONS, suggestActions } from '../lib/command/actions';
+
+/** One entry in the registry, as this file reads it. */
+type Action = (typeof ACTIONS)[number];
 import { composeSuggestions } from '../lib/command/compose';
 import { suggestFeatures } from '../lib/command/features';
 import { planCommand } from '../lib/command/plan';
@@ -67,7 +70,7 @@ function whatTheBarShows(text: string, role: UserRole): Shown[] {
     push({ kind: h.action.kind, label: h.action.label, path: h.action.path, id: h.action.id });
   }
   for (const f of suggestFeatures(text, 4)) {
-    push({ kind: 'screen', label: f.title, path: f.path });
+    push({ kind: 'screen', label: f.label, path: f.path });
   }
 
   return out.slice(0, 7);
