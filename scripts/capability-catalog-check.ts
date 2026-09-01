@@ -46,9 +46,12 @@ function main() {
     process.exit(1);
   }
 
-  const inCode = CAPABILITY_CATALOG.map((c) => c.key).sort();
-  const db = new Set(inDatabase);
-  const code = new Set(inCode);
+  /* Widened to plain strings on purpose. The whole point is to compare
+     two lists that may disagree, and a `Set<CrmCapability>` cannot be
+     asked whether it holds a key the database made up. */
+  const inCode: string[] = CAPABILITY_CATALOG.map((c) => c.key as string).sort();
+  const db = new Set<string>(inDatabase);
+  const code = new Set<string>(inCode);
 
   const problems: string[] = [];
 
