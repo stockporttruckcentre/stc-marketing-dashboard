@@ -87,6 +87,22 @@ const TD: CSSProperties = {
 const money = (n: number) =>
   n.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 });
 
+/* What each plan looks like.
+
+   Silver, gold and platinum are metals with actual colours, and a plan
+   picker where all three cards are the same navy makes somebody read
+   three paragraphs to find the one they already knew they wanted.
+
+   Kept to the card's edge and its icon rather than its fill: rule one of
+   the kit is that navy acts and red points, and three saturated cards
+   would be three things shouting. The colour is identification, not
+   emphasis. */
+const PLAN_COLOUR: Record<Plan, { line: string; tint: string; ink: string }> = {
+  Silver:   { line: '#9AA3AE', tint: 'rgba(154, 163, 174, 0.10)', ink: '#6B7480' },
+  Gold:     { line: '#C9A227', tint: 'rgba(201, 162, 39, 0.12)',  ink: '#8A6E12' },
+  Platinum: { line: '#5B6C8F', tint: 'rgba(91, 108, 143, 0.12)',  ink: '#3D4E71' },
+};
+
 /** What each plan is, in the words a salesman uses in the room. */
 const PLAN_BLURB: Record<Plan, string> = {
   Silver: 'Compliance. One DVSA inspection taken at MOT, the full MOT bundle, laden RBTs, tacho, sundries, direct debit and document storage.',
@@ -243,7 +259,7 @@ export function ContractWizard({
     [leads, accountId],
   );
 
-  async function save(then: 'draft' | 'send'): Promise<void> {
+  async function save(then: 'draft' | 'send', to?: string[]): Promise<void> {
     setBusy(true); setError(null);
     try {
       const body = { input, extras, account_id: accountId, lead_id: leadId };
@@ -261,18 +277,33 @@ export function ContractWizard({
       const contract = json.contract as { id: string; ref: string | null };
       setSavedId(contract.id);
 
+      setDirty(false);
+
       if (then === 'draft') {
         onSaved({ id: contract.id, ref: contract.ref, sent: false });
         return;
       }
 
+      /* Who it went to, from the send box, so the record says an address
+         somebody can check rather than the contact's name. */
+      const recipients = (to ?? [extras.customerEmail, input.customerContact])
+        .map((r) => r.trim()).filter(Boolean);
+
       const sent = await (await fetch(`/api/fleetsmart/contracts/${contract.id}/send`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ to: input.customerContact }),
+        body: JSON.stringify({ to: recipients.join(', ') }),
       })).json();
 
       if (!sent.ok) { setError(sent.message ?? 'It saved, but it could not be marked as sent.'); return; }
+
+      /* The email, opened with the contract described in it. The
+         document itself is attached by the person: a mail client cannot
+         be handed a file from a link, and pretending otherwise would
+         mean a welcome email arriving with nothing on it. The print
+         dialog is opened alongside so the PDF exists to attach. */
+      openTheEmail(recipients, input, priced, extras);
+
       onSaved({ id: contract.id, ref: contract.ref, sent: true });
     } catch {
       setError('That did not reach the server. Try again.');
@@ -391,6 +422,47 @@ export function ContractWizard({
         })}
       </div>
 
+      {closing && (
+        <Confirm
+          title="Close without saving?"
+          body={savedId
+            ? 'The changes made since you last saved will go. The draft itself stays where it is.'
+            : 'Nothing has been saved yet, so the whole contract goes: the customer, the fleet and the price.'}
+          confirmLabel="Close and lose it"
+          onConfirm={onClose}
+          onSave={may('fleetsmart.build') && ready
+            ? async () => { setClosing(false); await save('draft'); }
+            : undefined}
+          onCancel={() => setClosing(false)}
+        />
+      )}
+
+      {printReminder && (
+        <Confirm
+          title="Save it before you print"
+          body={savedId
+            ? 'This has been saved once. Anything changed since is on the screen and not in the record, and the print will show the screen.'
+            : 'This contract has not been saved yet. Printing it does not save it, so close the drawer afterwards and it is gone.'}
+          confirmLabel="Print anyway"
+          onConfirm={() => { setPrintReminder(null); window.print(); }}
+          onSave={may('fleetsmart.build') && ready
+            ? async () => { setPrintReminder(null); await save('draft'); }
+            : undefined}
+          onCancel={() => setPrintReminder(null)}
+        />
+      )}
+
+      {sending && (
+        <SendDialog
+          contract={{ name: input.customerName, monthly: priced.monthly, annual: priced.annual,
+                      plan: input.plan, term: input.termMonths, assets: realAssets.length }}
+          first={extras.customerEmail}
+          busy={busy}
+          onCancel={() => setSending(false)}
+          onSend={async (to) => { setSending(false); await save('send', to); }}
+        />
+      )}
+
       {coaching && (
         <StepCoach
           step={coaching}
@@ -454,7 +526,10 @@ export function ContractWizard({
       )}
 
       {step === 'Review' && (
-        <ReviewStep input={input} priced={priced} extras={extras} reference={reference} />
+        <ReviewStep
+          input={input} priced={priced} extras={extras} reference={reference}
+          onPrint={() => setPrintReminder('print')}
+        />
       )}
     </Drawer>
   );
@@ -640,16 +715,48 @@ function PlanStep({
     <>
       <Label>The plan</Label>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-        {PLANS.map((p) => (
-          <OptionCard
-            key={p}
-            selected={input.plan === p}
-            onSelect={() => setPlan(p)}
-            icon={<Truck size={16} />}
-            title={`FleetSmart+ ${p}`}
-            description={PLAN_BLURB[p]}
-          />
-        ))}
+        {PLANS.map((p) => {
+          const c = PLAN_COLOUR[p];
+          const on = input.plan === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPlan(p)}
+              style={{
+                display: 'flex', gap: 11, textAlign: 'left', cursor: 'pointer',
+                padding: '13px 14px 14px',
+                background: on ? c.tint : 'var(--surface)',
+                border: `1px solid ${on ? c.line : 'var(--border)'}`,
+                borderLeft: `3px solid ${c.line}`,
+                borderRadius: 'var(--r-md)',
+              }}
+            >
+              <span style={{
+                width: 30, height: 30, flex: 'none', borderRadius: 'var(--r)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: c.tint, color: c.ink,
+              }}>
+                <Truck size={16} />
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 14,
+                  color: 'var(--text)',
+                }}>
+                  FleetSmart+ {p}
+                  {on && <Check size={13} style={{ color: c.ink }} />}
+                </span>
+                <span style={{
+                  display: 'block', marginTop: 4,
+                  fontFamily: 'var(--inter)', fontSize: 12, lineHeight: 1.5,
+                  color: 'var(--text-muted)',
+                }}>{PLAN_BLURB[p]}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {input.plan === 'Platinum' && (
@@ -671,9 +778,11 @@ function PlanStep({
             {TERM_MONTHS.map((m) => <option key={m} value={m}>{m} months</option>)}
           </Select>
         </Field>
-        <Field label="Start date">
-          <TextInput type="date" value={input.startDate} onChange={(v) => set('startDate', v)} />
-        </Field>
+        <DatePicker
+          label="Start date"
+          value={input.startDate}
+          onChange={(v) => set('startDate', v)}
+        />
       </Split>
 
       <Label>Labour rates</Label>
@@ -1189,12 +1298,17 @@ function WordingStep({
 /* ---------------- 6. review ---------------- */
 
 function ReviewStep({
-  input, priced, extras, reference,
+  input, priced, extras, reference, onPrint,
 }: {
   input: ContractInput;
   priced: ReturnType<typeof priceContract>;
   extras: ContractExtras;
   reference: string | null;
+  /* The wizard's, not `window.print` directly, so printing something
+     that has not been saved says so first. Printing does not save, and
+     a PDF in somebody's downloads with no record behind it is the
+     quietest way to lose a contract. */
+  onPrint: () => void;
 }) {
   const warnings = priced.assets.flatMap((a) => a.warnings.map((w) => `${a.reg}: ${w}`));
 
@@ -1205,7 +1319,7 @@ function ReviewStep({
         <span style={{ fontSize: 12, color: 'var(--text-subtle)', flex: 1 }}>
           This is what the customer receives. Print it to PDF and attach it, or send the link.
         </span>
-        <Button size="sm" variant="secondary" onClick={() => window.print()}>
+        <Button size="sm" variant="secondary" onClick={onPrint}>
           <Printer size={13} /> Print or save as PDF
         </Button>
       </div>
@@ -1233,4 +1347,261 @@ function ReviewStep({
       <ContractPrintRules />
     </>
   );
+}
+
+/* ---------------- the three things that ask before they act ---------------- */
+
+/**
+ * One confirmation, three uses.
+ *
+ * Closing a builder with unsaved work, printing something that has not
+ * been saved, and any other point where the honest answer is "are you
+ * sure, and would you rather save first". `onSave` is what makes it
+ * useful rather than annoying: the question a person actually has when
+ * they are told they will lose something is how to not lose it.
+ */
+function Confirm({
+  title, body, confirmLabel, onConfirm, onSave, onCancel,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  /** Offered only where there is something savable to save. */
+  onSave?: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'absolute', inset: 0, zIndex: 60,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        background: 'rgba(5, 13, 38, 0.52)',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 420, padding: '20px 22px 18px',
+          background: 'var(--surface-raised)', border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)',
+        }}
+      >
+        <h3 style={{
+          margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 17,
+          letterSpacing: '-0.01em', color: 'var(--text)',
+        }}>{title}</h3>
+        <p style={{
+          margin: '8px 0 0', fontFamily: 'var(--inter)', fontSize: 13,
+          lineHeight: 1.55, color: 'var(--text-muted)',
+        }}>{body}</p>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+          {onSave && (
+            <Button size="sm" variant="primary" onClick={() => void onSave()}>
+              Save first
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={onCancel}>Keep working</Button>
+          <span style={{ flex: 1 }} />
+          <Button size="sm" variant="ghost" onClick={onConfirm}>{confirmLabel}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Who the contract is going to, before it goes.
+ *
+ * From the business: "Save and Send should pop up with the email address
+ * it's going to send it to and allows you to add more on."
+ *
+ * The first address is whatever the CRM had for them, so the common case
+ * is reading one line and pressing send. Everything typed is checked for
+ * an @ before it can be added, because an address with a typo in it
+ * looks exactly like one that worked.
+ */
+function SendDialog({
+  contract, first, busy, onSend, onCancel,
+}: {
+  contract: { name: string; monthly: number; annual: number; plan: string; term: number; assets: number };
+  first: string;
+  busy: boolean;
+  onSend: (to: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [to, setTo] = useState<string[]>(() => (first.trim() ? [first.trim()] : []));
+  const [typing, setTyping] = useState('');
+  const [bad, setBad] = useState(false);
+
+  function add() {
+    const value = typing.trim();
+    if (!value) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) { setBad(true); return; }
+    if (!to.includes(value)) setTo((t) => [...t, value]);
+    setTyping(''); setBad(false);
+  }
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'absolute', inset: 0, zIndex: 60,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        background: 'rgba(5, 13, 38, 0.52)',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 470, padding: '20px 22px 18px',
+          background: 'var(--surface-raised)', border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)',
+        }}
+      >
+        <h3 style={{
+          margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 17,
+          letterSpacing: '-0.01em', color: 'var(--text)',
+        }}>Send to {contract.name || 'the customer'}</h3>
+        <p style={{
+          margin: '8px 0 0', fontFamily: 'var(--inter)', fontSize: 12.5,
+          lineHeight: 1.55, color: 'var(--text-muted)',
+        }}>
+          FleetSmart+ {contract.plan}, {contract.term} months, {contract.assets} asset
+          {contract.assets === 1 ? '' : 's'}, {money(contract.monthly)} a month. This marks the
+          contract sent and opens an email with the welcome note already written.
+        </p>
+
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 14,
+          minHeight: 32, padding: to.length ? 6 : 0,
+          background: to.length ? 'var(--bg-subtle)' : 'transparent',
+          borderRadius: 'var(--r)',
+        }}>
+          {to.map((address) => (
+            <span key={address} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              height: 24, padding: '0 6px 0 9px',
+              background: 'var(--surface)', border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--r-full)',
+              fontFamily: 'var(--inter)', fontSize: 12, color: 'var(--text)',
+            }}>
+              {address}
+              <button
+                onClick={() => setTo((t) => t.filter((a) => a !== address))}
+                aria-label={`Take ${address} off`}
+                style={{
+                  display: 'inline-flex', border: 0, background: 'transparent',
+                  cursor: 'pointer', color: 'var(--text-subtle)', padding: 0,
+                }}
+              ><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+          <input
+            value={typing}
+            onChange={(e) => { setTyping(e.target.value); setBad(false); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+            placeholder="Add another address"
+            style={{
+              flex: 1, height: 32, padding: '0 11px',
+              background: 'var(--surface)', color: 'var(--text)',
+              border: `1px solid ${bad ? 'var(--danger, #CF2417)' : 'var(--border-strong)'}`,
+              borderRadius: 'var(--r)', fontFamily: 'var(--inter)', fontSize: 13,
+            }}
+          />
+          <Button size="sm" variant="secondary" onClick={add}>Add</Button>
+        </div>
+        {bad && (
+          <p style={{
+            margin: '6px 0 0', fontFamily: 'var(--inter)', fontSize: 11.5,
+            color: 'var(--danger, #CF2417)',
+          }}>That is not an email address.</p>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center' }}>
+          <Button
+            size="md" variant="primary"
+            disabled={busy || to.length === 0}
+            onClick={() => onSend(to)}
+          >
+            <Send size={14} /> Send to {to.length === 1 ? 'them' : `${to.length} people`}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
+          {to.length === 0 && (
+            <span style={{
+              fontFamily: 'var(--inter)', fontSize: 11.5, color: 'var(--text-subtle)',
+            }}>Add at least one address.</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The welcome email, written and opened in whatever they use for mail.
+ *
+ * A `mailto:` cannot carry an attachment. No browser API can: handing a
+ * mail client a file is a thing only the mail client can do. So this
+ * writes the email, names the attachment in it, and the person attaches
+ * the PDF they have just printed. Pretending otherwise would mean a
+ * welcome email going out with nothing on it, which is worse than one
+ * more step.
+ */
+function openTheEmail(
+  to: string[],
+  input: ContractInput,
+  priced: { monthly: number; annual: number },
+  extras: ContractExtras,
+): void {
+  const name = input.customerName.trim() || 'there';
+  const contact = input.customerContact.trim().split(' ')[0] || name;
+  const assets = input.assets.filter((a) => a.reg.trim()).length;
+
+  const subject = `Welcome to FleetSmart+ ${input.plan}, ${input.customerName.trim()}`.trim();
+
+  const body = [
+    `Hello ${contact},`,
+    '',
+    `Thank you for choosing FleetSmart+. Here is your ${input.plan} maintenance contract, attached as a PDF.`,
+    '',
+    'The short version:',
+    `  Plan            FleetSmart+ ${input.plan}`,
+    `  Term            ${input.termMonths} months${input.startDate ? `, from ${input.startDate}` : ''}`,
+    `  Assets covered  ${assets}`,
+    `  Cost            ${money(priced.monthly)} a month, ${money(priced.annual)} a year`,
+    '',
+    'The attached contract has the full breakdown: every asset, every line of work it covers, how often, and what is included in the plan and what is not.',
+    '',
+    'Have a read and let me know if anything needs changing before you sign.',
+    '',
+    extras.accountManagerName.trim() ? 'Best regards,' : 'Best regards,',
+    extras.accountManagerName.trim() || '',
+    extras.accountManagerPhone.trim() || '',
+    'Stockport Truck Centre',
+  ].filter((line, i, all) => !(line === '' && all[i - 1] === '')).join('\n');
+
+  const href = `mailto:${encodeURIComponent(to.join(','))}`
+    + `?subject=${encodeURIComponent(subject)}`
+    + `&body=${encodeURIComponent(body)}`;
+
+  /* A link rather than assigning to `location`, so the page underneath
+     is not navigated away from on a machine with no mail client set up. */
+  const a = document.createElement('a');
+  a.href = href;
+  a.rel = 'noopener';
+  a.click();
 }

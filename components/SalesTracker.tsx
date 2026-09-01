@@ -1,10 +1,13 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload, ShieldCheck,
+} from 'lucide-react';
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -113,6 +116,7 @@ export function SalesTracker({
   initialLeads, profile,
 }: { initialLeads: LeadWithAccount[]; profile: Profile }) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [rows, setRows] = useState<TrackerRow[]>(() => initialLeads.map(flatten));
   const [side, setSide] = useState<LeadType>('trailer_sales');
   const [whatFilter, setWhatFilter] = useState<string | null>(null);
@@ -640,6 +644,7 @@ export function SalesTracker({
         <NewLeadModal
           profile={profile}
           onCreate={createLead}
+          onFleetSmart={() => { setShowNewLead(false); router.push('/dashboard/fleetsmart?new=1'); }}
           onClose={() => setShowNewLead(false)}
         />
       )}
@@ -966,8 +971,10 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
  * example was Dave taking a call while Dean is away: he wants it in
  * Dean's tracker as he writes it down, not in his own and moved later.
  */
-function NewLeadModal({ profile, onCreate, onClose }: {
+function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
   profile: Profile;
+  /** Through to the FleetSmart+ builder, which raises its own lead. */
+  onFleetSmart: () => void;
   onCreate: (contactId: string | null, company: string, websiteUrl: string,
              type: LeadType, what: string | null, ownerId: string) => void;
   onClose: () => void;
@@ -1076,8 +1083,28 @@ function NewLeadModal({ profile, onCreate, onClose }: {
             title="Rental & leasing"
             description="Hire, contract hire, leasing"
           />
+          {/* Not a fourth lead type. FleetSmart+ is a priced maintenance
+              contract, and building one already creates the maintenance
+              lead behind it, so raising a lead here as well would make
+              two records for one pitch. This is the way through to the
+              builder, which is where the price gets set. */}
+          <OptionCard
+            selected={false}
+            onSelect={onFleetSmart}
+            icon={<ShieldCheck size={14} />}
+            title="FleetSmart+"
+            description="Price a fixed cost maintenance contract"
+          />
         </div>
       </Field>
+
+      <p style={{
+        margin: '-2px 0 0', fontFamily: 'var(--inter)', fontSize: 11.5,
+        color: 'var(--text-subtle)',
+      }}>
+        FleetSmart+ opens the contract builder. Saving a contract there puts the maintenance lead
+        on this tracker, and the two move together after that.
+      </p>
 
       {type === 'maintenance' && (
         <Field label="What kind of maintenance work?">
