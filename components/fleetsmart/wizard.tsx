@@ -301,6 +301,30 @@ export function ContractWizard({
     [leads, accountId],
   );
 
+  /**
+   * Print the contract, from wherever somebody is standing.
+   *
+   * The document is only in the page on the Review step: `ReviewStep`
+   * renders it and nothing else does. Printing from the send box on the
+   * Fleet step would hide everything and then find nothing to show,
+   * which is a blank sheet of paper rather than an error.
+   *
+   * So the step behind the dialog is moved to Review first. The dialog
+   * is a sibling of the step, not a child, so it stays open with the
+   * addresses somebody has typed still in it, and they are looking at
+   * the contract when the print dialog closes.
+   *
+   * Two frames rather than one: the first is the step swapping, the
+   * second is the document having laid out. Printing in between prints
+   * half a document.
+   */
+  function printTheContract(): void {
+    if (step === 'Review') { window.print(); return; }
+    setStep('Review');
+    setReached((r) => Math.max(r, STEPS.length - 1));
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  }
+
   async function save(then: 'draft' | 'send', to?: string[]): Promise<void> {
     setBusy(true); setError(null);
     try {
@@ -505,6 +529,7 @@ export function ContractWizard({
           first={suggestedRecipients}
           busy={busy}
           onCancel={() => setSending(false)}
+          onPrint={printTheContract}
           onSend={async (to) => { setSending(false); await save('send', to); }}
         />
       )}
@@ -1492,16 +1517,21 @@ function Confirm({
  * looks exactly like one that worked.
  */
 function SendDialog({
-  contract, first, busy, onSend, onCancel,
+  contract, first, busy, onSend, onPrint, onCancel,
 }: {
   contract: { name: string; monthly: number; annual: number; plan: string; term: number; assets: number };
   /** Every address the CRM and the builder between them know about. */
   first: string[];
   busy: boolean;
   onSend: (to: string[]) => void;
+  /* The PDF, here rather than only on the Review step, because this is
+     the moment somebody needs it: a mailto cannot carry an attachment,
+     so the file has to exist before the email opens. */
+  onPrint: () => void;
   onCancel: () => void;
 }) {
   const [to, setTo] = useState<string[]>(() => first);
+  const [printed, setPrinted] = useState(false);
   const [typing, setTyping] = useState('');
   const [bad, setBad] = useState(false);
 
@@ -1592,13 +1622,21 @@ function SendDialog({
           }}>That is not an email address.</p>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button
             size="md" variant="primary"
             disabled={busy || to.length === 0}
             onClick={() => onSend(to)}
           >
             <Send size={14} /> Send to {to.length === 1 ? 'them' : `${to.length} people`}
+          </Button>
+          <Button
+            size="sm"
+            variant={printed ? 'ghost' : 'secondary'}
+            onClick={() => { setPrinted(true); onPrint(); }}
+          >
+            {printed ? <Check size={13} /> : <Printer size={13} />}
+            {printed ? 'Saved' : 'Save as PDF'}
           </Button>
           <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
           {to.length === 0 && (

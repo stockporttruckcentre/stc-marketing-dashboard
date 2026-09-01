@@ -367,12 +367,25 @@ export function ContractPrintRules() {
         /* Out of the drawer and onto the page. Everything between the
            body and the contract still occupies its own box, so without
            this the contract prints in a 1180px column starting halfway
-           down the first sheet. */
+           down the first sheet.
+
+           Absolute positions against the nearest positioned ancestor,
+           and the drawer's backdrop is fixed, so the two rules below go
+           together: the backdrop is made static first, which leaves the
+           body as the containing block and puts the contract at the top
+           left of the first sheet. Without that pair the contract is
+           laid out inside a full-viewport box and prints one page short
+           at the end. */
+        .kit-drawer-backdrop, [role="dialog"] {
+          position: static !important;
+          background: none !important;
+        }
         #fs-contract {
           position: absolute !important; left: 0 !important; top: 0 !important;
           width: 100% !important; max-width: none !important;
           margin: 0 !important; padding: 0 !important;
           box-shadow: none !important; border: 0 !important;
+          background: #fff !important;
         }
 
         html, body {
