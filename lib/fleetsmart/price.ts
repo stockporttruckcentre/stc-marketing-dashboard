@@ -395,7 +395,18 @@ export function priceContract(
   const afterManager = subtotal + managerDiscount;
   const promoRaw = input.promoDiscount <= 0
     ? 0
-    : input.promoDiscount < 1
+    /* A fraction, which is what the builder writes now: its field is a
+       percentage and stores 0.05 for five per cent.
+
+       The `<= 1` rather than `< 1` matters at exactly one value. The
+       workbook's rule is that anything under 1 is a fraction and
+       anything else is pounds, so 1 would be a pound. Nobody discounts
+       a maintenance contract by £1, and 100 per cent is at least a
+       thing somebody might type, so 1 reads as all of it.
+
+       The pounds branch stays for a draft saved before the field was a
+       percentage, which is the only way a value above 1 can now exist. */
+    : input.promoDiscount <= 1
       ? afterManager * input.promoDiscount
       : input.promoDiscount;
   const promoDiscount = promoRaw ? round2(-Math.min(promoRaw, afterManager)) : 0;

@@ -126,7 +126,7 @@ export function ContractDocument({
             stops a browser helpfully dropping it to save ink. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/assets/logos/stc-logo-emblem.png"
+          src="/assets/stc-logo-emblem.png"
           alt=""
           width={44}
           height={44}
