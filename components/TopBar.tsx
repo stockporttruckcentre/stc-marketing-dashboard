@@ -4,35 +4,18 @@ import { usePathname } from 'next/navigation';
 import { Hash, HelpCircle } from 'lucide-react';
 import { CommandBar } from '@/components/dashboard/CommandBar';
 import { NotificationBell } from '@/components/notifications/bell';
+import { crumbsFor } from '@/lib/nav';
 import type { UserRole } from '@/lib/types';
 
-const CRUMBS: Record<string, [string, string]> = {
-  '/dashboard':           ['Workspace', 'Dashboard'],
-  '/dashboard/work':      ['Workspace', 'Work'],
-  '/dashboard/calendar':  ['Workspace', 'Diary'],
-  '/dashboard/news':      ['Workspace', 'Industry news'],
-  // Analytics and the tracker were missing, so both showed the fallback
-  // and told you you were on the Dashboard when you were not.
-  '/dashboard/analytics': ['Workspace', 'Analytics'],
-  '/dashboard/crm':       ['Sales',     'CRM pipeline'],
-  '/dashboard/leads':     ['Sales',     'Sales tracker'],
-  '/dashboard/finder':    ['Sales',     'Company finder'],
-  '/dashboard/sales':     ['Sales',     'Trailer sales'],
-  '/dashboard/fleetsmart': ['Sales',    'FleetSmart+'],
-  '/dashboard/social':    ['Marketing', 'Social planner'],
-  '/dashboard/brand':     ['Marketing', 'Brand kit'],
-  '/dashboard/admin':     ['Admin',     'Team'],
-  '/dashboard/settings':  ['Admin',     'Settings'],
-  '/dashboard/notifications': ['Workspace', 'Notifications'],
-};
+/* The breadcrumb reads `lib/nav.ts`, the same file the sidebar draws
+   from. It used to keep its own map, which was missing fourteen
+   screens: half the product told you that you were on the Dashboard
+   when you were not. One list, so it cannot happen again. */
 
 export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
   const path = usePathname();
 
-  let crumbs: [string, string] = ['Workspace', 'Dashboard'];
-  for (const key of Object.keys(CRUMBS)) {
-    if (path === key || path.startsWith(key + '/')) crumbs = CRUMBS[key];
-  }
+  const crumbs = crumbsFor(path);
 
   /* Three columns rather than a flex row.
 

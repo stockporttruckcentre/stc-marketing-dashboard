@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
+import { NotificationsProvider } from '@/components/notifications/provider';
 import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -36,13 +37,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
     created_at: new Date().toISOString(),
   };
 
+  /* One reading of the bell, above both the sidebar and the top bar.
+     Two ways in now, and they must never show different numbers: the
+     first time somebody sees a three on one and a two on the other,
+     neither is believed again. */
   return (
-    <div className="app">
-      <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
-      <div className="main">
-        <TopBar role={p.role} />
-        <main className="page">{children}</main>
+    <NotificationsProvider>
+      <div className="app">
+        <Sidebar profile={p} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
+        <div className="main">
+          <TopBar role={p.role} />
+          <main className="page">{children}</main>
+        </div>
       </div>
-    </div>
+    </NotificationsProvider>
   );
 }

@@ -1,66 +1,113 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, BarChart3, TrendingUp, Users, Search, Package, Container, Calendar,
+  LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays, ListChecks,
+  type LucideIcon,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import type { Profile, UserRole } from '@/lib/types';
+import { NotificationRail } from '@/components/notifications/rail';
+import { capabilitiesFor } from '@/lib/crm/permissions';
+import { visibleSections, type NavIcon } from '@/lib/nav';
+import type { Profile } from '@/lib/types';
 
-type Item = { href: string; label: string; Icon: any; roles: UserRole[]; badge?: string; alert?: boolean };
-type Section = { key: string; label: string; items: Item[] };
+/* =============================================================
+   The sidebar.
 
-export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profile: Profile; pendingPosts?: number; emblemUrl?: string | null }) {
+   ---- What it no longer holds ----
+
+   The list of screens. That lives in `lib/nav.ts` now, as plain data,
+   because the breadcrumb needs the same list and two copies of it had
+   already drifted apart. This file draws whatever that file says.
+
+   ---- Icons resolved by name ----
+
+   The configuration names an icon as a string, so it can one day be
+   rows in a table. A React component cannot go in a table. This map is
+   the one place the name becomes a component.
+
+   ---- Gated on capability ----
+
+   Not on a list of roles. Turning a permission off now takes the row
+   out of the sidebar as well as refusing the screen behind it, so
+   nobody is shown a door that will not open.
+
+   ---- Team and Settings under the scroll ----
+
+   Settings is the one thing everybody knows they want by name, and the
+   one thing that should never move. It was row twelve of a scrolling
+   list. It is pinned now, in its own section, separated by a rule
+   rather than by more air: a rule reads as a different kind of thing
+   starting, more air reads as the list continuing loosely.
+
+   No heading on that section. Two rows do not need one.
+   ============================================================= */
+
+const ICONS: Record<NavIcon, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  analytics: BarChart3,
+  work: ListChecks,
+  diary: CalendarDays,
+  news: TrendingUp,
+  crm: Users,
+  tracker: TrendingUp,
+  finder: Search,
+  stock: Container,
+  fleetsmart: ShieldCheck,
+  social: Calendar,
+  brand: ImageIcon,
+  team: ShieldCheck,
+  settings: Settings,
+};
+
+export function Sidebar({
+  profile, pendingPosts = 0, emblemUrl = null,
+}: {
+  profile: Profile;
+  pendingPosts?: number;
+  emblemUrl?: string | null;
+}) {
   const path = usePathname();
 
-  const sections: Section[] = [
-    {
-      key: 'workspace', label: 'Workspace',
-      items: [
-        { href: '/dashboard',          label: 'Dashboard',     Icon: LayoutDashboard, roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/analytics', label: 'Analytics',     Icon: BarChart3,       roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/work',     label: 'Work',          Icon: ListChecks,      roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/calendar', label: 'Diary',         Icon: CalendarDays,    roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/news',     label: 'Industry news', Icon: TrendingUp,      roles: ['admin','marketer','sales','viewer'] },
-      ],
-    },
-    {
-      key: 'sales', label: 'Sales',
-      items: [
-        { href: '/dashboard/crm',    label: 'CRM pipeline',   Icon: Users,    roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/leads',       label: 'Sales tracker', Icon: TrendingUp, roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/finder', label: 'Company finder', Icon: Search,   roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/sales',  label: 'Trailer sales',  Icon: Container, roles: ['admin','marketer','sales','viewer'] },
-        { href: '/dashboard/fleetsmart', label: 'FleetSmart+', Icon: ShieldCheck, roles: ['admin','marketer','sales','viewer'] },
-      ],
-    },
-    {
-      key: 'marketing', label: 'Marketing',
-      items: [
-        { href: '/dashboard/social', label: 'Social planner', Icon: Calendar,  roles: ['admin','marketer','viewer'],
-          badge: pendingPosts > 0 ? String(pendingPosts) : undefined, alert: pendingPosts > 0 },
-        { href: '/dashboard/brand',  label: 'Brand kit',      Icon: ImageIcon, roles: ['admin','marketer','sales','viewer'] },
-      ],
-    },
-    {
-      key: 'admin', label: 'Admin',
-      items: [
-        { href: '/dashboard/admin',    label: 'Team', Icon: ShieldCheck, roles: ['admin'] },
-        { href: '/dashboard/settings', label: 'Settings',          Icon: Settings,    roles: ['admin','marketer','sales','viewer'] },
-      ],
-    },
-  ];
+  const sections = useMemo(() => {
+    const caps = capabilitiesFor(profile);
+    return visibleSections((c) => caps.has(c));
+  }, [profile]);
 
-  const isActive = (href: string) => href === '/dashboard' ? path === '/dashboard' : path.startsWith(href);
+  const isActive = (href: string) => (
+    href === '/dashboard' ? path === '/dashboard' : path.startsWith(href)
+  );
+
+  const rows = (items: ReturnType<typeof visibleSections>[number]['items']) => (
+    <div className="sidebar__nav">
+      {items.map((i) => {
+        const Icon = ICONS[i.icon];
+        const badge = i.badge === 'content' && pendingPosts > 0 ? String(pendingPosts) : undefined;
+        return (
+          <Link
+            key={i.href}
+            href={i.href}
+            className={`sidebar__item${isActive(i.href) ? ' is-active' : ''}`}
+          >
+            <Icon size={16} />
+            <span>{i.label}</span>
+            {badge && <span className="badge badge--alert">{badge}</span>}
+          </Link>
+        );
+      })}
+    </div>
+  );
 
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
         {emblemUrl ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={emblemUrl} alt="STC" width={38} height={38} style={{ borderRadius: 6, objectFit: 'contain' }} />
+          <img src={emblemUrl} alt="STC" width={38} height={38}
+            style={{ borderRadius: 6, objectFit: 'contain' }} />
         ) : (
           <div style={{ width: 38, height: 38, borderRadius: 6, background: 'var(--bg-3)' }} />
         )}
@@ -71,29 +118,21 @@ export function Sidebar({ profile, pendingPosts = 0, emblemUrl = null }: { profi
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {sections.map((s) => {
-          const items = s.items.filter((i) => i.roles.includes(profile.role));
-          if (!items.length) return null;
-          return (
-            <div key={s.key} className="sidebar__section">
-              <div className="sidebar__section-head"><span>{s.label}</span></div>
-              <div className="sidebar__nav">
-                {items.map((i) => {
-                  const active = isActive(i.href);
-                  const Icon = i.Icon;
-                  return (
-                    <Link key={i.href} href={i.href} className={`sidebar__item${active ? ' is-active' : ''}`}>
-                      <Icon size={16} />
-                      <span>{i.label}</span>
-                      {i.badge && <span className={`badge${i.alert ? ' badge--alert' : ''}`}>{i.badge}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+        {sections.filter((s) => !s.atFoot).map((s) => (
+          <div key={s.key} className="sidebar__section">
+            <div className="sidebar__section-head"><span>{s.label}</span></div>
+            {rows(s.items)}
+          </div>
+        ))}
       </div>
+
+      {sections.filter((s) => s.atFoot).map((s) => (
+        <div key={s.key} className="sidebar__section sidebar__section--foot">
+          {rows(s.items)}
+        </div>
+      ))}
+
+      <NotificationRail />
 
       <div className="sidebar__footer">
         <div className="avatar">

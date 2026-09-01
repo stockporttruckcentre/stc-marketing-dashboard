@@ -30,6 +30,7 @@ import { attributeNames } from '../lib/command/attributes';
 import type { Cond } from '../lib/command/ir/types';
 import { loadSampleVocabulary } from './sample-vocabulary';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
+import { crumbsFor, visibleSections, NAV_ITEMS } from '../lib/nav';
 import type { UserRole } from '../lib/types';
 
 /* The bar learns makes, depots and customers from the database. A check
@@ -1188,6 +1189,60 @@ for (const role of ROLES) {
     suggestActions('notifications', CAPS[role], 8).some((h) => h.action.id === 'me.notifications'));
   ok(`a ${role} can reach their notification settings`,
     suggestActions('notification settings', CAPS[role], 8).some((h) => h.action.id === 'notifications.settings'));
+}
+
+/* -------------------------------------------------------------
+   The sidebar, gated on capability rather than role.
+
+   The point of the change is that turning a permission off takes the
+   row out of the sidebar as well as refusing the screen behind it.
+   Nobody should be shown a door that will not open, and the old
+   version did exactly that: the screen stayed in the list, they
+   clicked it, and the page said no.
+
+   Also asserted: the two things nobody is withheld, and that the
+   breadcrumb and the sidebar read the same file, since two lists of
+   the same thing is how they drifted in the first place.
+   ------------------------------------------------------------- */
+{
+  const sectionsFor = (role: keyof typeof CAPS) => {
+    const caps = CAPS[role];
+    return visibleSections((c) => caps.has(c));
+  };
+  const hrefs = (role: keyof typeof CAPS) =>
+    sectionsFor(role).flatMap((s) => s.items.map((i) => i.href));
+
+  ok('an admin sees the Team screen',
+    hrefs('admin').includes('/dashboard/admin'));
+  ok('a read only viewer does not, rather than being refused after clicking',
+    !hrefs('viewer').includes('/dashboard/admin'));
+
+  for (const role of ROLES) {
+    ok(`a ${role} keeps their own diary in the sidebar`,
+      hrefs(role).includes('/dashboard/calendar'));
+    ok(`a ${role} keeps their own settings in the sidebar`,
+      hrefs(role).includes('/dashboard/settings'));
+  }
+
+  ok('Team and Settings sit under the scroll',
+    sectionsFor('admin').some((s) => s.atFoot
+      && s.items.map((i) => i.href).join(',') === '/dashboard/admin,/dashboard/settings'));
+
+  ok('no section is drawn with nothing in it',
+    ROLES.every((r) => sectionsFor(r).every((s) => s.items.length > 0)));
+
+  /* Every screen in the sidebar answers to the breadcrumb, and says
+     its own name rather than the Dashboard. */
+  for (const item of NAV_ITEMS) {
+    const [, screen] = crumbsFor(item.href);
+    ok(`the breadcrumb on ${item.href} says ${item.crumb ?? item.label}`,
+      screen === (item.crumb ?? item.label));
+  }
+
+  /* A nested route says the screen it sits under, not whichever entry
+     happened to be declared last. */
+  ok('a nested route says the screen it is under',
+    crumbsFor('/dashboard/crm/12345')[1] === 'CRM pipeline');
 }
 
 console.log(`\n${pass}/${pass + fail} passing`);
