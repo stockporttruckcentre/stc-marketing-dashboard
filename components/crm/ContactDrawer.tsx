@@ -15,6 +15,7 @@ import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { AddressMap } from './AddressMap';
+import { CustomerValue } from './CustomerValue';
 import type {
   CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress, Lead, LeadType,
 } from '@/lib/types';
@@ -635,6 +636,27 @@ export function ContactDrawer({
               </div>
             )}
 
+            {/* What they are worth, before the list of what makes it up.
+
+                The list was here on its own and every value on it was a
+                per lead figure, so answering "what is this customer
+                worth" meant adding six numbers in your head, and the
+                tracker's own pipeline figure only ever counted the open
+                ones. Same block as the tracker's, from
+                `components/crm/CustomerValue.tsx`, so the two screens
+                cannot answer it with two numbers. */}
+            {!loadingLeads && leads.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <CustomerValue
+                  leads={leads as never}
+                  onOpenLead={(l) => {
+                    const id = (l as { id?: string }).id;
+                    if (id) window.location.assign(`/dashboard/leads?lead=${id}`);
+                  }}
+                />
+              </div>
+            )}
+
             {loadingLeads ? (
               <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>Loading</div>
             ) : leads.length === 0 ? (
@@ -643,6 +665,9 @@ export function ContactDrawer({
                 &ldquo;put {edit.company_name} on my tracker&rdquo;.
               </div>
             ) : (
+              /* The detail the value block does not carry: whose tracker
+                 each pitch is on. That is the thing a manager opens this
+                 record to find out, and it is not a number. */
               <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
                 {leads.map((l) => (
                   <div key={l.id} style={{

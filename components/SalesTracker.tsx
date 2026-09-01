@@ -9,6 +9,7 @@ import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-com
 import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload, ShieldCheck,
 } from 'lucide-react';
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
+import { CustomerValue } from './crm/CustomerValue';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
@@ -124,18 +125,55 @@ export function SalesTracker({
   const [query, setQuery] = useState('');
   const [editingRow, setEditingRow] = useState<TrackerRow | null>(null);
 
-  // ?contact=ID deep-link from the stock drawer's "View in tracker" button.
-  // It names a company, and a company can now have several pitches open,
-  // so it opens the one on the tab being looked at and otherwise the first.
+  /* Two deep links into this screen, and both open a drawer.
+
+     ?contact=ID names a company, from the stock drawer's "View in
+     tracker" button. A company can have several pitches open, so it
+     opens the one on the tab being looked at and otherwise the first.
+
+     ?lead=ID names one pitch, from the CRM record and from the customer
+     value block on this drawer. That link existed and did nothing: the
+     CRM record has offered an Open button against every lead since the
+     lead entity went in, and nothing here has ever read the parameter,
+     so it landed on the tracker with no drawer and no explanation.
+
+     A lead that is not on this tracker is the case worth handling
+     rather than ignoring. The page only loads pitches somebody owns or
+     that are shared with them, so a link to a colleague's lead is a
+     link to a row that is not here, and doing nothing looks exactly
+     like a broken button. It says so instead. */
   const sp = useSearchParams();
   useEffect(() => {
-    const id = sp?.get('contact');
-    if (!id) return;
-    const mine = rows.filter(r => r.contact_id === id || r.id === id);
-    const target = mine.find(r => r.type === side) ?? mine[0];
+    const contact = sp?.get('contact');
+    if (contact) {
+      const mine = rows.filter(r => r.contact_id === contact || r.id === contact);
+      const target = mine.find(r => r.type === side) ?? mine[0];
+      if (target) { setEditingRow(target); setSide(target.type); }
+      return;
+    }
+
+    const lead = sp?.get('lead');
+    if (!lead) return;
+
+    const target = rows.find(r => r.id === lead);
     if (target) {
       setEditingRow(target);
-      setSide(target.type);
+      setSide(target.type ?? 'trailer_sales');
+      /* The tab as well as the side, or a won pitch opens behind the
+         Working tab and the grid underneath looks empty. */
+      setTab(STATUS_TO_TAB[target.status] ?? 'all');
+      return;
+    }
+
+    /* Only once the rows have actually arrived. On the first render
+       they are the server's, so an empty list here means empty, but
+       saying so before anything loaded would flash a warning on every
+       deep link. */
+    if (rows.length > 0) {
+      setMessage(
+        'That lead is not on your tracker. It belongs to somebody else, or it was not shared with you. '
+        + 'Open the customer in the CRM to see it.',
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp, rows]);
@@ -664,6 +702,16 @@ export function SalesTracker({
   );
 }
 
+/** The little the value block needs about a sibling pitch. */
+type SiblingLead = {
+  id: string;
+  type: string | null;
+  status: string;
+  what: string | null;
+  estimated_value: number | null;
+  sale_price: number | null;
+};
+
 // ===== Detail drawer for full edit of a single lead =====
 function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; profile: Profile; onClose: () => void; onSave: (patch: Partial<TrackerRow>) => void }) {
   const supabase = useMemo(() => createClient(), []);
@@ -674,6 +722,40 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
   const [showSchedule, setShowSchedule] = useState(false);
   const [conflictMeeting, setConflictMeeting] = useState<CalendarEvent | null>(null);
   const tab = STATUS_TO_TAB[edit.status];
+
+  /* Every other pitch to the same customer, and what they come to.
+
+     The drawer showed this one lead and nothing else, so a rep opening
+     a £4,000 trailer enquiry could not see that the same haulier had a
+     £40,000 maintenance contract quoted by somebody else. The tracker's
+     own pipeline figure counted every open lead across every customer,
+     which answers a different question entirely.
+
+     Read by company, the same way the meetings below already are, and
+     for the same reason: a pitch to Dawson is a pitch to Dawson. Row
+     level security decides which of them come back, so a rep and a
+     manager see different lists and neither list is decided here. */
+  const [siblings, setSiblings] = useState<SiblingLead[]>([]);
+  const [loadingSiblings, setLoadingSiblings] = useState(true);
+
+  useEffect(() => {
+    if (!row.contact_id) { setSiblings([]); setLoadingSiblings(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingSiblings(true);
+      const { data } = await supabase
+        .from('crm_leads')
+        .select('id, type, status, what, estimated_value, sale_price')
+        .eq('contact_id', row.contact_id)
+        .order('status')
+        .order('updated_at', { ascending: false });
+      if (!cancelled) {
+        setSiblings((data ?? []) as SiblingLead[]);
+        setLoadingSiblings(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [supabase, row.contact_id, edit.status, edit.estimated_value, edit.sale_price]);
 
   // Every meeting with this company, whichever pitch prompted it. Read
   // by company rather than by lead: a visit to Dawson is a visit to
@@ -766,6 +848,27 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
         <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
       </>}
     >
+          {/* What this customer is worth across everything open with
+              them, and every pitch that makes it up, before the fields
+              for this one.
+
+              First on the drawer on purpose. Somebody opening a lead is
+              about to ring the customer, and what they need in their
+              head before they dial is not this pitch's estimate, it is
+              whether the same haulier has £40,000 quoted by somebody
+              else. */}
+          {!loadingSiblings && siblings.length > 0 && (
+            <CustomerValue
+              leads={siblings}
+              currentLeadId={row.id}
+              dense
+              onOpenLead={(l) => {
+                const id = (l as { id?: string }).id;
+                if (id) window.location.assign(`/dashboard/leads?lead=${id}`);
+              }}
+            />
+          )}
+
           <Split>
             <Field label="Contact">
               <TextInput value={edit.contact_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, contact_name: v }))} onCommit={(v) => saveField('contact_name', v)} />
