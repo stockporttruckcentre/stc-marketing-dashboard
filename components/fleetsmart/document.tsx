@@ -120,6 +120,21 @@ export function ContractDocument({
         display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap',
         paddingBottom: 12, borderBottom: `2px solid ${NAVY}`,
       }}>
+        {/* The emblem, left of the name, on the screen and on the paper.
+            A contract that goes to a customer with no mark on it looks
+            like a quote somebody typed. `print-color-adjust` is what
+            stops a browser helpfully dropping it to save ink. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/assets/logos/stc-logo-emblem.png"
+          alt=""
+          width={44}
+          height={44}
+          style={{
+            width: 44, height: 44, objectFit: 'contain', flex: 'none',
+            printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact',
+          } as React.CSSProperties}
+        />
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{
             fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 17,
@@ -330,18 +345,51 @@ export function ContractPrintRules() {
   return (
     <style>{`
       @media print {
-        .sidebar, .topbar, nav, header.topbar { display: none !important; }
+        /* ---- Print the contract, and nothing else ----
+
+           This used to hide the sidebar and the top bar by name and
+           unpin the drawer, which left everything the drawer was sitting
+           over still in the page: the CRM grid, the contract list, the
+           whole dashboard, printed underneath the contract.
+
+           Hiding by name cannot work. There is no list of every element
+           that might be on the page behind a drawer, and a screen added
+           next month is one more thing nobody remembers to add to it.
+
+           So: hide everything, then show the contract and the elements
+           it sits inside. Visibility rather than display, because
+           hiding an ancestor with display:none takes the contract with
+           it however visible the contract claims to be. Its own subtree
+           is turned back on explicitly, since visibility inherits. */
+        body * { visibility: hidden !important; }
+        #fs-contract, #fs-contract * { visibility: visible !important; }
+
+        /* Out of the drawer and onto the page. Everything between the
+           body and the contract still occupies its own box, so without
+           this the contract prints in a 1180px column starting halfway
+           down the first sheet. */
+        #fs-contract {
+          position: absolute !important; left: 0 !important; top: 0 !important;
+          width: 100% !important; max-width: none !important;
+          margin: 0 !important; padding: 0 !important;
+          box-shadow: none !important; border: 0 !important;
+        }
+
         html, body {
           background: #fff !important; margin: 0 !important; padding: 0 !important;
           height: auto !important; overflow: visible !important;
         }
+        /* Nothing between the two may clip or scroll, or the contract is
+           cut off at the height of the drawer it came out of. */
+        [role="dialog"], [role="dialog"] * {
+          overflow: visible !important; max-height: none !important;
+          height: auto !important;
+        }
         [role="dialog"] {
           position: static !important; max-width: none !important; width: 100% !important;
-          height: auto !important; box-shadow: none !important; border: 0 !important;
+          box-shadow: none !important; border: 0 !important;
         }
-        [role="dialog"] > div { overflow: visible !important; height: auto !important; }
         .fs-doc-frame { border: 0 !important; border-radius: 0 !important; }
-        #fs-contract { padding: 0 !important; }
         .fs-doc-section { break-inside: avoid; page-break-inside: avoid; }
         @page { margin: 14mm; }
       }

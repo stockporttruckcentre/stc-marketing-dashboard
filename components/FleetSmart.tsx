@@ -1,8 +1,8 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Check, Copy, FileText, Plus, Printer, Search, Send, ShieldCheck, Trash2, X,
 } from 'lucide-react';
@@ -134,6 +134,7 @@ export function FleetSmart({
   manager: { name: string; email: string; phone: string };
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const caps = useMemo(() => new Set(capabilities), [capabilities]);
   const may = useCallback((c: string) => caps.has(c), [caps]);
 
@@ -185,6 +186,19 @@ export function FleetSmart({
      ever typed" counts drafts nobody finished as losses. */
   const decided = contracts.filter((c) => c.status === 'accepted' || c.status === 'declined');
   const winRate = decided.length ? Math.round((accepted.length / decided.length) * 100) : null;
+
+  /* Arriving from the tracker's New lead dialog with FleetSmart+
+     picked. The builder opens straight away rather than landing
+     somebody on a list and asking them to press New again, and the
+     parameter is cleared so a refresh does not reopen it over work they
+     have already saved. */
+  useEffect(() => {
+    if (params.get('new') !== '1') return;
+    if (!may('fleetsmart.build')) return;
+    startNew();
+    router.replace('/dashboard/fleetsmart');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function startNew() {
     setError(null); setNotice(null);
@@ -292,7 +306,7 @@ export function FleetSmart({
       <RecordHead
         icon={<ShieldCheck size={19} />}
         title="FleetSmart+"
-        badges={<Badge tone="neutral">Rate card 2026-08</Badge>}
+        badges={<Badge tone="neutral">Contract Builder</Badge>}
         sub="Fixed price maintenance contracts, priced off the STC rate card as you build them. Contracts built here will show on your sales tracker and update in unison."
         actions={
           may('fleetsmart.build')
