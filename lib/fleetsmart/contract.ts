@@ -73,7 +73,10 @@ export function blankExtras(): ContractExtras {
     registeredAddress: '',
     customerEmail: '',
     customerPhone: '',
-    maximumMileage: 100_000,
+    /* The workbook's wear and tear baseline, on the Lists tab, and the
+       figure most of these contracts are written at. It was 100,000
+       here, which meant every contract needed the number changing. */
+    maximumMileage: 60_000,
     accountManagerName: '',
     accountManagerPhone: '',
     accountManagerEmail: '',
