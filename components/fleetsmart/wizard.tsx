@@ -165,11 +165,23 @@ export function ContractWizard({
   const [printReminder, setPrintReminder] = useState<'print' | null>(null);
   const [sending, setSending] = useState(false);
 
-  /* The first message, on opening the builder. A draft being reopened
-     is already past this, so it starts on the step it was left at
-     without being told what a customer is. */
+  /* The first message, on opening the builder.
+
+     A contract that has been saved has already been through here, so it
+     opens with every step unlocked and no messages at all. Somebody
+     reopening a draft to change one figure does not need telling what a
+     customer is, and being told anyway on every tab is the thing that
+     turns a signpost into an obstacle.
+
+     Whether it is a draft, sent or accepted makes no difference: what
+     decides it is whether this contract has been built once, not what
+     state it ended up in. */
   useEffect(() => {
-    if (contractId) { setReached(STEPS.length - 1); return; }
+    if (contractId) {
+      setReached(STEPS.length - 1);
+      setCoached(new Set(STEPS));
+      return;
+    }
     setCoaching('Customer');
     setCoached(new Set(['Customer']));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -254,6 +266,36 @@ export function ContractWizard({
       .slice(0, 12);
   }, [accounts, query]);
 
+  /* Who the contract can honestly be sent to.
+
+     Three sources, because one is not enough. What was typed into the
+     builder, whatever the CRM record holds for them right now, and the
+     contact's own address where the CRM keeps one.
+
+     Reading the account live is what fixes the case that made this
+     empty: an email added to the CRM after the draft was built was
+     invisible here, because `extras.customerEmail` only ever held what
+     was there at the moment somebody picked the account. Now adding it
+     to the record is enough.
+
+     Deduplicated, and anything without an @ in it is dropped rather
+     than offered: a contact's name is not an address, and this box used
+     to be seeded with one. */
+  const suggestedRecipients = useMemo(() => {
+    const account = accounts.find((a) => a.id === accountId);
+    const candidates = [extras.customerEmail, account?.email ?? ''];
+    const seen = new Set<string>();
+    return candidates
+      .map((c) => c.trim())
+      .filter((c) => c && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c))
+      .filter((c) => {
+        const key = c.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [accounts, accountId, extras.customerEmail]);
+
   const theirLeads = useMemo(
     () => leads.filter((l) => l.contact_id && l.contact_id === accountId),
     [leads, accountId],
@@ -278,6 +320,10 @@ export function ContractWizard({
       setSavedId(contract.id);
 
       setDirty(false);
+      /* Saved once, so it has been built. Any step not yet reached
+         opens without a message from here on, the same as reopening it
+         tomorrow would. */
+      setCoached(new Set(STEPS));
 
       if (then === 'draft') {
         onSaved({ id: contract.id, ref: contract.ref, sent: false });
@@ -286,7 +332,7 @@ export function ContractWizard({
 
       /* Who it went to, from the send box, so the record says an address
          somebody can check rather than the contact's name. */
-      const recipients = (to ?? [extras.customerEmail, input.customerContact])
+      const recipients = (to ?? suggestedRecipients)
         .map((r) => r.trim()).filter(Boolean);
 
       const sent = await (await fetch(`/api/fleetsmart/contracts/${contract.id}/send`, {
@@ -456,7 +502,7 @@ export function ContractWizard({
         <SendDialog
           contract={{ name: input.customerName, monthly: priced.monthly, annual: priced.annual,
                       plan: input.plan, term: input.termMonths, assets: realAssets.length }}
-          first={extras.customerEmail}
+          first={suggestedRecipients}
           busy={busy}
           onCancel={() => setSending(false)}
           onSend={async (to) => { setSending(false); await save('send', to); }}
@@ -482,6 +528,7 @@ export function ContractWizard({
           accounts={matches} query={query} onQuery={setQuery}
           accountId={accountId} leads={theirLeads} leadId={leadId}
           input={input} set={set}
+          accountEmail={accounts.find((a) => a.id === accountId)?.email ?? ''}
           onPick={(a) => {
             setAccountId(a.id);
             setLeadId(null);
@@ -538,7 +585,7 @@ export function ContractWizard({
 /* ---------------- 1. customer ---------------- */
 
 function CustomerStep({
-  accounts, query, onQuery, accountId, leads, leadId, input, set,
+  accounts, query, onQuery, accountId, leads, leadId, input, set, accountEmail,
   onPick, picked, onLead, onClear, extras, setExtras,
 }: {
   accounts: PickableAccount[];
@@ -549,6 +596,8 @@ function CustomerStep({
   leadId: string | null;
   input: ContractInput;
   set: <K extends keyof ContractInput>(k: K, v: ContractInput[K]) => void;
+  /** What the CRM holds for them, shown as the placeholder. */
+  accountEmail: string;
   onPick: (a: PickableAccount) => void;
   /** The account just picked, so the step can say what it filled in. */
   picked: PickableAccount | null;
@@ -654,9 +703,10 @@ function CustomerStep({
       </Field>
 
       <Split>
-        <Field label="Their email" hint="What the Send box opens on.">
+        <Field label="Their email" hint="What the Send box opens on. Blank uses whatever is on their CRM record.">
           <TextInput
             value={extras.customerEmail}
+            placeholder={accountEmail || 'Nothing on their CRM record'}
             onChange={(v) => setExtras({ ...extras, customerEmail: v })}
           />
         </Field>
@@ -1096,15 +1146,25 @@ function MoneyStep({
             <TextInput value="None" readOnly />
           </Field>
         )}
+        {/* A percentage, like the manager's one next to it.
+
+            This used to take the workbook's own P6 value, where a number
+            under 1 means a fraction and anything else means pounds. That
+            rule works in a spreadsheet cell that accepts "10%" and
+            stores 0.1. It does not work in a number field, where
+            somebody typing 5 for five per cent gets five pounds: on a
+            £6,138 contract that is 42p a month rather than £25.57, and
+            it looks like the discount is broken rather than misread. */}
         <Field
           label="Promotional discount"
-          hint="Under 1 is read as a percentage, so 0.1 is ten percent. Anything else is pounds. Capped at the contract total."
+          hint="Taken after the manager's discount, and capped at the contract total."
         >
           <TextInput
             type="number"
-            value={input.promoDiscount ? String(input.promoDiscount) : ''}
+            value={input.promoDiscount ? String(Math.round(input.promoDiscount * 1000) / 10) : ''}
             placeholder="None"
-            onChange={(v) => set('promoDiscount', Number(v) || 0)}
+            trailing={<span style={{ fontSize: 12 }}>%</span>}
+            onChange={(v) => set('promoDiscount', Math.min(100, Math.max(0, Number(v) || 0)) / 100)}
           />
         </Field>
       </Split>
@@ -1435,12 +1495,13 @@ function SendDialog({
   contract, first, busy, onSend, onCancel,
 }: {
   contract: { name: string; monthly: number; annual: number; plan: string; term: number; assets: number };
-  first: string;
+  /** Every address the CRM and the builder between them know about. */
+  first: string[];
   busy: boolean;
   onSend: (to: string[]) => void;
   onCancel: () => void;
 }) {
-  const [to, setTo] = useState<string[]>(() => (first.trim() ? [first.trim()] : []));
+  const [to, setTo] = useState<string[]>(() => first);
   const [typing, setTyping] = useState('');
   const [bad, setBad] = useState(false);
 
@@ -1543,7 +1604,10 @@ function SendDialog({
           {to.length === 0 && (
             <span style={{
               fontFamily: 'var(--inter)', fontSize: 11.5, color: 'var(--text-subtle)',
-            }}>Add at least one address.</span>
+            }}>
+              The CRM holds no email for them. Type one here, or add it to their record and it
+              will fill itself in next time.
+            </span>
           )}
         </div>
       </div>

@@ -78,10 +78,18 @@ export type ContractInput = {
   /** A manager's discount, as a fraction. 0.05 is five percent. */
   managerDiscount: number;
   /**
-   * A promotional discount. Under 1 it is read as a percentage of what
-   * is left after the manager's discount; 1 or over it is read as a
-   * pound figure. The workbook's own P6 rule, kept because the sales
-   * team already types it that way.
+   * A promotional discount, as a fraction of what is left after the
+   * manager's discount. 0.05 is five per cent.
+   *
+   * The builder's field is a percentage and writes the fraction. It used
+   * to take the workbook's own P6 value, where anything under 1 is a
+   * fraction and anything else is pounds. That rule works in a cell that
+   * accepts "5%" and stores 0.05; in a number field somebody typing 5
+   * for five per cent got five pounds, which on a £6,093 contract is
+   * 42p a month off instead of £25.39.
+   *
+   * A value above 1 is still read as pounds, for a draft saved before
+   * the field changed. Nothing writes one now.
    */
   promoDiscount: number;
   /** Whether the customer sees the promotional discount as its own line. */

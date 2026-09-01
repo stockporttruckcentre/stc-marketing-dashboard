@@ -466,6 +466,138 @@ for (const { type } of ASSET_TYPES) {
   ok('and says so', noType.warnings.length === 1);
 }
 
+/* =============================================================
+   The totals add up.
+
+   From the business, looking at a contract: "Unsure things are totaling
+   properly?"
+
+   It is a fair question and nothing here answered it. Every assertion
+   above checks a line against the workbook. None of them checked that
+   the lines add up to the asset, that the assets add up to the contract,
+   or that the monthly figure is the annual one over twelve. A rate card
+   can be perfect and a contract still come out wrong if the sum is.
+
+   So: every plan, every asset type, and a spread of the options that
+   move a price, reconciled three ways.
+   ============================================================= */
+{
+  let linesToAsset = true;
+  let assetsToContract = true;
+  let monthlyFromAnnual = true;
+
+  const OPTIONS: Partial<FleetAsset>[] = [
+    {},
+    { outOfHours: true },
+    { workPattern: 'Nights' },
+    { workPattern: 'Combined', outOfHours: true },
+    { collectionAndDelivery: true },
+    { pmiWeeks: 4 },
+    { ladenRbtPerYear: 6, brakeTestsPerYear: 2 },
+    { telematicsPerYear: 480 },
+    { misc: 350 },
+    { wearAndTear: 1250 },
+    { tailLift: false },
+    { portalAddOn: true },
+    { age: 9, mileagePerYear: 120_000 },
+  ];
+
+  for (const plan of PLANS) {
+    for (const type of ASSET_TYPES.map((a) => a.type)) {
+      for (const over of OPTIONS) {
+        const one = asset(type, plan, over);
+        const priced = priceAsset(one, contract(plan, [one]));
+
+        /* Every line, added up, is the asset's annual figure. Rounded to
+           the penny on both sides, because the asset total is rounded
+           once and the lines are rounded individually. */
+        const summed = priced.lines.reduce((t, l) => t + l.cost, 0);
+        if (Math.abs(summed - priced.annual) > 0.02) {
+          linesToAsset = false;
+          failures.push(`${plan} ${type} ${JSON.stringify(over)}: lines come to ${summed.toFixed(2)}, asset says ${priced.annual.toFixed(2)}`);
+        }
+
+        if (Math.abs(priced.monthly * 12 - priced.annual) > 0.02) {
+          monthlyFromAnnual = false;
+          failures.push(`${plan} ${type}: ${priced.monthly.toFixed(2)} a month is not ${priced.annual.toFixed(2)} a year`);
+        }
+      }
+    }
+  }
+
+  /* And a whole fleet: the contract is the sum of its assets, before
+     either discount. */
+  for (const plan of PLANS) {
+    const fleet = ASSET_TYPES.map((a, i) => asset(a.type, plan, { }));
+    fleet.forEach((a, i) => { a.key = `k${i}`; a.reg = `REG ${i}`; });
+    const whole = priceContract(contract(plan, fleet));
+    const summed = whole.assets.reduce((t, a) => t + a.annual, 0);
+    if (Math.abs(summed - whole.subtotal) > 0.02) {
+      assetsToContract = false;
+      failures.push(`${plan}: assets come to ${summed.toFixed(2)}, contract subtotal says ${whole.subtotal.toFixed(2)}`);
+    }
+    if (Math.abs(whole.monthly * 12 - whole.annual) > 0.02) {
+      monthlyFromAnnual = false;
+      failures.push(`${plan}: contract monthly does not multiply back to annual`);
+    }
+  }
+
+  ok('every line on an asset adds up to that asset', linesToAsset);
+  ok('every asset adds up to the contract', assetsToContract);
+  ok('the monthly figure is always the annual one over twelve', monthlyFromAnnual);
+}
+
+/* =============================================================
+   The two discounts, and the one that was being misread.
+
+   A promotional discount typed as 5, meaning five per cent, was read as
+   five pounds: the workbook's rule is that a value under 1 is a fraction
+   and anything else is pounds, which works in a cell that accepts "5%"
+   and stores 0.05, and does not work in a number field. On a £6,093
+   contract that is 42p a month off instead of £25.39, so it looked like
+   the discount was broken rather than misread. The builder's field is a
+   percentage now and writes the fraction.
+   ============================================================= */
+{
+  const one = asset('6x2 Truck', 'Platinum');
+  const plain = priceContract(contract('Platinum', [one]));
+
+  near('a Platinum 6x2 Truck is £6,092.85 a year', plain.annual, 6092.85);
+  near('and £507.74 a month', plain.monthly, 507.74);
+
+  const fivePercent = priceContract(contract('Platinum', [one], { promoDiscount: 0.05 }));
+  near('five per cent off takes £304.64', -fivePercent.promoDiscount, 304.64);
+  near('leaving £482.35 a month', fivePercent.monthly, 482.35);
+  ok('which is a real reduction, not pennies',
+    plain.monthly - fivePercent.monthly > 20,
+    `only ${(plain.monthly - fivePercent.monthly).toFixed(2)} a month`);
+
+  /* The manager's discount comes off first, and the promotional one off
+     what is left. Both together, on the workbook's own order. */
+  const both = priceContract(contract('Platinum', [one], {
+    managerDiscount: 0.1, promoDiscount: 0.05,
+  }));
+  near("a manager's ten per cent takes £609.29", -both.managerDiscount, 609.29);
+  near('and five per cent of what is left takes £274.18', -both.promoDiscount, 274.18);
+  near('leaving £5,209.38', both.annual, 5209.38);
+
+  /* Capped, so a discount can never make a contract cost less than
+     nothing. */
+  const everything = priceContract(contract('Platinum', [one], { promoDiscount: 1 }));
+  near('a hundred per cent leaves nothing to pay', everything.annual, 0);
+  ok('and never goes below it', everything.annual >= 0);
+
+  const silly = priceContract(contract('Platinum', [one], { promoDiscount: 100000 }));
+  ok('a pound figure bigger than the contract is capped at it', silly.annual === 0);
+
+  /* The legacy reading, kept for a draft saved before the field was a
+     percentage. Asserted so that behaviour is deliberate rather than
+     left over. */
+  const legacyPounds = priceContract(contract('Platinum', [one], { promoDiscount: 500 }));
+  near('a value above 1 is still read as pounds, for older drafts',
+    -legacyPounds.promoDiscount, 500);
+}
+
 console.log(`\n${pass}/${pass + fail} holding`);
 if (failures.length) {
   console.log('\nfirst failures:');
