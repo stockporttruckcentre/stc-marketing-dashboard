@@ -49,6 +49,11 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
   const [tab, setTab] = useState<StatusTab>('in_stock');
   const [category, setCategory] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  /* Opened by `?view=mot-due`, which is where the command bar's "MOTs
+     running out" now points. Read once on mount rather than watched:
+     it is an entry point, not a control, and re-reading it would undo
+     somebody clicking Clear. */
+  const [motOnly, setMotOnly] = useState(false);
   const [editing, setEditing] = useState<{ row: StockTrailer; focusField?: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: StockTrailer; field?: string } | null>(null);
@@ -91,16 +96,56 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     return Array.from(set).sort();
   }, [rows, tab]);
 
+  /* ---- MOTs running out ----
+
+     The command bar has offered "MOTs running out, units needing a
+     test booking" since the action registry was written, and it
+     navigated here and showed the whole list. It promised a filter
+     that did not exist, which is worse than not offering it: somebody
+     asks the question, lands on 400 rows, and concludes the bar does
+     not work.
+
+     Sixty days, because a test is booked weeks ahead rather than on
+     the day, and anything already expired is in the same answer: a
+     unit whose plating ran out last month is the most urgent row on
+     the screen, not one that has stopped being relevant. */
+  const MOT_WINDOW_DAYS = 60;
+
+  useEffect(() => {
+    const view = new URLSearchParams(window.location.search).get('view');
+    if (view === 'mot-due') { setMotOnly(true); setTab('all'); }
+  }, []);
+
+  const motDue = useMemo(() => {
+    const now = Date.now();
+    const edge = now + MOT_WINDOW_DAYS * 86_400_000;
+    const due = new Set<string>();
+    for (const r of rows) {
+      if (!r.mot_date) continue;
+      const t = Date.parse(String(r.mot_date));
+      if (!Number.isFinite(t)) continue;
+      /* Sold and scrapped units are somebody else's test to book. */
+      if (r.status === 'sold' || r.status === 'scrap') continue;
+      if (t <= edge) due.add(r.id);
+    }
+    return due;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter(r => {
-      if (tab !== 'all' && r.status !== tab) return false;
+      /* The MOT view crosses every status, so it replaces the tab
+         rather than narrowing it. A test running out on a rental unit
+         still needs booking. */
+      if (motOnly) {
+        if (!motDue.has(r.id)) return false;
+      } else if (tab !== 'all' && r.status !== tab) return false;
       if (category && (r.category || '') !== category) return false;
       if (!q) return true;
       return [r.stc_no, r.chassis_number, r.make, r.model, r.description, r.location, r.customer, r.sales_rep, r.supplier, r.category]
         .filter(Boolean).join(' ').toLowerCase().includes(q);
     });
-  }, [rows, tab, category, query]);
+  }, [rows, tab, category, query, motOnly, motDue]);
 
   const isSoldOrOrder = tab === 'sold' || tab === 'sales_order';
 
@@ -438,6 +483,15 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
           padding: '10px 14px', borderRadius: 'var(--r-md)',
           background: 'var(--surface)', border: '1px solid var(--border)',
         }}>
+          {/* On screen whenever it is on, because a list that has been
+              narrowed and does not say so is a list somebody reads as
+              the whole stock. Clicking it turns it off. */}
+          {motOnly && (
+            <Chip active onClick={() => setMotOnly(false)} count={motDue.size}
+              title={`MOT expired or due within ${MOT_WINDOW_DAYS} days`}>
+              MOTs running out
+            </Chip>
+          )}
           {categoriesInTab.length > 1 && (
             <>
               <Chip active={category === null} onClick={() => setCategory(null)}>All categories</Chip>
@@ -448,8 +502,8 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
             </>
           )}
 
-          {(query || category || tab !== 'all') && (
-            <button onClick={() => { setQuery(''); setCategory(null); setTab('all'); }} style={{
+          {(query || category || motOnly || tab !== 'all') && (
+            <button onClick={() => { setQuery(''); setCategory(null); setMotOnly(false); setTab('all'); }} style={{
               background: 'transparent', border: 0, padding: 0, cursor: 'pointer',
               color: 'var(--accent)', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
               textDecoration: 'underline', textUnderlineOffset: 3,

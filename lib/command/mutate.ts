@@ -1399,10 +1399,28 @@ const PROMINENT = [
  */
 const ASKING = /\b(show me|how much|how many|what is|what are|whats|which|list|export|download|count|total|value of|report|give me)\b/i;
 
+/* A QUESTION OPENS WITH A QUESTION WORD.
+
+   `what` is a real column on a lead, so "what mots are running out"
+   matched the field and offered "Set What on a customer" above the
+   answer to the question actually being asked. Edit hints go first in
+   the candidate list, so it took the top row.
+
+   `ASKING` above nearly caught it: it has `what is`, `what are` and
+   `whats`, and the sentence was "what mots", which is neither. Adding
+   "what mots" to that list would fix one sentence and leave "what
+   trailers", "what leads", "what customers" and every noun after it.
+
+   The shape is the rule, not the noun. An instruction opens with a
+   verb, and "set what on Dawson to maintenance" still reaches the
+   field because it opens with `set`. */
+const OPENS_A_QUESTION = /^(what|which|who|whose|whom|where|when|why|how)\b/i;
+
 export function composeEdits(input: string, caps: CrmCapabilities, limit = 6): EditSuggestion[] {
   const raw = input.trim();
   if (raw.length < 3) return [];
   if (raw.endsWith('?')) return [];
+  if (OPENS_A_QUESTION.test(raw)) return [];
   if (ASKING.test(raw)) return [];
 
   const stock = readStockRef(raw);

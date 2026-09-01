@@ -242,6 +242,59 @@ function display(spec: WritableField | null, v: unknown): string {
 }
 
 /** Every field the plan's mutation steps write, in plan order. */
+/**
+ * What a create says it did.
+ *
+ * The name it was given where the sentence gave it one, because
+ * "Maxwell Haulage added to the CRM" is a confirmation somebody can
+ * check at a glance and "one record was created" is a receipt they
+ * have to go and verify.
+ *
+ * Falls back to the entity's own noun where the create carried no
+ * obvious name, rather than inventing one out of whichever column
+ * happened to be first.
+ */
+export function madeWhat(steps: Plan['steps']): string {
+  const NAMES = ['company_name', 'name', 'title', 'full_name', 'stc_no', 'subject'];
+
+  const named: string[] = [];
+  let entity = '';
+  for (const step of steps) {
+    const set = (step as Mutate).set ?? [];
+    entity = entity || ((step as Mutate).target?.entity ?? '');
+    for (const key of NAMES) {
+      const hit = set.find((a) => !('via' in a.field) && a.field.field === key);
+      const to = hit?.to;
+      if (to && to.kind === 'literal' && to.value != null && String(to.value).trim()) {
+        named.push(String(to.value).trim());
+        break;
+      }
+    }
+  }
+
+  const noun = entityNoun(entity);
+  const where = entity === 'contacts' ? ' to the CRM' : '';
+
+  if (named.length === 1) return `${named[0]} added${where}.`;
+  if (named.length > 1) return `${named.length} ${noun}s added${where}.`;
+  return steps.length === 1
+    ? `One ${noun} created.`
+    : `${steps.length} ${noun}s created.`;
+}
+
+/** The singular word for an entity, for a sentence somebody reads. */
+function entityNoun(entity: string): string {
+  switch (entity) {
+    case 'contacts': return 'customer';
+    case 'deals':    return 'lead';
+    case 'trailers': return 'trailer';
+    case 'meetings': return 'meeting';
+    case 'posts':    return 'post';
+    case 'people':   return 'person';
+    default:         return 'record';
+  }
+}
+
 export function changedFields(plan: Plan): ChangedField[] {
   const out: ChangedField[] = [];
   for (const step of plan.steps) {
@@ -863,6 +916,24 @@ export async function applyMutation(
 
   const fields = changedFields(planning.plan);
   const operation = planning.plan.steps.find((s) => s.op === 'invoke');
+
+  /* A CREATE IS NOT A CHANGE, AND SAYING SO FRIGHTENED SOMEBODY.
+
+     "create a lead for maxwell haulage" made the right record and
+     reported "Company name changed on one record", because this
+     summary only knew two shapes: an operation, or a list of fields
+     that changed. A create sets `company_name`, so it fell into the
+     second one and described itself as a rename.
+
+     Nothing was renamed and nothing was lost. It still has to be
+     fixed, and not as wording: somebody who reads "company name
+     changed" after asking to create something has to go and check
+     whether they have just damaged a customer record, and a tool that
+     makes people check its work has failed whatever the database
+     says. */
+  const made = planning.plan.steps.filter((s) => s.op === 'create');
+  const changing = planning.plan.steps.some((s) => s.op === 'update');
+
   const what = operation
     ? (capabilityLabel(planning.plan) ?? 'That')
     : fields.map((f) => f.label).join(' and ');
@@ -877,9 +948,14 @@ export async function applyMutation(
     ? ''
     : operation
       ? `${what} on ${changedRecords.toLocaleString('en-GB')} ${changedRecords === 1 ? 'record' : 'records'}.`
-      : changedRecords === 1
-        ? `${what} changed on one record.`
-        : `${what} changed on ${changedRecords.toLocaleString('en-GB')} records.`;
+      /* Made, not changed. Named where the sentence named it, because
+         "Maxwell Haulage added to the CRM" is the confirmation and
+         "one record was created" is a receipt. */
+      : made.length && !changing
+        ? madeWhat(made)
+        : changedRecords === 1
+          ? `${what} changed on one record.`
+          : `${what} changed on ${changedRecords.toLocaleString('en-GB')} records.`;
 
   /* WHAT AN OPERATION REPORTS HAVING DONE.
 

@@ -553,8 +553,13 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['to the tracker', 'to my tracker', 'as a deal', 'to sales'],
     phrases: ['put this on my tracker', 'i have got a buyer for this'] },
 
-  { id: 'stock.motDue', label: 'MOTs running out', blurb: 'Units needing a test booking', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/sales', verbs: [...GO, 'which', 'how many'],
+  /* The path carries the filter. It used to be bare `/dashboard/sales`,
+     so this promised "units needing a test booking" and delivered the
+     whole stock list. An action that navigates somewhere unfiltered
+     while claiming to answer a question is worse than no action: the
+     person asked, got 400 rows, and concluded the bar does not work. */
+  { id: 'stock.motDue', label: 'MOTs running out', blurb: 'Expired, or due in the next 60 days', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/sales?view=mot-due', verbs: [...GO, 'which', 'how many'],
     objects: ['mot', 'mots', 'mot due', 'tests due', 'expiring mots', 'plating'],
     phrases: ['what mots are running out', 'which trailers need testing'] },
 
