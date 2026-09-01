@@ -10,6 +10,8 @@ import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
 import { blankContract, blankExtras, type ContractExtras } from '@/lib/fleetsmart/contract';
 import type { PickableAccount } from '@/lib/fleetsmart/account';
+import type { RateCard } from '@/lib/fleetsmart/ratecard';
+import { RateEditor } from '@/components/fleetsmart/rate-editor';
 import { priceContract } from '@/lib/fleetsmart/price';
 import { ContractDocument, ContractPrintRules } from '@/components/fleetsmart/document';
 import { ContractWizard } from '@/components/fleetsmart/wizard';
@@ -83,7 +85,7 @@ type Lead = {
   id: string; contact_id: string | null; company_name: string | null; requirement: string | null;
 };
 
-type TabKey = 'live' | 'drafts' | 'sent' | 'won' | 'closed';
+type TabKey = 'live' | 'drafts' | 'sent' | 'won' | 'closed' | 'rates';
 
 const STATUS_TONE: Record<ContractRow['status'], Tone> = {
   draft: 'neutral',
@@ -124,7 +126,7 @@ const TD: CSSProperties = {
 const NUM: CSSProperties = { ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 
 export function FleetSmart({
-  contracts, accounts, leads, capabilities, manager,
+  contracts, accounts, leads, capabilities, manager, card, cardVersions,
 }: {
   contracts: ContractRow[];
   accounts: Account[];
@@ -132,6 +134,10 @@ export function FleetSmart({
   capabilities: string[];
   /** Whoever is looking, so a new contract carries their name as the account manager. */
   manager: { name: string; email: string; phone: string };
+  /** What the builder prices off. The shipped card until somebody edits it. */
+  card: RateCard;
+  /** Every version saved, newest first. Empty until somebody edits it. */
+  cardVersions: { version: string; note: string | null; is_current: boolean; created_at: string }[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -340,10 +346,24 @@ export function FleetSmart({
             { key: 'sent', label: 'With customers', count: counts.sent },
             { key: 'won', label: 'Accepted', count: counts.won },
             { key: 'closed', label: 'Closed', count: counts.closed },
+            /* Last, on the far right, because it is not a view of the
+               contracts: it is what they are priced off. Reachable by
+               anybody who can open the tab, and read only until somebody
+               holds the permission that sets prices. */
+            { key: 'rates', label: 'Rate editor' },
           ]}
         />
       </div>
 
+      {tab === 'rates' ? (
+        <RateEditor
+          current={card}
+          versions={cardVersions}
+          may={may}
+          onSaved={(message) => { setNotice(message); setError(null); router.refresh(); }}
+        />
+      ) : (
+      <>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <SearchInput
           value={query}
@@ -471,6 +491,8 @@ export function FleetSmart({
         A draft opens in the builder. A contract that has gone out opens as the document the customer
         got, because changing a price somebody is already holding you to is not an edit.
       </GridHint>
+      </>
+      )}
 
       {open?.kind === 'wizard' && (
         <ContractWizard
@@ -530,6 +552,11 @@ function ContractDocumentDrawer({
   onDecide: (status: 'accepted' | 'declined') => void;
   onCopy: () => void;
 }) {
+  /* The snapshot, always, where there is one. A contract that has gone
+     out prints the prices it went out at, whatever the rate card says
+     today. The fallback is for an old row saved before `priced` was
+     stored, and it uses the card STC ships rather than the current one
+     for the same reason. */
   const priced = row.priced?.assets ? row.priced : priceContract(row.input);
 
   return (

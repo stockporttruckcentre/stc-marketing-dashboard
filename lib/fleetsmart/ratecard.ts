@@ -213,3 +213,137 @@ export const SETTINGS = {
 
 /** The default labour rates the builder opens with. */
 export const DEFAULT_LABOUR = { hgv: 85, trailer: 65, van: 85 };
+
+/* =============================================================
+   The whole card as one value.
+
+   Everything above is the card STC ships with. This is the same thing
+   in a shape that can be stored, edited and handed to the engine, so a
+   price rise is a row somebody types in the Rate editor rather than a
+   deploy.
+
+   ---- Why the constants stay ----
+
+   They are the seed and the fallback. An installation that has not run
+   the rate card migration prices correctly off this file, and
+   `scripts/fleetsmart-price-check.ts` asserts against it, so the 325
+   figures it holds are still checked against the workbook's own.
+
+   ---- Why a contract keeps its own copy ----
+
+   `fleetsmart_contracts.priced` is a snapshot taken when the contract
+   was built, and migration 061 explains why: a contract signed in March
+   at March's prices has to keep printing March's numbers in October, or
+   the document in the customer's drawer and the document on the screen
+   stop agreeing and only one of them is enforceable. Editing the card
+   changes what the next contract costs and nothing about one already
+   sent.
+   ============================================================= */
+
+export type RateCard = {
+  /** Bumped every time somebody saves a change, so a contract can say
+      what it was priced against. */
+  version: string;
+  rates: RateRow[];
+  included: Record<Plan, Record<AssetClass, string[]>>;
+  serviceKit: Record<AssetType, number>;
+  oilLitres: Record<AssetType, number>;
+  portalPerVisit: Record<AssetClass, number>;
+  bulbsPerYear: Record<AssetClass, number>;
+  wearAndTearBase: Record<AssetType, number>;
+  silverPortalPerYear: number;
+  workPatterns: { value: string; label: string; multiplier: number }[];
+  settings: typeof SETTINGS;
+  defaultLabour: typeof DEFAULT_LABOUR;
+};
+
+/** The version STC ships. A saved card carries its own. */
+export const SHIPPED_VERSION = '2026-08';
+
+/** The card as shipped, which is what everything falls back to. */
+export const SHIPPED_CARD: RateCard = {
+  version: SHIPPED_VERSION,
+  rates: RATES,
+  included: INCLUDED,
+  serviceKit: SERVICE_KIT,
+  oilLitres: OIL_LITRES,
+  portalPerVisit: PORTAL_PER_VISIT,
+  bulbsPerYear: BULBS_PER_YEAR,
+  wearAndTearBase: WEAR_AND_TEAR_BASE,
+  silverPortalPerYear: SILVER_PORTAL_PER_YEAR,
+  workPatterns: WORK_PATTERNS,
+  settings: SETTINGS,
+  defaultLabour: DEFAULT_LABOUR,
+};
+
+/**
+ * A card read back from the database, filled in from the shipped one.
+ *
+ * Anything the stored card does not carry keeps its shipped value, so
+ * an older saved card missing a field added since does not price that
+ * line at zero. A missing price and a price of nothing are different
+ * things, and only one of them should ever reach a customer.
+ */
+export function cardFrom(stored: unknown, version?: string): RateCard {
+  if (!stored || typeof stored !== 'object') return SHIPPED_CARD;
+  const s = stored as Partial<RateCard>;
+  return {
+    version: version ?? s.version ?? SHIPPED_VERSION,
+    rates: Array.isArray(s.rates) && s.rates.length ? s.rates : SHIPPED_CARD.rates,
+    included: s.included ?? SHIPPED_CARD.included,
+    serviceKit: { ...SHIPPED_CARD.serviceKit, ...(s.serviceKit ?? {}) },
+    oilLitres: { ...SHIPPED_CARD.oilLitres, ...(s.oilLitres ?? {}) },
+    portalPerVisit: { ...SHIPPED_CARD.portalPerVisit, ...(s.portalPerVisit ?? {}) },
+    bulbsPerYear: { ...SHIPPED_CARD.bulbsPerYear, ...(s.bulbsPerYear ?? {}) },
+    wearAndTearBase: { ...SHIPPED_CARD.wearAndTearBase, ...(s.wearAndTearBase ?? {}) },
+    silverPortalPerYear: typeof s.silverPortalPerYear === 'number'
+      ? s.silverPortalPerYear : SHIPPED_CARD.silverPortalPerYear,
+    workPatterns: Array.isArray(s.workPatterns) && s.workPatterns.length
+      ? s.workPatterns : SHIPPED_CARD.workPatterns,
+    settings: { ...SHIPPED_CARD.settings, ...(s.settings ?? {}) },
+    defaultLabour: { ...SHIPPED_CARD.defaultLabour, ...(s.defaultLabour ?? {}) },
+  };
+}
+
+/** What somebody changed, in words, for the note on a saved version. */
+export function whatChanged(from: RateCard, to: RateCard): string[] {
+  const out: string[] = [];
+
+  const before = new Map(from.rates.map((r) => [`${r.cls}|${r.line}`, r]));
+  for (const r of to.rates) {
+    const was = before.get(`${r.cls}|${r.line}`);
+    if (!was) { out.push(`${r.cls}: ${r.line} added`); continue; }
+    for (let i = 0; i < 4; i += 1) {
+      if (was.axle[i] !== r.axle[i]) {
+        out.push(`${r.cls} ${r.line}, ${i + 1} axle: ${was.axle[i]} to ${r.axle[i]}`);
+      }
+    }
+  }
+
+  const scalars: [string, number, number][] = [
+    ['Silver portal, a year', from.silverPortalPerYear, to.silverPortalPerYear],
+    ['Engine oil, per litre', from.settings.oilPerLitre, to.settings.oilPerLitre],
+    ['Out of hours uplift', from.settings.outOfHoursUplift, to.settings.outOfHoursUplift],
+    ['Wear and tear, per year', from.settings.wearUpliftPerYear, to.settings.wearUpliftPerYear],
+    ['Wear mileage baseline', from.settings.wearMileageBaseline, to.settings.wearMileageBaseline],
+    ['Labour, HGV', from.defaultLabour.hgv, to.defaultLabour.hgv],
+    ['Labour, trailer', from.defaultLabour.trailer, to.defaultLabour.trailer],
+    ['Labour, van', from.defaultLabour.van, to.defaultLabour.van],
+  ];
+  for (const [label, was, now] of scalars) {
+    if (was !== now) out.push(`${label}: ${was} to ${now}`);
+  }
+
+  for (const key of Object.keys(to.serviceKit) as AssetType[]) {
+    if (from.serviceKit[key] !== to.serviceKit[key]) {
+      out.push(`Service kit, ${key}: ${from.serviceKit[key]} to ${to.serviceKit[key]}`);
+    }
+  }
+  for (const key of Object.keys(to.wearAndTearBase) as AssetType[]) {
+    if (from.wearAndTearBase[key] !== to.wearAndTearBase[key]) {
+      out.push(`Wear and tear base, ${key}: ${from.wearAndTearBase[key]} to ${to.wearAndTearBase[key]}`);
+    }
+  }
+
+  return out;
+}

@@ -644,6 +644,116 @@ BEGIN
 END $$;
 
 -- =============================================================
+-- 10. The rate card.
+--
+-- Migration 070. Prices are edited in the application, one version at a
+-- time, and only by somebody who may set prices.
+-- =============================================================
+DO $$
+DECLARE saved fleetsmart_rate_cards;
+BEGIN
+  -- A salesman builds and sends but does not set prices.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  BEGIN
+    PERFORM fleetsmart_save_rate_card('2099-01', '{"rates": [{"cls": "Van"}]}'::JSONB, NULL);
+    RAISE EXCEPTION 'a salesman saved a rate card';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%permission that sets prices%' THEN
+      RAISE NOTICE 'ok  a salesman cannot change what anything costs';
+    ELSE RAISE; END IF;
+  END;
+
+  -- Nor can a viewer.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000004');
+  BEGIN
+    PERFORM fleetsmart_save_rate_card('2099-01', '{"rates": [{"cls": "Van"}]}'::JSONB, NULL);
+    RAISE EXCEPTION 'a viewer saved a rate card';
+  EXCEPTION WHEN raise_exception THEN
+    RAISE NOTICE 'ok  a viewer cannot either';
+  END;
+
+  -- An administrator can, and a card with no rates in it is refused
+  -- whoever asks, because every line would price at nothing.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  BEGIN
+    PERFORM fleetsmart_save_rate_card('2099-01', '{"rates": []}'::JSONB, NULL);
+    RAISE EXCEPTION 'a rate card with no rates was saved';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM LIKE '%price at nothing%' THEN
+      RAISE NOTICE 'ok  a card carrying no rates is refused';
+    ELSE RAISE; END IF;
+  END;
+
+  saved := fleetsmart_save_rate_card(
+    '2099-01', '{"rates": [{"cls": "Van", "line": "Submit for MOT"}]}'::JSONB, 'A test card');
+  IF NOT saved.is_current THEN
+    RAISE EXCEPTION 'the card that was just saved is not the one in use';
+  END IF;
+  RAISE NOTICE 'ok  an administrator saves one and it becomes the one in use';
+END $$;
+
+-- Exactly one card is current, whatever happens.
+DO $$
+DECLARE n INT;
+BEGIN
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  PERFORM fleetsmart_save_rate_card(
+    '2099-02', '{"rates": [{"cls": "Van", "line": "Submit for MOT"}]}'::JSONB, 'Another');
+  PERFORM fleetsmart_save_rate_card(
+    '2099-03', '{"rates": [{"cls": "Van", "line": "Submit for MOT"}]}'::JSONB, 'And another');
+
+  RESET ROLE;
+  SELECT count(*) INTO n FROM fleetsmart_rate_cards WHERE is_current;
+  IF n <> 1 THEN
+    RAISE EXCEPTION '% cards are current, and exactly one has to be', n;
+  END IF;
+  IF (SELECT version FROM fleetsmart_rate_cards WHERE is_current) <> '2099-03' THEN
+    RAISE EXCEPTION 'the newest card is not the one in use';
+  END IF;
+  RAISE NOTICE 'ok  saving three leaves exactly one in use, the newest';
+
+  -- Going back to an older one, without deleting anything.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  PERFORM fleetsmart_use_rate_card('2099-01');
+  RESET ROLE;
+  SELECT count(*) INTO n FROM fleetsmart_rate_cards WHERE is_current;
+  IF n <> 1 OR (SELECT version FROM fleetsmart_rate_cards WHERE is_current) <> '2099-01' THEN
+    RAISE EXCEPTION 'going back to an older card left % current', n;
+  END IF;
+  IF (SELECT count(*) FROM fleetsmart_rate_cards WHERE version LIKE '2099-%') <> 3 THEN
+    RAISE EXCEPTION 'going back deleted a version';
+  END IF;
+  RAISE NOTICE 'ok  going back to an older card keeps every version';
+END $$;
+
+-- And a contract already priced does not move when the card does.
+DO $$
+DECLARE made UUID; before NUMERIC; after NUMERIC;
+BEGIN
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  INSERT INTO fleetsmart_contracts (customer_name, plan, term_months, priced, owner_id, created_by)
+  VALUES ('Frozen Price Ltd', 'Gold', 36, pg_temp.snapshot(7200, 3),
+          'ff000000-0000-0000-0000-000000000002',
+          'ff000000-0000-0000-0000-000000000002')
+  RETURNING id INTO made;
+
+  RESET ROLE;
+  SELECT annual_total INTO before FROM fleetsmart_contracts WHERE id = made;
+
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000001');
+  PERFORM fleetsmart_save_rate_card(
+    '2099-09', '{"rates": [{"cls": "Van", "line": "Submit for MOT", "axle": [0, 9999, 0, 0]}]}'::JSONB,
+    'Everything up');
+
+  RESET ROLE;
+  SELECT annual_total INTO after FROM fleetsmart_contracts WHERE id = made;
+  IF before IS DISTINCT FROM after THEN
+    RAISE EXCEPTION 'a contract already priced moved from % to % when the rate card changed', before, after;
+  END IF;
+  RAISE NOTICE 'ok  a contract keeps the prices it was built at when the card moves';
+END $$;
+
+-- =============================================================
 -- 8. The constraint that stops a contract being sent with no date.
 -- =============================================================
 RESET ROLE;

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { FleetSmart, type ContractRow } from '@/components/FleetSmart';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import { ACCOUNT_COLUMNS, type PickableAccount } from '@/lib/fleetsmart/account';
+import { SHIPPED_CARD, cardFrom } from '@/lib/fleetsmart/ratecard';
 import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type { Profile } from '@/lib/types';
 
@@ -37,7 +38,7 @@ export default async function FleetSmartPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, contractRes, accountRes, addressRes, leadRes] = await Promise.all([
+  const [profileRes, contractRes, accountRes, addressRes, leadRes, cardRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('fleetsmart_contracts').select('*').order('updated_at', { ascending: false }).limit(300),
     supabase.from('crm_contacts').select(ACCOUNT_COLUMNS).order('company_name').limit(2000),
@@ -51,6 +52,12 @@ export default async function FleetSmartPage() {
       .limit(4000),
     supabase.from('crm_leads').select('id, contact_id, company_name, requirement')
       .order('created_at', { ascending: false }).limit(2000),
+    /* Every rate card ever saved, newest first. No rows is a working
+       installation, not a missing one: the builder then prices off the
+       card the application ships with, which is the workbook's. */
+    supabase.from('fleetsmart_rate_cards')
+      .select('version, card, note, is_current, created_at')
+      .order('created_at', { ascending: false }).limit(50),
   ]);
 
   /* One address per account, the primary where there is one. The table
@@ -91,8 +98,18 @@ export default async function FleetSmartPage() {
     );
   }
 
+  const savedCards = (cardRes.data ?? []) as {
+    version: string; card: unknown; note: string | null;
+    is_current: boolean; created_at: string;
+  }[];
+  const inUse = savedCards.find((c) => c.is_current);
+  const card = inUse ? cardFrom(inUse.card, inUse.version) : SHIPPED_CARD;
+
   return (
     <FleetSmart
+      card={card}
+      cardVersions={savedCards.map(({ version, note, is_current, created_at }) =>
+        ({ version, note, is_current, created_at }))}
       contracts={(contractRes.data ?? []) as ContractRow[]}
       accounts={accounts}
       leads={(leadRes.data ?? []) as {

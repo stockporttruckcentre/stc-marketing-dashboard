@@ -31,9 +31,8 @@
    salesman asks in the room.
    ============================================================= */
 import {
-  ASSET_TYPES, BULBS_PER_YEAR, INCLUDED, OIL_LITRES, PORTAL_PER_VISIT,
-  RATES, SERVICE_KIT, SETTINGS, SILVER_PORTAL_PER_YEAR, WEAR_AND_TEAR_BASE,
-  WORK_PATTERNS, type AssetClass, type AssetType, type FreqCode, type Plan,
+  ASSET_TYPES, SHIPPED_CARD,
+  type AssetClass, type AssetType, type FreqCode, type Plan, type RateCard,
 } from './ratecard';
 import type {
   ContractFlags, ContractInput, FleetAsset, PricedAsset, PricedContract, PricedLine,
@@ -106,13 +105,16 @@ export function defaultLadenRbt(cls: AssetClass | ''): number {
  * Platinum only. On Silver and Gold the line is not in the plan and the
  * figure is zero unless somebody sets one.
  */
-export function autoWearAndTear(type: AssetType | '', age: number | null, miles: number | null): number {
+export function autoWearAndTear(
+  type: AssetType | '', age: number | null, miles: number | null,
+  card: RateCard = SHIPPED_CARD,
+): number {
   if (!type) return 0;
-  const base = WEAR_AND_TEAR_BASE[type as AssetType] ?? 0;
+  const base = card.wearAndTearBase[type as AssetType] ?? 0;
   const years = age ?? 0;
-  const effective = miles && miles > 0 ? (years * miles) / SETTINGS.wearMileageBaseline : years;
-  const over = Math.max(0, effective - SETTINGS.wearUpliftStartYear);
-  return round2(base * (1 + SETTINGS.wearUpliftPerYear * over));
+  const effective = miles && miles > 0 ? (years * miles) / card.settings.wearMileageBaseline : years;
+  const over = Math.max(0, effective - card.settings.wearUpliftStartYear);
+  return round2(base * (1 + card.settings.wearUpliftPerYear * over));
 }
 
 /** Every frequency this asset resolves, keyed by the rate card's codes. */
@@ -150,9 +152,9 @@ function resolveFreq(code: FreqCode, f: ReturnType<typeof frequencies>): number 
 }
 
 /** What the work pattern and out-of-hours between them do to a labour line. */
-export function labourUplift(asset: FleetAsset): number {
-  const pattern = WORK_PATTERNS.find((p) => p.value === asset.workPattern)?.multiplier ?? 1;
-  return pattern * (asset.outOfHours ? 1 + SETTINGS.outOfHoursUplift : 1);
+export function labourUplift(asset: FleetAsset, card: RateCard = SHIPPED_CARD): number {
+  const pattern = card.workPatterns.find((p) => p.value === asset.workPattern)?.multiplier ?? 1;
+  return pattern * (asset.outOfHours ? 1 + card.settings.outOfHoursUplift : 1);
 }
 
 /**
@@ -183,12 +185,14 @@ function overrideFor(line: string, asset: FleetAsset, plan: Plan): boolean | nul
 }
 
 /** Price one asset, line by line. */
-export function priceAsset(asset: FleetAsset, input: ContractInput): PricedAsset {
+export function priceAsset(
+  asset: FleetAsset, input: ContractInput, card: RateCard = SHIPPED_CARD,
+): PricedAsset {
   const { plan } = input;
   const { cls, axles } = describe(asset.type);
   const f = frequencies(asset, cls, plan);
-  const uplift = labourUplift(asset);
-  const covered = cls ? INCLUDED[plan][cls] : [];
+  const uplift = labourUplift(asset, card);
+  const covered = cls ? card.included[plan][cls] : [];
 
   const lines: PricedLine[] = [];
   const add = (line: string, price: number, frequency: number, included: boolean, labour: boolean) => {
@@ -212,7 +216,7 @@ export function priceAsset(asset: FleetAsset, input: ContractInput): PricedAsset
   }
 
   /* ---- the rate card lines ---- */
-  for (const rate of RATES) {
+  for (const rate of card.rates) {
     if (rate.cls !== cls) continue;
     /* Kept only so an old key still resolves. */
     if (rate.line === 'Inspection/B Service') continue;
@@ -232,10 +236,10 @@ export function priceAsset(asset: FleetAsset, input: ContractInput): PricedAsset
 
   /* ---- the lines the rate card holds in its own blocks ---- */
 
-  add('Service Kit (C)', SERVICE_KIT[asset.type as AssetType] ?? 0, f.cServices,
+  add('Service Kit (C)', card.serviceKit[asset.type as AssetType] ?? 0, f.cServices,
     covered.includes('Service Kit (C)'), false);
 
-  add('Engine Oil', round2((OIL_LITRES[asset.type as AssetType] ?? 0) * SETTINGS.oilPerLitre), f.cServices,
+  add('Engine Oil', round2((card.oilLitres[asset.type as AssetType] ?? 0) * card.settings.oilPerLitre), f.cServices,
     covered.includes('Engine Oil'), false);
 
   /* Wear and tear. Platinum earns it automatically; on any plan a
@@ -244,20 +248,20 @@ export function priceAsset(asset: FleetAsset, input: ContractInput): PricedAsset
   const manual = asset.wearAndTear != null && asset.wearAndTear > 0;
   const wear = manual
     ? asset.wearAndTear!
-    : plan === 'Platinum' ? autoWearAndTear(asset.type, asset.age, asset.mileagePerYear) : 0;
+    : plan === 'Platinum' ? autoWearAndTear(asset.type, asset.age, asset.mileagePerYear, card) : 0;
   add('Wear & Tear Allowance', wear, 1, plan === 'Platinum' || manual, false);
 
   /* The portal is part of Gold and Platinum, priced per inspection. On
      Silver it is a £100 a year add-on, which is why its price and its
      frequency both change rather than only its flag. */
   if (plan === 'Silver') {
-    add('Compliance Portal Access', SILVER_PORTAL_PER_YEAR, 1, asset.portalAddOn, false);
+    add('Compliance Portal Access', card.silverPortalPerYear, 1, asset.portalAddOn, false);
   } else {
-    add('Compliance Portal Access', PORTAL_PER_VISIT[cls], f.visits,
+    add('Compliance Portal Access', card.portalPerVisit[cls], f.visits,
       covered.includes('Compliance Portal Access'), false);
   }
 
-  add('Bulb Replacement', BULBS_PER_YEAR[cls], 1, covered.includes('Bulb Replacement'), false);
+  add('Bulb Replacement', card.bulbsPerYear[cls], 1, covered.includes('Bulb Replacement'), false);
 
   add('Miscellaneous (agreed extra)', asset.misc ?? 0, 1, (asset.misc ?? 0) > 0, false);
 
@@ -275,7 +279,7 @@ export function priceAsset(asset: FleetAsset, input: ContractInput): PricedAsset
     wearAndTear: wear,
     wearAndTearIsManual: manual,
     visitsPerYear: f.visits,
-    warnings: warningsFor(asset, plan, cls, f, wear, manual),
+    warnings: warningsFor(asset, plan, cls, f, wear, manual, card),
   };
 }
 
@@ -297,6 +301,7 @@ function warningsFor(
   f: ReturnType<typeof frequencies>,
   wear: number,
   manual: boolean,
+  card: RateCard,
 ): string[] {
   const out: string[] = [];
   const telematics = asset.telematicsPerYear ?? 0;
@@ -345,7 +350,7 @@ function warningsFor(
     out.push(`Miscellaneous expense of £${(asset.misc ?? 0).toFixed(2)} a year on top of the plan.`);
   }
   if (manual && plan === 'Platinum'
-      && round2(wear) !== autoWearAndTear(asset.type, asset.age, asset.mileagePerYear)) {
+      && round2(wear) !== autoWearAndTear(asset.type, asset.age, asset.mileagePerYear, card)) {
     out.push('Manual wear and tear figure in use, overriding the automatic one.');
   }
   if (manual && plan !== 'Platinum') {
@@ -376,8 +381,10 @@ function warningsFor(
 }
 
 /** Price the whole contract. */
-export function priceContract(input: ContractInput): PricedContract {
-  const assets = input.assets.map((a) => priceAsset(a, input));
+export function priceContract(
+  input: ContractInput, card: RateCard = SHIPPED_CARD,
+): PricedContract {
+  const assets = input.assets.map((a) => priceAsset(a, input, card));
   const subtotal = round2(assets.reduce((n, a) => n + a.annual, 0));
 
   /* The manager's discount comes off first, then the promotional one,
