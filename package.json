@@ -49,6 +49,8 @@
     "check:fleetsmart": "bash scripts/sql/fleetsmart-check.sh",
     "check:permissions": "bash scripts/sql/permissions-check.sh",
     "check:hooks": "next lint --max-warnings 999",
+    "bar:list": "tsx scripts/command-what-works.ts --list",
+    "bar:audit": "tsx scripts/command-what-works.ts --audit",
     "check:workflow": "bash scripts/sql/workflow-check.sh"
   },
   "dependencies": {
