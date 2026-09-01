@@ -219,6 +219,13 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['add refurb', 'change the refurb', 'update the mot', 'move it to'],
     seed: 'set refurb cost on STC' },
 
+  { id: 'crm.bulkStatus', label: 'Change status on several accounts', blurb: 'Everything you have selected in the CRM', kind: 'record',
+    capability: 'crm.edit', verbs: [...CHANGE, 'mark', 'bulk', 'set'],
+    objects: ['status on these', 'these accounts to', 'the selected customers',
+      'all of these to', 'status on the selected', 'these customers to'],
+    phrases: ['mark all of these as contacted', 'set these accounts to quoted',
+      'change the status on everything selected'] },
+
   { id: 'rec.editContactField', label: 'Change a customer detail', blurb: 'Owner, status, phone, next action', kind: 'record',
     capability: 'crm.edit', verbs: [...CHANGE, 'add', 'clear'],
     objects: ['customer detail', 'contact detail', 'phone number', 'email address',

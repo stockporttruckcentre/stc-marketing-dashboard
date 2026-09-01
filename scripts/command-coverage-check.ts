@@ -1245,6 +1245,30 @@ for (const role of ROLES) {
     crumbsFor('/dashboard/crm/12345')[1] === 'CRM pipeline');
 }
 
+/* -------------------------------------------------------------
+   Changing the status on several accounts at once.
+
+   The words people use for it, and the one permission assertion that
+   matters: a read only viewer typing "mark all of these as contacted"
+   sees nothing, because an action that appears and then refuses
+   teaches people the tool lies.
+   ------------------------------------------------------------- */
+for (const said of [
+  'status on these', 'these accounts to', 'the selected customers',
+  'mark all of these as contacted', 'set these accounts to quoted',
+  'change the status on everything selected',
+]) {
+  ok(`"${said}" reaches the bulk status change`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'crm.bulkStatus'));
+}
+
+ok('a read only viewer is not offered changing status in bulk',
+  !suggestActions('mark all of these as contacted', CAPS.viewer, 8)
+    .some((h) => h.action.id === 'crm.bulkStatus'));
+ok('a sales user is',
+  suggestActions('mark all of these as contacted', CAPS.sales, 8)
+    .some((h) => h.action.id === 'crm.bulkStatus'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

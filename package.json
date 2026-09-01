@@ -38,6 +38,7 @@
     "check:content": "bash scripts/sql/content-check.sh",
     "check:anon": "bash scripts/sql/anon-check.sh",
     "check:notify": "bash scripts/sql/notify-check.sh",
+    "check:crm-status": "bash scripts/sql/crm-status-check.sh",
     "check:diary": "bash scripts/sql/calendar-check.sh",
     "check:calendar": "tsx scripts/calendar-check.ts",
     "check:price": "tsx scripts/fleetsmart-price-check.ts",
