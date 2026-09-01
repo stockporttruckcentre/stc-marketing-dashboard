@@ -348,20 +348,7 @@ END $$;
 -- =============================================================
 DO $$
 BEGIN
-  -- A draft has not been answered, because it was never asked.
-  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
-  BEGIN
-    PERFORM fleetsmart_decide('ff000000-0000-0000-0000-0000000000a2', 'accepted', NULL);
-    RAISE EXCEPTION 'a draft nobody sent was recorded as accepted';
-  EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM LIKE '%not been sent%' THEN
-      RAISE NOTICE 'ok  a draft cannot be accepted';
-    ELSE
-      RAISE;
-    END IF;
-  END;
-
-  -- A viewer cannot answer one either.
+  -- A viewer cannot answer one.
   PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000004');
   BEGIN
     PERFORM fleetsmart_decide('ff000000-0000-0000-0000-0000000000a1', 'accepted', NULL);
@@ -386,6 +373,30 @@ BEGIN
       RAISE;
     END IF;
   END;
+END $$;
+
+-- A draft can be answered, and the answer stamps a sent date.
+--
+-- This was the other way round until migration 067. It had to change:
+-- the tracker can now win a deal that was priced here and emailed out of
+-- Outlook, and refusing that leaves a signed contract sitting as a
+-- draft. The constraint from 061 still holds, so accepting a draft fills
+-- in `sent_at` and says in `sent_to` that nobody recorded where it went,
+-- which is true and is better than an empty column nobody can explain.
+DO $$
+DECLARE st TEXT; sent TIMESTAMPTZ; who TEXT;
+BEGIN
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  PERFORM fleetsmart_decide('ff000000-0000-0000-0000-0000000000a2', 'accepted', NULL);
+  SELECT status, sent_at, sent_to INTO st, sent, who
+    FROM fleetsmart_contracts WHERE id = 'ff000000-0000-0000-0000-0000000000a2';
+  IF st <> 'accepted' OR sent IS NULL THEN
+    RAISE EXCEPTION 'accepting a draft left it as % with sent_at %', st, sent;
+  END IF;
+  IF who IS NULL OR who NOT LIKE '%draft%' THEN
+    RAISE EXCEPTION 'accepting a draft did not say where it went: %', who;
+  END IF;
+  RAISE NOTICE 'ok  a draft can be answered, and says it was never sent from here';
 END $$;
 
 DO $$
@@ -425,6 +436,211 @@ BEGIN
     RAISE EXCEPTION 'one salesman can see only % of the other salesman''s contracts', n;
   END IF;
   RAISE NOTICE 'ok  everybody who can open the screen can read what was quoted';
+END $$;
+
+-- =============================================================
+-- 9. A contract and its lead are one record.
+--
+-- Migration 067. Every contract has a lead the moment it exists, the two
+-- statuses move together in both directions, and neither trigger sets
+-- the other one off again.
+-- =============================================================
+RESET ROLE;
+
+DO $$
+DECLARE
+  acct UUID; made UUID; lead UUID;
+  st TEXT; kind TEXT; money NUMERIC; owner UUID; taken NUMERIC;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Shared Record Haulage', 'lead', 'manual')
+  RETURNING id INTO acct;
+
+  -- Building one makes a maintenance lead against that account.
+  INSERT INTO fleetsmart_contracts (
+    account_id, customer_name, plan, term_months, priced,
+    owner_id, created_by
+  ) VALUES (
+    acct, 'Shared Record Haulage', 'Platinum', 36, pg_temp.snapshot(9600, 4),
+    'ff000000-0000-0000-0000-000000000002',
+    'ff000000-0000-0000-0000-000000000002'
+  ) RETURNING id INTO made;
+
+  SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
+  IF lead IS NULL THEN
+    RAISE EXCEPTION 'building a contract made no lead';
+  END IF;
+  RAISE NOTICE 'ok  building a contract puts a lead on the tracker';
+
+  SELECT l.status, l.type, l.estimated_value, l.owner_id
+    INTO st, kind, money, owner
+    FROM crm_leads l WHERE l.id = lead;
+
+  IF kind <> 'maintenance' THEN
+    RAISE EXCEPTION 'the lead came out as a % lead', kind;
+  END IF;
+  IF st <> 'contacted' THEN
+    RAISE EXCEPTION 'a draft contract left its lead at %', st;
+  END IF;
+  IF money IS DISTINCT FROM 9600 THEN
+    RAISE EXCEPTION 'the lead is worth % and the contract is worth 9600', money;
+  END IF;
+  IF owner <> 'ff000000-0000-0000-0000-000000000002' THEN
+    RAISE EXCEPTION 'the lead landed on the wrong tracker';
+  END IF;
+  IF (SELECT status FROM crm_contacts
+       WHERE company_name = 'Shared Record Haulage') <> 'contacted' THEN
+    RAISE EXCEPTION 'the account status did not follow its new lead';
+  END IF;
+  RAISE NOTICE 'ok  the lead is a maintenance lead, worth what the contract is worth';
+
+  -- Sending quotes it.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  PERFORM fleetsmart_send(made, 'transport@sharedrecord.test');
+  RESET ROLE;
+  SELECT l.status INTO st FROM crm_leads l WHERE l.id = lead;
+  IF st <> 'quoted' THEN
+    RAISE EXCEPTION 'sending the contract left its lead at %', st;
+  END IF;
+  RAISE NOTICE 'ok  sending the contract quotes its lead';
+
+  -- Accepting on the FleetSmart+ side wins it, and moves the money.
+  PERFORM pg_temp.act_as('ff000000-0000-0000-0000-000000000002');
+  PERFORM fleetsmart_decide(made, 'accepted', 'Signed.');
+  RESET ROLE;
+  SELECT l.status, l.sale_price, l.estimated_value
+    INTO st, taken, money FROM crm_leads l WHERE l.id = lead;
+  IF st <> 'customer' THEN
+    RAISE EXCEPTION 'accepting the contract left its lead at %', st;
+  END IF;
+  IF taken IS DISTINCT FROM 9600 THEN
+    RAISE EXCEPTION 'accepting did not move the money onto the lead: %', taken;
+  END IF;
+  IF money IS NOT NULL THEN
+    RAISE EXCEPTION 'won money is still sitting in the open pipeline column: %', money;
+  END IF;
+  RAISE NOTICE 'ok  accepting the contract wins the lead and moves the money';
+END $$;
+
+-- And the other direction: winning on the tracker accepts the contract.
+DO $$
+DECLARE acct UUID; made UUID; lead UUID; st TEXT; sent TIMESTAMPTZ; note TEXT;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Tracker Wins It Ltd', 'lead', 'manual')
+  RETURNING id INTO acct;
+
+  INSERT INTO fleetsmart_contracts (
+    account_id, customer_name, plan, term_months, priced, owner_id, created_by
+  ) VALUES (
+    acct, 'Tracker Wins It Ltd', 'Gold', 24, pg_temp.snapshot(4800, 2),
+    'ff000000-0000-0000-0000-000000000002',
+    'ff000000-0000-0000-0000-000000000002'
+  ) RETURNING id INTO made;
+
+  /* Read back rather than taken from RETURNING. An INSERT's RETURNING
+     gives the row as the BEFORE triggers left it, and `lead_id` is
+     filled in by an AFTER trigger, so RETURNING hands back a NULL and
+     every assertion below it silently tests nothing. */
+  SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
+  IF lead IS NULL THEN RAISE EXCEPTION 'the contract has no lead'; END IF;
+
+  UPDATE crm_leads SET status = 'customer' WHERE id = lead;
+
+  SELECT status, sent_at, decision_note INTO st, sent, note
+    FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'accepted' THEN
+    RAISE EXCEPTION 'winning the lead left the contract at %', st;
+  END IF;
+  IF sent IS NULL THEN
+    RAISE EXCEPTION 'the contract is accepted with no sent date, which the constraint forbids';
+  END IF;
+  IF note IS NULL OR note NOT LIKE '%tracker%' THEN
+    RAISE EXCEPTION 'the contract does not say the tracker answered it: %', note;
+  END IF;
+  RAISE NOTICE 'ok  winning the lead accepts the contract, and says where from';
+
+  -- Losing the other way round.
+  UPDATE crm_leads SET status = 'lost' WHERE id = lead;
+  SELECT status INTO st FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'accepted' THEN
+    RAISE EXCEPTION 'an answered contract was reopened from the tracker, ending at %', st;
+  END IF;
+  RAISE NOTICE 'ok  a contract already answered is not reopened by the tracker';
+END $$;
+
+-- Declining from the tracker, on a contract that has not been answered.
+DO $$
+DECLARE acct UUID; made UUID; lead UUID; st TEXT;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Tracker Loses It Ltd', 'lead', 'manual')
+  RETURNING id INTO acct;
+
+  INSERT INTO fleetsmart_contracts (
+    account_id, customer_name, plan, term_months, priced, owner_id, created_by
+  ) VALUES (
+    acct, 'Tracker Loses It Ltd', 'Silver', 12, pg_temp.snapshot(1200, 1),
+    'ff000000-0000-0000-0000-000000000002',
+    'ff000000-0000-0000-0000-000000000002'
+  ) RETURNING id INTO made;
+
+  SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
+  IF lead IS NULL THEN RAISE EXCEPTION 'the contract has no lead'; END IF;
+
+  UPDATE crm_leads SET status = 'lost' WHERE id = lead;
+  SELECT status INTO st FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'declined' THEN
+    RAISE EXCEPTION 'losing the lead left the contract at %', st;
+  END IF;
+
+  -- And quoting a lead does NOT claim the contract was sent.
+  UPDATE crm_leads SET status = 'quoted' WHERE id = lead;
+  SELECT status INTO st FROM fleetsmart_contracts WHERE id = made;
+  IF st <> 'declined' THEN
+    RAISE EXCEPTION 'moving a lead to quoted changed the contract to %', st;
+  END IF;
+  RAISE NOTICE 'ok  losing the lead declines the contract, and quoting it claims nothing';
+END $$;
+
+-- A contract built against a pitch somebody already opened keeps it.
+DO $$
+DECLARE acct UUID; mine UUID; made UUID; lead UUID; n INT;
+BEGIN
+  INSERT INTO crm_contacts (company_name, status, source)
+  VALUES ('Already A Pitch Ltd', 'lead', 'manual')
+  RETURNING id INTO acct;
+
+  INSERT INTO crm_leads (contact_id, owner_id, created_by, type, status, requirement)
+  VALUES (acct, 'ff000000-0000-0000-0000-000000000002',
+          'ff000000-0000-0000-0000-000000000002', 'maintenance', 'lead',
+          'Asked about maintenance at the truck show')
+  RETURNING id INTO mine;
+
+  INSERT INTO fleetsmart_contracts (
+    account_id, lead_id, customer_name, plan, term_months, priced, owner_id, created_by
+  ) VALUES (
+    acct, mine, 'Already A Pitch Ltd', 'Gold', 36, pg_temp.snapshot(6000, 3),
+    'ff000000-0000-0000-0000-000000000002',
+    'ff000000-0000-0000-0000-000000000002'
+  ) RETURNING id INTO made;
+
+  SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
+
+  IF lead IS DISTINCT FROM mine THEN
+    RAISE EXCEPTION 'the contract made a second lead instead of using the one it was given';
+  END IF;
+
+  SELECT count(*) INTO n FROM crm_leads WHERE contact_id = acct;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'that account ended up with % leads', n;
+  END IF;
+
+  IF (SELECT requirement FROM crm_leads WHERE id = mine)
+     <> 'Asked about maintenance at the truck show' THEN
+    RAISE EXCEPTION 'the contract overwrote what somebody had written on their own lead';
+  END IF;
+  RAISE NOTICE 'ok  a contract attached to an existing pitch uses it and does not rewrite it';
 END $$;
 
 -- =============================================================

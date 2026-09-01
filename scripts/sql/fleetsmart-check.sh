@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# FleetSmart+: who may build one, the totals the trigger owns, and the
-# two things a sent contract must never do.
+# FleetSmart+: who may build one, the totals the trigger owns, the two
+# things a sent contract must never do, and migration 067, which makes a
+# contract and its tracker lead one record that moves in both
+# directions.
 set -u
 export PATH=/usr/lib/postgresql/16/bin:$PATH
 export PGHOST=${PGHOST:-/var/tmp/pgtest}
@@ -19,4 +21,4 @@ if echo "$out" | grep -q "ERROR"; then
   exit 1
 fi
 echo "$out" | grep 'NOTICE:' | sed 's/^.*NOTICE:  /  /'
-echo "  fleetsmart holds: a posted total is thrown away, a sent contract is frozen, and nobody without the permission builds or sends one"
+echo "  fleetsmart holds: a posted total is thrown away, a sent contract is frozen, nobody without the permission builds or sends one, and a contract and its lead move together"
