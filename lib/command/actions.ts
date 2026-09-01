@@ -165,7 +165,7 @@ export const ACTIONS: CommandActionSpec[] = [
      the thing somebody actually meant off the end of the results. */
   { id: 'nav.admin', label: 'Admin', blurb: 'Roles, permissions and accounts', kind: 'navigate',
     path: '/dashboard/admin', verbs: GO, capability: 'admin.users',
-    objects: ['admin', 'permissions', 'roles', 'user management', 'user admin',
+    objects: ['admin', 'permissions', 'roles', 'user', 'users', 'user management', 'user admin',
       'who can do what', 'permission hub', 'manage users', 'user accounts'] },
 
   { id: 'nav.settings', label: 'Settings', blurb: 'Your profile, password, theme and access', kind: 'navigate',
@@ -341,9 +341,25 @@ export const ACTIONS: CommandActionSpec[] = [
      The entry stays, because the question is a real one and the team
      screen is the honest answer to it. What changed is the label: it
      said "add a user" and opened a screen that cannot. */
-  { id: 'admin.addUser', label: 'See who has signed up', blurb: 'People join by signing up, then you promote them', kind: 'admin',
-    capability: 'admin.users', path: '/dashboard/admin', verbs: MAKE,
-    objects: ['user', 'new user', 'member', 'colleague', 'someone', 'staff member', 'to the team'] },
+  /* This used to say people sign up and then get promoted, and the
+     blurb was the honest answer to a question the screen could not do
+     anything about. They ask now, and an administrator makes the
+     account here, so the entry is a real operation rather than an
+     explanation. */
+  { id: 'admin.addUser', label: 'Add somebody to the team', blurb: 'Approve a request and make their account', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin?tab=requests', verbs: MAKE,
+    /* Not the bare "user" or "users". Those name the list, which is
+       the screen, and an operation claiming them put "add somebody" at
+       the top for a person who typed a noun. */
+    objects: ['new user', 'member', 'colleague', 'someone', 'staff member', 'to the team',
+      'an account', 'a login', 'a starter', 'a new starter'],
+    phrases: ['set somebody up', 'new starter needs a login', 'make an account for somebody'] },
+
+  { id: 'admin.requests', label: 'Requests for access', blurb: 'Who has asked for an account', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin?tab=requests', verbs: [...GO, 'show', 'check', 'review'],
+    objects: ['requests', 'access requests', 'who has asked', 'requests for access', 'the queue',
+      'people waiting', 'pending accounts'],
+    phrases: ['has anybody asked for access', 'who is waiting for an account'] },
 
   { id: 'admin.dashboard', label: 'Set somebody’s dashboard', blurb: 'Rep, exec or support view', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: [...CHANGE, 'give'],

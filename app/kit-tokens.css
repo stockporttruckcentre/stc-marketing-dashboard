@@ -100,8 +100,22 @@
   --content-max:1440px;
 }
 
+/* `.stc-force-dark` is the third selector on purpose rather than a
+   fourth copy of the palette below it.
+
+   A screen that is dark whatever the person's theme says: the sign in
+   page, where there is no person yet and no preference to read. Adding
+   it here means it cannot drift from the real dark theme, which a
+   separate block of the same forty values would do within a month.
+
+   It goes on an element rather than on <html>, because only the root
+   layout can write attributes there and a client page cannot. Custom
+   properties inherit from the nearest ancestor that defines them, so a
+   div carrying this beats a light theme on the root for everything
+   inside it. */
 [data-stc-theme="dark"],
-[data-theme="dark"] {
+[data-theme="dark"],
+.stc-force-dark {
   --bg:#050D26;
   --bg-subtle:#13224F;
   --surface:#09163A;
@@ -144,10 +158,23 @@
   --border: #E2E2DE;
 }
 [data-stc-theme="dark"] .kit,
-[data-theme="dark"] .kit {
+[data-theme="dark"] .kit,
+.stc-force-dark.kit,
+.stc-force-dark .kit {
   --bg: #050D26;
   --accent: #E03B2E;
   --border: #1E2F63;
+}
+
+/* The ground behind a forced dark screen.
+
+   Without this the page is dark and the strip the browser paints past
+   the end of it is not, so an overscroll on a phone flashes white under
+   a navy sign in page. `:has` rather than a class on body, because a
+   client page cannot put one there either. */
+html:has(.stc-force-dark),
+body:has(.stc-force-dark) {
+  background: #050D26;
 }
 
 .kit {
