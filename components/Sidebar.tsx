@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays, ListChecks,
-  type LucideIcon,
+  UserCog, type LucideIcon,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationRail } from '@/components/notifications/rail';
@@ -59,8 +59,9 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   fleetsmart: ShieldCheck,
   social: Calendar,
   brand: ImageIcon,
-  team: ShieldCheck,
+  team: Users,
   settings: Settings,
+  admin: UserCog,
 };
 
 export function Sidebar({

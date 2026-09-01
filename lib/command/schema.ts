@@ -471,7 +471,12 @@ export const ENTITIES: EntitySpec[] = [
     dimensions: [
       { key: 'role', column: 'role', label: 'role', words: ['role', 'roles', 'access'] },
     ],
-    hrefFor: () => '/dashboard/admin',
+    /* The directory rather than the permission hub. "How many sales
+       reps are there" is a question anybody may ask, and the hub
+       redirects anybody without `admin.users`, so sending them there
+       would answer a legitimate question by bouncing them. An
+       administrator who wants the other half has one click from here. */
+    hrefFor: () => '/dashboard/team',
   },
 ];
 

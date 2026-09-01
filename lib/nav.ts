@@ -26,15 +26,17 @@ import type { CrmCapability } from '@/lib/crm/permissions';
    takes a screen out of all three at once.
 
    `capability: null` means everybody signed in, and it is deliberate on
-   exactly three items: the dashboard, the diary and settings. Nobody
-   withholds somebody their own diary or their own password.
+   exactly four items: the dashboard, the diary, settings and the team
+   directory. Nobody withholds somebody their own diary or their own
+   password, and a phone list only an administrator can open is not a
+   phone list.
    ============================================================= */
 
 export type NavIcon =
   | 'dashboard' | 'analytics' | 'work' | 'diary' | 'news'
   | 'crm' | 'tracker' | 'finder' | 'stock' | 'fleetsmart'
   | 'social' | 'brand'
-  | 'team' | 'settings';
+  | 'team' | 'settings' | 'admin';
 
 export type NavItem = {
   href: string;
@@ -89,19 +91,28 @@ export const NAVIGATION: NavSection[] = [
   {
     /* Its own section at the foot, under the scroll.
 
-       Settings is not something anybody hunts for in a list of
-       fourteen screens: it is the one thing everybody knows they want
-       by name and the one thing that should never move. Team is drawn
-       only for whoever may actually open it, rather than shown and
-       then refused.
+       Three rows, and the order is the point: Team, Settings, Admin.
 
-       No heading on this section. Two rows do not need one, and the
+       Team is a directory and belongs to everybody, so it goes first
+       and carries no capability. Settings is the one thing everybody
+       knows they want by name and the one thing that should never
+       move. Admin is the role and permission hub, drawn only for
+       whoever may actually open it rather than shown and then refused.
+
+       Team and Admin were one screen until the business asked for
+       three tabs here. They were also two questions: who works here,
+       asked by anybody, and what can they do, asked by an
+       administrator. One screen answering both made a phone list feel
+       like an access review.
+
+       No heading on this section. Three rows do not need one, and the
        rule above them already says a different kind of thing starts
        here. */
     key: 'admin', label: 'Admin', atFoot: true,
     items: [
-      { href: '/dashboard/admin', label: 'Team', icon: 'team', capability: 'admin.users' },
+      { href: '/dashboard/team', label: 'Team', icon: 'team', capability: null },
       { href: '/dashboard/settings', label: 'Settings', icon: 'settings', capability: null },
+      { href: '/dashboard/admin', label: 'Admin', icon: 'admin', capability: 'admin.users' },
     ],
   },
 ];

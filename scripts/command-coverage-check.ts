@@ -895,6 +895,72 @@ for (const [said, id] of [
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
 }
 
+/* -------------------------------------------------------------
+   The three tabs at the foot: Team, Settings and Admin.
+
+   Team was one screen and is now two, and the split has to survive the
+   words people actually type. Who works here goes to the directory,
+   who can do what goes to the hub, and the ones that could honestly
+   mean either reach both rather than picking one silently.
+   ------------------------------------------------------------- */
+for (const [said, id] of [
+  // The directory. Everybody, no permission needed.
+  ['team', 'nav.team'],
+  ['staff', 'nav.team'],
+  ['people', 'nav.team'],
+  ['who works here', 'nav.team'],
+  ['team directory', 'nav.team'],
+  ['phone list', 'nav.team'],
+  ['who looks after maintenance', 'admin.directory'],
+  ['what is dave’s job title', 'admin.directory'],
+
+  // The hub. Administrators only, asserted the other way below.
+  ['permissions', 'nav.admin'],
+  ['roles', 'nav.admin'],
+  ['manage users', 'nav.admin'],
+  ['who can do what', 'nav.admin'],
+  ['let dave approve posts', 'admin.grant'],
+  ['give them one extra permission', 'admin.grant'],
+  ['stop them exporting', 'admin.refuse'],
+  ['take one permission off them', 'admin.refuse'],
+  ['show me the exceptions', 'admin.exceptions'],
+  ['who has access they should not', 'admin.exceptions'],
+  ['dave has left', 'admin.deactivate'],
+  ['turn their account off', 'admin.deactivate'],
+  ['dave is back', 'admin.reactivate'],
+  ['turn their account back on', 'admin.reactivate'],
+
+  // Your own account.
+  ['what can i do', 'me.access'],
+  ['my permissions', 'me.access'],
+  ['why can i not see that', 'me.access'],
+  ['my working hours', 'me.profile'],
+  ['my skills', 'me.profile'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+/* Everything on the hub is invisible without the permission, and the
+   directory and your own access are not. An action that appears and
+   then refuses teaches people the tool is unreliable, and one that is
+   hidden when it should not be sends somebody to ask an administrator
+   for a colleague's job title. */
+for (const said of [
+  'permissions', 'roles', 'manage users', 'let dave approve posts',
+  'stop them exporting', 'show me the exceptions', 'dave has left',
+]) {
+  ok(`a read only viewer is not offered "${said}"`,
+    !suggestActions(said, CAPS.viewer, 8)
+      .some((h) => h.action.path === '/dashboard/admin'));
+}
+for (const role of ROLES) {
+  ok(`a ${role} can reach the team directory by name`,
+    suggestActions('team', CAPS[role], 8).some((h) => h.action.id === 'nav.team'));
+  ok(`a ${role} can ask what they themselves can do`,
+    suggestActions('what can i do', CAPS[role], 8).some((h) => h.action.id === 'me.access'));
+}
+
 // Raising work.
 for (const said of ['new task', 'add a task', 'create a task', 'new job', 'raise a ticket']) {
   ok(`"${said}" raises a task`,
@@ -1212,7 +1278,7 @@ for (const role of ROLES) {
   const hrefs = (role: keyof typeof CAPS) =>
     sectionsFor(role).flatMap((s) => s.items.map((i) => i.href));
 
-  ok('an admin sees the Team screen',
+  ok('an admin sees the Admin screen',
     hrefs('admin').includes('/dashboard/admin'));
   ok('a read only viewer does not, rather than being refused after clicking',
     !hrefs('viewer').includes('/dashboard/admin'));
@@ -1222,11 +1288,24 @@ for (const role of ROLES) {
       hrefs(role).includes('/dashboard/calendar'));
     ok(`a ${role} keeps their own settings in the sidebar`,
       hrefs(role).includes('/dashboard/settings'));
+    /* The directory is a phone list. One that only an administrator can
+       open is not a phone list, and hiding it teaches everybody else to
+       ask somebody for a colleague's job title. */
+    ok(`a ${role} can look a colleague up in the team directory`,
+      hrefs(role).includes('/dashboard/team'));
   }
 
-  ok('Team and Settings sit under the scroll',
+  ok('Team, Settings and Admin sit under the scroll, in that order',
     sectionsFor('admin').some((s) => s.atFoot
-      && s.items.map((i) => i.href).join(',') === '/dashboard/admin,/dashboard/settings'));
+      && s.items.map((i) => i.href).join(',')
+        === '/dashboard/team,/dashboard/settings,/dashboard/admin'));
+
+  /* And the foot section still holds the two open rows for somebody
+     with no admin permission, rather than collapsing to Settings on its
+     own or disappearing. */
+  ok('a read only viewer still gets Team and Settings at the foot',
+    sectionsFor('viewer').some((s) => s.atFoot
+      && s.items.map((i) => i.href).join(',') === '/dashboard/team,/dashboard/settings'));
 
   ok('no section is drawn with nothing in it',
     ROLES.every((r) => sectionsFor(r).every((s) => s.items.length > 0)));

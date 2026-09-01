@@ -119,15 +119,23 @@ export const FEATURES: Feature[] = [
     aliases: ['brand', 'logo', 'logos', 'fonts', 'colours', 'colors', 'assets', 'artwork'],
     blurb: 'Logos, fonts and colour swatches',
   },
+  /* Two screens where there was one. The directory belongs to
+     everybody and the permission hub does not, so the words divide the
+     same way: who works here against who can do what. */
   {
-    id: 'team', title: 'Team', path: '/dashboard/admin',
-    aliases: ['team', 'users', 'staff', 'roles', 'permissions', 'people', 'admin'],
-    blurb: 'Who has access, and at what level',
+    id: 'team', title: 'Team', path: '/dashboard/team',
+    aliases: ['team', 'staff', 'people', 'colleagues', 'directory', 'who works here'],
+    blurb: 'Who works here and what they look after',
+  },
+  {
+    id: 'admin', title: 'Admin', path: '/dashboard/admin',
+    aliases: ['admin', 'users', 'roles', 'permissions', 'manage users', 'user management'],
+    blurb: 'Roles, permissions and accounts',
   },
   {
     id: 'settings', title: 'Settings', path: '/dashboard/settings',
     aliases: ['settings', 'preferences', 'password', 'theme', 'dark mode', 'light mode', 'my account'],
-    blurb: 'Your name, password and theme',
+    blurb: 'Your name, password, theme and what you can do',
   },
   {
     id: 'dashboard', title: 'Dashboard', path: '/dashboard',
