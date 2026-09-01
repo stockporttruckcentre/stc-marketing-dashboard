@@ -4,8 +4,8 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  AlertTriangle, Check, Copy, FileText, Pencil, Plus, Printer, Search, Send,
-  ShieldCheck, Square, Trash2, X,
+  AlertTriangle, Check, Copy, FileText, GitBranch, Pencil, Plus, Printer,
+  Search, Send, ShieldCheck, Square, Trash2, X,
 } from 'lucide-react';
 import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
@@ -13,6 +13,7 @@ import { blankContract, blankExtras, type ContractExtras } from '@/lib/fleetsmar
 import type { PickableAccount } from '@/lib/fleetsmart/account';
 import type { RateCard } from '@/lib/fleetsmart/ratecard';
 import { RateEditor } from '@/components/fleetsmart/rate-editor';
+import { AmendDrawer } from '@/components/fleetsmart/amend-drawer';
 import { priceContract } from '@/lib/fleetsmart/price';
 import { ContractDocument, ContractPrintRules } from '@/components/fleetsmart/document';
 import { ContractWizard } from '@/components/fleetsmart/wizard';
@@ -82,6 +83,19 @@ export type ContractRow = {
    See `lib/fleetsmart/account.ts`: the address in particular is three
    possible columns and picking between them is not a thing to do twice. */
 type Account = PickableAccount;
+
+/** One version of a contract, as the record drawer lists it. */
+export type AmendmentRow = {
+  contract_id: string;
+  seq: number;
+  effective_on: string;
+  summary: { changes?: { what: string; delta: number | null }[] } | null;
+  note: string | null;
+  annual_total: number;
+  monthly_total: number;
+  asset_count: number;
+  created_at: string;
+};
 type Lead = {
   id: string; contact_id: string | null; company_name: string | null; requirement: string | null;
 };
@@ -132,7 +146,7 @@ const TD: CSSProperties = {
 const NUM: CSSProperties = { ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 
 export function FleetSmart({
-  contracts, accounts, leads, capabilities, manager, card, cardVersions,
+  contracts, accounts, leads, capabilities, manager, card, cardVersions, amendments,
 }: {
   contracts: ContractRow[];
   accounts: Account[];
@@ -144,6 +158,8 @@ export function FleetSmart({
   card: RateCard;
   /** Every version saved, newest first. Empty until somebody edits it. */
   cardVersions: { version: string; note: string | null; is_current: boolean; created_at: string }[];
+  /** Every amendment on every contract, read once for the whole page. */
+  amendments: AmendmentRow[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -172,6 +188,11 @@ export function FleetSmart({
   const [open, setOpen] = useState<
     | { kind: 'wizard'; row: ContractRow | null; seed: ContractInput; extras: ContractExtras }
     | { kind: 'document'; row: ContractRow }
+    /* Amending a live contract. Its own thing rather than the wizard,
+       because the questions are different: not "what is this contract"
+       but "what is changing, from when, and what does that do to the
+       bill". See `components/fleetsmart/amend-drawer.tsx`. */
+    | { kind: 'amend'; row: ContractRow }
     | null
   >(null);
 
@@ -536,13 +557,22 @@ export function FleetSmart({
                           </>
                         )}
                         {c.status === 'accepted' && may('fleetsmart.build') && (
-                          <IconButton
-                            label="End this contract"
-                            disabled={busy === c.id}
-                            onClick={() => setAsking({ kind: 'end', row: c })}
-                          >
-                            <Square size={14} />
-                          </IconButton>
+                          <>
+                            <IconButton
+                              label="Amend this contract"
+                              disabled={busy === c.id}
+                              onClick={() => { setError(null); setNotice(null); setOpen({ kind: 'amend', row: c }); }}
+                            >
+                              <GitBranch size={14} />
+                            </IconButton>
+                            <IconButton
+                              label="End this contract"
+                              disabled={busy === c.id}
+                              onClick={() => setAsking({ kind: 'end', row: c })}
+                            >
+                              <Square size={14} />
+                            </IconButton>
+                          </>
                         )}
                         {c.status !== 'draft' && may('fleetsmart.discount') && (
                           <IconButton
@@ -625,14 +655,31 @@ export function FleetSmart({
         />
       )}
 
+      {open?.kind === 'amend' && (
+        <AmendDrawer
+          contract={{
+            id: open.row.id,
+            ref: open.row.ref,
+            customer_name: open.row.customer_name,
+            starts_on: open.row.starts_on,
+            input: open.row.input,
+          }}
+          card={card}
+          onClose={() => setOpen(null)}
+          onApplied={(message) => { setNotice(message); setOpen(null); router.refresh(); }}
+        />
+      )}
+
       {open?.kind === 'document' && (
         <ContractDocumentDrawer
           row={open.row}
           busy={busy === open.row.id}
           may={may}
           onClose={() => setOpen(null)}
+          amendments={amendments.filter((a) => a.contract_id === open.row.id)}
           onDecide={(status) => decide(open.row, status)}
           onCopy={() => copyRow(open.row)}
+          onAmend={() => setOpen({ kind: 'amend', row: open.row })}
           onEnd={() => setAsking({ kind: 'end', row: open.row })}
           onReopen={() => setAsking({ kind: 'reopen', row: open.row })}
           onDelete={() => setAsking({ kind: 'delete', row: open.row })}
@@ -653,17 +700,22 @@ export function FleetSmart({
    development case rather than a live one.
    ============================================================= */
 function ContractDocumentDrawer({
-  row, busy, may, onClose, onDecide, onCopy, onEnd, onReopen, onDelete,
+  row, busy, may, amendments, onClose, onDecide, onCopy, onAmend, onEnd, onReopen, onDelete,
 }: {
   row: ContractRow;
   busy: boolean;
   may: (c: string) => boolean;
   onClose: () => void;
+  /** Every version of this contract, oldest first. Empty is normal. */
+  amendments: AmendmentRow[];
   onDecide: (status: 'accepted' | 'declined') => void;
   onCopy: () => void;
   /* The three that need asking first. The dialog lives on the list
      rather than in here, so a record and a row ask the same question in
      the same words. */
+  /* Changing a live contract. The one that is not destructive, so it is
+     the one that gets the primary button. */
+  onAmend: () => void;
   onEnd: () => void;
   onReopen: () => void;
   onDelete: () => void;
@@ -712,9 +764,14 @@ function ContractDocumentDrawer({
             </>
           )}
           {row.status === 'accepted' && may('fleetsmart.build') && (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={onEnd}>
-              <Square size={13} /> End it
-            </Button>
+            <>
+              <Button size="sm" variant="primary" disabled={busy} onClick={onAmend}>
+                <GitBranch size={13} /> Amend
+              </Button>
+              <Button size="sm" variant="secondary" disabled={busy} onClick={onEnd}>
+                <Square size={13} /> End it
+              </Button>
+            </>
           )}
           {row.status !== 'draft' && may('fleetsmart.discount') && (
             <Button size="sm" variant="secondary" disabled={busy} onClick={onReopen}>
@@ -741,6 +798,17 @@ function ContractDocumentDrawer({
       </div>
 
       {row.decision_note && <Alert tone="info">{row.decision_note}</Alert>}
+
+      {/* ---- what this contract has cost over its life ----
+
+          Only where it has been amended, because a contract nobody has
+          changed has one price and a history panel saying so is noise.
+
+          Read as periods rather than events. "Three amendments" is a
+          count; "£4,302 until 14 March, £6,513 after" is the answer to
+          the question somebody reconciling a direct debit is actually
+          asking. */}
+      {amendments.length > 0 && <AmendmentHistory rows={amendments} />}
 
       <div className="fs-doc-frame" style={{
         border: '1px solid var(--border)', borderRadius: 'var(--r-md)', overflow: 'hidden',
@@ -907,4 +975,99 @@ function ActionConfirm({
       </div>
     </div>
   );
+}
+
+/* =============================================================
+   What a contract has cost over its life.
+
+   One row per version with the period it applied for, then the sentences
+   the application wrote when the change was applied. Those sentences are
+   stored rather than recomputed, so a change made in March still reads
+   in March's terms after the rate card has moved twice.
+   ============================================================= */
+function AmendmentHistory({ rows }: { rows: AmendmentRow[] }) {
+  const ordered = [...rows].sort((a, b) => a.seq - b.seq);
+
+  return (
+    <div style={{
+      border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+      background: 'var(--surface)', overflow: 'hidden',
+    }}>
+      <PanelHead title="What it has cost" count={ordered.length} hint="versions, newest last" />
+
+      {ordered.map((a, i) => {
+        const next = ordered[i + 1];
+        const changes = a.summary?.changes ?? [];
+        const inForce = !next;
+
+        return (
+          <div key={a.seq} style={{
+            padding: '11px 14px',
+            borderBottom: i === ordered.length - 1 ? 0 : '1px solid var(--border)',
+            background: inForce ? 'var(--bg-subtle)' : 'transparent',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 12.5,
+                color: 'var(--text)', minWidth: 168,
+              }}>
+                {a.seq === 0 ? 'As first agreed' : `Amendment ${a.seq}`}
+                <span style={{ fontWeight: 500, color: 'var(--text-subtle)' }}>
+                  {' '}from {when(a.effective_on)}
+                  {next ? ` to ${when(shiftBack(next.effective_on))}` : ''}
+                </span>
+              </span>
+
+              {inForce && <Badge tone="success" dot>In force</Badge>}
+
+              <span style={{ flex: 1 }} />
+
+              <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                {a.asset_count} asset{a.asset_count === 1 ? '' : 's'}
+              </span>
+              <span style={{
+                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 14,
+                fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
+              }}>
+                {money2(Number(a.annual_total || 0))}
+                <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-subtle)' }}> a year</span>
+              </span>
+            </div>
+
+            {changes.length > 0 && (
+              <ul style={{ margin: '7px 0 0', padding: '0 0 0 16px' }}>
+                {changes.map((c, j) => (
+                  <li key={j} style={{
+                    fontFamily: 'var(--inter)', fontSize: 12.5, lineHeight: 1.6,
+                    color: 'var(--text-muted)',
+                  }}>
+                    {c.what}
+                    {c.delta != null && (
+                      <span style={{ color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
+                        {' '}({c.delta > 0 ? '+' : ''}{money2(c.delta)} a year)
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {a.note && (
+              <p style={{
+                margin: '6px 0 0', fontFamily: 'var(--inter)', fontSize: 12,
+                fontStyle: 'italic', color: 'var(--text-subtle)',
+              }}>{a.note}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The day before, so a period reads as ending where the next one starts. */
+function shiftBack(iso: string): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
 }

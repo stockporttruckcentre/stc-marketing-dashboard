@@ -44,6 +44,7 @@
     "check:diary": "bash scripts/sql/calendar-check.sh",
     "check:calendar": "tsx scripts/calendar-check.ts",
     "check:price": "tsx scripts/fleetsmart-price-check.ts",
+    "check:amend": "tsx scripts/fleetsmart-amend-check.ts",
     "check:fleetsmart": "bash scripts/sql/fleetsmart-check.sh",
     "check:workflow": "bash scripts/sql/workflow-check.sh"
   },
