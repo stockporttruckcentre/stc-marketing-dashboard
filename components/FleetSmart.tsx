@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertTriangle, Check, Copy, FileText, GitBranch, Pencil, Plus, Printer,
-  Search, Send, ShieldCheck, Square, Trash2, X,
+  Search, Send, ShieldCheck, SlidersHorizontal, Square, Trash2, X,
 } from 'lucide-react';
 import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
@@ -425,23 +425,57 @@ export function FleetSmart({
       {error && <Alert tone="danger">{error}</Alert>}
       {notice && !error && <Alert tone="success">{notice}</Alert>}
 
+      {/* The five status filters, and one button that is not one.
+
+          The rate editor sat in the tab strip and read as a sixth
+          status, which it is not: the other five say which contracts to
+          show and it says what they are priced off. A row of six
+          identical underline tabs cannot make that difference, so it
+          stops being a tab. Its own control, on the far side of a rule,
+          in the shape the kit uses for a button rather than a filter:
+          bordered, 32px, and navy when it is the thing showing, because
+          navy acts. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { key: 'live', label: 'Live', count: counts.live },
-            { key: 'drafts', label: 'Drafts', count: counts.drafts },
-            { key: 'sent', label: 'With customers', count: counts.sent },
-            { key: 'won', label: 'Accepted', count: counts.won },
-            { key: 'closed', label: 'Closed', count: counts.closed },
-            /* Last, on the far right, because it is not a view of the
-               contracts: it is what they are priced off. Reachable by
-               anybody who can open the tab, and read only until somebody
-               holds the permission that sets prices. */
-            { key: 'rates', label: 'Rate editor' },
-          ]}
-        />
+        <div style={{ flex: 1, minWidth: 280 }}>
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { key: 'live', label: 'Live', count: counts.live },
+              { key: 'drafts', label: 'Drafts', count: counts.drafts },
+              { key: 'sent', label: 'With customers', count: counts.sent },
+              { key: 'won', label: 'Accepted', count: counts.won },
+              { key: 'closed', label: 'Closed', count: counts.closed },
+            ]}
+          />
+        </div>
+
+        <span style={{
+          width: 1, height: 20, background: 'var(--border)', flex: 'none',
+        }} />
+
+        <button
+          onClick={() => setTab(tab === 'rates' ? 'live' : 'rates')}
+          aria-pressed={tab === 'rates'}
+          title={`The rates every contract is priced off. Currently ${card.version}.`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7, flex: 'none',
+            height: 32, padding: '0 13px', cursor: 'pointer',
+            borderRadius: 'var(--r)',
+            background: tab === 'rates' ? 'var(--accent)' : 'var(--surface)',
+            color: tab === 'rates' ? '#fff' : 'var(--text-muted)',
+            border: `1px solid ${tab === 'rates' ? 'var(--accent)' : 'var(--border-strong)'}`,
+            fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 12.5,
+          }}
+        >
+          <SlidersHorizontal size={14} />
+          Rate editor
+          <span style={{
+            fontFamily: 'var(--inter)', fontWeight: 500, fontSize: 11,
+            color: tab === 'rates' ? 'rgba(255,255,255,0.75)' : 'var(--text-subtle)',
+            fontVariantNumeric: 'tabular-nums',
+          }}>{card.version}</span>
+        </button>
       </div>
 
       {tab === 'rates' ? (
