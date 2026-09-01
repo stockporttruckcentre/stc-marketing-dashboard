@@ -51,7 +51,8 @@
     "check:hooks": "next lint --max-warnings 999",
     "bar:list": "tsx scripts/command-what-works.ts --list",
     "bar:audit": "tsx scripts/command-what-works.ts --audit",
-    "check:workflow": "bash scripts/sql/workflow-check.sh"
+    "check:workflow": "bash scripts/sql/workflow-check.sh",
+    "check:access": "bash scripts/sql/access-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

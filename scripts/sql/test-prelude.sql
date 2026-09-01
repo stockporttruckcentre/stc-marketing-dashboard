@@ -38,6 +38,33 @@ CREATE TABLE IF NOT EXISTS auth.users (
   raw_user_meta_data JSONB DEFAULT '{}'::JSONB
 );
 
+/* The rest of the columns real Supabase has on this table.
+   Added when migration 074 started CREATING accounts rather than only
+   reading them: a stub with three columns let an insert naming the real
+   ones fail here and work in production, or the other way round, and
+   neither is a thing a check should be able to be wrong about.
+   Separate statements so a database that already has them is untouched. */
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS instance_id        UUID;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS aud                TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS role               TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS encrypted_password TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at TIMESTAMPTZ;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS created_at         TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at    TIMESTAMPTZ;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_app_meta_data  JSONB DEFAULT '{}'::JSONB;
+
+/* Sessions and refresh tokens, for anything that signs somebody out. */
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID
+);
+CREATE TABLE IF NOT EXISTS auth.refresh_tokens (
+  id BIGSERIAL PRIMARY KEY, user_id TEXT
+);
+
+/* `crypt` and `gen_salt`, which is how a password is written. */
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Who the current statement is running as, for RLS.
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID
 LANGUAGE sql STABLE AS $$

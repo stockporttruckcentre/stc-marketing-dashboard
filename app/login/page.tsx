@@ -2,11 +2,10 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { AlertCircle, CheckCircle2, Loader, LogIn } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Alert, Button } from '@/components/kit/primitives';
-import { Field, Modal, TextInput } from '@/components/kit/forms';
+import { Field, Modal, TextArea, TextInput } from '@/components/kit/forms';
 
 /* =============================================================
    Signing in, in the STC kit.
@@ -79,6 +78,7 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForgot, setShowForgot] = useState(false);
+  const [showRequest, setShowRequest] = useState(false);
 
   /* Supabase password reset emails come back to the site root with the
      recovery session in the URL hash. The root redirects here, hash
@@ -205,17 +205,26 @@ function LoginForm() {
               }}
             >Forgotten your password?</button>
 
-            <span style={{ color: 'var(--text-subtle)' }}>
-              No account?{' '}
-              <Link href="/signup" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
-                Sign up
-              </Link>
-            </span>
+            {/* Not "Sign up". Anybody could sign up and the account they
+                got was a viewer with nothing on it until an
+                administrator noticed, so the old flow already needed a
+                person in the loop. It just put them after the account
+                existed rather than before it. */}
+            <button
+              type="button"
+              onClick={() => setShowRequest(true)}
+              style={{
+                background: 'none', border: 0, padding: 0, cursor: 'pointer',
+                fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+                color: 'var(--accent)',
+              }}
+            >Request access</button>
           </div>
         </form>
       </div>
 
       {showForgot && <ForgotModal initialEmail={email} onClose={() => setShowForgot(false)} />}
+      {showRequest && <RequestModal initialEmail={email} onClose={() => setShowRequest(false)} />}
     </Ground>
   );
 }
@@ -291,6 +300,92 @@ function ForgotModal({ initialEmail, onClose }: { initialEmail: string; onClose:
             been used by the time it reaches you. An administrator can set your password
             directly from Supabase, under Authentication and then Users.
           </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/* =============================================================
+   Asking for an account.
+
+   The one rule this dialog obeys, and the reason it looks slightly
+   underwhelming: it says the same thing to everybody. Not "you already
+   have an account", not "that address is not on the staff list", not
+   "an administrator will be in touch if you are staff". Any of those
+   turns the sign in page into a way of testing addresses against the
+   staff list, and this page is reachable by anybody with the URL.
+
+   `request_access` answers identically whatever the address is. What
+   is shown here is whatever it said, so the two cannot drift.
+   ============================================================= */
+function RequestModal({ initialEmail, onClose }: { initialEmail: string; onClose: () => void }) {
+  const [email, setEmail] = useState(initialEmail);
+  const [said, setSaid] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function send() {
+    setLoading(true); setErr(null);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc('request_access', {
+      p_email: email, p_said: said || null,
+    });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    setDone((data as { said?: string } | null)?.said
+      ?? 'Thanks. Somebody will be in touch once it has been looked at.');
+  }
+
+  return (
+    <Modal
+      title={done ? 'Request sent' : 'Request access'}
+      description={done ? undefined : 'An administrator sets accounts up. Tell them where to send it.'}
+      onClose={onClose}
+      width={430}
+      footer={done
+        ? <Button variant="primary" onClick={onClose}>Done</Button>
+        : (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button variant="primary" onClick={send} disabled={loading || !email.trim()}>
+              {loading ? <Loader size={14} className="spin" /> : null}
+              {loading ? 'Sending' : 'Send the request'}
+            </Button>
+          </>
+        )}
+    >
+      {done ? (
+        <Alert tone="success">
+          <span style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <CheckCircle2 size={14} style={{ flex: 'none', marginTop: 2 }} />
+            <span>{done}</span>
+          </span>
+        </Alert>
+      ) : (
+        <>
+          <Field label="Your work email" hint="This is where the login details will go.">
+            <TextInput
+              type="email" value={email} onChange={setEmail}
+              placeholder="you@stc-uk.com"
+              name="email" autoComplete="email" autoFocus
+            />
+          </Field>
+          <Field label="Anything they should know" hint="Optional. Your name and what you do is usually enough.">
+            <TextArea
+              value={said} onChange={setSaid} rows={3}
+              placeholder="Tom Moore, started in the workshop on Monday."
+            />
+          </Field>
+          {err && (
+            <Alert tone="danger">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={14} style={{ flex: 'none' }} />
+                <span>{err}</span>
+              </span>
+            </Alert>
+          )}
         </>
       )}
     </Modal>

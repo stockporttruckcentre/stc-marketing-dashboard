@@ -929,6 +929,11 @@ for (const [said, id] of [
   ['turn their account off', 'admin.deactivate'],
   ['dave is back', 'admin.reactivate'],
   ['turn their account back on', 'admin.reactivate'],
+  ['requests', 'admin.requests'],
+  ['who has asked', 'admin.requests'],
+  ['who is waiting for an account', 'admin.requests'],
+  ['new starter needs a login', 'admin.addUser'],
+  ['set somebody up', 'admin.addUser'],
 
   // Your own account.
   ['what can i do', 'me.access'],
@@ -949,6 +954,7 @@ for (const [said, id] of [
 for (const said of [
   'permissions', 'roles', 'manage users', 'let dave approve posts',
   'stop them exporting', 'show me the exceptions', 'dave has left',
+  'requests', 'who has asked', 'new starter needs a login',
 ]) {
   ok(`a read only viewer is not offered "${said}"`,
     !suggestActions(said, CAPS.viewer, 8)

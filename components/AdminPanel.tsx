@@ -14,6 +14,7 @@ import {
 import { Field, Select } from '@/components/kit/forms';
 import { Toasts, useToast } from '@/components/kit/toast';
 import { Avatar } from '@/components/team/avatar';
+import { AccessQueue } from '@/components/admin/access-queue';
 import {
   byArea, loadCapabilitiesFor, loadTeam, overrideState, roleInWords, setActive,
   setCapability, setRoleTemplate, updateTeamMember, whySource,
@@ -65,6 +66,8 @@ import type { UserRole } from '@/lib/types';
 
 const LEGACY_ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
 
+type Area = 'people' | 'requests';
+
 export function AdminPanel({
   selfId, templates,
 }: {
@@ -94,6 +97,11 @@ function AdminBody({
   const [find, setFind] = useState('');
   const [onlyExceptions, setOnlyExceptions] = useState(false);
   const [chosen, setChosen] = useState<string | null>(params.get('person'));
+  /* Which half of the screen: the people who work here, or the people
+     asking to. `?tab=requests` so the notification about a new request
+     can land on the right one. */
+  const [area, setArea] = useState<Area>(params.get('tab') === 'requests' ? 'requests' : 'people');
+  const [waiting, setWaiting] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     const done = await loadTeam(supabase);
@@ -153,6 +161,20 @@ function AdminBody({
         sub="What each person can do, and every exception to it. Every change is recorded against your name."
       />
 
+      <div style={{ marginBottom: 14 }}>
+        <Tabs
+          value={area}
+          onChange={setArea}
+          tabs={[
+            { key: 'people' as Area, label: 'People', count: totals.people },
+            { key: 'requests' as Area, label: 'Requests', count: waiting ?? undefined },
+          ]}
+        />
+      </div>
+
+      {area === 'requests' && <AccessQueue onCount={setWaiting} />}
+
+      {area === 'people' && (<>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <Stat label="People" value={totals.people} />
         <Stat label="Administrators" value={totals.admins} tone={totals.admins < 2 ? 'warning' : 'neutral'} />
@@ -252,6 +274,7 @@ function AdminBody({
             : <Card><EmptyState what="Pick somebody" why="Choose a name on the left." /></Card>}
         </div>
       </div>
+      </>)}
     </div>
   );
 }
