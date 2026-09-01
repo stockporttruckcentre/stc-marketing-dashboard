@@ -200,8 +200,14 @@ export function NotificationPrefs() {
                 )}
                 <span style={{ flex: 1 }}>{c.label}</span>
                 {off > 0 && (
+                  /* Inter, not Panton. The kit's rule is that Panton
+                     carries headings, numbers and labels with
+                     authority, and "4 off" is a quiet aside on a rail
+                     item: it is read alongside the label rather than
+                     scanned as a figure. Panton at 10px also sits below
+                     the 11px floor the kit sets for it. */
                   <span style={{
-                    fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
+                    fontFamily: 'var(--inter)', fontWeight: 500, fontSize: 11,
                     color: 'var(--text-subtle)',
                   }}>{off} off</span>
                 )}
