@@ -81,3 +81,4 @@
 018_command_set_role
 019_last_admin
 059_work_role_templates
+073_the_permission_hub

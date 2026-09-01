@@ -143,11 +143,32 @@ export const ACTIONS: CommandActionSpec[] = [
     path: '/dashboard/brand', verbs: GO,
     objects: ['brand', 'brand kit', 'logos', 'assets', 'fonts', 'templates', 'artwork', 'colours', 'colors', 'branding'] },
 
-  { id: 'nav.team', label: 'Team', blurb: 'Who has access and to what', kind: 'navigate',
-    path: '/dashboard/admin', verbs: GO, capability: 'admin.users',
-    objects: ['team', 'users', 'staff', 'people', 'admin', 'permissions', 'roles', 'access'] },
+  /* Two screens where there was one, and the split is the point.
 
-  { id: 'nav.settings', label: 'Settings', blurb: 'Your profile and theme', kind: 'navigate',
+     Team is a directory and belongs to everybody, so it carries no
+     capability: looking a colleague's job title up is not privileged.
+     Admin is the role and permission hub and is invisible without
+     `admin.users`, which is the case the requirement named.
+
+     The words divide the same way. "team", "staff", "who works here"
+     is the directory. "permissions", "roles", "access" is the hub.
+     "admin" reaches both, because somebody typing it could mean
+     either and the two sit next to each other in the results. */
+  { id: 'nav.team', label: 'Team', blurb: 'Who works here and what they look after', kind: 'navigate',
+    path: '/dashboard/team', verbs: GO,
+    objects: ['team', 'staff', 'people', 'colleagues', 'directory', 'team directory',
+      'who works here', 'everybody', 'the team', 'contact details', 'phone list'] },
+
+  /* Not the bare words "access" or "accounts". Both already mean
+     something else here: sharing a list is list access, and an account
+     is a company on the CRM. A navigation entry claiming either pushed
+     the thing somebody actually meant off the end of the results. */
+  { id: 'nav.admin', label: 'Admin', blurb: 'Roles, permissions and accounts', kind: 'navigate',
+    path: '/dashboard/admin', verbs: GO, capability: 'admin.users',
+    objects: ['admin', 'permissions', 'roles', 'user management', 'user admin',
+      'who can do what', 'permission hub', 'manage users', 'user accounts'] },
+
+  { id: 'nav.settings', label: 'Settings', blurb: 'Your profile, password, theme and access', kind: 'navigate',
     path: '/dashboard/settings', verbs: GO,
     objects: ['settings', 'preferences', 'options', 'my profile', 'account settings', 'config', 'password', 'change my password'] },
 
@@ -284,8 +305,20 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'appearance', 'colours'] },
 
   { id: 'me.profile', label: 'My profile', blurb: 'Your name and details', kind: 'session',
-    path: '/dashboard/settings', verbs: [...GO, ...CHANGE],
-    objects: ['my profile', 'my details', 'my name', 'my account', 'my settings'] },
+    path: '/dashboard/settings?tab=profile', verbs: [...GO, ...CHANGE],
+    objects: ['my profile', 'my details', 'my name', 'my account', 'my settings',
+      'my job title', 'my working hours', 'my skills', 'what i look after'] },
+
+  /* No capability, deliberately. Knowing what you can do is not
+     privileged information about you, and the question people
+     actually ask is "why can I not see the tracker". A screen that
+     refused to answer it would send them to an administrator for
+     something they can read themselves. */
+  { id: 'me.access', label: 'What you can do', blurb: 'Every permission you hold, and where it came from', kind: 'session',
+    path: '/dashboard/settings?tab=access', verbs: [...GO, 'check', 'see'],
+    objects: ['what i can do', 'my permissions', 'my access', 'my capabilities',
+      'what am i allowed to do', 'why can i not', 'my role', 'what my role gives me'],
+    phrases: ['what can i do', 'what am i allowed', 'why can i not see that', 'what does my role let me do'] },
 
   /* ---------- other people ----------
      Everything here is invisible without admin.users, which is the case
@@ -315,6 +348,43 @@ export const ACTIONS: CommandActionSpec[] = [
   { id: 'admin.dashboard', label: 'Set somebody’s dashboard', blurb: 'Rep, exec or support view', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', verbs: [...CHANGE, 'give'],
     objects: ['dashboard', 'their dashboard', 'exec view', 'exec dashboard', 'rep view', 'landing page'] },
+
+  /* One permission for one person, which is the thing the model was
+     built for and had no screen until now. An administrator could make
+     somebody a Marketer and could not give that one Marketer the right
+     to approve. */
+  { id: 'admin.grant', label: 'Grant one permission', blurb: 'An exception on top of their role', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', verbs: ['grant', 'give', 'allow', 'let', 'enable', 'add'],
+    objects: ['a permission', 'one permission', 'permission', 'an exception', 'extra access',
+      'the right to approve', 'access to one thing'],
+    phrases: ['let dave approve posts', 'give them one extra permission', 'allow just this one thing'] },
+
+  { id: 'admin.refuse', label: 'Refuse one permission', blurb: 'Take one thing off somebody, keeping their role', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', verbs: ['refuse', 'block', 'deny', 'remove', 'revoke', 'take'],
+    objects: ['a permission', 'one permission', 'their access to one thing', 'the export permission'],
+    phrases: ['stop them exporting', 'take one permission off them', 'block them from deleting'] },
+
+  { id: 'admin.exceptions', label: 'Who has an exception', blurb: 'Everybody carrying access their role does not give', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', verbs: [...GO, 'show', 'list', 'review', 'audit'],
+    objects: ['exceptions', 'overrides', 'special access', 'granted permissions', 'people with exceptions',
+      'who has extra access', 'access review'],
+    phrases: ['who has access they should not', 'show me the exceptions', 'review who can do what'] },
+
+  { id: 'admin.deactivate', label: 'Turn an account off', blurb: 'Stops the account and keeps everything they own', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', verbs: ['deactivate', 'disable', 'suspend', 'turn', 'switch', 'remove'],
+    objects: ['an account', 'their account', 'somebody off', 'a leaver', 'a user off', 'access entirely'],
+    phrases: ['dave has left', 'turn their account off', 'disable this account', 'they have left the company'] },
+
+  { id: 'admin.reactivate', label: 'Turn an account back on', blurb: 'For somebody coming back', kind: 'admin',
+    capability: 'admin.users', path: '/dashboard/admin', verbs: ['reactivate', 'reinstate', 'restore', 'enable', 'turn'],
+    objects: ['an account back on', 'their account back', 'a returning colleague', 'somebody back on'],
+    phrases: ['dave is back', 'turn their account back on', 'let them back in'] },
+
+  { id: 'admin.directory', label: 'Look somebody up', blurb: 'Their job title, department, hours and how to reach them', kind: 'navigate',
+    path: '/dashboard/team', verbs: [...GO, 'find', 'look', 'search'],
+    objects: ['somebody', 'a colleague', 'who does what', 'their job title', 'their email',
+      'their extension', 'who to ask', 'who looks after'],
+    phrases: ['who looks after maintenance', 'what is dave’s job title', 'who do i ask about trailers'] },
 
   /* ---------- the CRM screen itself ----------
 

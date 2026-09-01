@@ -47,6 +47,7 @@
     "check:amend": "tsx scripts/fleetsmart-amend-check.ts",
     "check:value": "tsx scripts/lead-value-check.ts",
     "check:fleetsmart": "bash scripts/sql/fleetsmart-check.sh",
+    "check:permissions": "bash scripts/sql/permissions-check.sh",
     "check:workflow": "bash scripts/sql/workflow-check.sh"
   },
   "dependencies": {
