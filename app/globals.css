@@ -449,8 +449,90 @@ a { color: inherit; text-decoration: none; }
   margin: 12px 0;
 }
 
-.sidebar__footer {
+/* =========================================================
+   THE FOOT OF THE SIDEBAR
+
+   Team and Settings sit under the scroll rather than in it. Settings
+   is the one thing everybody knows they want by name and the one thing
+   that should never move, and it was row twelve of a scrolling list.
+
+   A rule separates it, not more air. A rule reads as "a different kind
+   of thing starts here". More air reads as "the list continues,
+   loosely", which is the opposite of what pinning it is for.
+
+   `margin-top: auto` moves off `.sidebar__footer` and onto this, so
+   the foot block, the notification rail and the user footer travel
+   together at the bottom of the column.
+   ========================================================= */
+.sidebar__section--foot {
   margin-top: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-top: 2px solid var(--border);
+}
+/* No section heading on it. Two rows do not need one, and the rule
+   above has already said the list has ended. */
+.sidebar__section--foot .sidebar__section-head { display: none; }
+
+/* =========================================================
+   THE NOTIFICATION RAIL
+
+   The block between the foot section and the person's own name. The
+   bell in the top bar is a good target for somebody already looking
+   for it; this is for everybody else, and it says how much is waiting
+   in words rather than as a number on an icon in the other corner.
+   ========================================================= */
+.nc-rail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  text-align: left;
+  background: transparent;
+  color: var(--fg-1);
+  border: 0;
+  border-top: 1px solid var(--border);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.nc-rail:hover { background: var(--stc-black-700); }
+.nc-rail > svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+
+/* The only state that gets a heavier rule, and it is the same signal
+   as the dot: somebody is waiting on you. */
+.nc-rail.is-now { border-top: 2px solid var(--stc-red); }
+
+.nc-rail__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.nc-rail__n {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nc-rail__sub { font-size: 11px; color: var(--fg-3); }
+.nc-rail__dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--stc-red); flex: none;
+}
+
+/* The count on the bell. Red only when something is actually waiting
+   on somebody; everything else counts in the foreground colour, so the
+   two reds cannot be confused for each other. */
+.nc-bell { position: relative; }
+.nc-bell__n {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 15px; height: 15px; padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: var(--fg-1); color: var(--bg);
+  font-size: 9.5px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.nc-bell__n.is-now { background: var(--stc-red); color: var(--stc-white); }
+
+.sidebar__footer {
   padding: 14px 16px;
   border-top: 1px solid var(--border);
   display: flex;
@@ -1772,6 +1854,16 @@ select option { background: var(--bg-elevated); color: var(--fg-1); }
 [data-theme="light"] .sidebar__item.is-active { background: rgba(0, 0, 0, 0.04); color: rgba(0, 0, 0, 0.9); }
 [data-theme="light"] .sidebar__user-name { color: rgba(0, 0, 0, 0.9); }
 [data-theme="light"] .sidebar__brand-title { color: rgba(0, 0, 0, 0.9); }
+
+/* The rail follows the sidebar rows rather than the dark navy hex they
+   use in the dark theme. Without this it hovers to a navy block on a
+   near white sidebar, which is the one defect a screenshot catches and
+   no check does. */
+[data-theme="light"] .nc-rail { color: rgba(0, 0, 0, 0.75); }
+[data-theme="light"] .nc-rail:hover { background: rgba(0, 0, 0, 0.04); }
+[data-theme="light"] .nc-rail__n { color: rgba(0, 0, 0, 0.9); }
+[data-theme="light"] .nc-bell__n { background: rgba(0, 0, 0, 0.85); color: #fff; }
+[data-theme="light"] .nc-bell__n.is-now { background: var(--stc-red); color: #fff; }
 
 /* Topbar in light mode: white, subtle border */
 [data-theme="light"] .topbar { background: rgba(255, 255, 255, 0.88); border-bottom: 1px solid var(--border); }
