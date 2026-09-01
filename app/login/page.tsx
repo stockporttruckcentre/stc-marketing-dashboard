@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AlertCircle, CheckCircle2, Loader, LogIn } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { Alert, Button, Label } from '@/components/kit/primitives';
+import { Alert, Button } from '@/components/kit/primitives';
 import { Field, Modal, TextInput } from '@/components/kit/forms';
 
 /* =============================================================
@@ -48,10 +48,20 @@ export default function LoginPage() {
   );
 }
 
-/** The page ground, on its own, so the Suspense fallback is not a flash of white. */
+/**
+ * The page ground, on its own, so the Suspense fallback is not a flash
+ * of white.
+ *
+ * `stc-force-dark` because there is no person here yet. The theme comes
+ * from a cookie set once somebody has signed in and chosen one, so on
+ * this screen it is either absent or it is the last person's, and
+ * neither is a preference worth honouring on the front door. Dark is
+ * the brand and the sign in screen is where it should be least
+ * negotiable.
+ */
 function Ground({ children }: { children?: React.ReactNode }) {
   return (
-    <div className="kit" style={{
+    <div className="kit stc-force-dark" style={{
       minHeight: '100vh', background: 'var(--bg)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 24,
@@ -113,7 +123,15 @@ function LoginForm() {
             alt="Stockport Truck Centre"
             style={{ height: 44, width: 'auto' }}
           />
-          <Label>Marketing and sales</Label>
+          {/* The platform's name, not a description of it. Panton at the
+              size the wordmark can carry, because this is the one place
+              somebody reads what the thing is called. */}
+          <div style={{
+            fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 19,
+            letterSpacing: '-0.02em', color: 'var(--text)', lineHeight: 1,
+          }}>
+            STC Workspace
+          </div>
         </div>
 
         {/* ---- the form ---- */}
