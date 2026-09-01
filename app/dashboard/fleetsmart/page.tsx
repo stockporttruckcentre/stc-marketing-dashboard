@@ -4,6 +4,7 @@ import { FleetSmart, type ContractRow } from '@/components/FleetSmart';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import { ACCOUNT_COLUMNS, type PickableAccount } from '@/lib/fleetsmart/account';
 import { SHIPPED_CARD, cardFrom } from '@/lib/fleetsmart/ratecard';
+import type { AmendmentRow } from '@/components/FleetSmart';
 import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type { Profile } from '@/lib/types';
 
@@ -38,7 +39,7 @@ export default async function FleetSmartPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const [profileRes, contractRes, accountRes, addressRes, leadRes, cardRes] = await Promise.all([
+  const [profileRes, contractRes, accountRes, addressRes, leadRes, cardRes, amendRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('fleetsmart_contracts').select('*').order('updated_at', { ascending: false }).limit(300),
     supabase.from('crm_contacts').select(ACCOUNT_COLUMNS).order('company_name').limit(2000),
@@ -58,6 +59,13 @@ export default async function FleetSmartPage() {
     supabase.from('fleetsmart_rate_cards')
       .select('version, card, note, is_current, created_at')
       .order('created_at', { ascending: false }).limit(50),
+    /* Every amendment on every contract, read once rather than per
+       record. A business with four hundred contracts and a handful of
+       amendments each is still a small read, and the alternative is a
+       request every time somebody opens a record. */
+    supabase.from('fleetsmart_amendments')
+      .select('contract_id, seq, effective_on, summary, note, annual_total, monthly_total, asset_count, created_at')
+      .order('contract_id').order('seq').limit(3000),
   ]);
 
   /* One address per account, the primary where there is one. The table
@@ -107,6 +115,7 @@ export default async function FleetSmartPage() {
 
   return (
     <FleetSmart
+      amendments={(amendRes.data ?? []) as AmendmentRow[]}
       card={card}
       cardVersions={savedCards.map(({ version, note, is_current, created_at }) =>
         ({ version, note, is_current, created_at }))}
