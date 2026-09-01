@@ -220,6 +220,11 @@ export function AnalyticsView({
       m.profit += Number(s.profit || 0);
     }
     return months;
+    /* `now` is deliberately not a dependency. It is a new Date on
+       every render, so listing it would rebuild the twelve month
+       window on every keystroke, and the window somebody is reading
+       should not move under them mid session. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sold]);
 
   const allLineData = useMemo(() => [

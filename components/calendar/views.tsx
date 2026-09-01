@@ -72,7 +72,10 @@ export type ViewProps = {
   entries: DiaryEntry[];
   cursor: Date;
   onOpen: (entry: DiaryEntry) => void;
-  onCompose: (dayKey: string) => void;
+  /* `toggle` is passed by the shaded day cell and by nothing else.
+     A second click on the day you already have open closes it; the
+     Book buttons always open. */
+  onCompose: (dayKey: string, toggle?: boolean) => void;
   canCompose: boolean;
 };
 
@@ -160,9 +163,14 @@ export function MonthView({ entries, cursor, onOpen, onCompose, canCompose }: Vi
             role="button"
             tabIndex={canCompose ? 0 : -1}
             aria-label={`${d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}, ${mine.length} in the diary`}
-            onClick={() => canCompose && onCompose(key)}
+            /* `toggle` on the cell, not on the Book button below it.
+               Clicking the shaded part of a day you already have open
+               closes it, the way clicking a record you already have
+               open closes it on the CRM. A button that says Book and
+               closes the thing it just opened would read as broken. */
+            onClick={() => canCompose && onCompose(key, true)}
             onKeyDown={(e) => {
-              if (canCompose && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onCompose(key); }
+              if (canCompose && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onCompose(key, true); }
             }}
             style={{
               /* Tight on purpose. Six week rows share whatever the

@@ -193,10 +193,30 @@ export function TeamCalendar({
     setOpen({ event: entry.event, draft: draftFor(entry.event) });
   }, []);
 
-  const compose = useCallback((day: string) => {
+  /* Clicking a day opens the composer on it. Clicking the same day
+     again closes it, the way clicking a record you already have open
+     closes it on the CRM.
+
+     Worth being precise about what "the same day" means here, because
+     getting it wrong would throw away typing. It only closes when the
+     composer is open for a NEW entry (`event` is null) on that exact
+     day. An entry somebody opened to edit is never closed by a click
+     behind it: that is a record with a save button on it, and losing
+     it to a stray click on the grid is a different bug from the one
+     being fixed.
+
+     `startAt` is `YYYY-MM-DDTHH:MM`, so the day is its first ten
+     characters. Compared rather than kept in a second piece of state,
+     because two pieces of state saying which day is open is how they
+     come to disagree. */
+  const compose = useCallback((day: string, toggle?: boolean) => {
     if (!canBook) return;
     setNote(null);
-    setOpen({ event: null, draft: blankDraft(day, userId, myName) });
+    setOpen((was) => (
+      toggle && was && was.event === null && was.draft.startAt.slice(0, 10) === day
+        ? null
+        : { event: null, draft: blankDraft(day, userId, myName) }
+    ));
   }, [canBook, userId, myName]);
 
   return (

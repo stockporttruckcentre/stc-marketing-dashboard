@@ -73,7 +73,7 @@ export function DiaryScreen({
   onWhose: (v: Whose) => void;
   onNote: (v: string | null) => void;
   onOpen: (entry: DiaryEntry) => void;
-  onCompose: (day: string) => void;
+  onCompose: (day: string, toggle?: boolean) => void;
   /** The entry drawer, when one is open. Owned by whoever can save. */
   drawer?: React.ReactNode;
 }) {

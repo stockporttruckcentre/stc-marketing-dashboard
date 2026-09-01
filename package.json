@@ -48,6 +48,7 @@
     "check:value": "tsx scripts/lead-value-check.ts",
     "check:fleetsmart": "bash scripts/sql/fleetsmart-check.sh",
     "check:permissions": "bash scripts/sql/permissions-check.sh",
+    "check:hooks": "next lint --max-warnings 999",
     "check:workflow": "bash scripts/sql/workflow-check.sh"
   },
   "dependencies": {

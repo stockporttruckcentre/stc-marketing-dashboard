@@ -245,6 +245,10 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      still offered the Team screen: the action was hidden and the door to
      it was left open. Screens come from the action registry now, which
      knows who may see them. */
+  /* Rebuilt every render, so the memo reading it recomputes every
+     render. Accepted, and in fact wanted: the bar recomputes on
+     every keystroke anyway. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const features: Suggestion[] = [];
 
   /**
@@ -417,7 +421,12 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
     return out;
     /* Recomputed when the selection changes or the page does. The bar
        reads the URL directly, so a screen that opens a record without a
-       navigation is picked up on the next keystroke rather than never. */
+       navigation is picked up on the next keystroke rather than never.
+
+       `text` is listed and not read, on purpose: it is what makes this
+       recompute on the next keystroke, which is the whole mechanism
+       described above. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, openList, text, attached]);
 
   /* THE READING SOMEBODY IS SHOWN COMES FROM THE SERVER.
