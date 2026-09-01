@@ -77,10 +77,29 @@ type InputProps = {
   trailing?: ReactNode;
   onKeyDown?: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
   style?: CSSProperties;
+
+  /* ---- what a real form needs and an inline editor does not ----
+
+     Everything above was written for editing a record in a drawer,
+     where the control is a cell that saves on blur. A sign in form is
+     the other kind of input entirely, and without these four a browser
+     will not offer to fill it in or to remember it: no `name` means
+     nothing to save under, and no `autoComplete` means a password
+     manager has to guess which box is which.
+
+     A login screen that password managers cannot see is one people
+     type by hand every morning. */
+  name?: string;
+  autoComplete?: string;
+  required?: boolean;
+  autoFocus?: boolean;
+  /** So a `<label htmlFor>` can point at it. */
+  id?: string;
 };
 
 export function TextInput({
   value, onChange, onCommit, type = 'text', placeholder, readOnly, invalid, list, trailing, onKeyDown, style,
+  name, autoComplete, required, autoFocus, id,
 }: InputProps) {
   const [focused, setFocused] = useState(false);
   return (
@@ -92,6 +111,7 @@ export function TextInput({
     }}>
       <input
         type={type} value={value} placeholder={placeholder} readOnly={readOnly} list={list}
+        name={name} autoComplete={autoComplete} required={required} autoFocus={autoFocus} id={id}
         onChange={(e) => onChange?.(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setFocused(true)}
