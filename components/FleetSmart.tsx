@@ -293,7 +293,7 @@ export function FleetSmart({
         icon={<ShieldCheck size={19} />}
         title="FleetSmart+"
         badges={<Badge tone="neutral">Rate card 2026-08</Badge>}
-        sub="Fixed price maintenance contracts, priced off the STC rate card as you build them."
+        sub="Fixed price maintenance contracts, priced off the STC rate card as you build them. Contracts built here will show on your sales tracker and update in unison."
         actions={
           may('fleetsmart.build')
             ? <Button variant="accent" onClick={startNew}><Plus size={14} /> New contract</Button>

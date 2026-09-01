@@ -1,10 +1,10 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, FileText, Plus,
-  Printer, Search, Send, Trash2, Truck,
+  AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, FileText, Lock, Plus,
+  Printer, Search, Send, Trash2, Truck, X,
 } from 'lucide-react';
 import {
   ASSET_TYPES, PMI_INTERVALS, PLANS, TACHO_CHOICES, TERM_MONTHS, WORK_PATTERNS,
@@ -20,6 +20,11 @@ import {
 } from '@/lib/fleetsmart/contract';
 import type { ContractInput, FleetAsset, PricedAsset } from '@/lib/fleetsmart/types';
 import { fillFrom, filledWords, type PickableAccount } from '@/lib/fleetsmart/account';
+import {
+  STEPS, STEP_COACH, canOpen, furthestOpen, stepDone, whatIsMissing, type Step,
+} from '@/lib/fleetsmart/steps';
+import { StepCoach } from './coach';
+import { DatePicker } from './date-picker';
 import { ContractDocument, ContractPrintRules } from './document';
 import {
   Alert, Badge, Button, Chip, EmptyState, IconButton, Label, SearchInput,
@@ -62,8 +67,6 @@ import {
    its blank cells are not missing data.
    ============================================================= */
 
-const STEPS = ['Customer', 'Plan', 'Fleet', 'Money', 'Wording', 'Review'] as const;
-type Step = (typeof STEPS)[number];
 
 const PANEL: CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -122,8 +125,58 @@ export function ContractWizard({
      noise. */
   const [picked, setPicked] = useState<PickableAccount | null>(null);
 
+  /* The drawer's own scrolling element, so arriving at a step starts at
+     the top of it. Without this, coming to Review from the bottom of
+     Wording opened the contract halfway down. */
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  /* The furthest step they have opened, kept so going back to change the
+     fleet and forward again is not four presses of Next. `furthestOpen`
+     decides what is unlocked from the contract itself; this only ever
+     widens it. */
+  const [reached, setReached] = useState(0);
+
+  /* Which steps have already shown their message. Once per step per
+     contract: coming back to Fleet to add a trailer does not replay the
+     message about adding a fleet. */
+  const [coached, setCoached] = useState<Set<string>>(() => new Set());
+  const [coaching, setCoaching] = useState<Step | null>(null);
+
+  /* Anything typed since the last save. What the close confirmation
+     asks about. */
+  const [dirty, setDirty] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [printReminder, setPrintReminder] = useState<'print' | null>(null);
+  const [sending, setSending] = useState(false);
+
+  /* The first message, on opening the builder. A draft being reopened
+     is already past this, so it starts on the step it was left at
+     without being told what a customer is. */
+  useEffect(() => {
+    if (contractId) { setReached(STEPS.length - 1); return; }
+    setCoaching('Customer');
+    setCoached(new Set(['Customer']));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Moving to a step, and being told what it is for the first time. */
+  const goTo = useCallback((next: Step) => {
+    setStep(next);
+    setReached((r) => Math.max(r, STEPS.indexOf(next)));
+    setCoached((seen) => {
+      if (seen.has(next)) return seen;
+      setCoaching(next);
+      const grown = new Set(seen); grown.add(next); return grown;
+    });
+    /* A step arrived at from the bottom of the last one starts at the
+       bottom without this, which is how Review opened halfway down the
+       document. */
+    bodyRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+
   const set = useCallback(<K extends keyof ContractInput>(k: K, v: ContractInput[K]) => {
     setInput((s) => ({ ...s, [k]: v }));
+    setDirty(true);
   }, []);
 
   /* The price, recomputed on every keystroke. It is a few hundred
@@ -231,27 +284,49 @@ export function ContractWizard({
   const at = STEPS.indexOf(step);
   const ready = input.customerName.trim() !== '' && realAssets.length > 0;
 
+  const missing = whatIsMissing(step, input);
+  const open = Math.max(reached, furthestOpen(input, extras));
+  const onLastStep = at === STEPS.length - 1;
+  const canGoOn = !onLastStep && stepDone(step, input, extras);
+
   return (
     <Drawer
       eyebrow={reference ? `FleetSmart+ · ${reference}` : 'FleetSmart+'}
       title={input.customerName.trim() || 'New contract'}
       icon={<FileText size={18} />}
-      onClose={onClose}
+      /* Never straight out. A builder that closes on a stray Escape is
+         a builder that loses a fleet somebody spent ten minutes typing. */
+      onClose={() => { if (dirty) setClosing(true); else onClose(); }}
+      bodyRef={bodyRef}
       width={1180}
       footer={
         <>
           <Button
             size="sm" variant="ghost" disabled={at === 0}
-            onClick={() => setStep(STEPS[Math.max(0, at - 1)])}
+            onClick={() => goTo(STEPS[Math.max(0, at - 1)])}
           >
             <ChevronLeft size={13} /> Back
           </Button>
-          <Button
-            size="sm" variant="secondary" disabled={at === STEPS.length - 1}
-            onClick={() => setStep(STEPS[Math.min(STEPS.length - 1, at + 1)])}
-          >
-            Next <ChevronRight size={13} />
-          </Button>
+
+          {/* The main thing to do on every step but the last, so it is
+              the one button that looks like it. Disabled until the step
+              is finished, and the reason is next to it rather than in a
+              tooltip nobody hovers. */}
+          {!onLastStep && (
+            <>
+              <Button
+                size="md" variant="primary" disabled={!canGoOn}
+                onClick={() => goTo(STEPS[at + 1])}
+              >
+                Next: {STEPS[at + 1]} <ChevronRight size={14} />
+              </Button>
+              {missing && (
+                <span style={{
+                  fontFamily: 'var(--inter)', fontSize: 11.5, color: 'var(--text-subtle)',
+                }}>{missing}</span>
+              )}
+            </>
+          )}
 
           <span style={{ flex: 1 }} />
 
@@ -272,25 +347,61 @@ export function ContractWizard({
             </Button>
           )}
           {may('fleetsmart.send') && (
-            <Button size="sm" variant="primary" disabled={busy || !ready} onClick={() => save('send')}>
+            <Button
+              size={onLastStep ? 'md' : 'sm'}
+              variant={onLastStep ? 'primary' : 'secondary'}
+              disabled={busy || !ready}
+              onClick={() => setSending(true)}
+            >
               <Send size={13} /> Save and send
             </Button>
           )}
         </>
       }
     >
-      {/* ---- the rail ---- */}
+      {/* ---- the rail ----
+
+          A route, not a set of tabs. A step past the last finished one
+          is locked, so the order the work is meant to happen in is the
+          order it happens in, and nobody reaches Review with an empty
+          fleet. Everything already reached stays open, because going
+          back to fix something is not skipping ahead. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {STEPS.map((s, i) => (
-          <Chip key={s} active={s === step} onClick={() => setStep(s)}>
-            <span style={{
-              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
-              color: s === step ? 'var(--accent)' : 'var(--text-subtle)',
-            }}>{i + 1}</span>
-            {s}
-          </Chip>
-        ))}
+        {STEPS.map((s, i) => {
+          const reachable = canOpen(s, input, extras, reached);
+          const done = i < open && stepDone(s, input, extras);
+          return (
+            <Chip
+              key={s}
+              active={s === step}
+              onClick={reachable ? () => goTo(s) : undefined}
+              title={reachable ? undefined : `Finish ${STEPS[i - 1]} first`}
+            >
+              <span style={{
+                display: 'inline-flex', alignItems: 'center',
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
+                color: s === step ? 'var(--accent)' : 'var(--text-subtle)',
+                opacity: reachable ? 1 : 0.55,
+              }}>
+                {!reachable ? <Lock size={10} /> : done ? <Check size={11} /> : i + 1}
+              </span>
+              <span style={{ opacity: reachable ? 1 : 0.55 }}>{s}</span>
+            </Chip>
+          );
+        })}
       </div>
+
+      {coaching && (
+        <StepCoach
+          step={coaching}
+          title={STEP_COACH[coaching].title}
+          body={STEP_COACH[coaching].body}
+          missing={whatIsMissing(coaching, input)}
+          onNext={STEPS.indexOf(coaching) < STEPS.length - 1
+            ? () => goTo(STEPS[STEPS.indexOf(coaching) + 1]) : null}
+          onDismiss={() => setCoaching(null)}
+        />
+      )}
 
       {error && <Alert tone="danger"><AlertTriangle size={13} /> {error}</Alert>}
 
@@ -706,7 +817,7 @@ function FleetStep({
                       onChange={(v) => onAsset(a.key, { cServicesPerYear: v === '' ? null : Number(v) })}
                     />
                   </Field>
-                  <Field label="Brake tests a year">
+                  <Field label="Unladen RBTs a year">
                     <TextInput
                       type="number"
                       value={a.brakeTestsPerYear == null ? '' : String(a.brakeTestsPerYear)}

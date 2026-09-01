@@ -62,24 +62,55 @@ export function CrmWorkspace({
     setRows(initialContacts);
   }, [initialContacts, selectedListId]);
 
-  /**
-   * Everything on the list showing, read back from the database.
-   *
-   * Two queries rather than one because membership is a join table now.
-   * A company used to carry the list it was on as a column, which is
-   * exactly why the same haulier had to exist once per list and why the
-   * pipeline and a rep's tracker held different Dawsons.
-   */
+  /** Whether the list showing is the shared pipeline. */
+  const showingThePipeline = useMemo(
+    () => lists.find((l) => l.id === selectedListId)?.is_global ?? false,
+    [lists, selectedListId],
+  );
+
+  /* Everything on the list showing, read back from the database, on the
+     same rule the server read.
+
+     This asked the join table which companies are on the open list and
+     fetched exactly those, which is the rule that left the CRM empty
+     while every tracker was full. A company on no list is fetched by
+     nothing, and the only thing filling that table is a trigger on
+     `crm_contacts.list_id`, which the import, the FleetSmart+ builder
+     and the New lead flow all leave alone.
+
+     `app/dashboard/crm/page.tsx` carries the reasoning. The short
+     version is that migration 040's policy already says a company on no
+     list is visible to everybody, so the shared pipeline shows what is
+     filed on it plus everything filed nowhere. A private list still
+     shows exactly what its owner put on it.
+
+     Both copies of this rule exist because the first paint is drawn on
+     the server and every reload after an import or a merge is drawn
+     here. They have to agree or the grid changes under somebody after
+     an action that had nothing to do with which list they are on. */
   const reloadList = useCallback(async (): Promise<CRMContact[]> => {
     if (!selectedListId) return [];
+
     const { data: onList } = await supabase
       .from('crm_list_contacts').select('contact_id').eq('list_id', selectedListId);
     const ids = ((onList ?? []) as { contact_id: string }[]).map((r) => r.contact_id);
-    if (!ids.length) return [];
+
+    if (!showingThePipeline) {
+      if (!ids.length) return [];
+      const { data } = await supabase.from('crm_contacts').select('*')
+        .in('id', ids).order('updated_at', { ascending: false });
+      return (data ?? []) as CRMContact[];
+    }
+
+    const { data: filed } = await supabase.from('crm_list_contacts').select('contact_id');
+    const filedIds = new Set(((filed ?? []) as { contact_id: string }[]).map((r) => r.contact_id));
+    const onPipeline = new Set(ids);
+
     const { data } = await supabase.from('crm_contacts').select('*')
-      .in('id', ids).order('updated_at', { ascending: false });
-    return (data ?? []) as CRMContact[];
-  }, [supabase, selectedListId]);
+      .order('updated_at', { ascending: false });
+    return ((data ?? []) as CRMContact[])
+      .filter((c) => onPipeline.has(c.id) || !filedIds.has(c.id));
+  }, [supabase, selectedListId, showingThePipeline]);
 
   // Remember last list so the sidebar nav can return you here
   useEffect(() => {

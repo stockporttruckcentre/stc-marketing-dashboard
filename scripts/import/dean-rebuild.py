@@ -529,7 +529,48 @@ SELECT DISTINCT ON (lower(btrim(e.company)))
           (e.contact IS NULL), (e.email IS NULL), (e.phone IS NULL);
 
 -- -------------------------------------------------------------
--- 8. The pitches.
+-- 8. On the shared pipeline, so the CRM tab shows them.
+--
+-- Not decoration, and the reason is worth stating.
+--
+-- Migration 040 moved list membership out of `crm_contacts.list_id` and
+-- into `crm_list_contacts`. The CRM screen asks that table which
+-- companies are on the open list and fetches those, so a company on no
+-- list is fetched by nothing: it exists, it takes leads, it shows on
+-- trackers, it counts in every total, and the CRM tab is empty.
+--
+-- A lead cannot exist without a customer in the CRM, and that has to be
+-- true on the screen and not only in the data. So every account this
+-- file creates joins the shared pipeline, in the same transaction that
+-- creates it.
+--
+-- Only the shared one. Nothing here touches anybody's private list.
+-- -------------------------------------------------------------
+INSERT INTO crm_list_contacts (list_id, contact_id)
+SELECT l.id, c.id
+  FROM crm_contacts c
+ CROSS JOIN (SELECT id FROM crm_lists WHERE is_global ORDER BY created_at LIMIT 1) l
+ON CONFLICT DO NOTHING;
+
+DO $$
+DECLARE unfiled INT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM crm_lists WHERE is_global) THEN
+    RAISE EXCEPTION
+      'There is no shared CRM list in this database, so nothing would show on the CRM tab. Make one first.';
+  END IF;
+
+  SELECT count(*) INTO unfiled
+    FROM crm_contacts c
+   WHERE NOT EXISTS (SELECT 1 FROM crm_list_contacts lc WHERE lc.contact_id = c.id);
+
+  IF unfiled > 0 THEN
+    RAISE EXCEPTION '% account(s) are on no list, so the CRM tab would not show them', unfiled;
+  END IF;
+END $$;
+
+-- -------------------------------------------------------------
+-- 9. The pitches.
 -- -------------------------------------------------------------
 INSERT INTO crm_leads (
   id, contact_id, owner_id, created_by, type, status,
@@ -559,7 +600,7 @@ JOIN crm_contacts c ON lower(btrim(c.company_name)) = lower(btrim(i.company))
 CROSS JOIN dean d;
 
 -- -------------------------------------------------------------
--- 9. The money on the twelve sales.
+-- 10. The money on the twelve sales.
 --
 -- Sixteen rows on the figures sheet against twelve companies. Cadowood
 -- bought three times, Smart Waste twice, Andy Swan twice. Their lead
@@ -620,7 +661,7 @@ BEGIN
 END $$;
 
 -- -------------------------------------------------------------
--- 10. Does the CRM now say what the spreadsheet says.
+-- 11. Does the CRM now say what the spreadsheet says.
 --
 -- Every one of these is a figure the workbook's own Dashboard tab
 -- computes. Any of them coming out wrong rolls back the delete as well
@@ -648,6 +689,18 @@ BEGIN
   SELECT count(*) INTO n FROM crm_leads WHERE contact_id IS NULL;
   IF n <> 0 THEN
     RAISE EXCEPTION '% leads point at no account', n;
+  END IF;
+
+  /* And every one of those accounts is on the shared pipeline, so the
+     CRM tab shows the customer behind every lead on the tracker. A
+     tracker full of customers the CRM cannot open is the exact state
+     this file exists to make impossible. */
+  SELECT count(*) INTO n
+    FROM crm_leads l
+   WHERE NOT EXISTS (
+     SELECT 1 FROM crm_list_contacts lc WHERE lc.contact_id = l.contact_id);
+  IF n <> 0 THEN
+    RAISE EXCEPTION '% leads have a customer the CRM tab will not show', n;
   END IF;
 
   /* Trailer sales. */
