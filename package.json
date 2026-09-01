@@ -39,6 +39,7 @@
     "check:anon": "bash scripts/sql/anon-check.sh",
     "check:notify": "bash scripts/sql/notify-check.sh",
     "check:crm-status": "bash scripts/sql/crm-status-check.sh",
+    "check:crm-view": "tsx scripts/crm-view-check.ts",
     "check:diary": "bash scripts/sql/calendar-check.sh",
     "check:calendar": "tsx scripts/calendar-check.ts",
     "check:price": "tsx scripts/fleetsmart-price-check.ts",
