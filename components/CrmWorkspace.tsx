@@ -28,6 +28,9 @@ import {
 } from '@/lib/crm/ownership';
 import { capabilitiesFor, defaultScopeKind, roleLabel, type CrmCapabilities } from '@/lib/crm/permissions';
 import { ukDateShort } from '@/lib/format/date';
+import {
+  applyView, clearView, describeView, readView, writeView, type SavedView,
+} from '@/lib/crm/grid-view';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
@@ -92,6 +95,11 @@ export function CrmWorkspace({
   const [emptyAreaMenu, setEmptyAreaMenu] = useState<{ x: number; y: number } | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
   const [statusMenu, setStatusMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
+
+  /* What the person has arranged, and whether anything is arranged at
+     all. Held in state only so the line under the grid can say what is
+     applied; the arrangement itself lives on the grid. */
+  const [savedView, setSavedView] = useState<SavedView | null>(null);
   const [listPickerFor, setListPickerFor] = useState<{ purpose: 'enrich'; email: string } | null>(null);
   const [enrichConfirm, setEnrichConfirm] = useState<{ row: CRMContact; field: string } | null>(null);
   const [enriching, setEnriching] = useState(false);
@@ -729,6 +737,56 @@ export function CrmWorkspace({
     return () => window.removeEventListener('click', close);
   }, []);
 
+  /* ---- keeping the arrangement ----
+
+     Every one of these fires on a thing somebody did by hand: sorting,
+     resizing, moving, hiding, pinning, filtering. Saving on all of them
+     rather than on a Save button, because there is nothing to save: the
+     arrangement is whatever the grid currently is, and a button would
+     only be a way to lose it by navigating away.
+
+     Resizing fires per pixel, so that one waits for the drag to finish.
+     `finished` is false on every frame of the drag and true once. */
+  const keepView = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    writeView(profile.id, api);
+    setSavedView(readView(profile.id));
+  }, [profile.id]);
+
+  function onGridReady() {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const view = readView(profile.id);
+    if (!view) return;
+    applyView(api, view);
+    setSavedView(view);
+  }
+
+  function resetView() {
+    const api = gridRef.current?.api;
+    clearView(profile.id);
+    setSavedView(null);
+    /* `null` state with applyOrder puts the columns back the way the
+       column definitions declare them, which is the default nobody has
+       to remember. */
+    api?.applyColumnState({ defaultState: { sort: null, hide: false, pinned: null }, applyOrder: true });
+    api?.setFilterModel(null);
+    api?.sizeColumnsToFit();
+  }
+
+  /* What the arrangement is doing, in words. Rebuilt whenever it
+     changes rather than on every render: `getColumnState` walks every
+     column and this sits under a grid that redraws on every keystroke
+     in the search box. */
+  const viewSummary = useMemo(() => {
+    if (!savedView) return null;
+    const headers = new Map(
+      columnDefs.map((c) => [c.field ?? '', c.headerName ?? c.field ?? '']),
+    );
+    return describeView(savedView, (colId) => headers.get(colId) ?? colId);
+  }, [savedView, columnDefs]);
+
   function onSelectionChanged() {
     const rows = gridRef.current?.api.getSelectedRows() ?? [];
     setSelectedCount(rows.length);
@@ -960,6 +1018,14 @@ export function CrmWorkspace({
           onCellContextMenu={onCellContextMenu}
           onSelectionChanged={onSelectionChanged}
           onRowClicked={onRowClicked}
+          onGridReady={onGridReady}
+          onSortChanged={keepView}
+          onFilterChanged={keepView}
+          onColumnMoved={keepView}
+          onColumnVisible={keepView}
+          onColumnPinned={keepView}
+          /* Resizing fires per pixel of the drag. Only the last one. */
+          onColumnResized={(e) => { if (e.finished) keepView(); }}
           preventDefaultOnContextMenu
           noRowsOverlayComponent={NoRows}
           noRowsOverlayComponentParams={{
@@ -969,9 +1035,24 @@ export function CrmWorkspace({
         />
       </div>
 
-      <GridHint>
-        Click a row to open it. Right click any cell to edit, enrich, move or delete it.
-      </GridHint>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <GridHint>
+          Click a row to open it. Right click any cell to edit, move or delete it.
+        </GridHint>
+        <span style={{ flex: 1 }} />
+        {/* A sort somebody set last week and forgot is a sort they
+            blame the data for, so the arrangement says what it is
+            doing and offers the way back. Nothing shown at all when
+            the grid is in its default state. */}
+        {viewSummary && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+              Your view: {viewSummary}. Kept on this computer.
+            </span>
+            <Button size="sm" variant="ghost" onClick={resetView}>Reset it</Button>
+          </span>
+        )}
+      </div>
 
       {statusMenu && (
         <StatusMenu
