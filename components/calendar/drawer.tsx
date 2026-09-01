@@ -876,6 +876,10 @@ function AddPeople({
   onAdd: (p: Person) => void;
 }) {
   const [query, setQuery] = useState('');
+  /* A fresh Set each render, so the memo reading it recomputes each
+     render. Accepted: it is a set over the handful of people already
+     on one meeting. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const taken = new Set(already.map((a) => a.user_id).filter(Boolean));
 
   const matches = useMemo(() => {

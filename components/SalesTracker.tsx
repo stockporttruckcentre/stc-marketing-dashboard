@@ -381,7 +381,20 @@ export function SalesTracker({
       ),
     });
     return base;
-  }, [saveCell, supabase, isCustomerTab]);
+    /* `isMaintenance` was missing from this list, and it is read seven
+       times in the body above. The memo therefore kept the columns it
+       built for whichever division was open when it last ran, and only
+       rebuilt them when the status tab changed, which is why clicking
+       Maintenance left the trailer sales columns on screen until you
+       clicked a filter inside it.
+
+       It read as a rendering glitch and was worse than that. Both sides
+       have a column the other does not, and one of them is called
+       "What" on maintenance while trailer sales has its own What field
+       for the type of unit. So the stale header sat above the right
+       data with the wrong name on it, on a screen people read figures
+       off. */
+  }, [saveCell, supabase, isCustomerTab, isMaintenance]);
 
   const defaultColDef = useMemo<ColDef>(() => ({
     resizable: true, sortable: true, filter: true, floatingFilter: false,
@@ -1482,6 +1495,10 @@ function CommissionView({ rows }: { rows: TrackerRow[] }) {
   const sales = useMemo(() => rows.filter(r => Number(r.commission) > 0)
     .sort((a, b) => (b.dispatch_date || b.order_date || '').localeCompare(a.dispatch_date || a.order_date || '')), [rows]);
 
+  /* Rebuilt every render, so the memo below it is recomputed every
+     render too. Accepted: it is a handful of sums over rows already in
+     memory, and a today that moved mid session would be worse. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = new Date();
   const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
   const dKey = (r: TrackerRow) => (r.dispatch_date || r.order_date || '').slice(0,7);

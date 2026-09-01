@@ -211,6 +211,10 @@ export function CrmWorkspace({
   useEffect(() => {
     publishOpenList(selectedList ? { id: selectedList.id, name: selectedList.name } : null);
     return () => publishOpenList(null);
+    /* The id and the name, not the object. The object is a fresh
+       `find` result on every render, so depending on it would
+       republish on every keystroke elsewhere on the page. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedList?.id, selectedList?.name]);
   const isOwner = selectedList ? selectedList.owner_id === profile.id : false;
   /**
@@ -1813,6 +1817,11 @@ function EnrichConfirmModal({ row, balance, onConfirm, onCancel, busy }: { row: 
       }
     })();
     return () => { cancelled = true; };
+    /* `row.links` is read inside and not listed. This modal is mounted
+       for one row and unmounted when it closes, so the links cannot
+       change underneath it, and listing an array prop would re-run a
+       network call on every render. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.company_name, row.email]);
 
   const remaining = balance == null ? '?' : balance.toString();

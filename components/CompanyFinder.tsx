@@ -135,24 +135,6 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         </div>
       </div>
 
-      {/* The lock the meeting asked for at rollout. Said out loud rather
-          than left as buttons that quietly fail, and the routes refuse it
-          server side too, because hiding a button is not a lock. */}
-      {LUSHA_LOCKED && (
-        <div className="kit" style={{ marginBottom: 14 }}>
-          <Alert tone="warning">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <strong>Lusha searching is switched off</strong>
-              <span>
-                Searches and enrichment come out of a shared monthly credit
-                allowance, so it stays off until it is agreed who can spend
-                them. Nothing here will charge anything in the meantime.
-              </span>
-            </div>
-          </Alert>
-        </div>
-      )}
-
       <div className="cf-tabs" role="tablist">
         <button onClick={() => setTab('finder')}
           className={`cf-tab ${tab === 'finder' ? 'is-active' : ''}`}>
@@ -168,6 +150,31 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
         <BusinessActivityStrip />
       ) : (
       <>
+      {/* The lock the meeting asked for at rollout. Said out loud rather
+          than left as buttons that quietly fail, and the routes refuse it
+          server side too, because hiding a button is not a lock.
+
+          Inside this branch rather than above the tabs, which is where
+          it was. Insolvency Updates comes off The Gazette over RSS and
+          never touches Lusha, so a warning above both tabs told
+          somebody reading company news that a service they were not
+          using was unavailable. A notice on a screen it does not apply
+          to is how people learn to stop reading notices. */}
+      {LUSHA_LOCKED && (
+        <div className="kit" style={{ marginBottom: 14 }}>
+          <Alert tone="warning">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <strong>Lusha searching is switched off</strong>
+              <span>
+                Searches and enrichment come out of a shared monthly credit
+                allowance, so it stays off until it is agreed who can spend
+                them. Nothing here will charge anything in the meantime.
+              </span>
+            </div>
+          </Alert>
+        </div>
+      )}
+
       <div className="cf-card">
         <div className="cf-search-grid">
           <CfField label="Location" Icon={MapPin}>
