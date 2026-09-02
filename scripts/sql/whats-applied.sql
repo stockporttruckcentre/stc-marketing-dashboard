@@ -101,7 +101,8 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     (50, '087',        'Renaming, emptying and dismissing a group',       'declined_group_suggestions', 'table'),
     (51, '088',        'Three divisions on one footing, for Analytics',   'division_revenue',           'function'),
     (52, '089',        'A group belongs to a division',                   'group_revenue:p_division',   'signature'),
-    (53, '090',        'The seven figures finance takes into a meeting',  'trailer_deals',              'function')
+    (53, '090',        'The seven figures finance takes into a meeting',  'trailer_deals',              'function'),
+    (54, '091',        'An approved account can actually sign in',        'blank_auth_tokens',          'function')
 )
 SELECT
   e.migration                                AS "Migration",

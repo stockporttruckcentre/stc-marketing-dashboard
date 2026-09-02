@@ -54,6 +54,25 @@ ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ D
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS last_sign_in_at    TIMESTAMPTZ;
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_app_meta_data  JSONB DEFAULT '{}'::JSONB;
 
+/* THE EIGHT COLUMNS AN ACCOUNT CANNOT SIGN IN WITHOUT.
+
+   Nullable here exactly as they are in real Supabase, which is the
+   whole point: GoTrue reads them into non-nullable Go strings, so a
+   row inserted by hand that leaves them null answers every sign in
+   with "Database error querying schema". Stubbing them NOT NULL would
+   make the check pass on a bug that is still there in production.
+
+   No DEFAULT, for the same reason. Supabase has none either, and a
+   default would silently fix the insert this is meant to catch. */
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_token         TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS recovery_token             TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change               TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_new     TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_change_token_current TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change               TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone_change_token         TEXT;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS reauthentication_token     TEXT;
+
 /* Sessions and refresh tokens, for anything that signs somebody out. */
 CREATE TABLE IF NOT EXISTS auth.sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID

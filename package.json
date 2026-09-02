@@ -65,7 +65,9 @@
     "check:whats-applied": "bash scripts/sql/whats-applied-check.sh",
     "check:chart-colour": "tsx scripts/chart-colour-check.ts",
     "check:finance": "bash scripts/sql/finance-check.sh",
-    "check:analytics-view": "tsx scripts/analytics-view-check.ts"
+    "check:analytics-view": "tsx scripts/analytics-view-check.ts",
+    "check:lead-identity": "tsx scripts/lead-identity-check.ts",
+    "check:order": "tsx scripts/order-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
