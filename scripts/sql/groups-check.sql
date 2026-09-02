@@ -67,14 +67,22 @@ ON CONFLICT (alpha) DO NOTHING;
 /* Two years each, so the like for like cut is exercised rather than
    assumed, and more than one invoice per account so a fan out over the
    open jobs join would double a real number rather than a zero. */
+/* Dated inside the company's year, which runs April to April. Every
+   figure below is read at 1 August 2026, so the year running is the one
+   that began 1 April 2026 and the comparison is the same point in the
+   year that began 1 April 2025. */
 INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
-  ('T1', 'MONTTRAN', '2026-02-01', 100000), ('T2', 'MONTTRAN', '2026-03-01', 21440),
-  ('T3', 'MONTTRAN', '2025-02-01',  90000),
-  ('D1', 'MONTDIST', '2026-02-01', 108110), ('D2', 'MONTDIST', '2025-02-01', 100000),
-  ('K1', 'MONTTANK', '2026-02-01',  83355),
-  ('H1', 'ARIFLEET', '2026-02-01',  50000), ('H2', 'ARIFLEET', '2026-04-01', 25000),
-  ('V1', 'ARIVMS',   '2026-02-01',  30000),
-  /* Last December, so it counts to last year and not to this one. */
+  /* T1 sits exactly on the read date on purpose: the window is
+     inclusive of it, and an off by one there would drop a day's
+     invoicing from every figure on every screen. */
+  ('T1', 'MONTTRAN', '2026-08-01', 100000), ('T2', 'MONTTRAN', '2026-06-01', 21440),
+  ('T3', 'MONTTRAN', '2025-05-01',  90000),
+  ('D1', 'MONTDIST', '2026-05-01', 108110), ('D2', 'MONTDIST', '2025-05-01', 100000),
+  ('K1', 'MONTTANK', '2026-05-01',  83355),
+  ('H1', 'ARIFLEET', '2026-05-01',  50000), ('H2', 'ARIFLEET', '2026-07-01', 25000),
+  ('V1', 'ARIVMS',   '2026-05-01',  30000),
+  /* Last December. Inside the previous year and AFTER the same point in
+     it, so it counts to neither figure. That is the like for like cut. */
   ('H3', 'ARIFLEET', '2025-12-01',  40000)
 ON CONFLICT (invoice_no) DO NOTHING;
 
@@ -124,10 +132,11 @@ END $$;
 -- 3. The total is the sum of the members, and each member is still
 --    readable on its own.
 --
---    2026 to 1 May: Transport 121,440 + Distribution 108,110 +
---    Tank 83,355 = 312,905. 2025 to the same day: 90,000 + 100,000
---    = 190,000. Holman is deliberately in a different group so a
---    stray join cannot pull it in.
+--    The year from April 2026, read at 1 August: Transport 121,440 +
+--    Distribution 108,110 + Tank 83,355 = 312,905. The same point in
+--    the year from April 2025: 90,000 + 100,000 = 190,000. Holman is
+--    deliberately in a different group so a stray join cannot pull it
+--    in.
 -- -------------------------------------------------------------
 DO $$
 DECLARE
@@ -142,7 +151,7 @@ BEGIN
   PERFORM put_in_group('91000000-0000-0000-0000-000000000003', g);
   PERFORM put_in_group('91000000-0000-0000-0000-000000000004', h);
 
-  SELECT * INTO r FROM group_revenue('2026-05-01') WHERE group_id = g;
+  SELECT * INTO r FROM group_revenue('2026-08-01') WHERE group_id = g;
   IF r.this_year <> 312905 THEN
     RAISE EXCEPTION 'Montgomery this year is %, not 312905', r.this_year;
   END IF;
@@ -167,8 +176,9 @@ END $$;
 -- 4. One customer, two accounts. The group is the sum, and each
 --    account is still separately visible.
 --
---    Holman to 1 May 2026: ARIFLEET 75,000 + ARIVMS 30,000 = 105,000.
---    Last year to the same day: nothing, because H3 is December.
+--    Holman to 1 August 2026: ARIFLEET 75,000 + ARIVMS 30,000 =
+--    105,000. The same point last year: nothing, because H3 is
+--    December, which is after 1 August in its own year.
 -- -------------------------------------------------------------
 DO $$
 DECLARE
@@ -177,22 +187,22 @@ BEGIN
   PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
   h := name_a_group('Holman Fleet');
 
-  SELECT * INTO r FROM group_revenue('2026-05-01') WHERE group_id = h;
+  SELECT * INTO r FROM group_revenue('2026-08-01') WHERE group_id = h;
   IF r.this_year <> 105000 THEN
     RAISE EXCEPTION 'Holman this year is %, not 105000', r.this_year;
   END IF;
   IF r.last_year <> 0 THEN
-    RAISE EXCEPTION 'Holman last year is %, and December is not before 1 May', r.last_year;
+    RAISE EXCEPTION 'Holman last year is %, and December is not before 1 August', r.last_year;
   END IF;
   IF r.customers <> 1 OR r.accounts <> 2 THEN
     RAISE EXCEPTION 'Holman is % customers over % accounts', r.customers, r.accounts;
   END IF;
 
-  SELECT count(*) INTO n FROM group_breakdown(h, '2026-05-01');
+  SELECT count(*) INTO n FROM group_breakdown(h, '2026-08-01');
   IF n <> 2 THEN RAISE EXCEPTION 'the Holman breakdown has % rows', n; END IF;
 
-  SELECT this_year INTO fleet FROM group_breakdown(h, '2026-05-01') WHERE alpha = 'ARIFLEET';
-  SELECT this_year INTO vms   FROM group_breakdown(h, '2026-05-01') WHERE alpha = 'ARIVMS';
+  SELECT this_year INTO fleet FROM group_breakdown(h, '2026-08-01') WHERE alpha = 'ARIFLEET';
+  SELECT this_year INTO vms   FROM group_breakdown(h, '2026-08-01') WHERE alpha = 'ARIVMS';
   IF fleet <> 75000 OR vms <> 30000 THEN
     RAISE EXCEPTION 'the split is % and %, not 75000 and 30000', fleet, vms;
   END IF;

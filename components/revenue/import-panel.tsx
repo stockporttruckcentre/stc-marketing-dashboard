@@ -14,7 +14,8 @@ import {
   type Read, type InvoiceRow, type OpenJobRow,
 } from '@/lib/protean/import';
 import {
-  startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, wouldClose, addUp,
+  startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, wouldClose,
+  relinkJobs, addUp,
   type BatchResult, type WouldClose,
 } from '@/lib/protean/rpc';
 
@@ -108,6 +109,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [sent, setSent] = useState<Sent[]>([]);
   const [closing, setClosing] = useState<Closing | null>(null);
+  const [linkedNow, setLinkedNow] = useState(0);
 
   const take = useCallback(async (files: FileList | File[]) => {
     const next: Dropped[] = [];
@@ -125,7 +127,23 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   }, []);
 
   const send = useCallback(async () => {
-    const usable = dropped.filter((d) => d.read.ok);
+    /* INVOICES ALWAYS FIRST.
+
+       The open jobs export carries no account code, only a customer
+       name, and the accounts it matches against are created by the
+       invoice file. Sent the other way round there is nothing to match,
+       so every job lands with no account and the screen says "No
+       account" on all of them.
+
+       The relink pass after the loop makes the order not matter, and
+       this makes it not matter twice. Two cheap guards on a mistake
+       whose symptom is a thousand rows looking wrong. */
+    const usable = dropped
+      .filter((d) => d.read.ok)
+      .sort((a, b) => {
+        const rank = (d: Dropped) => (d.read.ok && d.read.kind === 'invoices' ? 0 : 1);
+        return rank(a) - rank(b);
+      });
     if (!usable.length) return;
 
     const landed: Sent[] = [];
@@ -167,6 +185,16 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
 
         landed.push({ kind, fileName: d.fileName, result: addUp(results), closed });
       }
+
+      /* Link any job that had nothing to point at when it landed. It
+         only ever fills a blank, so running it every time is free and
+         it repairs an earlier import made in the wrong order. */
+      let linked = 0;
+      if (landed.some((l) => l.kind === 'open_jobs') || landed.some((l) => l.kind === 'invoices')) {
+        setBusy('Matching jobs to their accounts');
+        linked = await relinkJobs(supabase);
+      }
+      setLinkedNow(linked);
 
       setSent(landed);
       setDropped([]);
@@ -410,6 +438,16 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
               </div>
             ))}
           </div>
+          {linkedNow > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <Alert tone="info">
+                {linkedNow.toLocaleString('en-GB')} open jobs were matched to their Protean
+                account by name. The open jobs export carries no account code, so this happens
+                after the invoices land.
+              </Alert>
+            </div>
+          )}
+
           {sent.some((s) => s.result.accounts_new > 0) && (
             <div style={{ marginTop: 14 }}>
               <Alert tone="warning">

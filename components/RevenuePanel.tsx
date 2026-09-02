@@ -13,10 +13,13 @@ import { useToast } from '@/components/kit/toast';
 import { ImportPanel } from '@/components/revenue/import-panel';
 import { ModeratePanel } from '@/components/revenue/moderate-panel';
 import {
-  yearOnYear, groupRevenue, groupBreakdown,
-  type YearOnYear, type GroupRevenue, type GroupLine,
+  yearOnYear, groupRevenue, groupBreakdown, companyRevenue, everyOpenJob,
+  type YearOnYear, type GroupRevenue, type GroupLine, type CompanyRevenue,
+  type OpenJob,
 } from '@/lib/protean/rpc';
 import { whatToShow, REVENUE_TABS, type RevenueTab } from '@/lib/protean/screen';
+import { groupsToOffer } from '@/lib/protean/customers';
+import { nameGroup, putInGroup } from '@/lib/protean/rpc';
 
 /* =============================================================
    What Protean has billed.
@@ -61,6 +64,7 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
   const { say } = useToast();
 
   const [tab, setTab] = useState<Tab>('customers');
+  const [company, setCompany] = useState<CompanyRevenue | null>(null);
   const [customers, setCustomers] = useState<YearOnYear[]>([]);
   const [groups, setGroups] = useState<GroupRevenue[]>([]);
   const [open, setOpen] = useState<OpenJob[]>([]);
@@ -71,20 +75,17 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [yoy, grp, jobs, queue] = await Promise.all([
+      const [totals, yoy, grp, jobs, queue] = await Promise.all([
+        companyRevenue(supabase),
         yearOnYear(supabase),
         groupRevenue(supabase),
-        supabase
-          .from('protean_open_jobs')
-          .select('job_no, protean_name, job_type, status, depot, logged_on, job_total, alpha')
-          .eq('still_open', true)
-          .order('logged_on', { ascending: true })
-          .limit(2000),
+        everyOpenJob(supabase),
         supabase.rpc('protean_to_moderate'),
       ]);
+      setCompany(totals);
       setCustomers(yoy);
       setGroups(grp);
-      setOpen((jobs.data ?? []) as OpenJob[]);
+      setOpen(jobs);
       setWaiting(((queue.data ?? []) as unknown[]).length);
     } catch (e) {
       say({ tone: 'danger', title: e instanceof Error ? e.message : 'The revenue would not load.' });
@@ -106,12 +107,32 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
     }
   }, [mayImport]);
 
-  const totals = useMemo(() => {
-    const thisYear = customers.reduce((s, c) => s + Number(c.this_year || 0), 0);
-    const lastYear = customers.reduce((s, c) => s + Number(c.last_year || 0), 0);
-    const openValue = open.reduce((s, j) => s + Number(j.job_total || 0), 0);
-    return { thisYear, lastYear, change: thisYear - lastYear, openValue };
-  }, [customers, open]);
+  /* EVERY HEADLINE FIGURE COMES FROM THE DATABASE, NOT FROM THE LIST.
+
+     These used to be worked out by adding up the rows on screen, which
+     is wrong the moment the list is not all of them, and PostgREST caps
+     a response at a thousand rows whatever limit is asked for. With
+     1,009 jobs open the screen showed a thousand and quietly reported
+     the value of a thousand as the value of all of them.
+
+     A total that is a sum of what happens to have been fetched is a
+     total that goes wrong silently and gets larger as the business
+     does. So the company function counts them, in the database, over
+     everything. */
+  const totals = useMemo(() => ({
+    thisYear: Number(company?.this_year || 0),
+    lastYear: Number(company?.last_year || 0),
+    change: Number(company?.change || 0),
+    openValue: Number(company?.open_value || 0),
+    openJobs: Number(company?.open_jobs || 0),
+    fyStarted: company?.fy_started ?? null,
+  }), [company]);
+
+  /* The period every "this year" figure is measured over, named rather
+     than left as a word somebody has to know the setting for. */
+  const yearLabel = totals.fyStarted
+    ? new Date(`${totals.fyStarted}T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    : null;
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -130,7 +151,7 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'customers', label: 'Customers', count: customers.length },
     { key: 'groups', label: 'Groups', count: groups.length },
-    { key: 'open', label: 'Open work', count: open.length },
+    { key: 'open', label: 'Open work', count: company ? Number(company.open_jobs) : open.length },
     { key: 'accounts', label: 'Accounts', count: waiting || undefined },
     ...(mayImport ? [{ key: 'import' as Tab, label: 'Import' }] : []),
   ];
@@ -228,7 +249,7 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
         )}
 
         {showing.body === 'customers' && <Customers rows={shown} loading={loading} />}
-        {showing.body === 'groups' && <Groups rows={groups} />}
+        {showing.body === 'groups' && <Groups rows={groups} onChanged={() => void load()} />}
         {showing.body === 'open' && <OpenWork rows={shownJobs} loading={loading} />}
         {showing.body === 'accounts' && <ModeratePanel onChanged={() => void load()} />}
         {showing.body === 'import' && <ImportPanel onDone={() => void load()} />}
@@ -273,10 +294,68 @@ function Customers({ rows, loading }: { rows: YearOnYear[]; loading: boolean }) 
 /* -------------------------------------------------------------
    Groups, and what each account inside one billed.
    ------------------------------------------------------------- */
-function Groups({ rows }: { rows: GroupRevenue[] }) {
+type BoundAccount = {
+  alpha: string;
+  protean_name: string;
+  contact_id: string | null;
+  ignored: boolean;
+};
+
+function Groups({ rows, onChanged }: { rows: GroupRevenue[]; onChanged: () => void }) {
   const supabase = createClient();
+  const { say } = useToast();
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [lines, setLines] = useState<Record<string, GroupLine[]>>({});
+
+  /* THE SUGGESTIONS COME FROM EVERY ACCOUNT, NOT FROM THE QUEUE.
+
+     They used to be worked out from the moderation queue, which holds
+     only accounts nobody has placed yet. So they disappeared at exactly
+     the moment they became usable: place the three Dawson accounts and
+     the Dawson suggestion vanishes with them, leaving a Groups tab
+     reading zero and no way to make one.
+
+     A group is a relationship between customers, so it is asked of the
+     customers, and the queue has nothing to do with it. */
+  const [accounts, setAccounts] = useState<BoundAccount[]>([]);
+  const [inGroup, setInGroup] = useState<Record<string, string | null>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    const [accs, contacts] = await Promise.all([
+      supabase.from('protean_accounts').select('alpha, protean_name, contact_id, ignored'),
+      supabase.from('crm_contacts').select('id, group_id'),
+    ]);
+    setAccounts(((accs.data ?? []) as BoundAccount[]).filter((a) => !a.ignored));
+    const map: Record<string, string | null> = {};
+    for (const c of (contacts.data ?? []) as { id: string; group_id: string | null }[]) {
+      map[c.id] = c.group_id;
+    }
+    setInGroup(map);
+  }, [supabase]);
+
+  useEffect(() => { void loadAccounts(); }, [loadAccounts]);
+
+  const suggestions = useMemo(
+    () => groupsToOffer(
+      accounts.map((a) => ({ account: a.alpha, name: a.protean_name, contactId: a.contact_id })),
+      (id) => inGroup[id] ?? null,
+    ),
+    [accounts, inGroup],
+  );
+
+  const accept = useCallback(async (name: string, contacts: string[]) => {
+    setBusy(name);
+    try {
+      const group = await nameGroup(supabase, name);
+      for (const id of contacts) await putInGroup(supabase, id, group);
+      say({ tone: 'success', title: `${name} is a group of ${contacts.length}.` });
+      await loadAccounts();
+      onChanged();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setBusy(null); }
+  }, [supabase, say, loadAccounts, onChanged]);
 
   const expand = useCallback(async (id: string) => {
     if (openGroup === id) { setOpenGroup(null); return; }
@@ -287,16 +366,7 @@ function Groups({ rows }: { rows: GroupRevenue[] }) {
     }
   }, [openGroup, lines, supabase]);
 
-  if (!rows.length) {
-    return (
-      <EmptyState
-        what="No groups yet"
-        why="A group totals several customers together without merging them, so Montgomery Transport, Distribution and Tank Services can be read as one number and as three. Suggestions appear under Accounts."
-      />
-    );
-  }
-
-  return (
+  const table = rows.length > 0 ? (
     <Card padded={false}>
       <Head cells={['Group', 'This year', 'Same point last year', 'Change', 'Open', '']} />
       {rows.map((g) => (
@@ -351,6 +421,59 @@ function Groups({ rows }: { rows: GroupRevenue[] }) {
         </div>
       ))}
     </Card>
+  ) : (
+    <EmptyState
+      what="No groups yet"
+      why="A group totals several customers together without merging them, so Montgomery Transport, Distribution and Tank Services read as one number and as three."
+    />
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {table}
+
+      {suggestions.length > 0 && (
+        <Card>
+          <SectionHead
+            title="These might be one group"
+            hint="Customers whose names start the same way. Read each one before accepting it."
+          />
+          <Alert tone="warning">
+            A shared first word is a reason to look, not a reason to group. Fleet Assist and
+            Fleet Operations are unrelated companies.
+          </Alert>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            {suggestions.map((g) => (
+              <div key={g.name} style={{
+                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 10,
+              }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <div style={{
+                    fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14,
+                    color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    {g.name}
+                    <Badge tone="neutral">{g.contacts.length} customers</Badge>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 5 }}>
+                    {g.members.map((m) => m.name).join(', ')}
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!!busy}
+                  onClick={() => void accept(g.name, g.contacts)}
+                >
+                  Make this a group
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -360,17 +483,6 @@ function Groups({ rows }: { rows: GroupRevenue[] }) {
    Oldest first because the question this screen answers is which job
    has been sitting there longest, not which arrived most recently.
    ------------------------------------------------------------- */
-type OpenJob = {
-  job_no: string;
-  protean_name: string;
-  job_type: string | null;
-  status: string | null;
-  depot: string | null;
-  logged_on: string | null;
-  job_total: number | null;
-  alpha: string | null;
-};
-
 function OpenWork({ rows, loading }: { rows: OpenJob[]; loading: boolean }) {
   if (loading) return <Card><Quiet>Reading the workshop.</Quiet></Card>;
   if (!rows.length) {

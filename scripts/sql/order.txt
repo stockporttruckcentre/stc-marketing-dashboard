@@ -89,3 +89,5 @@
 078_before_closing_the_workshop
 079_spend_on_the_record
 080_revenue_on_analytics
+081_jobs_find_their_account
+082_the_year_runs_april_to_april

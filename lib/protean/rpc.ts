@@ -25,6 +25,8 @@ export type YearOnYear = {
   open_jobs: number;
   open_value: number;
   last_billed: string | null;
+  /** The day the current financial year began. */
+  fy_started: string;
 };
 
 export type GroupRevenue = {
@@ -52,6 +54,70 @@ export type GroupLine = {
   open_value: number;
   last_billed: string | null;
 };
+
+export type CompanyRevenue = {
+  this_year: number;
+  last_year: number;
+  change: number;
+  fy_started: string;
+  invoices: number;
+  customers: number;
+  unattributed: number;
+  set_aside: number;
+  open_jobs: number;
+  open_value: number;
+  last_billed: string | null;
+};
+
+export async function companyRevenue(db: Db, upto?: string): Promise<CompanyRevenue | null> {
+  const { data, error } = await db.rpc('protean_company', { p_upto: upto ?? null });
+  if (error) throw new Error(error.message);
+  return rows<CompanyRevenue>(data)[0] ?? null;
+}
+
+export type OpenJob = {
+  job_no: string;
+  protean_name: string;
+  job_type: string | null;
+  status: string | null;
+  depot: string | null;
+  logged_on: string | null;
+  job_total: number | null;
+  alpha: string | null;
+};
+
+/**
+ * Every open job, not the first thousand of them.
+ *
+ * PostgREST caps a response at a thousand rows whatever `.limit()` asks
+ * for, and it does so silently: the request succeeds and comes back
+ * short. With 1,009 jobs open the screen showed a thousand, and the
+ * total it worked out from them was the value of a thousand presented
+ * as the value of all of them.
+ *
+ * So it is paged. The loop stops on a short page, which is the only
+ * honest end condition when the server decides the page size.
+ */
+export async function everyOpenJob(db: Db): Promise<OpenJob[]> {
+  const PAGE = 1000;
+  const out: OpenJob[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from('protean_open_jobs')
+      .select('job_no, protean_name, job_type, status, depot, logged_on, job_total, alpha')
+      .eq('still_open', true)
+      .order('logged_on', { ascending: true })
+      .order('job_no', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const page = (data ?? []) as OpenJob[];
+    out.push(...page);
+    if (page.length < PAGE) return out;
+    /* A workshop does not have a hundred thousand jobs open. If this
+       ever trips, something is wrong with the query, not the yard. */
+    if (out.length > 100_000) return out;
+  }
+}
 
 export type Waiting = {
   alpha: string;
@@ -111,7 +177,7 @@ export type CustomerSpend = {
   this_year: number;
   last_year: number;
   change: number;
-  financial_year: number;
+  /** The day the current financial year began, for labelling. */
   fy_started: string;
   lifetime: number;
   invoices: number;
@@ -285,6 +351,29 @@ export async function wouldClose(db: Db, importId: string): Promise<WouldClose> 
   return (rows<WouldClose>(data)[0]) ?? {
     would_close: 0, open_now: 0, in_this_file: 0, biggest_job: null, biggest_value: 0,
   };
+}
+
+/**
+ * Give every unlinked open job its account, by name.
+ *
+ * The open jobs export carries no account code, so a job is matched to
+ * the account the invoice file created. Run after every import, because
+ * it only ever fills a blank and so repairs an earlier import made in
+ * the wrong order at no cost.
+ */
+export async function relinkJobs(db: Db): Promise<number> {
+  const { data, error } = await db.rpc('protean_relink_jobs');
+  if (error) throw new Error(error.message);
+  return (data as number) ?? 0;
+}
+
+export type OrphanJobs = { protean_name: string; jobs: number; value: number };
+
+/** Companies with open work and no invoice, so no account. */
+export async function jobsWithoutAccount(db: Db): Promise<OrphanJobs[]> {
+  const { data, error } = await db.rpc('protean_jobs_without_account');
+  if (error) throw new Error(error.message);
+  return rows<OrphanJobs>(data);
 }
 
 export async function closeWhatWentAway(db: Db, importId: string): Promise<number> {
