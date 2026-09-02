@@ -414,19 +414,20 @@ BEGIN
 END $$;
 
 -- -------------------------------------------------------------
--- 11. The customer record's own figures.
+-- 11. The customer record's own figures, on the company's year.
 --
 --   ensure this updates CRM records too with an open jobs section,
 --   revnue last year vs this year, jobs invoiced total this financial
 --   year etc.
 --
--- The financial year is the part worth asserting hardest. It is a
--- setting rather than a guess, and the arithmetic that is easy to get
--- one out is which year a date in February belongs to when the year
--- starts in April.
+-- And then, asked directly:  "default april to april always"
+--
+-- So there is ONE year, from the one setting, and "this year" means it
+-- everywhere. The arithmetic that is easy to get one out is which year
+-- a date in February belongs to when the year starts in April.
 -- -------------------------------------------------------------
 DO $$
-DECLARE made UUID; r RECORD;
+DECLARE r RECORD;
 BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
 
@@ -439,10 +440,10 @@ BEGIN
   ON CONFLICT (alpha) DO NOTHING;
 
   INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
-    ('R1', 'RECTEST', '2026-05-01', 1000),   -- this calendar year, and in a year that began in April
-    ('R2', 'RECTEST', '2026-02-01',  400),   -- this calendar year, PREVIOUS financial year if April
-    ('R3', 'RECTEST', '2025-02-01',  700),   -- last year, before the cut
-    ('R4', 'RECTEST', '2025-11-01',  900)    -- last year, AFTER the cut
+    ('R1', 'RECTEST', '2026-05-01', 1000),   -- this April year
+    ('R2', 'RECTEST', '2026-02-01',  400),   -- calendar 2026, PREVIOUS April year
+    ('R3', 'RECTEST', '2025-05-01',  700),   -- last April year, before the cut
+    ('R4', 'RECTEST', '2025-11-01',  900)    -- last April year, AFTER the cut
   ON CONFLICT (invoice_no) DO NOTHING;
 
   INSERT INTO protean_open_jobs (job_no, protean_name, alpha, job_total, logged_on, still_open)
@@ -450,18 +451,23 @@ BEGIN
          ('RJ2', 'Record Test Ltd', 'RECTEST', 150, '2026-06-02', TRUE)
   ON CONFLICT (job_no) DO NOTHING;
 
-  /* Read at 1 June 2026. */
+  /* Read at 1 June 2026. The year began 1 April 2026. */
   SELECT * INTO r FROM protean_customer('81000000-0000-0000-0000-000000000001', '2026-06-01');
 
-  IF r.this_year <> 1400 THEN
-    RAISE EXCEPTION 'this year reads %, not 1400', r.this_year;
+  IF r.fy_started <> '2026-04-01' THEN
+    RAISE EXCEPTION 'the year began %, not 1 April 2026', r.fy_started;
   END IF;
-  /* Only R3. R4 is November, which is after 1 June and so is NOT the
-     same point last year. This is the whole reason for the cut. */
+  /* R1 only. R2 is February and belongs to the year before, which is
+     the whole difference between an April year and a calendar one. */
+  IF r.this_year <> 1000 THEN
+    RAISE EXCEPTION 'this year reads %, not 1000. February is not in it', r.this_year;
+  END IF;
+  /* R3 only. R4 is November, after 1 June, so it is not the same point
+     last year. */
   IF r.last_year <> 700 THEN
     RAISE EXCEPTION 'the same point last year reads %, not 700', r.last_year;
   END IF;
-  IF r.change <> 700 THEN RAISE EXCEPTION 'the change reads %, not 700', r.change; END IF;
+  IF r.change <> 300 THEN RAISE EXCEPTION 'the change reads %, not 300', r.change; END IF;
   IF r.lifetime <> 3000 THEN RAISE EXCEPTION 'lifetime reads %, not 3000', r.lifetime; END IF;
   IF r.invoices <> 4 THEN RAISE EXCEPTION 'it counts % invoices, not 4', r.invoices; END IF;
   IF r.open_jobs <> 2 OR r.open_value <> 400 THEN
@@ -470,33 +476,28 @@ BEGIN
   IF r.oldest_open <> '2026-04-02' THEN
     RAISE EXCEPTION 'the oldest open job is %, not 2 April', r.oldest_open;
   END IF;
-
-  /* January by default, so the financial year and the calendar year
-     agree and nobody is shown a second unchecked figure. */
-  IF r.fy_started <> '2026-01-01' THEN
-    RAISE EXCEPTION 'unset, the financial year starts %, not 1 January', r.fy_started;
-  END IF;
-  IF r.financial_year <> r.this_year THEN
-    RAISE EXCEPTION 'unset, the financial year should equal the calendar year: % against %',
-      r.financial_year, r.this_year;
-  END IF;
-  RAISE NOTICE 'ok  a record shows this year, the same point last year, lifetime and open work';
+  RAISE NOTICE 'ok  a record shows the April year, the same point last April year, lifetime and open work';
 END $$;
 
 -- -------------------------------------------------------------
--- 11b. And with the year set to April, which is the answer most
---      companies would give.
+-- 11b. The year is a setting, and every screen reads the same one.
+--
+-- The one that is easy to get one out is February: on an April year, a
+-- date in February 2027 belongs to the year that began in April 2026.
 -- -------------------------------------------------------------
 DO $$
-DECLARE r RECORD;
+DECLARE m SMALLINT; r RECORD; c RECORD; y RECORD;
 BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
-  UPDATE tenant_settings SET financial_year_start_month = 4;
+
+  SELECT financial_year_start_month INTO m FROM tenant_settings LIMIT 1;
+  IF m <> 4 THEN
+    RAISE EXCEPTION 'the year starts in month %, and the business said April', m;
+  END IF;
 
   IF financial_year_of('2026-06-01') <> '2026-04-01' THEN
     RAISE EXCEPTION 'June 2026 sits in the year beginning %', financial_year_of('2026-06-01');
   END IF;
-  /* The one that is easy to get one out. */
   IF financial_year_of('2027-02-01') <> '2026-04-01' THEN
     RAISE EXCEPTION 'February 2027 sits in the year beginning %, not April 2026',
       financial_year_of('2027-02-01');
@@ -506,22 +507,34 @@ BEGIN
       financial_year_of('2026-03-31');
   END IF;
 
+  /* Every screen, one year. Two figures for one question is how a
+     meeting ends up arguing about which is the real one. */
   SELECT * INTO r FROM protean_customer('81000000-0000-0000-0000-000000000001', '2026-06-01');
-  IF r.fy_started <> '2026-04-01' THEN
-    RAISE EXCEPTION 'the financial year starts %, not 1 April', r.fy_started;
+  SELECT * INTO c FROM protean_company('2026-06-01');
+  SELECT * INTO y FROM protean_year_on_year('2026-06-01')
+   WHERE contact_id = '81000000-0000-0000-0000-000000000001';
+
+  IF r.fy_started <> c.fy_started OR r.fy_started <> y.fy_started THEN
+    RAISE EXCEPTION 'the record, the company and the table disagree about when the year began: %, %, %',
+      r.fy_started, c.fy_started, y.fy_started;
   END IF;
-  /* R1 only. R2 is February and belongs to the year before. The
-     calendar figure still says 1400, and the two being different is
-     the entire point of asking for the financial year separately. */
-  IF r.financial_year <> 1000 THEN
-    RAISE EXCEPTION 'the financial year to date reads %, not 1000', r.financial_year;
-  END IF;
-  IF r.this_year <> 1400 THEN
-    RAISE EXCEPTION 'setting the financial year moved the calendar year to %', r.this_year;
+  IF y.this_year <> r.this_year OR y.last_year <> r.last_year THEN
+    RAISE EXCEPTION 'the customer table says % against the record''s %', y.this_year, r.this_year;
   END IF;
 
+  /* Changing the setting moves them together. */
   UPDATE tenant_settings SET financial_year_start_month = 1;
-  RAISE NOTICE 'ok  the financial year is a setting, and February belongs to the year before it';
+  SELECT * INTO r FROM protean_customer('81000000-0000-0000-0000-000000000001', '2026-06-01');
+  IF r.fy_started <> '2026-01-01' THEN
+    RAISE EXCEPTION 'set to January, the year began %', r.fy_started;
+  END IF;
+  /* Now February IS in it, so the same customer reads 1400. */
+  IF r.this_year <> 1400 THEN
+    RAISE EXCEPTION 'on a calendar year the same customer reads %, not 1400', r.this_year;
+  END IF;
+  UPDATE tenant_settings SET financial_year_start_month = 4;
+
+  RAISE NOTICE 'ok  one year, from one setting, and every screen reads the same one';
 END $$;
 
 -- -------------------------------------------------------------
@@ -568,9 +581,12 @@ BEGIN
   VALUES ('CASHSALE', 'Cash Sale', TRUE, 'not a customer')
   ON CONFLICT (alpha) DO UPDATE SET ignored = TRUE;
 
+  /* Inside the April year that is running at 1 June 2026. March would
+     be the year before, which is the difference this whole migration is
+     about. */
   INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
-    ('C1', 'NOBODY',   '2026-03-01', 5000),
-    ('C2', 'CASHSALE', '2026-03-01', 3000)
+    ('C1', 'NOBODY',   '2026-05-01', 5000),
+    ('C2', 'CASHSALE', '2026-05-01', 3000)
   ON CONFLICT (invoice_no) DO NOTHING;
 
   SELECT * INTO r FROM protean_company('2026-06-01');
@@ -584,14 +600,17 @@ BEGIN
      against a number counted by hand. Earlier sections of this file
      leave their own unplaced accounts behind, and a hand counted
      figure would break every time somebody adds a fixture above. */
+  /* The window comes from the setting, not from a month typed here.
+     A check with the year hardcoded would keep passing after somebody
+     changed the company's year and stop meaning anything. */
   SELECT COALESCE(SUM(i.net), 0) INTO expect_unplaced
     FROM protean_invoices i JOIN protean_accounts a ON a.alpha = i.alpha
    WHERE a.contact_id IS NULL AND NOT a.ignored
-     AND i.tax_point BETWEEN '2026-01-01' AND '2026-06-01';
+     AND i.tax_point BETWEEN financial_year_of('2026-06-01') AND '2026-06-01';
   SELECT COALESCE(SUM(i.net), 0) INTO expect_aside
     FROM protean_invoices i JOIN protean_accounts a ON a.alpha = i.alpha
    WHERE a.ignored
-     AND i.tax_point BETWEEN '2026-01-01' AND '2026-06-01';
+     AND i.tax_point BETWEEN financial_year_of('2026-06-01') AND '2026-06-01';
 
   IF r.unattributed <> expect_unplaced THEN
     RAISE EXCEPTION 'it says % is on nobody''s record, and directly it is %',
@@ -651,6 +670,77 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'ok  every month in the window comes back, including the ones with nothing in them';
+END $$;
+
+-- -------------------------------------------------------------
+-- 13. THE ORDER THE FILES ARRIVE IN MUST NOT MATTER.
+--
+-- The open jobs export carries no account code, only a customer name,
+-- and the accounts it matches against are created by the INVOICE file.
+-- Sent the other way round there is nothing to match, so every job
+-- landed with no account and the screen said "No account" on all
+-- thousand of them. Nothing was lost and nothing said what happened.
+--
+-- The screen now sends invoices first. This asserts the deeper fix:
+-- linking is a pass that can be run again, so a job whose customer is
+-- first invoiced next month stops being orphaned then rather than
+-- staying orphaned forever.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; linked INTEGER; orphan TEXT; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+
+  /* Jobs FIRST, for a company nobody has ever invoiced. */
+  i := protean_start_import('open_jobs', 'jobs before invoices.csv');
+  PERFORM protean_take_open_jobs(i, '[
+    {"job_no":"O1","protean_name":"Backwards Haulage Ltd","job_total":"500"},
+    {"job_no":"O2","protean_name":"Backwards Haulage Ltd","job_total":"250"}
+  ]'::JSONB);
+
+  SELECT alpha INTO orphan FROM protean_open_jobs WHERE job_no = 'O1';
+  IF orphan IS NOT NULL THEN
+    RAISE EXCEPTION 'a job matched an account that did not exist yet';
+  END IF;
+
+  /* Now the invoice file arrives and creates the account. */
+  i := protean_start_import('invoices', 'invoices after jobs.csv');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"B1","alpha":"BACKW","protean_name":"Backwards Haulage Ltd",
+     "tax_point":"2026-05-01","net":"1200"}
+  ]'::JSONB);
+
+  linked := protean_relink_jobs();
+  IF linked < 2 THEN
+    RAISE EXCEPTION 'relinking found % jobs, not the 2 that were waiting', linked;
+  END IF;
+
+  SELECT alpha INTO orphan FROM protean_open_jobs WHERE job_no = 'O1';
+  IF orphan <> 'BACKW' THEN
+    RAISE EXCEPTION 'after relinking, O1 points at %, not BACKW', COALESCE(orphan, 'nobody');
+  END IF;
+
+  /* Running it again finds nothing, and moves nothing. */
+  IF protean_relink_jobs() <> 0 THEN
+    RAISE EXCEPTION 'relinking a second time changed something';
+  END IF;
+
+  /* And a job for a company we have genuinely never billed stays
+     unlinked and is reportable, which is a real answer rather than a
+     fault: accounts come from the invoice file. */
+  i := protean_start_import('open_jobs', 'a stranger again.csv');
+  PERFORM protean_take_open_jobs(i, '[
+    {"job_no":"O9","protean_name":"Never Invoiced Anybody Ltd","job_total":"75"}
+  ]'::JSONB);
+  PERFORM protean_relink_jobs();
+
+  SELECT count(*) INTO n FROM protean_jobs_without_account()
+   WHERE protean_name = 'Never Invoiced Anybody Ltd';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'a job we cannot place is not reported, it is just null';
+  END IF;
+
+  RAISE NOTICE 'ok  jobs find their account whichever file lands first, and one that cannot is named';
 END $$;
 
 ROLLBACK;

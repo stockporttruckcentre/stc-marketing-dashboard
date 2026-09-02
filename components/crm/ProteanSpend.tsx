@@ -26,18 +26,17 @@ import {
    question with a second number, the way `CustomerValue` already does.
    It is not mounted there yet.
 
-   ---- Four figures, and what each is for ----
+   ---- Three figures, and what each is for ----
 
-   This year against the same point last year is the one somebody acts
-   on, so it is the one with the arrow. It is cut like for like: this
-   year is only complete to today, so measured against a whole previous
-   year every customer in the book reads as a collapse.
+   The company's year runs April to April, set once in tenant_settings,
+   and "this year" means that year everywhere. It is labelled with the
+   month it began rather than with the word "financial", so nobody has
+   to know the setting to read the number.
 
-   The financial year is separate because it is a different question
-   with a different answer, and on an April year end in February the two
-   figures are genuinely different. It is labelled with the month it
-   started rather than the word "financial", so nobody has to remember
-   the setting to read the number.
+   Against the same point last year is the comparison somebody acts on,
+   so it is the one with the arrow. Cut like for like: this year is only
+   complete to today, and against a whole previous year every customer
+   in the book reads as a collapse.
 
    Lifetime is there because a customer of fifteen years and a customer
    of eight months read completely differently at the same annual spend.
@@ -117,13 +116,6 @@ export function ProteanSpend({ contactId, dense }: { contactId: string; dense?: 
     })
     : null;
 
-  /* A financial year that starts in January is the calendar year, and
-     showing the same number twice invites somebody to look for the
-     difference. Shown only once it is genuinely a different period. */
-  const fyIsItsOwnFigure = spend.fy_started
-    ? !spend.fy_started.endsWith('-01-01')
-    : false;
-
   const daysOpen = (d: string | null) => {
     if (!d) return null;
     return Math.round((Date.now() - new Date(`${d}T00:00:00`).getTime()) / 86_400_000);
@@ -144,15 +136,12 @@ export function ProteanSpend({ contactId, dense }: { contactId: string; dense?: 
         display: 'grid', gap: dense ? 10 : 12, marginBottom: 14,
         gridTemplateColumns: `repeat(auto-fit, minmax(${dense ? 130 : 150}px, 1fr))`,
       }}>
-        <Figure label="Invoiced this year" value={money(spend.this_year)} />
+        <Figure
+          label={fyMonth ? `Invoiced since ${fyMonth}` : 'Invoiced this year'}
+          value={money(spend.this_year)}
+        />
         <Figure label="Same point last year" value={money(spend.last_year)} quiet />
         <Change from={Number(spend.last_year || 0)} to={Number(spend.this_year || 0)} />
-        {fyIsItsOwnFigure && (
-          <Figure
-            label={`Year from ${fyMonth}`}
-            value={money(spend.financial_year)}
-          />
-        )}
         <Figure
           label="All time"
           value={money(spend.lifetime)}

@@ -286,6 +286,67 @@ export function suggestGroups(
 }
 
 /* -------------------------------------------------------------
+   Which groups to actually offer.
+
+   ---- The bug this exists because of ----
+
+   The suggestions were first worked out from the moderation queue,
+   which holds only the accounts nobody has placed yet. So they vanished
+   at exactly the moment they became usable: place the three Dawson
+   accounts and the Dawson suggestion disappears with them, leaving a
+   Groups tab reading zero and no route to making one.
+
+   Same shape as the import screen being unreachable until something had
+   been imported. A thing offered only in the state where it cannot be
+   used is a thing that is never offered.
+
+   So it is asked of every placed account, and written here where a
+   check can sweep it rather than inside a component.
+   ------------------------------------------------------------- */
+
+export type PlacedAccount = {
+  account: string;
+  name: string;
+  /** The CRM customer it is bound to. Null means still unplaced. */
+  contactId: string | null;
+};
+
+export type OfferedGroup = GroupSuggestion & { contacts: string[] };
+
+/**
+ * Groups worth offering, given who is already in one.
+ *
+ * Two rules beyond the name matching:
+ *
+ *   A suggestion needs at least two DIFFERENT customers. Two Protean
+ *   accounts on one customer are already one thing, and grouping a
+ *   customer with itself is a group of one wearing a badge saying two.
+ *
+ *   A set already wholly inside one group is not a suggestion, it is
+ *   that group. Offering it again reads as a second Montgomery.
+ */
+export function groupsToOffer(
+  accounts: PlacedAccount[],
+  groupOf: (contactId: string) => string | null,
+): OfferedGroup[] {
+  const placed = accounts.filter((a) => a.contactId);
+  const byAccount = new Map(placed.map((a) => [a.account, a]));
+
+  return suggestGroups(placed.map((a) => ({ account: a.account, name: a.name })))
+    .map((g) => ({
+      ...g,
+      contacts: [...new Set(g.members
+        .map((m) => byAccount.get(m.account)?.contactId)
+        .filter((id): id is string => !!id))],
+    }))
+    .filter((g) => g.contacts.length > 1)
+    .filter((g) => {
+      const groups = new Set(g.contacts.map((id) => groupOf(id)));
+      return !(groups.size === 1 && !groups.has(null));
+    });
+}
+
+/* -------------------------------------------------------------
    Reading Protean's own formats.
 
    Both exports are Windows-1252, so the pound sign arrives as a byte

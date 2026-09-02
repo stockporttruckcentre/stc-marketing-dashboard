@@ -19,7 +19,8 @@
    npm run check:protean
    ============================================================= */
 import {
-  decide, review, brand, words, suggestGroups, proteanDate, proteanMoney,
+  decide, review, brand, words, suggestGroups, groupsToOffer,
+  proteanDate, proteanMoney,
 } from '../lib/protean/customers';
 
 let pass = 0, fail = 0;
@@ -203,6 +204,62 @@ const named = (v: ReturnType<typeof decide>) =>
   ]);
   ok('an initial is not a brand, so no group is offered on one',
     initials.length === 0, JSON.stringify(initials.map((g) => g.name)));
+}
+
+/* -------------------------------------------------------------
+   1d. Which groups are actually OFFERED.
+
+   The suggestions were first worked out from the moderation queue,
+   which holds only accounts nobody has placed yet. So they disappeared
+   at exactly the moment they became usable: place the three Dawson
+   accounts and the Dawson suggestion goes with them, leaving a Groups
+   tab reading zero and no route to making one.
+
+   Same shape as the import screen being unreachable until something had
+   been imported. A thing offered only in the state where it cannot be
+   used is a thing that is never offered, so the first assertion here is
+   that bug.
+   ------------------------------------------------------------- */
+{
+  const dawsons = [
+    { account: 'DAWTRUCK', name: 'Dawson Group Truck & Trailer Ltd', contactId: 'c1' },
+    { account: 'DAWRENT', name: 'Dawson Rentals Vans Ltd', contactId: 'c2' },
+    { account: 'DAWVANS', name: 'Dawson Vans', contactId: 'c3' },
+  ];
+  const ungrouped = () => null;
+
+  const offered = groupsToOffer(dawsons, ungrouped);
+  ok('THE BUG: three placed Dawson accounts are still offered as a group',
+    offered.length === 1 && offered[0]!.contacts.length === 3,
+    JSON.stringify(offered.map((g) => `${g.name}:${g.contacts.length}`)));
+
+  /* Nothing placed, nothing to group. A group is a relationship between
+     customers, and an account with no customer is not one yet. */
+  ok('accounts nobody has placed are not offered as a group',
+    groupsToOffer(dawsons.map((d) => ({ ...d, contactId: null })), ungrouped).length === 0);
+
+  /* Two Protean accounts on ONE customer are already one thing.
+     Grouping a customer with itself is a group of one wearing a badge
+     that says two. */
+  const twoAlphasOneCustomer = [
+    { account: 'ARIFLEET', name: 'Holman Fleet Limited', contactId: 'h' },
+    { account: 'ARIVMS', name: 'Holman Fleet Limited (VMS)', contactId: 'h' },
+  ];
+  ok('two accounts on one customer are not offered as a group of two',
+    groupsToOffer(twoAlphasOneCustomer, ungrouped).length === 0,
+    JSON.stringify(groupsToOffer(twoAlphasOneCustomer, ungrouped)));
+
+  /* Once accepted it must stop being offered, or the tab reads as a
+     second Montgomery waiting to be made. */
+  ok('a group already formed is not offered again',
+    groupsToOffer(dawsons, () => 'g1').length === 0);
+
+  /* But a fourth Dawson arriving outside it IS worth offering, because
+     the group is now incomplete. */
+  const withANewcomer = [...dawsons,
+    { account: 'DAWFIN', name: 'Dawson Finance Ltd', contactId: 'c4' }];
+  ok('a newcomer outside an existing group is offered',
+    groupsToOffer(withANewcomer, (id) => (id === 'c4' ? null : 'g1')).length === 1);
 }
 
 /* -------------------------------------------------------------

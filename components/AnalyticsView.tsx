@@ -146,7 +146,7 @@ function canonicalRep(raw: string | null | undefined, idx: ReturnType<typeof bui
 export type ProteanFigures = {
   company: {
     this_year: number; last_year: number; change: number;
-    financial_year: number; fy_started: string;
+    fy_started: string;
     invoices: number; customers: number;
     unattributed: number; set_aside: number;
     open_jobs: number; open_value: number; last_billed: string | null;
@@ -232,6 +232,16 @@ export function AnalyticsView({
     () => workshopMonths.slice(-12).map((m) => m.net),
     [workshopMonths],
   );
+
+  /* The company's year is a setting, April to April, and this screen
+     reads the same one as the customer record. Two definitions of "this
+     year" on two screens is how a meeting ends up arguing about which
+     figure is the real one. The label names the period so nobody has to
+     know the setting to read the number. */
+  const fyStarted = workshop?.fy_started ?? null;
+  const fyLabel = fyStarted
+    ? new Date(`${fyStarted}T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    : null;
 
   /* The customers behind the figure, biggest first, with the ones who
      have fallen away marked. "If I haven't seen anything since last
@@ -461,7 +471,7 @@ export function AnalyticsView({
             <Kpi className="an-kpi--accent an-kpi--rev" label="Workshop invoiced" accent={CYAN}
                  value={fmtMoneyCompact(Number(workshop.this_year || 0))}
                  delta={deltaPct(Number(workshop.this_year || 0), Number(workshop.last_year || 0))}
-                 sub="vs the same point last year"
+                 sub={fyLabel ? `Since ${fyLabel}, vs the same point last year` : 'vs the same point last year'}
                  spark={workshopSpark} accentColor={CYAN} />
             <Kpi className="an-kpi--accent an-kpi--pipe" label="Open on the system" accent={WARN}
                  value={fmtMoneyCompact(Number(workshop.open_value || 0))}

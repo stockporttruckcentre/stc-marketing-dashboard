@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Plus, CircleSlash, Loader, Search, Users, AlertTriangle, Link2,
+  Check, Plus, CircleSlash, Loader, Search, Link2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -10,9 +10,9 @@ import {
 } from '@/components/kit/primitives';
 import { Field, Modal, TextInput } from '@/components/kit/forms';
 import { useToast } from '@/components/kit/toast';
-import { decide, suggestGroups, type Verdict, type CrmCustomer } from '@/lib/protean/customers';
+import { decide, type Verdict, type CrmCustomer } from '@/lib/protean/customers';
 import {
-  waitingOnUs, bindAccount, makeCustomer, setAside, nameGroup, putInGroup,
+  waitingOnUs, bindAccount, makeCustomer, setAside,
   type Waiting,
 } from '@/lib/protean/rpc';
 
@@ -94,11 +94,6 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
   const similar = decisions.filter((d) => d.verdict.kind === 'confirm');
   const strangers = decisions.filter((d) => d.verdict.kind === 'create');
 
-  const groups = useMemo(
-    () => suggestGroups(waiting.map((w) => ({ account: w.alpha, name: w.protean_name }))),
-    [waiting],
-  );
-
   const after = useCallback(async () => { await load(); onChanged(); }, [load, onChanged]);
 
   const bind = useCallback(async (alpha: string, contact: string, name: string) => {
@@ -136,29 +131,6 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
       say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
     } finally { setBusy(null); }
   }, [exact, supabase, say, after]);
-
-  const acceptGroup = useCallback(async (name: string, alphas: string[]) => {
-    setBusy(`group:${name}`);
-    try {
-      const group = await nameGroup(supabase, name);
-      /* Only the members that are already a customer can join. An
-         account still waiting has no record to put anywhere yet, and
-         saying so is better than half doing it. */
-      const bound = await supabase
-        .from('protean_accounts')
-        .select('alpha, contact_id')
-        .in('alpha', alphas)
-        .not('contact_id', 'is', null);
-      const rows = (bound.data ?? []) as { alpha: string; contact_id: string }[];
-      for (const r of rows) await putInGroup(supabase, r.contact_id, group);
-      say({ tone: 'success', title: rows.length
-        ? `${name} is a group of ${rows.length}.`
-        : `${name} is a group. Its members join it once they are customers.` });
-      await after();
-    } catch (e) {
-      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
-    } finally { setBusy(null); }
-  }, [supabase, say, after]);
 
   if (loading) {
     return <Card><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the queue.</span></Card>;
@@ -288,48 +260,12 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
         </Card>
       )}
 
-      {groups.length > 0 && (
-        <Card>
-          <SectionHead
-            title="These might be one group"
-            hint="Same name at the front. A group totals them together and still shows each on its own."
-          />
-          <Alert tone="warning">
-            <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>
-              A shared first word is a reason to look, not a reason to group. Fleet Assist and
-              Fleet Operations are unrelated companies. Read each one before accepting it.
-            </span>
-          </Alert>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-            {groups.map((g) => (
-              <div key={g.name} style={{
-                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-                border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 10,
-              }}>
-                <div style={{ flex: 1, minWidth: 240 }}>
-                  <div style={{
-                    fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14, color: 'var(--text)',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}>
-                    <Users size={14} style={{ color: 'var(--text-subtle)' }} />
-                    {g.name}
-                    <Badge tone="neutral">{g.members.length}</Badge>
-                  </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 5 }}>
-                    {g.members.map((m) => m.name).join(', ')}
-                  </div>
-                </div>
-                <Button variant="secondary" size="sm" disabled={!!busy}
-                  onClick={() => void acceptGroup(g.name, g.members.map((m) => m.account))}>
-                  {busy === `group:${g.name}` ? <Loader size={13} className="spin" /> : <Users size={13} />}
-                  Make this a group
-                </Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+      {/* Group suggestions used to sit here and were worked out from
+          this queue, which holds only the accounts nobody has placed.
+          So they vanished at the moment they became usable: place the
+          three Dawson accounts and the Dawson suggestion went with
+          them. They live on the Groups tab now, asked of every customer
+          rather than of whoever is still waiting. */}
 
       {picking && (
         <PickCustomer
