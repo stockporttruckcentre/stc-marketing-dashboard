@@ -42,7 +42,7 @@ export PGHOST=/var/tmp/pgtest
 
 STOP_AT=073_the_permission_hub
 # Every "Migration" cell that must say NO on the database that stops there.
-MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089"
+MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090"
 
 FAILED=0
 say() { printf '  %-6s %s\n' "$1" "$2"; }
@@ -112,7 +112,7 @@ for m in $MISSING; do
     FAILED=1
   fi
 done
-[ "$FAILED" = 0 ] && say ok "all 16 missing migrations say NO, 074 among them"
+[ "$FAILED" = 0 ] && say ok "every missing migration says NO, 074 among them"
 
 # And the other direction: nothing already applied is reported missing.
 WRONG=$(printf '%s\n' "$BEHIND" | grep '|NO$' | cut -d'|' -f1 \

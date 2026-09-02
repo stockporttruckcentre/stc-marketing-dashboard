@@ -62,7 +62,10 @@
     "check:export-window": "tsx scripts/export-window-check.ts",
     "check:divisions": "bash scripts/sql/divisions-check.sh",
     "check:rpc-errors": "tsx scripts/rpc-error-check.ts",
-    "check:whats-applied": "bash scripts/sql/whats-applied-check.sh"
+    "check:whats-applied": "bash scripts/sql/whats-applied-check.sh",
+    "check:chart-colour": "tsx scripts/chart-colour-check.ts",
+    "check:finance": "bash scripts/sql/finance-check.sh",
+    "check:analytics-view": "tsx scripts/analytics-view-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

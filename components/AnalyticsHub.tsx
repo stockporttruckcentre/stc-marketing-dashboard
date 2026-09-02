@@ -2,17 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  TrendingUp, TrendingDown, Minus, ArrowRight, Wrench, Container, KeyRound,
+  TrendingUp, TrendingDown, Minus, ArrowRight, Wrench, Container, KeyRound, RotateCcw,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
-  Alert, Badge, Button, Card, EmptyState, Label, PageHead, SectionHead,
+  Alert, Badge, Button, Card, EmptyState, Label, PageHead, SectionHead, Tabs,
   compactMoney, money,
 } from '@/components/kit/primitives';
-import { useToast } from '@/components/kit/toast';
+import { TextInput } from '@/components/kit/forms';
 import { MonthlyBars, SplitBar, RankRow, type Point } from '@/components/analytics/chart';
+import {
+  Ageing, Customers, DealsTable, Funnel, MonthTable, PeopleTable, Reconcile,
+} from '@/components/analytics/sections';
 import { readable } from '@/lib/protean/rpc';
+import {
+  VIEWS, concentration, customerMovement, openWorkAgeing, pipelineByStage, reconciliation,
+  salesByPerson, trailerDeals, viewFrom,
+  type AnalyticsView,
+  type AgeBand, type Concentration, type Deal, type Mover, type Person,
+  type Reconciliation, type Stage,
+} from '@/lib/protean/finance';
 
 /* =============================================================
    The company, three divisions wide.
@@ -85,10 +96,13 @@ type TopCustomer = {
   placed: boolean;
 };
 
+/* Data colours, which are their own axis in the kit and not the action
+   colours. A division is the same colour in both themes; `--primary`
+   and `--accent` invert between them, because a button has to. */
 const HUE: Record<string, string> = {
-  stc: 'var(--info)',
-  trailer: 'var(--accent-2, #2F6F5E)',
-  rental: 'var(--warning)',
+  stc: 'var(--chart-stc)',
+  trailer: 'var(--chart-trailer)',
+  rental: 'var(--chart-rental)',
 };
 
 const ICON: Record<string, typeof Wrench> = {
@@ -104,9 +118,30 @@ const GOES_TO: Record<string, string> = {
   trailer: '/dashboard/sales',
 };
 
+/* The drill downs, in the order somebody works through them in a
+   meeting: the shape of the year, then the deals inside it, then the
+   people, then what is coming, then the customers, then the work that
+   is not billed yet, and last the sentence that makes all of it
+   defensible. */
+
+/** Everything the drill down tabs read, loaded once each and kept. */
+type Deep = {
+  deals: Deal[];
+  people: Person[];
+  stages: Stage[];
+  movers: Mover[];
+  conc: Concentration | null;
+  bands: AgeBand[];
+  recon: Reconciliation[];
+};
+
 export function AnalyticsHub() {
   const supabase = createClient();
-  const { say } = useToast();
+  /* `?view=deals` so the command bar can land on a section rather than
+     on the page it happens to sit behind. An action that navigates to
+     the right screen and the wrong tab has answered a different
+     question from the one somebody typed. */
+  const params = useSearchParams();
 
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [months, setMonths] = useState<MonthRow[]>([]);
@@ -115,13 +150,30 @@ export function AnalyticsHub() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
 
+  const [tab, setTab] = useState<AnalyticsView>(() => viewFrom(params.get('view')));
+  const [deep, setDeep] = useState<Deep | null>(null);
+  const [deepFailed, setDeepFailed] = useState<string | null>(null);
+
+  /* THE AS AT DATE.
+
+     A board pack is dated, and the figure quoted on Tuesday has to
+     still be the figure on Friday. Empty means today, which is what
+     somebody wants ninety nine times in a hundred, and the hundredth is
+     "read it as it stood at the end of the quarter" and now possible.
+
+     `asked` is what the box holds; `upto` is what goes to the database,
+     and only once it is a real date. A half typed 2026-0 must not send
+     a query. */
+  const [asked, setAsked] = useState('');
+  const upto = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : undefined;
+
   const load = useCallback(async () => {
     setLoading(true);
     setFailed(null);
     try {
       const [rev, mth, pipe] = await Promise.all([
-        supabase.rpc('division_revenue', { p_upto: null }),
-        supabase.rpc('division_by_month', { p_months: 24, p_upto: null }),
+        supabase.rpc('division_revenue', { p_upto: upto ?? null }),
+        supabase.rpc('division_by_month', { p_months: 24, p_upto: upto ?? null }),
         supabase.rpc('division_pipeline'),
       ]);
       /* Through the same translator as everything else, so a database
@@ -138,7 +190,7 @@ export function AnalyticsHub() {
 
       const lists = await Promise.all(rows.map(async (d) => {
         const { data } = await supabase.rpc('division_customers', {
-          p_division: d.division, p_upto: null, p_limit: 8,
+          p_division: d.division, p_upto: upto ?? null, p_limit: 8,
         });
         return [d.division, (data ?? []) as TopCustomer[]] as const;
       }));
@@ -151,9 +203,35 @@ export function AnalyticsHub() {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [supabase, upto]);
+
+  /* The seven drill down reads, in one go rather than one per tab.
+
+     Loading each tab as it is opened would be tidier and is wrong for
+     what this screen is for: somebody presenting does not want a pause
+     every time they click, and by the time the overview has painted
+     they have already decided which tab they are going to. So they all
+     arrive together, once, and clicking is instant afterwards. */
+  const loadDeep = useCallback(async () => {
+    setDeepFailed(null);
+    try {
+      const [deals, people, stages, movers, conc, bands, recon] = await Promise.all([
+        trailerDeals(supabase, upto, 500),
+        salesByPerson(supabase, upto),
+        pipelineByStage(supabase),
+        customerMovement(supabase, upto, 25),
+        concentration(supabase, null, upto),
+        openWorkAgeing(supabase, null, upto),
+        reconciliation(supabase, upto),
+      ]);
+      setDeep({ deals, people, stages, movers, conc, bands, recon });
+    } catch (e) {
+      setDeepFailed(e instanceof Error ? e.message : 'The detail would not load.');
+    }
+  }, [supabase, upto]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setDeep(null); void loadDeep(); }, [loadDeep]);
 
   const company = useMemo(() => ({
     thisYear: divisions.reduce((s, d) => s + Number(d.this_year || 0), 0),
@@ -212,13 +290,19 @@ export function AnalyticsHub() {
 
   return (
     <div className="kit" style={PAGE}>
-      <PageHead
-        eyebrow="Analytics"
-        title="The company"
-        sub={yearLabel
-          ? `The year from ${yearLabel}, against the same point in the year before it.`
-          : 'Every division, on the company year.'}
-      />
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+        gap: 20, flexWrap: 'wrap',
+      }}>
+        <PageHead
+          eyebrow="Analytics"
+          title="The company"
+          sub={yearLabel
+            ? `The year from ${yearLabel}, against the same point in the year before it.`
+            : 'Every division, on the company year.'}
+        />
+        <AsAt value={asked} onChange={setAsked} />
+      </div>
 
       {nothingYet ? (
         <EmptyState
@@ -286,20 +370,105 @@ export function AnalyticsHub() {
             ))}
           </div>
 
-          {/* ---- Everything, over two years ---- */}
-          <Card>
-            <SectionHead
-              title="The company, month by month"
-              hint="Two years. The dashed rule is where a financial year began."
+          {/* ---- And then everything underneath it ----
+
+              The three columns answer "how big is each part of it",
+              which is the first question in a meeting and never the
+              last. Everything below is the questions that follow, and
+              they are behind tabs rather than stacked down one page
+              because seven sections of table is a document, not a
+              screen somebody presents from. */}
+          <div style={{ marginBottom: 16 }}>
+            <Tabs
+              value={tab}
+              onChange={setTab}
+              tabs={VIEWS.map((t) => ({
+                ...t,
+                count: t.key === 'deals' ? deep?.deals.length
+                  : t.key === 'people' ? deep?.people.length
+                    : t.key === 'customers' ? deep?.movers.length
+                      : undefined,
+              }))}
             />
-            <MonthlyBars
-              points={allMonths}
-              colour="var(--primary)"
-              height={190}
-              yearStart={yearStartMonth}
+          </div>
+
+          {deepFailed && tab !== 'overview' ? (
+            <EmptyState
+              what="The detail could not be read"
+              why={deepFailed}
+              action={<Button variant="secondary" onClick={() => void loadDeep()}>Try again</Button>}
             />
-          </Card>
+          ) : null}
+
+          {tab === 'overview' && (
+            <>
+              <Card style={{ marginBottom: 16 }}>
+                <SectionHead
+                  title="The company, month by month"
+                  hint="Two years. The dashed rule is where a financial year began."
+                />
+                <MonthlyBars
+                  points={allMonths}
+                  colour="var(--chart-company)"
+                  height={190}
+                  yearStart={yearStartMonth}
+                />
+              </Card>
+              <SectionHead
+                title="The same thing, as figures"
+                hint="Each month of the year running, against the same month a year earlier."
+              />
+              <MonthTable
+                months={months}
+                divisions={divisions.map((d) => ({ division: d.division, name: d.name }))}
+                yearStart={yearStartMonth}
+              />
+            </>
+          )}
+
+          {!deepFailed && tab !== 'overview' && !deep && (
+            <Card>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the detail.</span>
+            </Card>
+          )}
+
+          {deep && tab === 'deals' && <DealsTable deals={deep.deals} />}
+          {deep && tab === 'people' && <PeopleTable people={deep.people} />}
+          {deep && tab === 'pipeline' && <Funnel stages={deep.stages} />}
+          {deep && tab === 'customers' && <Customers movers={deep.movers} conc={deep.conc} />}
+          {deep && tab === 'work' && <Ageing bands={deep.bands} />}
+          {deep && tab === 'reconcile' && <Reconcile rows={deep.recon} />}
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The date every figure on the screen is read to.
+ *
+ * A board pack is dated. Somebody quoting a number on Tuesday has to be
+ * able to produce the same number on Friday, and "the year to date"
+ * quietly means something different on each of those days.
+ *
+ * Empty is today, which is what almost everybody wants almost always,
+ * so the control is out of the way rather than a decision to be made
+ * before the screen will render anything.
+ */
+function AsAt({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, paddingBottom: 4 }}>
+      <div>
+        <Label>Read as at</Label>
+        <div style={{ width: 148, marginTop: 5 }}>
+          <TextInput type="date" value={value} onChange={onChange} />
+        </div>
+      </div>
+      {value && (
+        <Button variant="ghost" size="sm" onClick={() => onChange('')}>
+          <RotateCcw size={12} />
+          Today
+        </Button>
       )}
     </div>
   );

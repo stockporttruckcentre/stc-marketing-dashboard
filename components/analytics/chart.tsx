@@ -109,8 +109,14 @@ export function MonthlyBars({
                 width={Math.max(0.5, w - gap)}
                 height={h}
                 rx={0.6}
-                fill={p.value === 0 ? 'var(--border-strong)' : colour}
-                opacity={over == null || over === i ? 1 : 0.4}
+                fill={p.value === 0 ? 'var(--chart-empty)' : colour}
+                /* Never full strength at rest. Twenty four solid bars
+                   two hundred pixels tall is a wall of colour whatever
+                   the colour is, and the one the eye should be able to
+                   pick out is the one under the pointer. So the resting
+                   state is just off, and hovering is what takes a bar
+                   to full. */
+                opacity={over == null ? 0.88 : over === i ? 1 : 0.28}
                 onMouseEnter={() => setOver(i)}
                 style={{ transition: 'opacity 90ms' }}
               />

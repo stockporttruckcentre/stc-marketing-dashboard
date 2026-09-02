@@ -76,6 +76,41 @@
   /* ---- semantic: status ---- */
   --success:#1F9E3C; --warning:#C77A06; --danger:#B31F14; --info:#2B3F78;
 
+  /* ---- semantic: data ----
+
+     A chart fill is not an action, and the kit had no token that said
+     so, so the charts reached for the nearest thing: `--primary`.
+
+     `--primary` is #09163A in light and #FFFFFF in dark, because a
+     primary button on a navy ground is a white button. The company
+     chart on Analytics is twenty four bars two hundred pixels tall, and
+     in dark theme every one of them was filled with pure white. From
+     the business: "the bottom bar graph is blinding". It was.
+
+     These four are the fix. They are a separate axis from the action
+     colours on purpose: an action token has to invert between themes to
+     stay an action, and a data token has to stay the same colour to
+     stay the same series. So each is given its own value on each
+     ground, tuned to sit on it rather than shout off it.
+
+     Red is deliberately absent. On a revenue screen red already means
+     "this is down", and a division wearing it permanently would make
+     that unreadable. `--danger` stays free to point.
+
+     `--chart-trailer` is the one value here with no kit ramp behind it.
+     Navy and red are the brand, and trailer sales needed a third
+     identity that was neither, so this is a green derived to sit at the
+     same weight as the other two rather than taken from the kit. If it
+     should be something else, it is a one line change in each theme. */
+  --chart-stc:#2B3F78;
+  --chart-trailer:#2F6F5E;
+  --chart-rental:#C77A06;
+  /* Everything together, for the company chart. Quieter than any of the
+     three, because it is a backdrop to them rather than a fourth. */
+  --chart-company:#5A6DA8;
+  /* A month that happened and was quiet. Drawn, not skipped. */
+  --chart-empty:#CBCBC6;
+
   /* ---- elevation ---- */
   --shadow-1:0 1px 2px rgba(9,22,58,.06);
   --shadow-2:0 2px 6px rgba(9,22,58,.08);
@@ -137,6 +172,16 @@
   --focus:#8492C0;
 
   --success:#3ECF6B; --warning:#E8A33D; --danger:#EC6055; --info:#8492C0;
+
+  /* Lifted off the navy ground, not merely lightened. Each one keeps
+     its hue so a division is the same colour in both themes, and none
+     of them goes anywhere near white: the ceiling here is navy-200, and
+     the company chart sits two steps below that. */
+  --chart-stc:#8492C0;
+  --chart-trailer:#4FA98F;
+  --chart-rental:#E8A33D;
+  --chart-company:#3D5290;
+  --chart-empty:#2B3F78;
 
   --shadow-1:0 1px 2px rgba(0,0,0,.35);
   --shadow-2:0 2px 6px rgba(0,0,0,.40);
