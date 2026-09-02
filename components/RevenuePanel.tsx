@@ -94,7 +94,7 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
       const [totals, yoy, grp, jobs, queue, unplaced] = await Promise.all([
         companyRevenue(supabase, division),
         yearOnYear(supabase, division),
-        groupRevenue(supabase),
+        groupRevenue(supabase, division),
         everyOpenJob(supabase, division),
         supabase.rpc('protean_to_moderate', { p_division: division }),
         supabase.rpc('protean_jobs_without_account', { p_division: division }),
@@ -234,7 +234,14 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
           gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
         }}>
           <Stat label="Invoiced this year" value={money(totals.thisYear)} />
-          <Stat label="Same point last year" value={money(totals.lastYear)} quiet />
+          <Stat
+            label="Same point last year"
+            value={money(totals.lastYear)}
+            quiet
+            under={totals.lastYearFull
+              ? { label: 'Whole of last year', value: money(totals.lastYearFull) }
+              : undefined}
+          />
           <Stat
             label="Up or down"
             value={money(Math.abs(totals.change))}
@@ -291,7 +298,9 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
         )}
 
         {showing.body === 'customers' && <Customers rows={shown} loading={loading} />}
-        {showing.body === 'groups' && <Groups rows={groups} onChanged={() => void load()} />}
+        {showing.body === 'groups' && (
+          <Groups rows={groups} division={division} onChanged={() => void load()} />
+        )}
         {showing.body === 'open' && <OpenWork rows={shownJobs} loading={loading} />}
         {showing.body === 'accounts' && <ModeratePanel division={division} onChanged={() => void load()} />}
         {showing.body === 'import' && (
@@ -391,7 +400,11 @@ type BoundAccount = {
   ignored: boolean;
 };
 
-function Groups({ rows, onChanged }: { rows: GroupRevenue[]; onChanged: () => void }) {
+function Groups({ rows, division, onChanged }: {
+  rows: GroupRevenue[];
+  division: Division;
+  onChanged: () => void;
+}) {
   const supabase = createClient();
   const { say } = useToast();
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -464,10 +477,10 @@ function Groups({ rows, onChanged }: { rows: GroupRevenue[]; onChanged: () => vo
     if (openGroup === id) { setOpenGroup(null); return; }
     setOpenGroup(id);
     if (!lines[id]) {
-      const got = await groupBreakdown(supabase, id);
+      const got = await groupBreakdown(supabase, id, division);
       setLines((was) => ({ ...was, [id]: got }));
     }
-  }, [openGroup, lines, supabase]);
+  }, [openGroup, lines, supabase, division]);
 
   const cols: Col<GroupRevenue>[] = [
     {
@@ -531,22 +544,23 @@ function Groups({ rows, onChanged }: { rows: GroupRevenue[]; onChanged: () => vo
   ];
 
   const table = rows.length > 0 ? (
-    <div>
-      <DataTable
-        columns={cols}
-        rows={rows}
-        rowKey={(g) => g.group_id}
-        initial={{ key: 'this', desc: true }}
-        onRowClick={(g) => void expand(g.group_id)}
-      />
-      {openGroup && (
-        <Card padded={false} style={{ marginTop: -1, background: 'var(--surface-sunken)' }}>
-          {(lines[openGroup] ?? []).map((l) => (
+    <DataTable
+      columns={cols}
+      rows={rows}
+      rowKey={(g) => g.group_id}
+      initial={{ key: 'this', desc: true }}
+      onRowClick={(g) => void expand(g.group_id)}
+      /* Drawn under the row it belongs to. It used to sit after the
+         whole table, so opening one group put its accounts at the foot
+         of the page and read as belonging to all of them. */
+      expanded={(g) => (openGroup !== g.group_id ? null : (
+        <div style={{ background: 'var(--surface-sunken)' }}>
+          {(lines[g.group_id] ?? []).map((l) => (
             <div key={`${l.division}:${l.alpha}`} style={{
               display: 'flex', alignItems: 'center', minHeight: 34, fontSize: 12.5,
               borderBottom: '1px solid var(--border)',
             }}>
-              <span style={{ flex: 2.4, minWidth: 200, padding: '0 14px' }}>
+              <span style={{ flex: 2.4, minWidth: 200, padding: '0 14px 0 36px' }}>
                 {l.protean_name}
                 <span style={{ color: 'var(--text-subtle)', marginLeft: 8 }}>
                   {l.alpha} · {l.company_name}
@@ -567,14 +581,20 @@ function Groups({ rows, onChanged }: { rows: GroupRevenue[]; onChanged: () => vo
               <span style={{ flex: 1.1, minWidth: 100, padding: '0 14px', textAlign: 'right' }}>
                 <Money quiet>{Number(l.open_value) ? money(l.open_value) : '—'}</Money>
               </span>
+              <span style={{ flex: 0.7, minWidth: 74 }} />
             </div>
           ))}
-          {!lines[openGroup] && (
-            <div style={{ padding: '10px 14px' }}><Quiet>Reading the accounts.</Quiet></div>
+          {!lines[g.group_id] && (
+            <div style={{ padding: '10px 14px 10px 36px' }}><Quiet>Reading the accounts.</Quiet></div>
           )}
-        </Card>
-      )}
-    </div>
+          {lines[g.group_id]?.length === 0 && (
+            <div style={{ padding: '10px 14px 10px 36px' }}>
+              <Quiet>Nothing in this division for this group.</Quiet>
+            </div>
+          )}
+        </div>
+      ))}
+    />
   ) : (
     <EmptyState
       what="No groups yet"

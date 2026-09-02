@@ -60,7 +60,7 @@ const CELL = (c: Col<unknown>): React.CSSProperties => ({
 });
 
 export function DataTable<T>({
-  columns, rows, rowKey, initial, onRowClick, footer,
+  columns, rows, rowKey, initial, onRowClick, expanded, footer,
 }: {
   columns: Col<T>[];
   rows: T[];
@@ -68,6 +68,16 @@ export function DataTable<T>({
   /** Which column to sort by on first paint, and which way. */
   initial?: { key: string; desc?: boolean };
   onRowClick?: (row: T) => void;
+  /**
+   * A panel that belongs to ONE row, drawn directly under it.
+   *
+   * Written here rather than left to the caller because the caller got
+   * it wrong: the group breakdown was rendered after the whole table,
+   * so opening any group put its accounts at the bottom of the page and
+   * it read as belonging to every group at once. A thing that belongs
+   * to a row has to be drawn inside the loop over rows.
+   */
+  expanded?: (row: T) => ReactNode | null;
   footer?: ReactNode;
 }) {
   const [by, setBy] = useState<string | null>(initial?.key ?? null);
@@ -133,21 +143,27 @@ export function DataTable<T>({
         })}
       </div>
 
-      {sorted.map((r) => (
-        <div
-          key={rowKey(r)}
-          onClick={onRowClick ? () => onRowClick(r) : undefined}
-          style={{
-            display: 'flex', alignItems: 'center', minHeight: 36,
-            borderBottom: '1px solid var(--border)', fontSize: 13,
-            cursor: onRowClick ? 'pointer' : 'default',
-          }}
-        >
-          {columns.map((c) => (
-            <div key={c.key} style={CELL(c as Col<unknown>)}>{c.cell(r)}</div>
-          ))}
-        </div>
-      ))}
+      {sorted.map((r) => {
+        const under = expanded?.(r) ?? null;
+        return (
+          <div key={rowKey(r)}>
+            <div
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', minHeight: 36,
+                borderBottom: '1px solid var(--border)', fontSize: 13,
+                cursor: onRowClick ? 'pointer' : 'default',
+                background: under ? 'var(--surface-sunken)' : undefined,
+              }}
+            >
+              {columns.map((c) => (
+                <div key={c.key} style={CELL(c as Col<unknown>)}>{c.cell(r)}</div>
+              ))}
+            </div>
+            {under}
+          </div>
+        );
+      })}
 
       {footer}
     </Card>

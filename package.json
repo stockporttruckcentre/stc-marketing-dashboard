@@ -59,7 +59,8 @@
     "check:protean-import": "tsx scripts/protean-import-check.ts",
     "check:revenue-screen": "tsx scripts/revenue-screen-check.ts",
     "check:nav": "tsx scripts/nav-check.ts",
-    "check:export-window": "tsx scripts/export-window-check.ts"
+    "check:export-window": "tsx scripts/export-window-check.ts",
+    "check:divisions": "bash scripts/sql/divisions-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

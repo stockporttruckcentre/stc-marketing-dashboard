@@ -96,3 +96,5 @@
 085_reading_by_division
 086_open_work_with_no_account
 087_managing_a_group
+088_three_divisions_on_one_footing
+089_groups_are_per_division

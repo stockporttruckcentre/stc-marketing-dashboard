@@ -152,7 +152,7 @@ export function ExportWizard({ division, divisionName, fyStarted, onClose }: {
 
       if (chosen.has('groups')) {
         setBusy('Reading the groups');
-        const groups = await groupRevenue(supabase);
+        const groups = await groupRevenue(supabase, division);
         const s = sheet(wb, 'Groups', [
           { header: 'Group', width: 32 },
           { header: 'Customer', width: 34 },
@@ -169,7 +169,7 @@ export function ExportWizard({ division, divisionName, fyStarted, onClose }: {
             Number(g.this_year), Number(g.last_year), Number(g.change),
             Number(g.open_jobs), Number(g.open_value),
           ]).font = { bold: true, name: 'Arial' };
-          const lines = await groupBreakdown(supabase, g.group_id);
+          const lines = await groupBreakdown(supabase, g.group_id, division);
           for (const l of lines) {
             s.addRow([
               '', l.company_name, `${l.protean_name} (${l.alpha})`,
@@ -289,8 +289,8 @@ export function ExportWizard({ division, divisionName, fyStarted, onClose }: {
       {chosen.has('groups') && (
         <div style={{ marginTop: 14 }}>
           <Alert tone="info">
-            Groups are the whole company rather than one division, because a group spans them.
-            Every other sheet is {divisionName}.
+            Groups show their {divisionName} half, the same as the screen does. A group whose
+            money is all in another division is not in this export.
           </Alert>
         </div>
       )}
