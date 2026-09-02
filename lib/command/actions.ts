@@ -1192,6 +1192,48 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['manager discount', 'contract discount', 'discount on a maintenance contract',
               'fleetsmart discount'],
     phrases: ['discount the maintenance contract', 'give them a manager discount'] },
+  /* ---------- Revenue, out of Protean ----------
+
+     Four different words for the same screen, because four people ask
+     four different questions of it: the sales manager asks what a
+     customer spends, the director asks what the company has billed,
+     the workshop asks what is still open, and whoever runs the import
+     asks for the import. All four land here.
+
+     "Spend" and "turnover" sit on the navigate entry rather than on a
+     question, because typing either without naming a customer is
+     somebody looking for the screen. Naming one is a question the
+     query side already answers. */
+
+  { id: 'nav.revenue', label: 'Revenue', blurb: 'What Protean has billed, and what is still open',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/revenue', verbs: GO,
+    objects: ['revenue', 'invoiced', 'invoices', 'billing', 'billed', 'turnover', 'spend',
+              'customer spend', 'protean', 'protean revenue', 'sales figures',
+              'what we have billed', 'year on year', 'open work', 'open jobs',
+              'jobs on the system', 'work in progress', 'wip'] },
+
+  { id: 'nav.revenueGroups', label: 'Customer groups',
+    blurb: 'Several customers totalled together, and each on its own', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/revenue?tab=groups', verbs: GO,
+    objects: ['customer groups', 'groups', 'group revenue', 'parent companies', 'group total',
+              'what a group is worth'] },
+
+  { id: 'nav.proteanAccounts', label: 'Protean accounts waiting',
+    blurb: 'Accounts with no customer yet, heaviest first', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/revenue?tab=accounts', verbs: GO,
+    objects: ['protean accounts', 'unmatched accounts', 'accounts waiting', 'unplaced revenue',
+              'accounts with no customer', 'the moderation queue', 'revenue with nobody on it'] },
+
+  { id: 'import.protean', label: 'Import the Protean export',
+    blurb: "This week's invoiced and open jobs files", kind: 'data',
+    capability: 'crm.import', path: '/dashboard/revenue?tab=import',
+    verbs: ['import', 'upload', 'load', 'bring in', 'put in', 'update', 'sync'],
+    objects: ['protean export', 'protean', 'the invoices', 'invoiced report', 'open jobs',
+              "this week's sales", 'the sales spreadsheet', 'revenue spreadsheet',
+              'protean spreadsheet', 'protean csv'],
+    phrases: ['import the protean export', 'update the sales figures',
+              "put this week's invoices in", 'upload the open jobs',
+              'load the protean spreadsheet'] },
 ];
 
 /* =============================================================

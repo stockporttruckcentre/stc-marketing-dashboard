@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays, ListChecks,
-  UserCog, type LucideIcon,
+  UserCog, Receipt, type LucideIcon,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationRail } from '@/components/notifications/rail';
@@ -57,6 +57,7 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   finder: Search,
   stock: Container,
   fleetsmart: ShieldCheck,
+  revenue: Receipt,
   social: Calendar,
   brand: ImageIcon,
   team: Users,
