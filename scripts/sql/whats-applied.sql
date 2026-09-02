@@ -107,7 +107,11 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     /* 093 only renames a row, so the marker is the row itself. Every
        function it could name has existed since 083. */
     (56, '093',        'The rental division is called S&L',               'S&L',                        'division'),
-    (57, '094',        'A group says which question it is answering',     'group_members:p_upto',       'signature')
+    (57, '094',        'A group says which question it is answering',     'group_members:p_upto',       'signature'),
+    /* 095 deletes two rows and adds one index, so the index is the only
+       thing in the catalogue it leaves behind. Every function and table
+       the Work tab uses has existed since 056. */
+    (58, '095',        'The Work rail has no view that is another one''s shape', 'idx_task_views_system_name', 'index')
 )
 SELECT
   e.migration                                AS "Migration",
@@ -128,6 +132,13 @@ CROSS JOIN LATERAL (
       WHERE c.capability = e.marker)
     WHEN 'catalog' THEN EXISTS (
       SELECT 1 FROM capability_catalog c WHERE c.key = e.marker)
+    /* A migration that only deletes rows leaves nothing behind to ask
+       about except the constraint it added to stop them coming back.
+       `pg_indexes` is a catalogue view, so unlike a row marker this
+       needs no guard: it is there on an empty database. */
+    WHEN 'index' THEN EXISTS (
+      SELECT 1 FROM pg_indexes i
+      WHERE i.schemaname = 'public' AND i.indexname = e.marker)
     /* A ROW IN A TABLE THAT MAY NOT BE THERE YET.
 
        `EXISTS (SELECT 1 FROM divisions ...)` is the obvious way to

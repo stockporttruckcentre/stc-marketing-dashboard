@@ -460,11 +460,32 @@ END $$;
 -- 7. Saved views are rows, and the built in ones are among them
 -- =============================================================
 DO $$
-DECLARE n INT;
+DECLARE n INT; total INT;
 BEGIN
+  /* THE CLAIM IS READABILITY, NOT A COUNT.
+
+     This said `n >= 12`, and twelve was the number 056 happened to
+     seed. Migration 095 removed two of them, because My board was My
+     work drawn as a board and Workload was Team work drawn as a chart,
+     and this went red on a change that was entirely correct. A check
+     that has to be edited every time the seed does is a check nobody
+     trusts by the third time.
+
+     What section 7 is actually for is row level security: an ordinary
+     person, not an administrator, can read the views the installation
+     ships. So it counts as that person and as nobody, and asserts the
+     two numbers agree. `npm run check:work-views` is what holds the
+     seed itself to its rule. */
+  /* As the owner explicitly. `SET LOCAL ROLE` lasts the transaction, so
+     counting here without resetting would count as whoever the previous
+     section happened to be acting as, and the comparison below would be
+     a number against itself. */
+  PERFORM pg_temp.as_owner();
+  SELECT count(*) INTO total FROM task_views WHERE is_system;
   PERFORM pg_temp.act_as('dd000000-0000-0000-0000-000000000002');
   SELECT count(*) INTO n FROM task_views WHERE is_system;
-  PERFORM pg_temp.ok('the views that ship are rows anybody can read', n >= 12);
+  PERFORM pg_temp.ok('the installation ships views at all', total > 0);
+  PERFORM pg_temp.ok('and an ordinary person can read every one of them', n = total);
 
   PERFORM pg_temp.ok('every one of them has a filter and a layout',
     NOT EXISTS (SELECT 1 FROM task_views WHERE filter IS NULL OR layout IS NULL));

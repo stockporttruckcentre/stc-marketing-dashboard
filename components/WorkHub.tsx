@@ -18,14 +18,33 @@
    an answer.
 
    And the view is data, not code. Every view in the rail, including the
-   twelve that ship, is a row in `task_views`. There is no code path
+   ten that ship, is a row in `task_views`. There is no code path
    that renders one of them specially, which is what makes a view
    somebody builds exactly as capable as one that came with it.
+
+   ---- A view is a question, not a shape ----
+
+   Twelve shipped, and two of them were another view drawn differently:
+   My board was My work as a board, and Workload was Team work as a
+   workload chart. From the business:
+
+     My Work and my board seem like the same thing just a different
+     view, then they both offer viewing options etc.
+
+   Migration 095 removes both. What replaces them is on this screen: the
+   layout somebody picks is remembered on their machine, per view, so
+   drawing My work as a board is a press that lasts rather than one that
+   has to be repeated every morning. That is the only thing the second
+   row was ever providing.
+
+   The ten that remain sit under three headings, because twelve
+   unlabelled rows is a list people navigate by memory, which is how two
+   duplicates went unnoticed as long as they did.
 
    Everything on this screen is drawn from `components/kit`. The package
    this came in with brought its own stylesheet; none of it is here.
    ============================================================= */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Plus, Columns3, Table2, List as ListIcon, CalendarDays, GanttChart, Gauge,
   ChevronLeft, ChevronRight, Search, SlidersHorizontal, ListChecks,
@@ -49,6 +68,7 @@ import { Compose, type NewTask } from '@/components/work/compose';
 import { ViewEditor } from '@/components/work/viewedit';
 import { Empty } from '@/components/work/parts';
 import { WorkDiary } from '@/components/work/diary';
+import { readChoice, writeChoice, forgetChoice } from '@/lib/ui/remember';
 import type { CalendarEvent } from '@/lib/types';
 import type { DiaryGuest, DiaryInvite, DiaryPerson } from '@/lib/calendar/diary';
 import { diaryCounts, toEntries } from '@/lib/calendar/diary';
@@ -61,6 +81,32 @@ const LAYOUTS: { key: Layout; label: string; Icon: typeof Columns3 }[] = [
   { key: 'timeline', label: 'Timeline', Icon: GanttChart },
   { key: 'workload', label: 'Workload', Icon: Gauge },
 ];
+
+const LAYOUT_KEYS = LAYOUTS.map((l) => l.key);
+const LAYOUT_LABEL = new Map(LAYOUTS.map((l) => [l.key, l.label]));
+
+/* The three headings the rail groups the shipped views under, set by
+   migration 095 in each view's `options.section`. Declared here in the
+   order they are drawn, so a section nothing carries simply does not
+   appear rather than leaving a gap. */
+const SECTIONS: { key: string; label: string }[] = [
+  { key: 'yours', label: 'Yours' },
+  { key: 'attention', label: 'Needs attention' },
+  { key: 'everyone', label: 'Everyone' },
+];
+
+/* A view from before 095, or one somebody built in the editor, has no
+   section. It reads as the business's rather than disappearing, which
+   is the one outcome a rail may never have. */
+function sectionOf(v: TaskView): string {
+  const s = v.options?.section;
+  return typeof s === 'string' && SECTIONS.some((x) => x.key === s) ? s : 'everyone';
+}
+
+/* Where the remembered layout for one view is kept. The id is in the
+   key, so drawing My work as a board and Team work as a table gives
+   both rather than one global choice the last screen touched. */
+const layoutKeyFor = (id: string) => `work-layout:${id}`;
 
 const GROUPINGS = [
   { key: 'status', label: 'Status' },
@@ -81,7 +127,7 @@ export function viewSlug(name: string): string {
 
 export function WorkHub({
   initialTasks, views, people, departments, entities, projects, customers, trailers,
-  requests, viewer, capabilities, multiEntity, openView, openTab,
+  requests, viewer, capabilities, multiEntity, openView, openLayout, openTab,
   diaryEvents, diaryInvites, diaryGuests, diaryPeople,
 }: {
   initialTasks: Task[];
@@ -99,6 +145,13 @@ export function WorkHub({
   multiEntity: boolean;
   /** The `?view=` slug the command bar arrived with, if any. */
   openView: string | null;
+  /**
+   * The `?layout=` the command bar arrived with, if any, so a sentence
+   * can land on a view drawn a particular way. Applied for this visit
+   * and deliberately NOT remembered: a link somebody followed once
+   * should not quietly rewrite how their screen draws from then on.
+   */
+  openLayout: string | null;
   /** `?tab=diary` from the command bar, so a sentence can land on it. */
   openTab: 'tasks' | 'diary';
   /* Everything booked anywhere in the application. Read on the server
@@ -114,15 +167,66 @@ export function WorkHub({
      One tab rather than a saved view, because the diary is not a task
      list filtered differently, it is a different table. */
   const [tab, setTab] = useState<'tasks' | 'diary'>(openTab);
-  const [viewId, setViewId] = useState(() => {
+  const initialViewId = useMemo(() => {
     const wanted = openView ? views.find((v) => viewSlug(v.name) === openView) : null;
     return (wanted ?? views[0])?.id ?? '';
+  }, [views, openView]);
+  const [viewId, setViewId] = useState(initialViewId);
+
+  /* ---- How each view is drawn ----
+
+     Overriding a layout never changes the view for anybody else, so
+     somebody can look at a shared board as a table without taking that
+     decision on behalf of the department. Saving stays a deliberate act.
+
+     What changed with 095 is that the override now LASTS, on this
+     machine, per view. It used to reset the moment somebody clicked
+     another row in the rail, which is why the seed carried a second row
+     called My board: a preference that has to be re-made every morning
+     is not a preference, so people asked for a permanent row instead.
+
+     Grouping is deliberately still per session. It is the thing people
+     twist for one question and then want back, and unlike a layout it
+     changes what the sections MEAN rather than only how they look. */
+  const [layoutFor, setLayoutFor] = useState<Record<string, Layout>>(() => {
+    /* `?layout=` from the command bar, for this visit only. Nothing here
+       touches storage: this runs on the server too. */
+    const wanted = openLayout && (LAYOUT_KEYS as readonly string[]).includes(openLayout)
+      ? (openLayout as Layout) : null;
+    return wanted && initialViewId ? { [initialViewId]: wanted } : {};
   });
-  /* Layout and grouping are overridden per session without saving, so
-     somebody can look at a shared view another way without changing it
-     for everybody. Saving is a deliberate act. */
-  const [layoutOverride, setLayoutOverride] = useState<Layout | null>(null);
   const [groupOverride, setGroupOverride] = useState<string | null>(null);
+
+  /* Read once the browser exists. Doing it in the initial state above
+     would run during the server render, where there is no localStorage,
+     and hand React two different first paints. */
+  useEffect(() => {
+    const saved: Record<string, Layout> = {};
+    for (const v of views) {
+      const got = readChoice<Layout>(layoutKeyFor(v.id), LAYOUT_KEYS);
+      if (got) saved[v.id] = got;
+    }
+    /* Anything chosen this session wins over what was on disk, in case a
+       write was refused. A private window still behaves for the length
+       of the visit. */
+    setLayoutFor((now) => ({ ...saved, ...now }));
+  }, [views]);
+
+  const layoutOverride = layoutFor[viewId] ?? null;
+
+  const chooseLayout = useCallback((l: Layout) => {
+    setLayoutFor((m) => ({ ...m, [viewId]: l }));
+    writeChoice(layoutKeyFor(viewId), l);
+  }, [viewId]);
+
+  const clearLayout = useCallback(() => {
+    setLayoutFor((m) => {
+      const next = { ...m };
+      delete next[viewId];
+      return next;
+    });
+    forgetChoice(layoutKeyFor(viewId));
+  }, [viewId]);
   const [search, setSearch] = useState('');
   const [entityFilter, setEntityFilter] = useState<string>('all');
   const [month, setMonth] = useState(() => new Date());
@@ -363,15 +467,18 @@ export function WorkHub({
         : [...all, saved]));
       setViewId(saved.id);
       /* The overrides were the whole point of saving, so they stop
-         being overrides once they are the view. */
-      setLayoutOverride(null); setGroupOverride(null);
+         being overrides once they are the view. Cleared against the row
+         somebody was looking AT, not the one they landed on: keeping it
+         would leave the old row drawn identically to the new one, which
+         is the duplicate this whole change exists to remove. */
+      clearLayout(); setGroupOverride(null);
       setEditingView(null);
       setNote(mode === 'new' ? `Saved. ${saved.name} is in your rail.` : 'Saved.');
       return true;
     } finally {
       setBusy(null);
     }
-  }, [view]);
+  }, [view, clearLayout]);
 
   if (!view) {
     /* No views at all means the seed did not run. The screen still has
@@ -426,7 +533,10 @@ export function WorkHub({
   const railItem = (v: TaskView) => (
     <button
       key={v.id}
-      onClick={() => { setViewId(v.id); setLayoutOverride(null); setGroupOverride(null); }}
+      /* Switching rows no longer forgets how this one is drawn. That
+         reset is precisely what made the layout chips feel temporary and
+         a second row feel necessary. */
+      onClick={() => { setViewId(v.id); setGroupOverride(null); }}
       title={v.description ?? undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
@@ -531,8 +641,22 @@ export function WorkHub({
             borderRadius: 'var(--r-md)',
           }}
         >
-          <div style={{ padding: '3px 3px 5px' }}><Label>Views</Label></div>
-          {system.map(railItem)}
+          {/* Three headings rather than one list of twelve. Which
+              question a row answers is the thing somebody is choosing
+              between, and an unlabelled list is read once and then
+              navigated from memory. A section nothing falls into is not
+              drawn, so an installation missing 095 loses a heading
+              rather than a view. */}
+          {SECTIONS.map(({ key, label }) => {
+            const rows = system.filter((v) => sectionOf(v) === key);
+            if (!rows.length) return null;
+            return (
+              <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ padding: '3px 3px 2px' }}><Label>{label}</Label></div>
+                {rows.map(railItem)}
+              </div>
+            );
+          })}
           {mine.length > 0 && (
             <div style={{ padding: '9px 3px 5px' }}><Label>Mine</Label></div>
           )}
@@ -599,13 +723,14 @@ export function WorkHub({
               </Select>
             </div>
 
-            <div role="group" aria-label="Layout" style={{ display: 'flex', gap: 5 }}>
+            <div role="group" aria-label={`How ${view.name} is drawn`}
+              style={{ display: 'flex', gap: 5 }}>
               {LAYOUTS.map(({ key, label, Icon }) => (
                 <Chip
                   key={key}
                   active={view.layout === key}
-                  title={label}
-                  onClick={() => setLayoutOverride(key)}
+                  title={`${view.name} as a ${label.toLowerCase()}. Remembered on this device.`}
+                  onClick={() => chooseLayout(key)}
                 >
                   <Icon size={13} /> {label}
                 </Chip>
@@ -649,27 +774,50 @@ export function WorkHub({
           )}
 
           {/* A view being looked at differently from how it was saved.
-              Said out loud, with the way to keep it, because the other
-              option is somebody rebuilding the same arrangement every
-              morning without realising it could be kept. */}
-          {(layoutOverride || groupOverride) && may('work.views') && (
-            <Alert tone="info">
-              <span style={{ flex: 1 }}>
-                You are looking at {view.name} your own way rather than how it was saved.
+              A footnote rather than an alert, because the layout half of
+              it is now permanent: a banner that appears every morning
+              for the rest of somebody's working life is furniture, and
+              furniture is what people stop reading.
+
+              It still says the two halves apart. The layout is kept on
+              this machine and nobody else's; the grouping lasts until
+              the view is left. Saving is how either becomes the view
+              itself, for everybody. */}
+          {(layoutOverride || groupOverride) && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+              padding: '0 2px', fontSize: 11.5, color: 'var(--text-subtle)',
+            }}>
+              <span style={{ flex: 1, minWidth: 180 }}>
+                {layoutOverride && (
+                  <>
+                    Drawn as a {(LAYOUT_LABEL.get(layoutOverride) ?? layoutOverride).toLowerCase()},
+                    {' '}remembered on this device.
+                  </>
+                )}
+                {layoutOverride && groupOverride ? ' ' : ''}
+                {groupOverride && (
+                  <>
+                    Grouped by {(GROUPINGS.find((g) => g.key === groupOverride)?.label
+                      ?? groupOverride).toLowerCase()} until you leave this view.
+                  </>
+                )}
               </span>
-              <Button size="sm" variant="secondary" onClick={() => setEditingView('new')}>
-                Keep this as a new view
-              </Button>
-              {(!view.is_system || may('work.manageSystemViews')) && (
-                <Button size="sm" variant="secondary" onClick={() => setEditingView('this')}>
-                  Save it over {view.name}
+              {may('work.views') && (
+                <Button size="sm" variant="ghost" onClick={() => setEditingView('new')}>
+                  Keep as a new view
+                </Button>
+              )}
+              {may('work.views') && (!view.is_system || may('work.manageSystemViews')) && (
+                <Button size="sm" variant="ghost" onClick={() => setEditingView('this')}>
+                  Save over {view.name}
                 </Button>
               )}
               <Button size="sm" variant="ghost"
-                onClick={() => { setLayoutOverride(null); setGroupOverride(null); }}>
-                Put it back
+                onClick={() => { clearLayout(); setGroupOverride(null); }}>
+                Back to how it was saved
               </Button>
-            </Alert>
+            </div>
           )}
 
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

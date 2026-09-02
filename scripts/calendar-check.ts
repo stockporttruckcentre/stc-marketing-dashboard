@@ -36,6 +36,7 @@ import {
   attendeesOf, diaryCounts, filterDiary, groupByDay, toEntries,
   type DiaryGuest, type DiaryInvite, type DiaryPerson,
 } from '../lib/calendar/diary';
+import { readFileSync } from 'node:fs';
 import { readEventBody } from '../lib/calendar/wire';
 import type { CalendarEvent } from '../lib/types';
 
@@ -583,6 +584,44 @@ ok('exactly one kind carries the accent',
   ok('and counts nothing', c.today === 0 && c.ahead === 0 && c.waitingOnMe === 0);
   ok('and a month of nothing is still a month',
     monthGrid(startOfMonth(new Date())).length % 7 === 0);
+}
+
+/* =============================================================
+   And the row tracks, in every calendar this application draws.
+
+   The same fault came back on a different screen. From the business,
+   about the Work tab:
+
+     on the Work tab, on My work, the calendar has a huge gap between
+     the day labels in the header and the actual calendar blocks
+
+   `components/calendar/views.tsx` was fixed for exactly this and says
+   so in a comment. `components/work/layouts.tsx` draws its own month
+   grid and had the same bug untouched: `gridAutoRows` applies to EVERY
+   row a grid creates, the seven day names being seven of them, so a
+   30px header was dropped into a track at least 88px tall and pinned to
+   the top of it. Mon to Sun, then a band of nothing, then the first
+   week.
+
+   A comment on one file did not stop it happening on the other. This
+   does: any file that lays a month out in a grid has to name its row
+   tracks, and there is nowhere left for a third one to hide.
+   ============================================================= */
+{
+  const grids = ['components/calendar/views.tsx', 'components/work/layouts.tsx'];
+  for (const file of grids) {
+    const src = readFileSync(file, 'utf8');
+    /* Only files that actually draw a month grid are held to it, and
+       every one of them declares its seven columns this way. */
+    if (!src.includes('repeat(7')) continue;
+    /* The property, not the word. Both files talk ABOUT `gridAutoRows`
+       in the comment explaining why they do not use it, and a check
+       that cannot tell a warning from the fault it warns about goes off
+       on the fix. */
+    ok(`${file} names its grid row tracks`, /gridTemplateRows\s*:/.test(src));
+    ok(`${file} does not size the day names like a week`,
+      !/gridAutoRows\s*:/.test(src));
+  }
 }
 
 console.log(`\n${pass.toLocaleString('en-GB')}/${(pass + fail).toLocaleString('en-GB')} holding`);

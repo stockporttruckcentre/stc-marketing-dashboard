@@ -902,9 +902,35 @@ for (const [said, id] of [
   ['late tasks', 'nav.overdueWork'],
   ['what i delegated', 'nav.assignedByMe'],
   ['work i assigned', 'nav.assignedByMe'],
+
+  /* The workload chart, which stopped being a view of its own in
+     migration 095 because its filter and grouping were Team work's and
+     only the layout differed. The question survives the row: these
+     sentences have to keep landing on the chart, which is now Team work
+     drawn as a workload. */
+  ['workload', 'nav.workload'],
+  ['work load', 'nav.workload'],
+  ['capacity', 'nav.workload'],
+  ['who is busy', 'nav.workload'],
+  ['who is busiest', 'nav.workload'],
+  ['team capacity', 'nav.workload'],
+  ['who has the most on', 'nav.workload'],
+  ['show me the workload', 'nav.workload'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+/* And it lands on the shape as well as the view. A sentence that gets
+   somebody to Team work as a board has not answered "who is busiest": it
+   has shown them the same rows in the arrangement that does not answer
+   it. The layout is half the destination here, which is why it is in
+   the path. */
+{
+  const hit = suggestActions('workload', CAPS.admin, 8)
+    .find((h) => h.action.id === 'nav.workload');
+  ok('"workload" carries layout=workload, not just the view',
+    (hit?.action.path ?? '').includes('layout=workload'));
 }
 
 /* -------------------------------------------------------------

@@ -24,6 +24,7 @@
    ============================================================= */
 
 import { applyOrder, moveTo } from '../lib/ui/order';
+import { readChoice, writeChoice, forgetChoice } from '../lib/ui/remember';
 
 let failed = 0;
 const ok = (what: string, cond: boolean, why = '') => {
@@ -152,9 +153,122 @@ ok('moving does not modify the list it was given', (() => {
     seen.size === 6, `only ${seen.size} reachable: ${[...seen].join(' | ')}`);
 }
 
+/* =============================================================
+   And the other thing kept on the machine: one choice out of a set.
+
+   `remember.ts` holds which layout a view is drawn in, and it exists
+   because two rows of the Work rail were the same question in different
+   shapes. From the business:
+
+     My Work and my board seem like the same thing just a different
+     view, then they both offer viewing options etc.
+
+   The reason a second row existed was that the layout chips did not
+   last. Making them last removes the row, and what makes that safe is
+   the one rule below: this reads a string out of storage that anything
+   on the machine can have written, and hands it back as a union type.
+   Without the check that is a lie the type system cannot catch, and it
+   shows up as a screen drawing nothing because `view.layout` is a word
+   no layout answers to.
+   ============================================================= */
+console.log('\n  A choice, remembered\n  --------------------');
+
+const LAYOUTS = ['board', 'table', 'list', 'calendar', 'timeline', 'workload'] as const;
+
+/* A stand in for what a browser gives, including the two ways it does
+   not: absent, and throwing on access. */
+function withStorage(store: Storage | null, run: () => void) {
+  const g = globalThis as unknown as { window?: unknown };
+  const had = 'window' in g;
+  const before = g.window;
+  g.window = store === null
+    ? { get localStorage(): Storage { throw new Error('site data is blocked'); } }
+    : { localStorage: store };
+  try { run(); } finally {
+    if (had) g.window = before; else delete g.window;
+  }
+}
+
+function fakeStorage(seed: Record<string, string> = {}): Storage {
+  const map = new Map(Object.entries(seed));
+  return {
+    get length() { return map.size; },
+    clear: () => map.clear(),
+    getItem: (k: string) => map.get(k) ?? null,
+    key: (i: number) => [...map.keys()][i] ?? null,
+    removeItem: (k: string) => { map.delete(k); },
+    setItem: (k: string, v: string) => { map.set(k, v); },
+  } as Storage;
+}
+
+withStorage(fakeStorage(), () => {
+  ok('nothing stored is null, not a guess',
+    readChoice('work-layout:x', LAYOUTS) === null);
+});
+
+withStorage(fakeStorage({ 'stc-choice:work-layout:x': 'board' }), () => {
+  ok('a stored choice comes back', readChoice('work-layout:x', LAYOUTS) === 'board');
+});
+
+/* ---- THE ONE THAT WOULD DRAW AN EMPTY SCREEN ----
+
+   `layout` used to be one of seven words. Retire one, or let anything
+   write to local storage, and a view whose remembered layout is 'gantt'
+   matches none of the six branches that draw it: not an error, not an
+   empty state, just a panel with nothing in it and no way to work out
+   why. Which is exactly the class of fault nobody reports as a bug. */
+withStorage(fakeStorage({ 'stc-choice:work-layout:x': 'gantt' }), () => {
+  ok('a stored layout that no longer exists is refused, not handed on',
+    readChoice('work-layout:x', LAYOUTS) === null);
+});
+
+withStorage(fakeStorage({ 'stc-choice:work-layout:x': '{"layout":"board"}' }), () => {
+  ok('and so is anything else somebody put there',
+    readChoice('work-layout:x', LAYOUTS) === null);
+});
+
+/* ---- Per view, not per screen ----
+
+   The whole point of the key carrying the view's id. One layout for the
+   whole Work tab would mean choosing a board on My work silently
+   redraws Team work, which is the same "why did that change" the
+   duplicate rows caused. */
+{
+  const store = fakeStorage();
+  withStorage(store, () => {
+    writeChoice('work-layout:mine', 'board');
+    writeChoice('work-layout:team', 'table');
+    ok('two views remember two different layouts',
+      readChoice('work-layout:mine', LAYOUTS) === 'board'
+      && readChoice('work-layout:team', LAYOUTS) === 'table');
+
+    forgetChoice('work-layout:mine');
+    ok('forgetting one leaves the other alone',
+      readChoice('work-layout:mine', LAYOUTS) === null
+      && readChoice('work-layout:team', LAYOUTS) === 'table');
+  });
+}
+
+/* ---- A browser that refuses ----
+
+   In a private window some browsers throw on the localStorage property
+   itself, before any method is called. A screen that cannot remember
+   how it was drawn opens the way it was saved. It does not fail to
+   open, and it does not tell anybody. */
+withStorage(null, () => {
+  let threw = false;
+  try {
+    ok('storage that throws reads as no choice', readChoice('work-layout:x', LAYOUTS) === null);
+    writeChoice('work-layout:x', 'board');
+    forgetChoice('work-layout:x');
+  } catch { threw = true; }
+  ok('and writing to it is silent rather than fatal', !threw);
+});
+
 console.log(
   failed === 0
-    ? '\n  Every tab comes back exactly once, whatever was saved.\n'
+    ? '\n  Every tab comes back exactly once, and every remembered choice is one\n'
+      + '  the screen can actually draw.\n'
     : `\n  ${failed} to fix.\n`,
 );
 process.exit(failed === 0 ? 0 : 1);

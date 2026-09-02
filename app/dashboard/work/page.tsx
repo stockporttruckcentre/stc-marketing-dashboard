@@ -36,7 +36,7 @@ function missingTable(error: { code?: string } | null): boolean {
 export default async function WorkPage({
   searchParams,
 }: {
-  searchParams: { view?: string; tab?: string };
+  searchParams: { view?: string; layout?: string; tab?: string };
 }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -135,6 +135,9 @@ export default async function WorkPage({
       /* Only somebody on both companies is offered the switcher. */
       multiEntity={entityIds.length > 1}
       openView={searchParams?.view ?? null}
+      /* Checked against the six layouts on the screen rather than here,
+         so there is one list of them and it is the one drawing. */
+      openLayout={searchParams?.layout ?? null}
       openTab={searchParams?.tab === 'diary' ? 'diary' : 'tasks'}
       diaryEvents={(diaryRes.data ?? []) as CalendarEvent[]}
       diaryInvites={(inviteRes.data ?? []) as DiaryInvite[]}
