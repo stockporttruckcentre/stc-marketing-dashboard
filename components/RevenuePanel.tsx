@@ -16,6 +16,7 @@ import {
   yearOnYear, groupRevenue, groupBreakdown,
   type YearOnYear, type GroupRevenue, type GroupLine,
 } from '@/lib/protean/rpc';
+import { whatToShow, REVENUE_TABS, type RevenueTab } from '@/lib/protean/screen';
 
 /* =============================================================
    What Protean has billed.
@@ -51,7 +52,9 @@ import {
    rows read as down £1.88m. A £2.35m swing on identical data.
    ============================================================= */
 
-type Tab = 'customers' | 'groups' | 'open' | 'accounts' | 'import';
+/* The tab names live with the render gate, so the check that sweeps
+   every state and the screen that draws them cannot drift apart. */
+type Tab = RevenueTab;
 
 export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
   const supabase = createClient();
@@ -98,8 +101,7 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
      put a Suspense boundary around the whole screen for one string. */
   useEffect(() => {
     const asked = new URLSearchParams(window.location.search).get('tab');
-    const known: Tab[] = ['customers', 'groups', 'open', 'accounts', 'import'];
-    if (asked && (known as string[]).includes(asked)) {
+    if (asked && (REVENUE_TABS as string[]).includes(asked)) {
       if (asked !== 'import' || mayImport) setTab(asked as Tab);
     }
   }, [mayImport]);
@@ -133,7 +135,21 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
     ...(mayImport ? [{ key: 'import' as Tab, label: 'Import' }] : []),
   ];
 
-  const nothingAtAll = !loading && !customers.length && !open.length && !waiting;
+  /* Every render gate on this screen, decided in one place that a check
+     can sweep. It used to be an inline ternary here, and it hid the tab
+     bar whenever the database was empty, which is the state every
+     installation starts in. The Import tab therefore did not exist, so
+     the two buttons that switch to it changed a piece of state nothing
+     was reading and did nothing at all. See lib/protean/screen.ts. */
+  const showing = whatToShow({
+    loading,
+    tab,
+    customers: customers.length,
+    groups: groups.length,
+    openJobs: open.length,
+    waiting,
+    mayImport,
+  });
 
   return (
     <div className="kit" style={{ padding: '22px 24px 40px', maxWidth: 1320, margin: '0 auto' }}>
@@ -149,74 +165,74 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
         ) : undefined}
       />
 
-      {nothingAtAll ? (
-        <EmptyState
-          what="Nothing has been imported yet"
-          why="Run the invoiced report and the open jobs report out of Protean, save them as CSV, and drop them into Import."
-          action={mayImport ? (
-            <Button variant="primary" onClick={() => setTab('import')}>
-              <Upload size={14} />
-              Import
-            </Button>
-          ) : undefined}
-        />
-      ) : (
-        <>
-          <div style={{
-            display: 'grid', gap: 12, marginBottom: 18,
-            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-          }}>
-            <Stat label="Invoiced this year" value={money(totals.thisYear)} />
-            <Stat label="Same point last year" value={money(totals.lastYear)} quiet />
-            <Stat
-              label="Up or down"
-              value={money(Math.abs(totals.change))}
-              tone={totals.change >= 0 ? 'up' : 'down'}
-              note={totals.lastYear
-                ? `${totals.change >= 0 ? '+' : '-'}${Math.abs(100 * totals.change / totals.lastYear).toFixed(1)}%`
-                : undefined}
-            />
-            <Stat label="Open on the system" value={money(totals.openValue)}
-              note={`${open.length} ${open.length === 1 ? 'job' : 'jobs'}`} />
-          </div>
-
-          {waiting > 0 && tab !== 'accounts' && (
-            <div style={{ marginBottom: 16 }}>
-              <Alert tone="warning">
-                {waiting} Protean {waiting === 1 ? 'account has' : 'accounts have'} no customer yet,
-                so their billing is in the company total and on nobody&apos;s record.
-                <button
-                  onClick={() => setTab('accounts')}
-                  style={{
-                    marginLeft: 8, border: 'none', background: 'transparent', padding: 0,
-                    color: 'var(--accent)', font: 'inherit', fontWeight: 600, cursor: 'pointer',
-                  }}
-                >Place them</button>
-              </Alert>
-            </div>
-          )}
-
-          <Tabs value={tab} onChange={setTab} tabs={tabs} />
-
-          <div style={{ marginTop: 16 }}>
-            {(tab === 'customers' || tab === 'open') && (
-              <div style={{ display: 'flex', marginBottom: 12 }}>
-                <SearchInput
-                  value={q}
-                  onChange={setQ}
-                  placeholder={tab === 'customers' ? 'Find a customer' : 'Find a job or a customer'}
-                />
-              </div>
-            )}
-
-            {tab === 'customers' && <Customers rows={shown} loading={loading} />}
-            {tab === 'groups' && <Groups rows={groups} />}
-            {tab === 'open' && <OpenWork rows={shownJobs} loading={loading} />}
-            {tab === 'accounts' && <ModeratePanel onChanged={() => void load()} />}
-            {tab === 'import' && mayImport && <ImportPanel onDone={() => void load()} />}
-          </div>
-        </>
+      {showing.stats && (
+        <div style={{
+          display: 'grid', gap: 12, marginBottom: 18,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+        }}>
+          <Stat label="Invoiced this year" value={money(totals.thisYear)} />
+          <Stat label="Same point last year" value={money(totals.lastYear)} quiet />
+          <Stat
+            label="Up or down"
+            value={money(Math.abs(totals.change))}
+            tone={totals.change >= 0 ? 'up' : 'down'}
+            note={totals.lastYear
+              ? `${totals.change >= 0 ? '+' : '-'}${Math.abs(100 * totals.change / totals.lastYear).toFixed(1)}%`
+              : undefined}
+          />
+          <Stat label="Open on the system" value={money(totals.openValue)}
+            note={`${open.length} ${open.length === 1 ? 'job' : 'jobs'}`} />
+        </div>
       )}
+
+      {waiting > 0 && showing.body !== 'accounts' && (
+        <div style={{ marginBottom: 16 }}>
+          <Alert tone="warning">
+            {waiting} Protean {waiting === 1 ? 'account has' : 'accounts have'} no customer yet,
+            so their billing is in the company total and on nobody&apos;s record.
+            <button
+              onClick={() => setTab('accounts')}
+              style={{
+                marginLeft: 8, border: 'none', background: 'transparent', padding: 0,
+                color: 'var(--accent)', font: 'inherit', fontWeight: 600, cursor: 'pointer',
+              }}
+            >Place them</button>
+          </Alert>
+        </div>
+      )}
+
+      {showing.tabs && <Tabs value={tab} onChange={setTab} tabs={tabs} />}
+
+      <div style={{ marginTop: 16 }}>
+        {showing.invitation && (
+          <EmptyState
+            what="Nothing has been imported yet"
+            why="Run the invoiced report and the open jobs report out of Protean, save them as CSV, and drop them into Import."
+            action={mayImport ? (
+              <Button variant="primary" onClick={() => setTab('import')}>
+                <Upload size={14} />
+                Import
+              </Button>
+            ) : undefined}
+          />
+        )}
+
+        {(showing.body === 'customers' || showing.body === 'open') && (
+          <div style={{ display: 'flex', marginBottom: 12 }}>
+            <SearchInput
+              value={q}
+              onChange={setQ}
+              placeholder={showing.body === 'customers' ? 'Find a customer' : 'Find a job or a customer'}
+            />
+          </div>
+        )}
+
+        {showing.body === 'customers' && <Customers rows={shown} loading={loading} />}
+        {showing.body === 'groups' && <Groups rows={groups} />}
+        {showing.body === 'open' && <OpenWork rows={shownJobs} loading={loading} />}
+        {showing.body === 'accounts' && <ModeratePanel onChanged={() => void load()} />}
+        {showing.body === 'import' && <ImportPanel onDone={() => void load()} />}
+      </div>
     </div>
   );
 }
