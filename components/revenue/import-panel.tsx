@@ -14,8 +14,8 @@ import {
   type Read, type InvoiceRow, type OpenJobRow,
 } from '@/lib/protean/import';
 import {
-  startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, addUp,
-  type BatchResult,
+  startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, wouldClose, addUp,
+  type BatchResult, type WouldClose,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -46,13 +46,27 @@ import {
    than doubling it, because every write is an upsert on Protean's own
    key.
 
-   ---- The last step of a snapshot ----
+   ---- The last step of a snapshot, and why it asks ----
 
    The open jobs file is everything open at the moment it was run, so a
    job that has stopped appearing has been finished, invoiced or
    cancelled. Closing those is a separate call made once, after every
    slice has landed. Done per slice, the first slice of a file would
    close every job the later slices were about to confirm.
+
+   It is also the only destructive thing the import does, and it cannot
+   tell a week's work finishing from a partial export. Somebody runs the
+   report filtered to one depot, drops it in, and a thousand jobs at
+   every other depot are marked finished on the strength of not being
+   mentioned.
+
+   There is no number that separates those two cases, so there is no
+   threshold here. The figure goes on the screen and a person presses
+   the button. A normal week is one extra glance; the week this exists
+   for is the one where the glance says 812 rather than 140.
+
+   Declining is safe. The jobs stay open and the next whole export
+   closes them, because the file is a snapshot and not a diff.
    ============================================================= */
 
 type Dropped = {
@@ -64,8 +78,13 @@ type Sent = {
   kind: 'invoices' | 'open_jobs';
   fileName: string;
   result: Required<BatchResult>;
-  closed: number;
+  /** Null while the closing question is still on the screen. */
+  closed: number | null;
 };
+
+/* The one destructive step in the whole import, held back until
+   somebody has read what it would do. See the header. */
+type Closing = { importId: string; fileName: string; would: WouldClose };
 
 function totalOf(read: Read): number {
   if (!read.ok) return 0;
@@ -88,6 +107,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [sent, setSent] = useState<Sent[]>([]);
+  const [closing, setClosing] = useState<Closing | null>(null);
 
   const take = useCallback(async (files: FileList | File[]) => {
     const next: Dropped[] = [];
@@ -131,10 +151,18 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
           }
         }
 
-        let closed = 0;
+        /* Closing is NOT done here. A snapshot marks everything absent
+           from it as finished, which is right for a whole export and
+           ruinous for a partial one, and nothing in the data tells the
+           two apart. So it is read, shown, and pressed. */
+        let closed: number | null = 0;
         if (kind === 'open_jobs' && d.read.rows.length) {
-          setBusy(`${d.fileName}: closing what has gone`);
-          closed = await closeWhatWentAway(supabase, importId);
+          setBusy(`${d.fileName}: working out what has finished`);
+          const would = await wouldClose(supabase, importId);
+          if (would.would_close > 0) {
+            closed = null;
+            setClosing({ importId, fileName: d.fileName, would });
+          }
         }
 
         landed.push({ kind, fileName: d.fileName, result: addUp(results), closed });
@@ -150,6 +178,21 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
       setBusy(null);
     }
   }, [dropped, supabase, say, onDone]);
+
+  const confirmClose = useCallback(async () => {
+    if (!closing) return;
+    setBusy('Marking them finished');
+    try {
+      const closed = await closeWhatWentAway(supabase, closing.importId);
+      setSent((was) => was.map((s) =>
+        s.fileName === closing.fileName && s.kind === 'open_jobs' ? { ...s, closed } : s));
+      setClosing(null);
+      say({ tone: 'success', title: `${closed} jobs marked as finished.` });
+      onDone();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setBusy(null); }
+  }, [closing, supabase, say, onDone]);
 
   const ready = dropped.some((d) => d.read.ok);
 
@@ -283,6 +326,53 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
+      {closing && (
+        <Card style={{ borderColor: 'var(--warning)' }}>
+          <SectionHead
+            title="Which jobs have finished"
+            hint={`From ${closing.fileName}.`}
+          />
+          <p style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 12px' }}>
+            {closing.would.in_this_file.toLocaleString('en-GB')} jobs were in that file.
+            {' '}
+            <strong>{closing.would.would_close.toLocaleString('en-GB')}</strong> of the
+            {' '}{closing.would.open_now.toLocaleString('en-GB')} open on the system are not in it,
+            so they have been finished, invoiced or cancelled since the last export.
+          </p>
+
+          <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginBottom: 12 }}>
+            <Figure label="Would be finished" value={closing.would.would_close.toLocaleString('en-GB')} />
+            <Figure label="Their value" value={money(closing.would.biggest_value)} />
+            {closing.would.biggest_job && (
+              <Figure label="Largest of them" value={closing.would.biggest_job} />
+            )}
+          </div>
+
+          <Alert tone="warning">
+            <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              Check that figure against the week you have had. This is the only step that
+              takes anything away, and a report run for one depot rather than all of them
+              looks exactly like a very quiet fortnight from here. If it reads high, say no:
+              the jobs stay open and the next whole export closes them properly.
+            </span>
+          </Alert>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            <Button variant="primary" disabled={!!busy} onClick={() => void confirmClose()}>
+              {busy ? <Loader size={14} className="spin" /> : <Check size={14} />}
+              Yes, mark {closing.would.would_close.toLocaleString('en-GB')} as finished
+            </Button>
+            <Button variant="ghost" disabled={!!busy} onClick={() => {
+              setClosing(null);
+              say({ tone: 'neutral', title: 'Left open. The next whole export will close them.' });
+            }}>
+              No, leave them open
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {sent.length > 0 && (
         <Card>
           <SectionHead title="What landed" hint="From the last import." />
@@ -306,7 +396,11 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
                   )}
                   {s.kind === 'open_jobs' && (
                     <>
-                      <Figure label="Now finished" value={s.closed.toLocaleString('en-GB')} />
+                      <Figure
+                        label="Now finished"
+                        value={s.closed == null ? 'waiting on you' : s.closed.toLocaleString('en-GB')}
+                        quiet={s.closed == null}
+                      />
                       <Figure label="No account yet"
                         value={s.result.rows_unmatched.toLocaleString('en-GB')}
                         quiet={s.result.rows_unmatched === 0} />

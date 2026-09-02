@@ -26,7 +26,30 @@ export default async function AnalyticsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [profileRes, profilesAllRes, stockAll, leadsAll] = await Promise.all([
+  /* Protean's figures are read here rather than in the view, so the
+     screen paints once with everything on it. They are also allowed to
+     fail: the workshop revenue is newer than this page, and a database
+     without the revenue migrations on it should still draw the trailer
+     sales analytics rather than a blank screen. */
+  const revenue = async () => {
+    try {
+      const [company, months, byCustomer] = await Promise.all([
+        supabase.rpc('protean_company', { p_upto: null }),
+        supabase.rpc('protean_by_month', { p_months: 24, p_upto: null }),
+        supabase.rpc('protean_year_on_year', { p_upto: null }),
+      ]);
+      if (company.error || months.error || byCustomer.error) return null;
+      return {
+        company: ((company.data ?? []) as any[])[0] ?? null,
+        months: (months.data ?? []) as any[],
+        customers: (byCustomer.data ?? []) as any[],
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const [profileRes, profilesAllRes, stockAll, leadsAll, protean] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('profiles').select('id, email, full_name, role'),
     fetchAll(supabase, 'stock_trailers'),
@@ -38,6 +61,7 @@ export default async function AnalyticsPage() {
        counts pitches rather than firms: two quotes to one haulier are
        two things in the pipeline, which is what a rep would say. */
     fetchAll(supabase, 'crm_leads', 'id, contact_id, owner_id, type, status, estimated_value, company_name'),
+    revenue(),
   ]);
 
   const tracker = (leadsAll as any[]).map((l) => ({
@@ -53,6 +77,7 @@ export default async function AnalyticsPage() {
       teamProfiles={(profilesAllRes.data ?? []) as Profile[]}
       stock={stockAll as StockTrailer[]}
       tracker={tracker}
+      protean={protean}
     />
   );
 }

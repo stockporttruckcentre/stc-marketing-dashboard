@@ -57,7 +57,8 @@
     "check:groups": "bash scripts/sql/groups-check.sh",
     "check:protean-sql": "bash scripts/sql/protean-check.sh",
     "check:protean-import": "tsx scripts/protean-import-check.ts",
-    "check:revenue-screen": "tsx scripts/revenue-screen-check.ts"
+    "check:revenue-screen": "tsx scripts/revenue-screen-check.ts",
+    "check:nav": "tsx scripts/nav-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

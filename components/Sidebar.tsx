@@ -3,15 +3,12 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
-  Image as ImageIcon, ShieldCheck, Settings, LogOut, CalendarDays, ListChecks,
-  UserCog, Receipt, type LucideIcon,
-} from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationRail } from '@/components/notifications/rail';
 import { capabilitiesFor } from '@/lib/crm/permissions';
-import { visibleSections, type NavIcon } from '@/lib/nav';
+import { visibleSections } from '@/lib/nav';
+import { ICONS } from '@/components/nav-icons';
 import type { Profile } from '@/lib/types';
 
 /* =============================================================
@@ -46,24 +43,6 @@ import type { Profile } from '@/lib/types';
    No heading on that section. Two rows do not need one.
    ============================================================= */
 
-const ICONS: Record<NavIcon, LucideIcon> = {
-  dashboard: LayoutDashboard,
-  analytics: BarChart3,
-  work: ListChecks,
-  diary: CalendarDays,
-  news: TrendingUp,
-  crm: Users,
-  tracker: TrendingUp,
-  finder: Search,
-  stock: Container,
-  fleetsmart: ShieldCheck,
-  revenue: Receipt,
-  social: Calendar,
-  brand: ImageIcon,
-  team: Users,
-  settings: Settings,
-  admin: UserCog,
-};
 
 export function Sidebar({
   profile, pendingPosts = 0, emblemUrl = null,
