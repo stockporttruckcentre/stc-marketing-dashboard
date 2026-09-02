@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +22,7 @@ function sumRemaining(usage: any): number | null {
 // Keep cache between warm function invocations (new key 4f87)
 const g = globalThis as any;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
@@ -31,7 +31,24 @@ export async function GET() {
   if (!key) return NextResponse.json({ error: 'LUSHA_API_KEY not set' }, { status: 500 });
 
   const now = Date.now();
-  if (g.__lushaCache && now - g.__lushaCache.t < CACHE_MS) {
+
+  /* `?fresh=1` is the Refresh button on the finder, and it is honoured
+     rather than obeyed.
+
+     The cache exists because Lusha allows five requests a minute and a
+     shared cache is what keeps everybody under it. A refresh that
+     ignored it entirely would let one person holding the button take
+     the whole allowance of REQUESTS, which is a different allowance
+     from the credits and just as easy to exhaust.
+
+     So a refresh shortens the window rather than removing it: after
+     five seconds it asks again, and inside five seconds it hands back
+     what it has. Nobody pressing a button twice notices the
+     difference, and the limit cannot be reached by pressing it. */
+  const fresh = req.nextUrl.searchParams.get('fresh') === '1';
+  const window = fresh ? 5_000 : CACHE_MS;
+
+  if (g.__lushaCache && now - g.__lushaCache.t < window) {
     return NextResponse.json({ balance: g.__lushaCache.balance, breakdown: g.__lushaCache.breakdown, cached: true });
   }
 

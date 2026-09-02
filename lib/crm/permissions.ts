@@ -313,21 +313,32 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
 };
 
 /**
- * Lusha, switched off at the door.
+ * Lusha, and the lock that is now lifted.
  *
  * The meeting asked for the company finder to be unclickable at rollout
- * until somebody decides a usage policy, because searches cost credits
- * out of a monthly allowance and one person exploring can spend the lot.
- * Tom named Dean; the point is that nobody should find out what a search
- * costs by accident.
+ * until somebody decided a usage policy, because searches cost credits
+ * out of a monthly allowance and one person exploring can spend the
+ * lot. Nobody should find out what a search costs by accident.
  *
- * A single constant rather than a role change, because it is temporary
- * and it applies to everybody including admins. Set it to false to lift
- * the lock, and the per role capability sets take over again unchanged.
- * When the admin panel lands this becomes a stored setting, so somebody
- * can turn it on for the people who should have it without a deploy.
+ * That decision has been made:
+ *
+ *   It only costed 1 credit for a lookup and we get 50 a month so that
+ *   should be safe to use again.
+ *
+ * So the lock comes off. What replaces it is not nothing: the balance
+ * is on the finder page itself, beside the button that spends it, so
+ * the allowance is visible at the moment somebody is about to use it
+ * rather than in a top bar on a screen they are not on.
+ *
+ * The lock stays HERE as a constant rather than being deleted, because
+ * the routes that cost money still consult it and a switch that can be
+ * flipped back in one line is worth keeping. When the admin panel lands
+ * it becomes a stored setting, so somebody can turn it on for the
+ * people who should have it without a deploy.
+ *
+ * Per role capability sets decide the rest, unchanged.
  */
-export const LUSHA_LOCKED = true;
+export const LUSHA_LOCKED = false;
 
 /**
  * The same lock, as a value the runtime reads.

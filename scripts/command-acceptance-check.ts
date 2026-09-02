@@ -36,7 +36,7 @@ import { planAndPreview, applyMutation } from '../lib/command/server/mutation';
 import { runEmit } from '../lib/command/server/emit';
 import { capabilitiesFor } from '../lib/crm/permissions';
 import { PROVIDER } from '../lib/crm/enrich';
-import { LUSHA_GATE, LUSHA_LOCKED } from '../lib/crm/permissions';
+import { LUSHA_GATE } from '../lib/crm/permissions';
 import { FINDER } from '../lib/crm/finder';
 import { fakeLedger } from './support/fake-ledger';
 import type { FileStore } from '../lib/command/files';
@@ -2897,17 +2897,29 @@ test('a viewer cannot raise a proposal, from either direction', async () => {
    writes.
    ============================================================= */
 
-test('enrichment is not offered while Lusha is switched off', async () => {
-  /* LUSHA_LOCKED strips crm.enrich from every role, so the sentence
-     reaches nothing. That is the product's current state and the reason
-     for it is a decision about credits, not a gap in the runtime. */
-  const planning = planCommand('enrich Dawson Group', {
-    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
+test('with the lock off, enrichment is offered to whoever holds it', async () => {
+  /* This used to assert that NOBODY could reach enrichment, which was
+     true while the lock was on and is a statement about a setting
+     rather than about a rule. From the business:
+
+       It only costed 1 credit for a lookup and we get 50 a month so
+       that should be safe to use again.
+
+     So the rule underneath it is what is asserted: capability decides,
+     the way it decides everything else. */
+  const holder = planCommand('enrich Dawson Group', {
+    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never), 'crm.enrich'] as never[],
   });
-  const reaches = planning?.plan.steps
-    .some((s) => s.op === 'invoke' && s.capability === 'contact.enrich') ?? false;
-  ok('nobody can reach it today', !reaches,
-    JSON.stringify(planning?.plan.steps.map((s) => s.op)));
+  ok('somebody who holds it reaches it',
+    holder?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'contact.enrich') ?? false,
+    JSON.stringify(holder?.plan.steps.map((s) => s.op)));
+
+  const viewer = planCommand('enrich Dawson Group', {
+    actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)],
+  });
+  ok('a read only viewer does not',
+    !(viewer?.plan.steps.some((s) => s.op === 'invoke' && s.capability === 'contact.enrich') ?? false),
+    JSON.stringify(viewer?.plan.steps.map((s) => s.op)));
 });
 
 test('with the credit lock lifted, enrichment plans as a real operation', async () => {
@@ -2928,7 +2940,16 @@ test('with the credit lock lifted, enrichment plans as a real operation', async 
   ok('it has to be confirmed', planning.confirm);
 });
 
+/* THE LOCK, ASSERTED BY TURNING IT ON RATHER THAN BY IT BEING ON.
+
+   `LUSHA_GATE` exists as a seam for exactly this: the constant is what
+   the application ships with, and this is what the runtime consults, so
+   a check can put the lock in either position and prove what happens.
+   Written against the shipped setting, this test passed for as long as
+   the lock happened to be on and said nothing about the lock at all. */
 test('the lock refuses the spend before anything is written', async () => {
+  const wasLocked = LUSHA_GATE.locked;
+  LUSHA_GATE.locked = true;
   const db = fakeDb({
     crm_contacts: [
       { id: 'c1', company_name: 'Dawson Group', status: 'lead', email: 'sam@dawson.co.uk' },
@@ -2962,6 +2983,7 @@ test('the lock refuses the spend before anything is written', async () => {
   });
   ok('it refuses', !done.ok, 'it spent a credit');
   ok('and nothing was written', db.writes.length === 0, JSON.stringify(db.writes));
+  LUSHA_GATE.locked = wasLocked;
 });
 
 /* =============================================================
@@ -4430,17 +4452,52 @@ test('a viewer cannot put a picture on a post', async () => {
 /* Everything except the lock, which is what the lock hides. */
 const PROSPECTOR = [...capabilitiesFor({ role: 'sales' } as never), 'crm.enrich'] as never[];
 
-test('the finder is invisible while Lusha is locked', async () => {
-  ok('the lock is on', LUSHA_LOCKED, 'it is off');
-  const planning = planCommand('find waste companies within 20 miles of Hyde', {
-    actorCapabilities: [...capabilitiesFor({ role: 'admin' } as never)],
-    context: {},
-  });
-  ok('nobody is offered a paid search',
-    !(planning?.plan.steps.some(
-      (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false),
-    JSON.stringify(planning?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+/* THE LOCK IS OFF, AND THE SWITCH STILL WORKS.
+
+   This used to assert `LUSHA_LOCKED` was true, which was right while it
+   was and is a test of a temporary state rather than of a rule. From
+   the business:
+
+     It only costed 1 credit for a lookup and we get 50 a month so that
+     should be safe to use again.
+
+   So what is asserted now is the pair that survives the switch being
+   flipped either way: with the lock off, capability decides who may
+   spend a credit, and with it on, nobody may whatever they hold. */
+test('with the lock off, capability decides who may spend a credit', async () => {
+  const was = LUSHA_GATE.locked;
+  LUSHA_GATE.locked = false;
+  try {
+    const allowed = planCommand('find waste companies within 20 miles of Hyde', {
+      actorCapabilities: PROSPECTOR, context: {},
+    });
+    ok('somebody who may search is offered one',
+      allowed?.plan.steps.some(
+        (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false,
+      JSON.stringify(allowed?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+
+    /* A viewer holds nothing that spends money, lock or no lock. That
+       is the guard that has to hold now the temporary one is gone. */
+    const viewer = planCommand('find waste companies within 20 miles of Hyde', {
+      actorCapabilities: [...capabilitiesFor({ role: 'viewer' } as never)], context: {},
+    });
+    ok('a read only viewer is not',
+      !(viewer?.plan.steps.some(
+        (s) => s.op === 'invoke' && s.capability === 'crm.findCompanies') ?? false),
+      JSON.stringify(viewer?.plan.steps.map((s) => (s.op === 'invoke' ? s.capability : s.op))));
+  } finally { LUSHA_GATE.locked = was; }
 });
+
+/* There is no plan time assertion about the lock here on purpose.
+
+   I wrote one and it failed, because the lock does not bite at plan
+   time and never did: `prepare.ts` consults it, so a locked search is
+   PLANNED and then refused before it is prepared. That is the right
+   place for it. Refusing to plan the sentence would tell somebody who
+   said what they wanted that nothing here reads it, and the money is
+   spent at prepare, not at plan.
+
+   The test above is the one that covers it, by turning the lock on. */
 
 test('a sentence with no place asks where, and reaches no search', async () => {
   const db = fakeDb({ crm_contacts: [] });
