@@ -61,6 +61,31 @@ export type OpenJobRow = {
 const INVOICE_MARKERS = ['Invoice No', 'Alpha', 'Tax Point'];
 const OPEN_JOB_MARKERS = ['Job No', 'Job Type', 'Customer'];
 
+/* ---- And the third file, which is not Protean at all ----
+
+   From the business:
+
+     it's not accepting the attached file on Revenue which is from SAGE
+     not protean. We can only take rental information from sage.
+
+   Rental invoicing is raised in Sage. The export is the same report
+   asked of a different system, so it lands in the same table and
+   answers the same questions, and only the reading of it differs:
+
+     Document No            the invoice number, zero padded
+     Type                   Invoice or Credit Note
+     Date                   24/08/2026, day first
+     Code                   the account, which is Protean's alpha
+     Customer Name          the account's name
+     Invoiced Net Value     net
+     Total Gross Value      gross
+
+   No tax column, no site, no created by, no due date. Those come back
+   null rather than invented, and every figure this application shows is
+   built on net, the tax point and the account, all three of which are
+   here. */
+const SAGE_MARKERS = ['Document No', 'Code', 'Customer Name', 'Invoiced Net Value'];
+
 export type Kind = 'invoices' | 'open_jobs';
 
 /** The money column carries the currency in its name: `Net(£)`. */
@@ -131,6 +156,13 @@ export function readProteanRows(headers: string[], rows: Record<string, unknown>
   }
 
   const has = (want: string[]) => want.every((c) => headers.includes(c));
+
+  /* SAGE FIRST, because its markers are the more specific pair. Both
+     files carry a `Document No`; only Sage carries `Invoiced Net
+     Value`, and only Protean carries `Alpha`. Checking Protean first
+     would be correct too, and ordering the more specific test first is
+     the habit that stays correct when a fourth file arrives. */
+  if (has(SAGE_MARKERS)) return readSage(rows);
 
   if (has(INVOICE_MARKERS)) {
     const netCol = moneyColumn(headers, 'Net');
@@ -209,10 +241,76 @@ export function readProteanRows(headers: string[], rows: Record<string, unknown>
 
   return {
     ok: false,
-    why: 'that is not one of the two Protean exports. '
-      + 'The invoice export has Invoice No, Alpha and Tax Point; '
-      + 'the open jobs export has Job No, Job Type and Customer.',
+    why: 'that is not one of the three exports this reads. '
+      + 'Protean invoices have Invoice No, Alpha and Tax Point; '
+      + 'Protean open jobs have Job No, Job Type and Customer; '
+      + 'the Sage rental export has Document No, Code and Invoiced Net Value.',
   };
+}
+
+/**
+ * The Sage rental export.
+ *
+ * ---- A credit note is negative and the file does not say so ----
+ *
+ * Sage writes the VALUE of a credit note, positive, and puts the sign
+ * in the `Type` column. Taken at face value a credit note ADDS to
+ * revenue, so every one of them is wrong by twice its own value: once
+ * for not coming off, and once for going on.
+ *
+ * On the first real file that is fifteen of six hundred and thirteen
+ * documents. Small enough that nobody would spot it in a total and
+ * large enough to matter in a board meeting, which is the worst size
+ * for a fault to be.
+ *
+ * Anything that is not an invoice is treated as a credit. There are two
+ * types in the file and inverting the test would mean a third type
+ * arriving one day and being counted as income by default.
+ */
+function readSage(rows: Record<string, unknown>[]): Read {
+  const out: InvoiceRow[] = [];
+  let unusable = 0;
+  let blank = 0;
+
+  for (const r of rows) {
+    const invoice_no = text(r, 'Document No');
+    const alpha = text(r, 'Code');
+    const tax_point = proteanDate(r.Date);
+    const raw = proteanMoney(r['Invoiced Net Value']);
+    const gross = proteanMoney(r['Total Gross Value']);
+    const kind = (text(r, 'Type') ?? '').toLowerCase();
+
+    if (isBlankRow([alpha, r.Date, r['Invoiced Net Value'], r['Customer Name']])) {
+      blank += 1; continue;
+    }
+    if (!invoice_no || !alpha || !tax_point || raw === null) { unusable += 1; continue; }
+
+    /* `Math.abs` first, so a file that ever does write the sign itself
+       is not flipped back to positive by this. */
+    const credit = kind !== '' && kind !== 'invoice';
+    const sign = credit ? -1 : 1;
+
+    out.push({
+      invoice_no,
+      document_no: invoice_no,
+      alpha: alpha.toUpperCase(),
+      customer_ref: null,
+      protean_name: text(r, 'Customer Name'),
+      site_name: null,
+      created_on: null,
+      tax_point,
+      due_on: null,
+      created_by: null,
+      net: sign * Math.abs(raw),
+      /* Sage gives no tax column. The difference between gross and net
+         IS the tax, and working it out here rather than storing null
+         means the figure is there for anybody who asks. */
+      tax: gross === null ? null : sign * Math.abs(gross - Math.abs(raw)),
+      gross: gross === null ? null : sign * Math.abs(gross),
+    });
+  }
+
+  return { ok: true, kind: 'invoices', rows: out, read: rows.length, unusable, blank };
 }
 
 /**
@@ -246,10 +344,47 @@ export function inBatches<T>(rows: T[], size = 500): T[][] {
   return out;
 }
 
-/** Windows-1252, for the reason in the header. */
+/**
+ * The text of a dropped file, in whichever encoding it is actually in.
+ *
+ * ---- Why this is no longer just Windows-1252 ----
+ *
+ * The Protean exports are Windows-1252, and reading them as UTF-8 turns
+ * the pound sign into a replacement character. That is what the header
+ * of this file is about and it has not changed.
+ *
+ * The Sage rental export is UTF-8 WITH A BYTE ORDER MARK. Read as
+ * Windows-1252 those three bytes become the characters `ï»¿`, which
+ * land at the front of the first header, so the file's first column is
+ * named `ï»¿Document No` and the marker test for it fails. The file
+ * then reports as "not one of the exports this reads" with every column
+ * present and correct, which is the least helpful way to be wrong.
+ *
+ * ---- The rule ----
+ *
+ * UTF-8 first, refusing anything that is not valid UTF-8, then
+ * Windows-1252. That is not a guess:
+ *
+ *   A cp1252 file with a pound sign in it contains byte A3, which is
+ *   not valid UTF-8 on its own, so the strict decode throws and the
+ *   fallback is taken. Right answer.
+ *
+ *   A cp1252 file that IS valid UTF-8 is pure ASCII, where the two
+ *   encodings agree byte for byte. Either answer is the same answer.
+ *
+ * So the only files that change behaviour are the ones that were being
+ * read wrong.
+ */
 export async function readFileAsProtean(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
-  return new TextDecoder('windows-1252').decode(buf);
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    /* The BOM survives a successful decode as U+FEFF and would sit
+       inside the first header name. Papa does not strip it. */
+    return utf8.charCodeAt(0) === 0xFEFF ? utf8.slice(1) : utf8;
+  } catch {
+    return new TextDecoder('windows-1252').decode(buf);
+  }
 }
 
 /**

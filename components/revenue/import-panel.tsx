@@ -235,7 +235,16 @@ export function ImportPanel({ division, divisionName, onDone }: {
       <Card>
         <SectionHead
           title="This week's export"
-          hint="Both files from Protean: everything invoiced, and everything still open."
+          /* WHICH SYSTEM, because they are not the same one.
+
+             Maintenance is raised in Protean and comes out as two
+             reports. Rental is raised in Sage and comes out as one:
+             "We can only take rental information from sage." A panel
+             that says Protean on the S&L screen is telling somebody to
+             go and find a file that does not exist. */
+          hint={division === 'rental'
+            ? 'From Sage: the invoiced report, covering invoices and credit notes.'
+            : 'Both files from Protean: everything invoiced, and everything still open.'}
         />
         <div
           onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -387,7 +396,8 @@ export function ImportPanel({ division, divisionName, onDone }: {
             {busy ?? 'Put this week in'}
           </Button>
           <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-            Sending the same file twice is safe. Every row is keyed on Protean&apos;s own number,
+            Sending the same file twice is safe. Every row is keyed on the document number
+            the accounting system gave it,
             so it updates what is there rather than adding it again.
           </span>
         </div>
@@ -505,7 +515,9 @@ export function ImportPanel({ division, divisionName, onDone }: {
       {!dropped.length && !sent.length && (
         <EmptyState
           what="Nothing dropped yet"
-          why="Run both reports out of Protean, save them as CSV, and drop them above."
+          why={division === 'rental'
+            ? 'Run the invoiced report out of Sage and drop it above.'
+            : 'Run both reports out of Protean, save them as CSV, and drop them above.'}
         />
       )}
     </div>

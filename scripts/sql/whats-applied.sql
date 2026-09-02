@@ -103,7 +103,10 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     (52, '089',        'A group belongs to a division',                   'group_revenue:p_division',   'signature'),
     (53, '090',        'The seven figures finance takes into a meeting',  'trailer_deals',              'function'),
     (54, '091',        'An approved account can actually sign in',        'blank_auth_tokens',          'function'),
-    (55, '092',        'Trailer customers reconcile, and can be created', 'make_customer_for_trailer',  'function')
+    (55, '092',        'Trailer customers reconcile, and can be created', 'make_customer_for_trailer',  'function'),
+    /* 093 only renames a row, so the marker is the row itself. Every
+       function it could name has existed since 083. */
+    (56, '093',        'The rental division is called S&L',               'S&L',                        'division')
 )
 SELECT
   e.migration                                AS "Migration",
@@ -124,6 +127,26 @@ CROSS JOIN LATERAL (
       WHERE c.capability = e.marker)
     WHEN 'catalog' THEN EXISTS (
       SELECT 1 FROM capability_catalog c WHERE c.key = e.marker)
+    /* A ROW IN A TABLE THAT MAY NOT BE THERE YET.
+
+       `EXISTS (SELECT 1 FROM divisions ...)` is the obvious way to
+       write this and it cannot be used. A table named directly is
+       resolved when the statement is PLANNED, not when the branch is
+       taken, so on a database that predates 083 the whole readback
+       fails to parse and comes back empty. Which is worse than any
+       wrong answer it could have given: every row then reads as absent,
+       including the forty that are there.
+
+       `query_to_xml` takes the query as a STRING, so nothing is
+       resolved until the CASE actually reaches it, and `to_regclass`
+       guards that. This is the standard way to ask about a table that
+       may not exist. */
+    WHEN 'division' THEN (
+      CASE WHEN to_regclass('public.divisions') IS NULL THEN FALSE
+           ELSE (xpath('/row/c/text()', query_to_xml(
+             format('SELECT count(*) AS c FROM public.divisions WHERE name = %L', e.marker),
+             FALSE, TRUE, '')))[1]::TEXT::INT > 0
+      END)
     /* `name:argument`. Present when some overload of that name takes an
        argument by that name, which is what tells a rewritten function
        apart from the version it replaced. */

@@ -404,12 +404,41 @@ export function proteanDate(raw: unknown): string | null {
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
 
   const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(text);
-  if (!m) return null;
-  const month = MONTHS[m[2]!.toLowerCase()];
-  if (!month) return null;
-  const day = Number(m[1]);
-  if (day < 1 || day > 31) return null;
-  return `20${m[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  if (m) {
+    const month = MONTHS[m[2]!.toLowerCase()];
+    if (!month) return null;
+    const day = Number(m[1]);
+    if (day < 1 || day > 31) return null;
+    return `20${m[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  /* DAY FIRST, ALWAYS.
+
+     Sage writes `24/08/2026`, and slash dates are the one format where
+     being wrong is invisible: `04/08/2025` is a real date read either
+     way, so a file read month first lands four months out with nothing
+     to show for it, and only the rows past the twelfth of a month give
+     the game away.
+
+     There is no sniffing here and there must not be. Deciding per file
+     from whether some row has a number above twelve means a rental
+     export covering one quiet fortnight gets read the other way round
+     from the one before it. This is a UK company and Sage UK writes day
+     first, so day first is the rule, stated once.
+
+     Two digit years are refused rather than guessed at. `01/04/26` is
+     unambiguous to a person and this has no way to know whether a
+     system that writes 26 means 2026 or 1926, and no need to: nothing
+     we import writes them. */
+  const slash = /^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/.exec(text);
+  if (slash) {
+    const day = Number(slash[1]);
+    const month = Number(slash[2]);
+    if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+    return `${slash[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  return null;
 }
 
 /**
