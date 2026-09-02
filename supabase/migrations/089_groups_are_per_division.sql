@@ -29,6 +29,13 @@
 
 DROP FUNCTION IF EXISTS group_revenue(DATE);
 
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is live and
+   `CREATE OR REPLACE` cannot change a return type. No-op on a fresh
+   database, the fix on a replay. */
+DROP FUNCTION IF EXISTS group_revenue(DATE, TEXT);
+
 CREATE OR REPLACE FUNCTION group_revenue(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
   group_id UUID, group_name TEXT, customers INTEGER, accounts INTEGER,
@@ -106,6 +113,13 @@ GRANT EXECUTE ON FUNCTION group_revenue(DATE, TEXT) TO authenticated;
 -- And the breakdown inside one, for the same division.
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS group_breakdown(UUID, DATE);
+
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is live and
+   `CREATE OR REPLACE` cannot change a return type. No-op on a fresh
+   database, the fix on a replay. */
+DROP FUNCTION IF EXISTS group_breakdown(UUID, DATE, TEXT);
 
 CREATE OR REPLACE FUNCTION group_breakdown(
   p_group UUID, p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)

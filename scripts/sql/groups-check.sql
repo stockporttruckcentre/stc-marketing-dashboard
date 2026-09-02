@@ -547,4 +547,126 @@ BEGIN
   RAISE NOTICE 'ok  a group carries the whole of last year alongside the same point in it';
 END $$;
 
+-- -------------------------------------------------------------
+-- 12d. THE ROW AND THE MANAGE DIALOG COUNT DIFFERENT THINGS,
+--      AND EACH ONE SAYS WHICH.
+--
+-- From the business:
+--
+--   We have a group it's made from 2 customers, the dropdown only shows
+--   one, the manage screen shows 2. then the inpost one does show 2,
+--   but one of them has never had any revenue so it technically doesn't
+--   belong in a revenue group yet.
+--
+-- Reported as a fault and both numbers were right. Manage lists every
+-- member of the group; the row on a division screen counts the ones
+-- with an account in THAT division. A member who bills only on S&L is
+-- correctly absent from the STC row and correctly present in Manage,
+-- and nothing anywhere said so.
+--
+-- The fixture below is the reported shape exactly: a two member group
+-- where one member bills on one division and the other bills on the
+-- other.
+-- -------------------------------------------------------------
+INSERT INTO crm_contacts (id, company_name, source, status) VALUES
+  ('90100000-0000-0000-0000-0000000000c1', 'Close Brothers Asset Finance', 'protean', 'customer'),
+  ('90100000-0000-0000-0000-0000000000c2', 'Close Brothers Vehicle Hire Limited', 'protean', 'customer'),
+  /* And a member with an account here and nothing on it, which is the
+     InPost half of the report. */
+  ('90100000-0000-0000-0000-0000000000c3', 'Close Brothers Leasing Ltd', 'protean', 'customer')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at) VALUES
+  ('stc',    'CLOSEAF', 'Close Brothers Asset Finance',        '90100000-0000-0000-0000-0000000000c1', NOW()),
+  ('rental', 'CLOSEVH', 'Close Brothers Vehicle Hire Limited', '90100000-0000-0000-0000-0000000000c2', NOW()),
+  ('stc',    'CLOSELE', 'Close Brothers Leasing Ltd',          '90100000-0000-0000-0000-0000000000c3', NOW())
+ON CONFLICT (division, alpha) DO NOTHING;
+
+INSERT INTO protean_invoices (division, invoice_no, alpha, tax_point, net) VALUES
+  ('stc',    'CB1', 'CLOSEAF', '2026-05-01', 55640),
+  ('rental', 'CB2', 'CLOSEVH', '2026-05-01', 48319)
+  /* CLOSELE gets none, on purpose. */
+ON CONFLICT (division, invoice_no) DO NOTHING;
+
+DO $$
+DECLARE g UUID; row_stc RECORD; row_rental RECORD; n INTEGER; m RECORD; b RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+
+  g := name_a_group('Close Brothers');
+  PERFORM put_in_group('90100000-0000-0000-0000-0000000000c1', g);
+  PERFORM put_in_group('90100000-0000-0000-0000-0000000000c2', g);
+  PERFORM put_in_group('90100000-0000-0000-0000-0000000000c3', g);
+
+  -- ---- Manage lists the whole group ----
+  SELECT count(*) INTO n FROM group_members(g, '2026-08-01');
+  IF n <> 3 THEN
+    RAISE EXCEPTION 'Manage lists % members, and three were put in the group', n;
+  END IF;
+
+  -- ---- The STC row counts the two with an STC account ----
+  SELECT * INTO row_stc FROM group_revenue('2026-08-01', 'stc') WHERE group_name = 'Close Brothers';
+  IF row_stc IS NULL THEN RAISE EXCEPTION 'the group is not on the STC screen at all'; END IF;
+  IF row_stc.customers <> 2 THEN
+    RAISE EXCEPTION 'the STC row counts % customers, and two of the three bill on STC',
+      row_stc.customers;
+  END IF;
+
+  /* THE NUMBER THAT MAKES THE TWO LEGIBLE. Without it the row says two
+     and the dialog says three, and the only reading available is that
+     something is broken. */
+  IF row_stc.members <> 3 THEN
+    RAISE EXCEPTION 'the STC row says the group has % members, and it has 3', row_stc.members;
+  END IF;
+  IF row_stc.this_year <> 55640 THEN
+    RAISE EXCEPTION 'the STC row shows %, not the 55640 billed on STC', row_stc.this_year;
+  END IF;
+
+  -- ---- And the S&L row counts the one with an S&L account ----
+  SELECT * INTO row_rental FROM group_revenue('2026-08-01', 'rental')
+   WHERE group_name = 'Close Brothers';
+  IF row_rental.customers <> 1 OR row_rental.this_year <> 48319 THEN
+    RAISE EXCEPTION 'the S&L row shows % customers at %, not 1 at 48319',
+      row_rental.customers, row_rental.this_year;
+  END IF;
+  IF row_rental.members <> 3 THEN
+    RAISE EXCEPTION 'the S&L row says the group has % members, and it has 3', row_rental.members;
+  END IF;
+
+  -- ---- Manage names where each member's money is ----
+  SELECT * INTO m FROM group_members(g, '2026-08-01')
+   WHERE company_name = 'Close Brothers Vehicle Hire Limited';
+  IF m.divisions IS DISTINCT FROM 'S&L' THEN
+    RAISE EXCEPTION 'Manage says Vehicle Hire bills on %, and it bills on S&L', m.divisions;
+  END IF;
+  IF m.this_year <> 48319 THEN
+    RAISE EXCEPTION 'Manage says Vehicle Hire billed % this year, not 48319', m.this_year;
+  END IF;
+
+  /* That one line is the whole answer to the report: somebody looking
+     at the STC row and the dialog can now see that the missing member
+     is missing because its money is on the other screen. */
+
+  -- ---- A member with an account here and nothing on it ----
+  SELECT * INTO b FROM group_breakdown(g, '2026-08-01', 'stc')
+   WHERE company_name = 'Close Brothers Leasing Ltd';
+  IF b IS NULL THEN
+    RAISE EXCEPTION 'a member with an account here and no billing was dropped from the '
+                    'breakdown, so the count and the list disagree again';
+  END IF;
+  IF b.billed_ever <> 0 THEN
+    RAISE EXCEPTION 'it reads as having billed % ever, and it has billed nothing', b.billed_ever;
+  END IF;
+
+  /* And one that HAS billed is told apart from it, which is the whole
+     point of carrying `billed_ever` next to `this_year`. */
+  SELECT * INTO b FROM group_breakdown(g, '2026-08-01', 'stc')
+   WHERE company_name = 'Close Brothers Asset Finance';
+  IF b.billed_ever <= 0 THEN
+    RAISE EXCEPTION 'an account that has billed reads as never having billed';
+  END IF;
+
+  RAISE NOTICE 'ok  the row counts this division and Manage counts the group, and each says which';
+END $$;
+
 ROLLBACK;
