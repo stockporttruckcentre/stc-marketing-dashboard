@@ -81,7 +81,7 @@ export async function companyRevenue(
   const { data, error } = await db.rpc('protean_company', {
     p_upto: upto ?? null, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<CompanyRevenue>(data)[0] ?? null;
 }
 
@@ -122,7 +122,7 @@ export async function everyOpenJob(db: Db, division: DivisionFilter = null): Pro
       .order('logged_on', { ascending: true })
       .order('job_no', { ascending: true })
       .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
+    if (error) throw readable(error);
     const page = (data ?? []) as OpenJob[];
     out.push(...page);
     if (page.length < PAGE) return out;
@@ -182,13 +182,58 @@ export type DivisionFilter = Division | null;
 
 const rows = <T>(data: unknown): T[] => (data ?? []) as T[];
 
+/**
+ * Turn a Postgres error into something a person can act on.
+ *
+ * ---- The one this exists for ----
+ *
+ *   Could not find the function public.group_revenue(p_division, p_upto)
+ *   in the schema cache
+ *
+ * That is what PostgREST says when the application asks for a function
+ * signature the database does not have yet, and it will happen every
+ * time a migration adds an argument: the code reaches main and deploys
+ * the moment it is merged, and the SQL is run by hand afterwards. There
+ * is always a window, and during it the screen was showing a sentence
+ * about a schema cache to somebody who wants to know what to do.
+ *
+ * Recognised by PostgREST's own code rather than by the wording, since
+ * the wording is theirs to change.
+ *
+ * The schema cache is mentioned because it is the second half of the
+ * answer: Supabase reloads it on a DDL change, and it can lag a few
+ * seconds behind the migration that has genuinely just run.
+ */
+export function readable(error: { message: string; code?: string }): Error {
+  const missing = error.code === 'PGRST202'
+    || /could not find the function/i.test(error.message);
+  if (missing) {
+    return new Error(
+      'This screen is asking the database for something it does not have yet. '
+      + 'Run the latest revenue migrations in the Supabase SQL editor. '
+      + 'If you have just run them, give the API a few seconds to notice.',
+    );
+  }
+
+  /* A table the migrations have not made yet, which is the same problem
+     one step earlier. */
+  if (error.code === '42P01' || /relation .* does not exist/i.test(error.message)) {
+    return new Error(
+      'The revenue tables are not on this database yet. '
+      + 'Run the revenue migrations in the Supabase SQL editor.',
+    );
+  }
+
+  return new Error(error.message);
+}
+
 export async function yearOnYear(
   db: Db, division: DivisionFilter = null, upto?: string,
 ): Promise<YearOnYear[]> {
   const { data, error } = await db.rpc('protean_year_on_year', {
     p_upto: upto ?? null, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<YearOnYear>(data);
 }
 
@@ -206,7 +251,7 @@ export async function groupRevenue(
   const { data, error } = await db.rpc('group_revenue', {
     p_upto: upto ?? null, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<GroupRevenue>(data);
 }
 
@@ -216,7 +261,7 @@ export async function groupBreakdown(
   const { data, error } = await db.rpc('group_breakdown', {
     p_group: group, p_upto: upto ?? null, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<GroupLine>(data);
 }
 
@@ -258,7 +303,7 @@ export async function customerSpend(
   const { data, error } = await db.rpc('protean_customer', {
     p_contact: contact, p_upto: null, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<CustomerSpend>(data)[0] ?? null;
 }
 
@@ -279,7 +324,7 @@ export async function openWorkFor(
   const { data, error } = await db.rpc('protean_open_work', {
     p_contact: contact, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<OpenWork>(data);
 }
 
@@ -293,19 +338,19 @@ export type SpendYear = {
 
 export async function spendByYear(db: Db, contact: string): Promise<SpendYear[]> {
   const { data, error } = await db.rpc('protean_spend', { p_contact: contact });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<SpendYear>(data);
 }
 
 export async function accountsOf(db: Db, contact: string): Promise<AccountLine[]> {
   const { data, error } = await db.rpc('protean_accounts_of', { p_contact: contact });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<AccountLine>(data);
 }
 
 export async function waitingOnUs(db: Db, division: DivisionFilter = null): Promise<Waiting[]> {
   const { data, error } = await db.rpc('protean_to_moderate', { p_division: division });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<Waiting>(data);
 }
 
@@ -315,7 +360,7 @@ export async function bindAccount(
   const { error } = await db.rpc('protean_bind', {
     p_division: division, p_alpha: alpha, p_contact: contact,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 export async function makeCustomer(
@@ -324,7 +369,7 @@ export async function makeCustomer(
   const { data, error } = await db.rpc('protean_make_customer', {
     p_division: division, p_alpha: alpha, p_name: name ?? null,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return data as string;
 }
 
@@ -332,23 +377,23 @@ export async function setAside(db: Db, division: Division, alpha: string, why: s
   const { error } = await db.rpc('protean_ignore', {
     p_division: division, p_alpha: alpha, p_why: why,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 export async function nameGroup(db: Db, name: string): Promise<string> {
   const { data, error } = await db.rpc('name_a_group', { p_name: name });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return data as string;
 }
 
 export async function putInGroup(db: Db, contact: string, group: string | null) {
   const { error } = await db.rpc('put_in_group', { p_contact: contact, p_group: group });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 export async function renameGroup(db: Db, group: string, name: string) {
   const { error } = await db.rpc('rename_group', { p_group: group, p_name: name });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 export type GroupMember = {
@@ -360,7 +405,7 @@ export type GroupMember = {
 
 export async function groupMembers(db: Db, group: string): Promise<GroupMember[]> {
   const { data, error } = await db.rpc('group_members', { p_group: group });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<GroupMember>(data);
 }
 
@@ -374,7 +419,7 @@ export async function groupMembers(db: Db, group: string): Promise<GroupMember[]
  */
 export async function declineGroupSuggestion(db: Db, name: string) {
   const { error } = await db.rpc('decline_group_suggestion', { p_name: name });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 export async function declinedGroupNames(db: Db): Promise<Set<string>> {
@@ -385,7 +430,7 @@ export async function declinedGroupNames(db: Db): Promise<Set<string>> {
 
 export async function forgetGroup(db: Db, group: string) {
   const { error } = await db.rpc('forget_group', { p_group: group });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
 }
 
 /* -------------------------------------------------------------
@@ -403,7 +448,7 @@ export async function startImport(
   const { data, error } = await db.rpc('protean_start_import', {
     p_kind: kind, p_file: fileName, p_division: division,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return data as string;
 }
 
@@ -413,7 +458,7 @@ export async function sendInvoices(
   const { data, error } = await db.rpc('protean_take_invoices', {
     p_import: importId, p_rows: batch,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (rows<BatchResult>(data)[0]) ?? {
     rows_read: 0, rows_new: 0, rows_updated: 0, rows_skipped: 0, accounts_new: 0,
   };
@@ -425,7 +470,7 @@ export async function sendOpenJobs(
   const { data, error } = await db.rpc('protean_take_open_jobs', {
     p_import: importId, p_rows: batch,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (rows<BatchResult>(data)[0]) ?? {
     rows_read: 0, rows_new: 0, rows_updated: 0, rows_skipped: 0, rows_unmatched: 0,
   };
@@ -449,7 +494,7 @@ export type WouldClose = {
  */
 export async function wouldClose(db: Db, importId: string): Promise<WouldClose> {
   const { data, error } = await db.rpc('protean_would_close', { p_import: importId });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (rows<WouldClose>(data)[0]) ?? {
     would_close: 0, open_now: 0, in_this_file: 0, biggest_job: null, biggest_value: 0,
   };
@@ -465,7 +510,7 @@ export async function wouldClose(db: Db, importId: string): Promise<WouldClose> 
  */
 export async function relinkJobs(db: Db): Promise<number> {
   const { data, error } = await db.rpc('protean_relink_jobs');
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (data as number) ?? 0;
 }
 
@@ -489,7 +534,7 @@ export async function jobsWithoutAccount(
   db: Db, division: DivisionFilter = null,
 ): Promise<OrphanJobs[]> {
   const { data, error } = await db.rpc('protean_jobs_without_account', { p_division: division });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return rows<OrphanJobs>(data);
 }
 
@@ -500,7 +545,7 @@ export async function placeOpenWork(
   const { data, error } = await db.rpc('protean_place_open_work', {
     p_division: division, p_name: name, p_contact: contact,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (data as number) ?? 0;
 }
 
@@ -511,13 +556,13 @@ export async function makeCustomerForWork(
   const { data, error } = await db.rpc('protean_make_customer_for_work', {
     p_division: division, p_name: name,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return data as string;
 }
 
 export async function closeWhatWentAway(db: Db, importId: string): Promise<number> {
   const { data, error } = await db.rpc('protean_finish_open_jobs', { p_import: importId });
-  if (error) throw new Error(error.message);
+  if (error) throw readable(error);
   return (data as number) ?? 0;
 }
 

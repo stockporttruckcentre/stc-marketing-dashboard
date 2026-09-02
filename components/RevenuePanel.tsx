@@ -25,7 +25,7 @@ import { whatToShow, REVENUE_TABS, type RevenueTab } from '@/lib/protean/screen'
 import { groupsToOffer } from '@/lib/protean/customers';
 import {
   nameGroup, putInGroup, renameGroup, forgetGroup, groupMembers,
-  declineGroupSuggestion, declinedGroupNames,
+  declineGroupSuggestion, declinedGroupNames, readable,
   type GroupMember,
 } from '@/lib/protean/rpc';
 
@@ -99,6 +99,8 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
         supabase.rpc('protean_to_moderate', { p_division: division }),
         supabase.rpc('protean_jobs_without_account', { p_division: division }),
       ]);
+      if (queue.error) throw readable(queue.error);
+      if (unplaced.error) throw readable(unplaced.error);
       setCompany(totals);
       setCustomers(yoy);
       setGroups(grp);

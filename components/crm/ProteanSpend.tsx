@@ -94,9 +94,7 @@ export function ProteanSpend({ contactId, dense }: { contactId: string; dense?: 
     return (
       <EmptyState
         what="Their spend could not be read"
-        why={failed.includes('does not exist')
-          ? 'The Protean tables are not on this database yet. Run the revenue migrations and this fills in.'
-          : failed}
+        why={failed}
       />
     );
   }

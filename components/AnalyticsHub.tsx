@@ -12,6 +12,7 @@ import {
 } from '@/components/kit/primitives';
 import { useToast } from '@/components/kit/toast';
 import { MonthlyBars, SplitBar, RankRow, type Point } from '@/components/analytics/chart';
+import { readable } from '@/lib/protean/rpc';
 
 /* =============================================================
    The company, three divisions wide.
@@ -123,7 +124,12 @@ export function AnalyticsHub() {
         supabase.rpc('division_by_month', { p_months: 24, p_upto: null }),
         supabase.rpc('division_pipeline'),
       ]);
-      if (rev.error) throw new Error(rev.error.message);
+      /* Through the same translator as everything else, so a database
+         that is behind the application says so rather than quoting
+         PostgREST's schema cache at somebody. */
+      if (rev.error) throw readable(rev.error);
+      if (mth.error) throw readable(mth.error);
+      if (pipe.error) throw readable(pipe.error);
 
       const rows = (rev.data ?? []) as Division[];
       setDivisions(rows);
@@ -195,9 +201,7 @@ export function AnalyticsHub() {
         <PageHead eyebrow="Analytics" title="The company" />
         <EmptyState
           what="The figures could not be read"
-          why={failed.includes('does not exist')
-            ? 'The division migrations are not on this database yet. Run them and this fills in.'
-            : failed}
+          why={failed}
           action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
         />
       </div>
