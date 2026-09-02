@@ -855,8 +855,16 @@ export const ACTIONS: CommandActionSpec[] = [
      `analytics.periodYtd` was worse than useless. It said "Since the
      first of January" on a company whose year runs April to April.
 
-     The page is now seven views behind `?view=`, and each entry below
-     lands on the one that answers the sentence somebody typed. */
+     They were then rewritten to point at seven `?view=` targets, which
+     existed for exactly one commit. The tabs went the same way and for
+     a related reason: "Not keen on tabs here, people miss tabs."
+     Everything they held is in a division column now.
+
+     So every entry below goes to the page and nothing else. That is not
+     a regression: there is no state left on the screen to address, and
+     an action carrying a query string the page does not read is the
+     fault this comment is a record of, twice over. The words are what
+     still matter, because they are what somebody types. */
 
   { id: 'analytics.revenue', label: 'Revenue and profit', blurb: 'Every division, on the company year', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
@@ -869,50 +877,50 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['as it stood at the end of the quarter', 'how did it look in june'] },
 
   { id: 'analytics.trend', label: 'Month by month', blurb: 'Two years of it, and the figures underneath', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=overview', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['trend', 'monthly trend', 'month by month', 'the trend line', 'last 12 months',
               'monthly figures', 'by month', 'the monthly table'] },
 
   { id: 'analytics.deals', label: 'The trailers sold this year', blurb: 'Every deal, with its margin', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=deals', verbs: [...GO, 'list', 'which'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'list', 'which'],
     objects: ['deals', 'the deals', 'individual deals', 'deal list', 'trailers sold',
               'what we have sold', 'sales list', 'every sale', 'deal review'],
     phrases: ['what trailers have we sold', 'show me the deals'] },
 
   { id: 'analytics.avgDeal', label: 'Average deal size', blurb: 'What a trailer sale is worth on average', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=deals', verbs: [...GO, 'how much', 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
     objects: ['average deal', 'average sale', 'typical deal', 'deal size', 'average order value'] },
 
   { id: 'analytics.leaderboard', label: 'Who is selling', blurb: 'Trailers and leads, per person', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=people', verbs: [...GO, 'who is'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
     objects: ['leaderboard', 'league table', 'top rep', 'best salesman', 'rankings',
               'who is winning', 'who is selling', 'per rep', 'by rep', 'sales team figures'],
     phrases: ['who has sold the most', 'how is the team doing'] },
 
   { id: 'analytics.commission', label: 'Commission recorded', blurb: 'What is on the leads, per person', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=people', verbs: [...GO, 'how much'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
     objects: ['commission', 'commission paid', 'commission bill', 'what the team earned',
               'total commission', 'commission run'] },
 
   { id: 'analytics.funnel', label: 'What is coming', blurb: 'Every stage, per division', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['funnel', 'pipeline funnel', 'the stages', 'stage breakdown', 'where deals are',
               'what is coming', 'the pipeline'] },
 
   { id: 'analytics.pipelineValue', label: 'Pipeline value', blurb: 'What everything still open is worth', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: [...GO, 'how much'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
     objects: ['pipeline value', 'whats in the pipeline', 'open value', 'value of the pipeline'] },
 
   { id: 'analytics.conversion', label: 'How leads convert', blurb: 'How many sit at each stage', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: [...GO, 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'whats'],
     objects: ['conversion', 'conversion rate', 'close rate', 'win rate', 'strike rate'] },
 
   { id: 'analytics.topCustomers', label: 'Top customers', blurb: 'And how much of the income they are', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'who are'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who are'],
     objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
 
   { id: 'analytics.movers', label: 'Who is growing and who is going', blurb: 'Against the same point last year', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'who is'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
     /* Deliberately not "the call list", which is what the old screen
        called this and what a rep says out loud. It collides head on
        with cancelling a call, opening a CRM list, deleting a list and
@@ -925,19 +933,19 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['who is spending less than last year', 'which customers have dropped off'] },
 
   { id: 'analytics.concentration', label: 'How exposed we are', blurb: 'What share the top ten customers are', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'how much', 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
     objects: ['concentration', 'customer concentration', 'exposure', 'the top ten share',
               'how much is one customer', 'reliance on one customer'],
     phrases: ['how much of our income is the top ten'] },
 
   { id: 'analytics.ageing', label: 'How old the open work is', blurb: 'Work in progress, by how long it has sat', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=work', verbs: [...GO, 'how old'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how old'],
     objects: ['ageing', 'aged work', 'work in progress', 'wip', 'open work', 'old jobs',
               'jobs over 90 days', 'what is on the ramps', 'unbilled work'],
     phrases: ['what has been open the longest', 'how much work is over 90 days old'] },
 
   { id: 'analytics.reconcile', label: 'Why the customers do not add up', blurb: 'Placed, unplaced and set aside', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?view=reconcile', verbs: [...GO, 'why'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'why'],
     objects: ['reconciliation', 'reconcile', 'the difference', 'unattributed revenue',
               'money on no customer', 'unplaced accounts', 'set aside', 'cash sales',
               'why it does not add up'],

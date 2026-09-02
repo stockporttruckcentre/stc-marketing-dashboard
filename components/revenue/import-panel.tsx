@@ -267,7 +267,26 @@ export function ImportPanel({ division, divisionName, onDone }: {
           <input
             ref={picker}
             type="file"
-            accept=".csv,text/csv"
+            /* THE PICKER HAS TO ACCEPT WHAT THE READER ACCEPTS.
+
+               The line above says "CSV or XLSX" and this said CSV, so
+               the only way to hand it a spreadsheet was to switch the
+               dialog to All Files and hope. From the business: "i've
+               tested bypassing that and uploading xlsx and it works
+               fine so it shouldn't restrict that in the picker."
+
+               `readDroppedFile` has taken .xls and .xlsx since the
+               rental import, and the drop zone beside this button has
+               never restricted anything at all. This was the one place
+               left saying otherwise.
+
+               Both MIME types as well as both extensions, because a
+               file that arrived by email or out of a zip often reaches
+               the disk with no useful type on it and macOS in
+               particular then greys it out on the extension alone. */
+            accept={'.csv,.xlsx,.xls,text/csv,'
+              + 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,'
+              + 'application/vnd.ms-excel'}
             multiple
             hidden
             onChange={(e) => { if (e.target.files?.length) void take(e.target.files); e.target.value = ''; }}
