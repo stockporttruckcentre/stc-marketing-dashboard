@@ -35,7 +35,7 @@ import type { CrmCapability } from '@/lib/crm/permissions';
 export type NavIcon =
   | 'dashboard' | 'analytics' | 'work' | 'diary' | 'news'
   | 'crm' | 'tracker' | 'finder' | 'stock' | 'fleetsmart'
-  | 'social' | 'brand'
+  | 'social' | 'brand' | 'revenue'
   | 'team' | 'settings' | 'admin';
 
 export type NavItem = {
@@ -79,6 +79,7 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'crm.view' },
       { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'crm.view' },
       { href: '/dashboard/fleetsmart', label: 'FleetSmart+', icon: 'fleetsmart', capability: 'fleetsmart.view' },
+      { href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view' },
     ],
   },
   {

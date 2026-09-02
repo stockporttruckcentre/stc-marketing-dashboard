@@ -191,6 +191,18 @@ const named = (v: ReturnType<typeof decide>) =>
   ok('a shared first word is offered as a group, for a person to decline',
     fleets.length === 1 && fleets[0]!.name === 'Fleet',
     JSON.stringify(fleets.map((g) => g.name)));
+
+  /* Both of these really were offered on the first pass over the export.
+     An ampersand and a full stop are word breaks, so two unrelated firms
+     shared a first word of one letter. */
+  const initials = suggestGroups([
+    { account: 'HB', name: 'H&B Logistics' },
+    { account: 'HC', name: 'H&C Cardiem Limited' },
+    { account: 'KC', name: 'K Cotterill Transport Limited' },
+    { account: 'KA', name: 'K.Azmeh (Textiles) Ltd' },
+  ]);
+  ok('an initial is not a brand, so no group is offered on one',
+    initials.length === 0, JSON.stringify(initials.map((g) => g.name)));
 }
 
 /* -------------------------------------------------------------

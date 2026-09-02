@@ -349,6 +349,23 @@ const RESERVED = new Set([
      the moment a preposition ran into it. */
   'notification', 'notifications', 'notif', 'notifs', 'alert', 'alerts',
   'reminder', 'reminders', 'bell', 'unread', 'inbox', 'feed', 'quiet',
+
+  /* Protean's own vocabulary, and the revenue screen's. "How much has
+     Dawson spent on invoices this year" has to read Dawson as the
+     customer, and without these it finds a customer called Invoices.
+
+     `alpha` is the one that would bite hardest: it is Protean's word
+     for an account code and it is also a plausible company name, so a
+     preposition running into it would bind a whole import to a firm
+     called Alpha.
+
+     Bare `open` is deliberately absent. It is a state word the query
+     side already matches on, so reserving it would stop "show me the
+     open jobs" finding any. */
+  'protean', 'invoice', 'invoices', 'invoiced', 'revenue', 'turnover',
+  'billing', 'billed', 'spend', 'spent', 'alpha', 'tax point', 'credit note',
+  'import', 'imports', 'export', 'exports', 'spreadsheet', 'csv',
+  'group', 'groups',
   ...Object.keys(BODY_TYPES),
 ]);
 

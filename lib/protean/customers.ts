@@ -239,7 +239,18 @@ export type GroupSuggestion = {
  * `Fleet Assist` and `Fleet Operations` share a first word and are
  * strangers, so a Fleet group will be offered and should be declined.
  * That is survivable in a way that binding them would not be.
+ *
+ * What is NOT worth offering is a suggestion nobody could ever accept.
+ * On the real export, `H&B Logistics` and `H&C Cardiem Limited` were
+ * offered as a group called `H`, because an ampersand is a word break
+ * and both names therefore start with the word `h`. So does `K
+ * Cotterill Transport` against `K.Azmeh (Textiles)`. A queue with those
+ * in it is a queue somebody skims instead of reading, and the real
+ * Montgomery is in the same list.
  */
+/** Below this, a shared beginning is a coincidence rather than a brand. */
+const SHORTEST_GROUP_NAME = 4;
+
 export function suggestGroups(
   accounts: { account: string; name: string }[],
 ): GroupSuggestion[] {
@@ -262,8 +273,11 @@ export function suggestGroups(
     while (common < first.length
       && members.every((m) => words(m.name)[common] === first[common])) common += 1;
 
+    const name = keptWords(members[0]!.name).slice(0, common).join(' ');
+    if (name.length < SHORTEST_GROUP_NAME) continue;
+
     out.push({
-      name: keptWords(members[0]!.name).slice(0, common).join(' '),
+      name,
       members: [...members].sort((a, b) => a.name.localeCompare(b.name)),
     });
   }

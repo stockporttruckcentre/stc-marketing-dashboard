@@ -1354,6 +1354,67 @@ ok('a sales user is',
   suggestActions('mark all of these as contacted', CAPS.sales, 8)
     .some((h) => h.action.id === 'crm.bulkStatus'));
 
+/* -------------------------------------------------------------
+   Revenue, out of Protean.
+
+   Four people ask four different questions of one screen. The sales
+   manager asks what a customer spends, the director asks what the
+   company has billed, the workshop asks what is still open, and
+   whoever runs the import asks for the import.
+
+   The import is the one with its own permission, because a bad import
+   moves every figure on the analytics screen and in a board meeting.
+   A salesperson reads the revenue and does not load it.
+   ------------------------------------------------------------- */
+for (const said of [
+  'revenue', 'what we have billed', 'customer spend', 'turnover', 'protean',
+  'invoiced', 'billing', 'year on year', 'open work', 'open jobs',
+  'jobs on the system', 'work in progress', 'wip', 'sales figures',
+]) {
+  ok(`"${said}" reaches the revenue screen`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'nav.revenue'));
+}
+
+for (const said of [
+  'customer groups', 'group revenue', 'group total', 'parent companies',
+  'what a group is worth',
+]) {
+  ok(`"${said}" reaches customer groups`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'nav.revenueGroups'));
+}
+
+for (const said of [
+  'protean accounts', 'unmatched accounts', 'accounts waiting', 'unplaced revenue',
+  'accounts with no customer', 'the moderation queue',
+]) {
+  ok(`"${said}" reaches the accounts waiting on a decision`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'nav.proteanAccounts'));
+}
+
+for (const said of [
+  'import the protean export', 'update the sales figures', 'upload the open jobs',
+  'load the protean spreadsheet', 'import protean', 'upload the invoiced report',
+]) {
+  ok(`"${said}" reaches the Protean import`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'import.protean'));
+}
+
+/* Both directions. Reading revenue is reading the CRM; loading it is
+   not, and a viewer holds neither. */
+ok('a viewer can read the revenue screen',
+  suggestActions('revenue', CAPS.viewer, 8).some((h) => h.action.id === 'nav.revenue'));
+ok('a marketer can read the revenue screen',
+  suggestActions('revenue', CAPS.marketer, 8).some((h) => h.action.id === 'nav.revenue'));
+ok('a viewer is not offered importing the Protean export',
+  !suggestActions('import the protean export', CAPS.viewer, 8)
+    .some((h) => h.action.id === 'import.protean'));
+ok('a marketer is not offered importing the Protean export',
+  !suggestActions('import the protean export', CAPS.marketer, 8)
+    .some((h) => h.action.id === 'import.protean'));
+ok('an admin is offered importing the Protean export',
+  suggestActions('import the protean export', CAPS.admin, 8)
+    .some((h) => h.action.id === 'import.protean'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

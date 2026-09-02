@@ -55,7 +55,8 @@
     "check:access": "bash scripts/sql/access-check.sh",
     "check:protean": "tsx scripts/protean-match-check.ts",
     "check:groups": "bash scripts/sql/groups-check.sh",
-    "check:protean-sql": "bash scripts/sql/protean-check.sh"
+    "check:protean-sql": "bash scripts/sql/protean-check.sh",
+    "check:protean-import": "tsx scripts/protean-import-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
