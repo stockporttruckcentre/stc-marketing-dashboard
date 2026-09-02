@@ -128,13 +128,43 @@ export function decide(
        being offered H&B. */
     if (theirs[0] !== mine[0]) continue;
 
-    const theirsSet = new Set(theirs);
-    let shared = 0;
-    for (const w of mineSet) if (theirsSet.has(w)) shared += 1;
+    /* AND THE SHORTER NAME MUST BE HOW THE LONGER ONE STARTS.
+
+       The business ruled on all eighteen the brand rule offered, and
+       the seven it got right are all a shortening from the front:
+
+         Novuna Vehicle Solutions   ->  Novuna
+         Holman Fleet Limited       ->  Holman
+         Hippo Waste Management     ->  Hippo Waste
+
+       Every one of the eleven it got wrong shares the brand and then
+       diverges:
+
+         Montgomery Transport       vs  Montgomery Tank Services
+         Alltruck Leicester         vs  Alltruck PLC, Shepley Windows
+         Fleet Assist               vs  Fleet Operations
+
+       Those are subsidiaries of the same group, and the business was
+       explicit that each needs its own account. So a shared brand is
+       not evidence of anything on its own; a shared brand followed by
+       the same words in the same order is.
+
+       The case that proves it has to be this strict is Dawson Rentals
+       Vans against Dawson Vans. Every token of the shorter name is in
+       the longer one, so any overlap measure scores it 1.00, and it is
+       still a different company. Only the ORDER separates them: the
+       shorter name skips `rentals`, so it is a subsequence and not a
+       beginning.
+
+       On the eighteen the business ruled on, this agrees eighteen
+       times. */
+    const [shorter, longer] = mine.length <= theirs.length ? [mine, theirs] : [theirs, mine];
+    if (!shorter.every((word, i) => longer[i] === word)) continue;
+
     candidates.push({
       id: c.id,
       name: c.company_name,
-      overlap: shared / Math.min(mineSet.size, theirsSet.size),
+      overlap: shorter.length / longer.length,
     });
   }
 

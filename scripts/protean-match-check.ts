@@ -64,16 +64,76 @@ const named = (v: ReturnType<typeof decide>) =>
 }
 
 /* -------------------------------------------------------------
+   1b. THE EIGHTEEN THE BUSINESS RULED ON.
+
+   Every account the brand rule offered on the real export, and what
+   Dean and Tom said about each. Seven were the same company, eleven
+   were not, and the eleven are "separate companies, subsidiaries of
+   larger groups, need their own accounts".
+
+   These are not examples. They are the specification, and any change
+   to the matcher has to keep agreeing with all eighteen.
+   ------------------------------------------------------------- */
+{
+  const CRM2 = [
+    'Novuna', 'Enterprise Flex-e-Rent', 'Holman', 'Amphorea', 'Hippo Waste',
+    'John Sutch', 'Dawson Vans', 'Montgomery Tank Services Limited',
+    'Alltruck PLC - Shepley Windows', 'Marshall Logisitcs', 'Fleet Operations Limited',
+    'Fleet Support at AA', 'Motor Move Uk Limited', 'TJ Hood Transport Limited',
+    'A.M Transport',
+  ].map((company_name, i) => ({ id: `r${i}`, company_name }));
+
+  /* The same company. A shortening from the front. */
+  const same: [string, string][] = [
+    ['Novuna Vehicle Solutions', 'Novuna'],
+    ['Enterprise Flex -E-Rent House', 'Enterprise Flex-e-Rent'],
+    ['Holman Fleet Limited', 'Holman'],
+    ['Holman Fleet Limited (VMS)', 'Holman'],
+    ['Amphorea Packaging Ltd', 'Amphorea'],
+    ['Hippo Waste Management', 'Hippo Waste'],
+    ['John Sutch Cranes', 'John Sutch'],
+  ];
+  for (const [protean, crmName] of same) {
+    const v = decide('X', protean, CRM2);
+    ok(`"${protean}" still reaches ${crmName}`,
+      named(v).includes(crmName), `${v.kind}: ${named(v).join(', ') || 'nothing'}`);
+  }
+
+  /* Different companies. Same group, same brand, own account. */
+  const different: [string, string][] = [
+    ['Dawson Group Truck & Trailer Ltd', 'Dawson Vans'],
+    /* The one that proves the rule has to be about ORDER. Every word of
+       "Dawson Vans" is in "Dawson Rentals Vans", so overlap scores it
+       1.00, and it is still a different company. */
+    ['Dawson Rentals Vans Ltd', 'Dawson Vans'],
+    ['Montgomery Transport Limited', 'Montgomery Tank Services Limited'],
+    ['Montgomery Distribution Limited', 'Montgomery Tank Services Limited'],
+    ['Alltruck Leicester', 'Alltruck PLC - Shepley Windows'],
+    ['Marshall - Tufflex Ltd', 'Marshall Logisitcs'],
+    ['Fleet Assist Limited', 'Fleet Operations Limited'],
+    ['Fleet Assess Limited', 'Fleet Support at AA'],
+    ['Motor Repair Network Ltd', 'Motor Move Uk Limited'],
+    ['TJ Morris Limited T/A Home Bargains', 'TJ Hood Transport Limited'],
+    ['A&A Scaffolding Group Limited (PRE FUNDED)', 'A.M Transport'],
+  ];
+  for (const [protean, wrong] of different) {
+    const v = decide('X', protean, CRM2);
+    ok(`"${protean}" is never offered ${wrong}`,
+      !named(v).includes(wrong), `${v.kind}: ${named(v).join(', ')}`);
+    ok(`"${protean}" is offered as its own account`,
+      v.kind === 'create', v.kind);
+  }
+}
+
+/* -------------------------------------------------------------
    2. The ordinary cases, which must keep working.
    ------------------------------------------------------------- */
 {
   const cases: [string, string, 'exact' | 'confirm' | 'create'][] = [
     ['Booker Limited', 'Booker', 'exact'],
     ['Royal Mail', 'Royal Mail', 'exact'],
-    ['Dawson Rentals Vans Ltd', 'Dawson Vans', 'confirm'],
     ['Amphorea Packaging Ltd', 'Amphorea', 'confirm'],
     ['Holman Fleet Limited', 'Holman', 'confirm'],
-    ['Alltruck Leicester', 'Alltruck PLC - Shepley Windows', 'confirm'],
   ];
   for (const [protean, expected, kind] of cases) {
     const v = decide('X', protean, CRM);
