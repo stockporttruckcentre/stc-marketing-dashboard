@@ -43,6 +43,7 @@ export type GroupRevenue = {
 };
 
 export type GroupLine = {
+  division: Division;
   alpha: string;
   protean_name: string;
   contact_id: string;
@@ -69,13 +70,18 @@ export type CompanyRevenue = {
   last_billed: string | null;
 };
 
-export async function companyRevenue(db: Db, upto?: string): Promise<CompanyRevenue | null> {
-  const { data, error } = await db.rpc('protean_company', { p_upto: upto ?? null });
+export async function companyRevenue(
+  db: Db, division: DivisionFilter = null, upto?: string,
+): Promise<CompanyRevenue | null> {
+  const { data, error } = await db.rpc('protean_company', {
+    p_upto: upto ?? null, p_division: division,
+  });
   if (error) throw new Error(error.message);
   return rows<CompanyRevenue>(data)[0] ?? null;
 }
 
 export type OpenJob = {
+  division: Division;
   job_no: string;
   protean_name: string;
   job_type: string | null;
@@ -98,14 +104,16 @@ export type OpenJob = {
  * So it is paged. The loop stops on a short page, which is the only
  * honest end condition when the server decides the page size.
  */
-export async function everyOpenJob(db: Db): Promise<OpenJob[]> {
+export async function everyOpenJob(db: Db, division: DivisionFilter = null): Promise<OpenJob[]> {
   const PAGE = 1000;
   const out: OpenJob[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db
+    let q = db
       .from('protean_open_jobs')
-      .select('job_no, protean_name, job_type, status, depot, logged_on, job_total, alpha')
-      .eq('still_open', true)
+      .select('division, job_no, protean_name, job_type, status, depot, logged_on, job_total, alpha')
+      .eq('still_open', true);
+    if (division) q = q.eq('division', division);
+    const { data, error } = await q
       .order('logged_on', { ascending: true })
       .order('job_no', { ascending: true })
       .range(from, from + PAGE - 1);
@@ -120,6 +128,7 @@ export async function everyOpenJob(db: Db): Promise<OpenJob[]> {
 }
 
 export type Waiting = {
+  division: Division;
   alpha: string;
   protean_name: string;
   invoices: number;
@@ -130,6 +139,8 @@ export type Waiting = {
 };
 
 export type AccountLine = {
+  division: Division;
+  division_name: string;
   alpha: string;
   protean_name: string;
   ignored: boolean;
@@ -152,10 +163,26 @@ export type BatchResult = {
 
 type Db = SupabaseClient<any, any, any>;
 
+/**
+ * Which division a figure is about.
+ *
+ * `null` means all of them, and that is the right default: the company
+ * total is genuinely the sum of the divisions. Defaulting to STC would
+ * make "what have we billed" quietly mean maintenance, which is the
+ * mistake the analytics page made for a year by counting only trailer
+ * sales.
+ */
+export type Division = 'stc' | 'rental' | 'trailer';
+export type DivisionFilter = Division | null;
+
 const rows = <T>(data: unknown): T[] => (data ?? []) as T[];
 
-export async function yearOnYear(db: Db, upto?: string): Promise<YearOnYear[]> {
-  const { data, error } = await db.rpc('protean_year_on_year', { p_upto: upto ?? null });
+export async function yearOnYear(
+  db: Db, division: DivisionFilter = null, upto?: string,
+): Promise<YearOnYear[]> {
+  const { data, error } = await db.rpc('protean_year_on_year', {
+    p_upto: upto ?? null, p_division: division,
+  });
   if (error) throw new Error(error.message);
   return rows<YearOnYear>(data);
 }
@@ -202,15 +229,18 @@ export type CustomerSpend = {
  * record can say "nothing billed" rather than having to tell an empty
  * result apart from a failed one.
  */
-export async function customerSpend(db: Db, contact: string): Promise<CustomerSpend | null> {
+export async function customerSpend(
+  db: Db, contact: string, division: DivisionFilter = null,
+): Promise<CustomerSpend | null> {
   const { data, error } = await db.rpc('protean_customer', {
-    p_contact: contact, p_upto: null,
+    p_contact: contact, p_upto: null, p_division: division,
   });
   if (error) throw new Error(error.message);
   return rows<CustomerSpend>(data)[0] ?? null;
 }
 
 export type OpenWork = {
+  division: Division;
   job_no: string;
   job_type: string | null;
   status: string | null;
@@ -220,8 +250,12 @@ export type OpenWork = {
   equip_no: string | null;
 };
 
-export async function openWorkFor(db: Db, contact: string): Promise<OpenWork[]> {
-  const { data, error } = await db.rpc('protean_open_work', { p_contact: contact });
+export async function openWorkFor(
+  db: Db, contact: string, division: DivisionFilter = null,
+): Promise<OpenWork[]> {
+  const { data, error } = await db.rpc('protean_open_work', {
+    p_contact: contact, p_division: division,
+  });
   if (error) throw new Error(error.message);
   return rows<OpenWork>(data);
 }
@@ -246,27 +280,35 @@ export async function accountsOf(db: Db, contact: string): Promise<AccountLine[]
   return rows<AccountLine>(data);
 }
 
-export async function waitingOnUs(db: Db): Promise<Waiting[]> {
-  const { data, error } = await db.rpc('protean_to_moderate');
+export async function waitingOnUs(db: Db, division: DivisionFilter = null): Promise<Waiting[]> {
+  const { data, error } = await db.rpc('protean_to_moderate', { p_division: division });
   if (error) throw new Error(error.message);
   return rows<Waiting>(data);
 }
 
-export async function bindAccount(db: Db, alpha: string, contact: string | null) {
-  const { error } = await db.rpc('protean_bind', { p_alpha: alpha, p_contact: contact });
+export async function bindAccount(
+  db: Db, division: Division, alpha: string, contact: string | null,
+) {
+  const { error } = await db.rpc('protean_bind', {
+    p_division: division, p_alpha: alpha, p_contact: contact,
+  });
   if (error) throw new Error(error.message);
 }
 
-export async function makeCustomer(db: Db, alpha: string, name?: string): Promise<string> {
+export async function makeCustomer(
+  db: Db, division: Division, alpha: string, name?: string,
+): Promise<string> {
   const { data, error } = await db.rpc('protean_make_customer', {
-    p_alpha: alpha, p_name: name ?? null,
+    p_division: division, p_alpha: alpha, p_name: name ?? null,
   });
   if (error) throw new Error(error.message);
   return data as string;
 }
 
-export async function setAside(db: Db, alpha: string, why: string) {
-  const { error } = await db.rpc('protean_ignore', { p_alpha: alpha, p_why: why });
+export async function setAside(db: Db, division: Division, alpha: string, why: string) {
+  const { error } = await db.rpc('protean_ignore', {
+    p_division: division, p_alpha: alpha, p_why: why,
+  });
   if (error) throw new Error(error.message);
 }
 
@@ -296,10 +338,10 @@ export async function forgetGroup(db: Db, group: string) {
    ------------------------------------------------------------- */
 
 export async function startImport(
-  db: Db, kind: 'invoices' | 'open_jobs', fileName: string,
+  db: Db, kind: 'invoices' | 'open_jobs', fileName: string, division: Division,
 ): Promise<string> {
   const { data, error } = await db.rpc('protean_start_import', {
-    p_kind: kind, p_file: fileName,
+    p_kind: kind, p_file: fileName, p_division: division,
   });
   if (error) throw new Error(error.message);
   return data as string;

@@ -10,13 +10,13 @@ import {
 } from '@/components/kit/primitives';
 import { useToast } from '@/components/kit/toast';
 import {
-  readProteanExport, readFileAsProtean, inBatches,
+  readDroppedFile, inBatches,
   type Read, type InvoiceRow, type OpenJobRow,
 } from '@/lib/protean/import';
 import {
   startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, wouldClose,
   relinkJobs, addUp,
-  type BatchResult, type WouldClose,
+  type BatchResult, type WouldClose, type Division,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -99,7 +99,14 @@ const WHAT_IT_IS: Record<'invoices' | 'open_jobs', string> = {
   open_jobs: 'Open jobs',
 };
 
-export function ImportPanel({ onDone }: { onDone: () => void }) {
+export function ImportPanel({ division, divisionName, onDone }: {
+  /* Which system this file came out of. Stated by the screen rather
+     than guessed from the file, because the two exports are the same
+     report out of two systems and look alike on purpose. */
+  division: Division;
+  divisionName: string;
+  onDone: () => void;
+}) {
   const supabase = createClient();
   const { say } = useToast();
   const picker = useRef<HTMLInputElement>(null);
@@ -114,8 +121,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   const take = useCallback(async (files: FileList | File[]) => {
     const next: Dropped[] = [];
     for (const file of Array.from(files)) {
-      const text = await readFileAsProtean(file);
-      next.push({ fileName: file.name, read: readProteanExport(text) });
+      next.push({ fileName: file.name, read: await readDroppedFile(file) });
     }
     /* One file of each kind. Dropping a newer invoices file replaces the
        one already sitting there rather than queueing two. */
@@ -152,7 +158,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
         if (!d.read.ok) continue;
         const kind = d.read.kind;
         setBusy(`Reading ${d.fileName} in`);
-        const importId = await startImport(supabase, kind, d.fileName);
+        const importId = await startImport(supabase, kind, d.fileName, division);
 
         const results: BatchResult[] = [];
         if (kind === 'invoices') {
@@ -205,7 +211,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
     } finally {
       setBusy(null);
     }
-  }, [dropped, supabase, say, onDone]);
+  }, [dropped, supabase, say, onDone, division]);
 
   const confirmClose = useCallback(async () => {
     if (!closing) return;
@@ -252,10 +258,11 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
             marginTop: 8, fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 15,
             color: 'var(--text)',
           }}>
-            Drop both exports here
+            Drop the {divisionName} export here
           </div>
           <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--text-subtle)' }}>
-            Saved as CSV from Protean. Nothing is sent anywhere until you say so.
+            CSV or XLSX. Nothing is sent anywhere until you say so, and it goes
+            in as {divisionName}.
           </div>
           <input
             ref={picker}
@@ -298,10 +305,23 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
                     value={d.read.unusable.toLocaleString('en-GB')}
                     quiet={d.read.unusable === 0}
                   />
+                  {d.read.blank > 0 && (
+                    <Figure label="Empty rows" value={d.read.blank.toLocaleString('en-GB')} quiet />
+                  )}
                 </div>
               ) : (
                 <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
                   {d.read.why}
+                </div>
+              )}
+
+              {d.read.ok && d.read.blank > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <Alert tone="info">
+                    {d.read.blank.toLocaleString('en-GB')} rows carry an invoice number and nothing
+                    else. That is how this export lists documents outside the date range asked for,
+                    so they are skipped rather than counted as a problem.
+                  </Alert>
                 </div>
               )}
 

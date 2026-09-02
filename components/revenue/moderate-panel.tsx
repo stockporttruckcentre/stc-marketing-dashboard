@@ -13,7 +13,7 @@ import { useToast } from '@/components/kit/toast';
 import { decide, type Verdict, type CrmCustomer } from '@/lib/protean/customers';
 import {
   waitingOnUs, bindAccount, makeCustomer, setAside,
-  type Waiting,
+  type Waiting, type Division, type DivisionFilter,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -52,7 +52,13 @@ import {
 
 type Decision = { alpha: string; verdict: Verdict; row: Waiting };
 
-export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
+export function ModeratePanel({ division, onChanged }: {
+  /* Null on a screen that shows every division at once. The account
+     itself always knows which one it is, so a decision is never made
+     without one. */
+  division: DivisionFilter;
+  onChanged: () => void;
+}) {
   const supabase = createClient();
   const { say } = useToast();
 
@@ -67,7 +73,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
     setLoading(true);
     try {
       const [queue, contacts] = await Promise.all([
-        waitingOnUs(supabase),
+        waitingOnUs(supabase, division),
         supabase.from('crm_contacts').select('id, company_name').order('company_name'),
       ]);
       setWaiting(queue);
@@ -77,7 +83,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
     } finally {
       setLoading(false);
     }
-  }, [supabase, say]);
+  }, [supabase, say, division]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -96,10 +102,10 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
 
   const after = useCallback(async () => { await load(); onChanged(); }, [load, onChanged]);
 
-  const bind = useCallback(async (alpha: string, contact: string, name: string) => {
+  const bind = useCallback(async (d: Division, alpha: string, contact: string, name: string) => {
     setBusy(alpha);
     try {
-      await bindAccount(supabase, alpha, contact);
+      await bindAccount(supabase, d, alpha, contact);
       say({ tone: 'success', title: `${alpha} is ${name}.` });
       await after();
     } catch (e) {
@@ -107,10 +113,10 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
     } finally { setBusy(null); }
   }, [supabase, say, after]);
 
-  const create = useCallback(async (alpha: string, name: string) => {
+  const create = useCallback(async (d: Division, alpha: string, name: string) => {
     setBusy(alpha);
     try {
-      await makeCustomer(supabase, alpha);
+      await makeCustomer(supabase, d, alpha);
       say({ tone: 'success', title: `${name} is in the CRM.` });
       await after();
     } catch (e) {
@@ -123,7 +129,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
     try {
       for (const d of exact) {
         if (d.verdict.kind !== 'exact') continue;
-        await bindAccount(supabase, d.alpha, d.verdict.contact.id);
+        await bindAccount(supabase, d.row.division, d.alpha, d.verdict.contact.id);
       }
       say({ tone: 'success', title: `${exact.length} accounts matched their customer exactly.` });
       await after();
@@ -198,14 +204,14 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
                       variant="secondary"
                       size="sm"
                       disabled={!!busy}
-                      onClick={() => void bind(d.alpha, c.id, c.name)}
+                      onClick={() => void bind(d.row.division, d.alpha, c.id, c.name)}
                     >
                       <Check size={13} />
                       This is {c.name}
                     </Button>
                   ))}
                   <Button variant="primary" size="sm" disabled={!!busy}
-                    onClick={() => void create(d.alpha, d.row.protean_name)}>
+                    onClick={() => void create(d.row.division, d.alpha, d.row.protean_name)}>
                     <Plus size={13} />
                     None of those, add it
                   </Button>
@@ -240,7 +246,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
               }}>
                 <div style={{ flex: 1, minWidth: 220 }}><Row row={d.row} /></div>
                 <Button variant="primary" size="sm" disabled={!!busy}
-                  onClick={() => void create(d.alpha, d.row.protean_name)}>
+                  onClick={() => void create(d.row.division, d.alpha, d.row.protean_name)}>
                   {busy === d.alpha ? <Loader size={13} className="spin" /> : <Plus size={13} />}
                   Add to the CRM
                 </Button>
@@ -272,7 +278,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
           decision={picking}
           crm={crm}
           onClose={() => setPicking(null)}
-          onPick={(c) => { setPicking(null); void bind(picking.alpha, c.id, c.company_name); }}
+          onPick={(c) => { setPicking(null); void bind(picking.row.division, picking.alpha, c.id, c.company_name); }}
         />
       )}
 
@@ -284,7 +290,7 @@ export function ModeratePanel({ onChanged }: { onChanged: () => void }) {
             setAsideFor(null);
             setBusy(aside.alpha);
             try {
-              await setAside(supabase, aside.alpha, why);
+              await setAside(supabase, aside.row.division, aside.alpha, why);
               say({ tone: 'success', title: `${aside.row.protean_name} is set aside.` });
               await after();
             } catch (e) {

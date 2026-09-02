@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LogOut } from 'lucide-react';
+import { LogOut, ChevronDown } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationRail } from '@/components/notifications/rail';
 import { capabilitiesFor } from '@/lib/crm/permissions';
@@ -67,6 +67,49 @@ export function Sidebar({
       {items.map((i) => {
         const Icon = ICONS[i.icon];
         const badge = i.badge === 'content' && pendingPosts > 0 ? String(pendingPosts) : undefined;
+        const open = !!i.children?.length && isActive(i.href);
+
+        /* A parent with children is not a link. Revenue redirects to a
+           division, so clicking it and landing somewhere the sidebar
+           did not name is the kind of small lie that makes people stop
+           trusting navigation. It opens instead, and the children are
+           the links. */
+        if (i.children?.length) {
+          return (
+            <div key={i.href}>
+              <Link
+                href={i.children[0]!.href}
+                className={`sidebar__item${open ? ' is-active' : ''}`}
+                aria-expanded={open}
+              >
+                <Icon size={16} />
+                <span>{i.label}</span>
+                <ChevronDown
+                  size={13}
+                  style={{
+                    marginLeft: 'auto', opacity: 0.55,
+                    transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+                    transition: 'transform 120ms ease',
+                  }}
+                />
+              </Link>
+              {open && (
+                <div style={{ marginLeft: 26, display: 'flex', flexDirection: 'column' }}>
+                  {i.children.map((c) => (
+                    <Link
+                      key={c.href}
+                      href={c.href}
+                      className={`sidebar__item${path === c.href ? ' is-active' : ''}`}
+                    >
+                      <span>{c.label}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+
         return (
           <Link
             key={i.href}

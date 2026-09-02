@@ -1205,28 +1205,40 @@ export const ACTIONS: CommandActionSpec[] = [
      somebody looking for the screen. Naming one is a question the
      query side already answers. */
 
-  { id: 'nav.revenue', label: 'Revenue', blurb: 'What Protean has billed, and what is still open',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/revenue', verbs: GO,
+  { id: 'nav.revenue', label: 'STC revenue', blurb: 'Maintenance invoicing, and what is still open',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/revenue/stc', verbs: GO,
     objects: ['revenue', 'invoiced', 'invoices', 'billing', 'billed', 'turnover', 'spend',
               'customer spend', 'protean', 'protean revenue', 'sales figures',
               'what we have billed', 'year on year', 'open work', 'open jobs',
-              'jobs on the system', 'work in progress', 'wip'] },
+              'jobs on the system', 'work in progress', 'wip',
+              'stc revenue', 'maintenance revenue', 'workshop revenue'] },
+
+  /* Its own entry rather than a filter on the one above. Two systems
+     that use the same account code for different companies are two
+     screens, and somebody typing "rental revenue" means the rental
+     one. */
+  { id: 'nav.rentalRevenue', label: 'S&L Rental revenue',
+    blurb: 'What the rental side has invoiced', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/revenue/rental', verbs: GO,
+    objects: ['rental revenue', 's&l revenue', 'sl revenue', 'rental invoices',
+              'rental billing', 'what rental has billed', 'leasing revenue',
+              'rental turnover', 'rental figures', 's and l rental'] },
 
   { id: 'nav.revenueGroups', label: 'Customer groups',
     blurb: 'Several customers totalled together, and each on its own', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/revenue?tab=groups', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/revenue/stc?tab=groups', verbs: GO,
     objects: ['customer groups', 'groups', 'group revenue', 'parent companies', 'group total',
               'what a group is worth'] },
 
   { id: 'nav.proteanAccounts', label: 'Protean accounts waiting',
     blurb: 'Accounts with no customer yet, heaviest first', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/revenue?tab=accounts', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/revenue/stc?tab=accounts', verbs: GO,
     objects: ['protean accounts', 'unmatched accounts', 'accounts waiting', 'unplaced revenue',
               'accounts with no customer', 'the moderation queue', 'revenue with nobody on it'] },
 
   { id: 'import.protean', label: 'Import the Protean export',
     blurb: "This week's invoiced and open jobs files", kind: 'data',
-    capability: 'crm.import', path: '/dashboard/revenue?tab=import',
+    capability: 'crm.import', path: '/dashboard/revenue/stc?tab=import',
     verbs: ['import', 'upload', 'load', 'bring in', 'put in', 'update', 'sync'],
     objects: ['protean export', 'protean', 'the invoices', 'invoiced report', 'open jobs',
               "this week's sales", 'the sales spreadsheet', 'revenue spreadsheet',
@@ -1234,6 +1246,15 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['import the protean export', 'update the sales figures',
               "put this week's invoices in", 'upload the open jobs',
               'load the protean spreadsheet'] },
+
+  { id: 'import.rental', label: 'Import the rental invoices',
+    blurb: 'The S&L Rental invoiced report', kind: 'data',
+    capability: 'crm.import', path: '/dashboard/revenue/rental?tab=import',
+    verbs: ['import', 'upload', 'load', 'bring in', 'put in', 'update', 'sync'],
+    objects: ['rental invoices', 'rental export', 'rental spreadsheet',
+              'the rental report', 's&l invoices', 'rental sales'],
+    phrases: ['import the rental invoices', 'upload the rental export',
+              'update the rental figures'] },
 ];
 
 /* =============================================================
