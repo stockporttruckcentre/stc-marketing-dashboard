@@ -52,7 +52,8 @@
     "bar:list": "tsx scripts/command-what-works.ts --list",
     "bar:audit": "tsx scripts/command-what-works.ts --audit",
     "check:workflow": "bash scripts/sql/workflow-check.sh",
-    "check:access": "bash scripts/sql/access-check.sh"
+    "check:access": "bash scripts/sql/access-check.sh",
+    "check:protean": "tsx scripts/protean-match-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
