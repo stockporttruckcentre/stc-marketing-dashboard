@@ -18,7 +18,9 @@
 
    npm run check:protean
    ============================================================= */
-import { decide, review, brand, words, proteanDate, proteanMoney } from '../lib/protean/customers';
+import {
+  decide, review, brand, words, suggestGroups, proteanDate, proteanMoney,
+} from '../lib/protean/customers';
 
 let pass = 0, fail = 0;
 const failures: string[] = [];
@@ -123,6 +125,72 @@ const named = (v: ReturnType<typeof decide>) =>
     ok(`"${protean}" is offered as its own account`,
       v.kind === 'create', v.kind);
   }
+}
+
+/* -------------------------------------------------------------
+   1c. The same eighteen, grouped.
+
+   The eleven the matcher must keep APART are, in the business's own
+   words, "separate companies, subsidiaries of larger groups". So the
+   same shared brand that must never bind them is the thing that should
+   offer them as a group:
+
+     we can see the total of both holman accounts, how much both dawson
+     accounts earn, how much all 3 montgomery accounts earn without
+     having to manually go into each, but also allow us to view the
+     revenue of each
+
+   A suggestion here is cheap to decline. That is the whole reason the
+   brand is allowed to be the evidence for this and not for binding.
+   ------------------------------------------------------------- */
+{
+  const accounts = [
+    ['DAWTRUCK', 'Dawson Group Truck & Trailer Ltd'],
+    ['DAWRENT', 'Dawson Rentals Vans Ltd'],
+    ['DAWVANS', 'Dawson Vans'],
+    ['MONTTRAN', 'Montgomery Transport Limited'],
+    ['MONTDIST', 'Montgomery Distribution Limited'],
+    ['MONTTANK', 'Montgomery Tank Services Limited'],
+    ['ARIFLEET', 'Holman Fleet Limited'],
+    ['ARIVMS', 'Holman Fleet Limited (VMS)'],
+    ['BOOKER', 'Booker Limited'],
+    ['ROYALM', 'Royal Mail'],
+  ].map(([account, name]) => ({ account: account!, name: name! }));
+
+  const groups = suggestGroups(accounts);
+  const named = (n: string) => groups.find((g) => g.name === n);
+
+  ok('three Montgomery companies are offered as one group',
+    named('Montgomery')?.members.length === 3,
+    JSON.stringify(groups.map((g) => `${g.name}:${g.members.length}`)));
+  ok('three Dawson companies are offered as one group',
+    named('Dawson')?.members.length === 3,
+    JSON.stringify(groups.map((g) => `${g.name}:${g.members.length}`)));
+  /* Both share two leading words, so the group is named on both. */
+  ok('the two Holman accounts are offered as Holman Fleet',
+    named('Holman Fleet')?.members.length === 2,
+    JSON.stringify(groups.map((g) => g.name)));
+  ok('a company with nobody to group with is not offered a group',
+    !groups.some((g) => g.members.some((m) => m.account === 'BOOKER')));
+  ok('and neither is Royal Mail',
+    !groups.some((g) => g.members.some((m) => m.account === 'ROYALM')));
+
+  /* The point of the whole exercise: grouping is a second layer and
+     changes nothing about who is bound to whom. */
+  const CRM3 = [{ id: 'x', company_name: 'Dawson Vans' }];
+  ok('being groupable does not make Dawson Rentals Vans a match',
+    decide('DAWRENT', 'Dawson Rentals Vans Ltd', CRM3).kind === 'create');
+
+  /* Declining a suggestion has to be possible, so the wrong one must
+     still be OFFERED rather than quietly filtered out. Fleet Assist and
+     Fleet Operations are unrelated and a person says so. */
+  const fleets = suggestGroups([
+    { account: 'FLASSIST', name: 'Fleet Assist Limited' },
+    { account: 'FLOPS', name: 'Fleet Operations Limited' },
+  ]);
+  ok('a shared first word is offered as a group, for a person to decline',
+    fleets.length === 1 && fleets[0]!.name === 'Fleet',
+    JSON.stringify(fleets.map((g) => g.name)));
 }
 
 /* -------------------------------------------------------------

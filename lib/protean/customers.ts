@@ -58,16 +58,20 @@ const GENERIC = new Set([
   'ta', 'trading', 'as', 'and', 'international', 'int',
 ]);
 
-/** A company name reduced to the words that identify it. */
-export function words(name: string): string[] {
+/** The identifying words, spelled as the company spells them. */
+export function keptWords(name: string): string[] {
   return name
     .normalize('NFKD')
     // eslint-disable-next-line no-control-regex
     .replace(/[^\x00-\x7F]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
     .split(' ')
-    .filter((w) => w && !GENERIC.has(w));
+    .filter((w) => w && !GENERIC.has(w.toLowerCase()));
+}
+
+/** A company name reduced to the words that identify it. */
+export function words(name: string): string[] {
+  return keptWords(name).map((w) => w.toLowerCase());
 }
 
 /** The one word that says which company this is. */
@@ -193,6 +197,78 @@ export function review(
     else out.create.push(v);
   }
   return out;
+}
+
+/* =============================================================
+   Groups.
+
+   The matcher above keeps subsidiaries apart, which is what the
+   business asked for:
+
+     an alpha makes an account unique ... 99% of the time when a company
+     is a subsidiary it has it's own accounts and requires a unique
+     protean account on our end and therefore is part of a group.
+
+   Keeping them apart is only half of it. The other half is being able
+   to ask what Montgomery is worth without opening three records, and
+   still see what each of the three billed.
+
+   So the shared brand is not thrown away. It is exactly the wrong
+   evidence for binding two accounts together and exactly the right
+   evidence for SUGGESTING they belong to one group, and the difference
+   between the two is that a group can be wrong and be fixed in a click,
+   whereas a bind merges two companies' revenue permanently.
+
+   Nothing here groups anything. It proposes, and a person accepts.
+   ============================================================= */
+
+export type GroupSuggestion = {
+  /** The words the members share, spelled as the first one spells them. */
+  name: string;
+  members: { account: string; name: string }[];
+};
+
+/**
+ * Accounts that share a brand, offered as groups.
+ *
+ * The name is the longest run of leading words they all share, so three
+ * Montgomery companies suggest `Montgomery` and two Holman accounts
+ * suggest `Holman Fleet` rather than both collapsing to one word.
+ *
+ * False suggestions are expected and are the price of the feature:
+ * `Fleet Assist` and `Fleet Operations` share a first word and are
+ * strangers, so a Fleet group will be offered and should be declined.
+ * That is survivable in a way that binding them would not be.
+ */
+export function suggestGroups(
+  accounts: { account: string; name: string }[],
+): GroupSuggestion[] {
+  const byBrand = new Map<string, { account: string; name: string }[]>();
+  for (const a of accounts) {
+    const b = brand(a.name);
+    if (!b) continue;
+    const seen = byBrand.get(b);
+    if (seen) seen.push(a);
+    else byBrand.set(b, [a]);
+  }
+
+  const out: GroupSuggestion[] = [];
+  for (const members of byBrand.values()) {
+    if (members.length < 2) continue;
+
+    /* How far the names agree, word for word, from the front. */
+    const first = words(members[0]!.name);
+    let common = 1;
+    while (common < first.length
+      && members.every((m) => words(m.name)[common] === first[common])) common += 1;
+
+    out.push({
+      name: keptWords(members[0]!.name).slice(0, common).join(' '),
+      members: [...members].sort((a, b) => a.name.localeCompare(b.name)),
+    });
+  }
+
+  return out.sort((a, b) => b.members.length - a.members.length || a.name.localeCompare(b.name));
 }
 
 /* -------------------------------------------------------------
