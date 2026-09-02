@@ -286,6 +286,15 @@ GRANT EXECUTE ON FUNCTION protean_open_work(UUID) TO authenticated;
 -- comparison somebody means when they say "May this year versus May
 -- last year".
 -- -------------------------------------------------------------
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is what is live, and
+   `CREATE OR REPLACE` cannot change a return type: it raises
+   "cannot change return type of existing function" and takes the
+   whole transaction with it. Dropping this exact signature first is
+   a no-op on a fresh database and the fix on a replay. */
+DROP FUNCTION IF EXISTS protean_year_on_year(DATE);
+
 CREATE OR REPLACE FUNCTION protean_year_on_year(p_upto DATE DEFAULT NULL)
 RETURNS TABLE (
   contact_id   UUID,

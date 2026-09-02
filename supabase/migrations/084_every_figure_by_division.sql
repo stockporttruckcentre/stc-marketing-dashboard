@@ -357,6 +357,12 @@ $fn$;
 
 DROP FUNCTION IF EXISTS protean_jobs_without_account();
 
+/* And this exact signature too, for the same reason one migration
+   further on: 086 changes what this returns. The drop above clears the
+   shape this file replaces; this one clears the shape it is about to
+   create, which on a second run is already there and already different. */
+DROP FUNCTION IF EXISTS protean_jobs_without_account(TEXT);
+
 CREATE OR REPLACE FUNCTION protean_jobs_without_account(p_division TEXT DEFAULT NULL)
 RETURNS TABLE (division TEXT, protean_name TEXT, jobs INTEGER, value NUMERIC)
 LANGUAGE plpgsql

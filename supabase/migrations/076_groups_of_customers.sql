@@ -274,6 +274,15 @@ GRANT EXECUTE ON FUNCTION group_revenue(DATE) TO authenticated;
 -- two rows carrying the same company name, which is the answer to "how
 -- much of Holman is VMS".
 -- -------------------------------------------------------------
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is what is live, and
+   `CREATE OR REPLACE` cannot change a return type: it raises
+   "cannot change return type of existing function" and takes the
+   whole transaction with it. Dropping this exact signature first is
+   a no-op on a fresh database and the fix on a replay. */
+DROP FUNCTION IF EXISTS group_breakdown(UUID, DATE);
+
 CREATE OR REPLACE FUNCTION group_breakdown(p_group UUID, p_upto DATE DEFAULT NULL)
 RETURNS TABLE (
   alpha        TEXT,
@@ -337,6 +346,15 @@ GRANT EXECUTE ON FUNCTION group_breakdown(UUID, DATE) TO authenticated;
 -- than one Protean account this says which account it came from, so the
 -- figure on the record can always be taken apart.
 -- -------------------------------------------------------------
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is what is live, and
+   `CREATE OR REPLACE` cannot change a return type: it raises
+   "cannot change return type of existing function" and takes the
+   whole transaction with it. Dropping this exact signature first is
+   a no-op on a fresh database and the fix on a replay. */
+DROP FUNCTION IF EXISTS protean_accounts_of(UUID);
+
 CREATE OR REPLACE FUNCTION protean_accounts_of(p_contact UUID)
 RETURNS TABLE (
   alpha        TEXT,

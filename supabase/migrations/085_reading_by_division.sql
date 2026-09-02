@@ -19,6 +19,12 @@
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_customer(UUID, DATE);
 
+/* And this exact signature too, for the same reason one migration
+   further on: 086 changes what this returns. The drop above clears the
+   shape this file replaces; this one clears the shape it is about to
+   create, which on a second run is already there and already different. */
+DROP FUNCTION IF EXISTS protean_customer(UUID, DATE, TEXT);
+
 CREATE OR REPLACE FUNCTION protean_customer(p_contact UUID, p_upto DATE DEFAULT NULL,
                                  p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
@@ -92,6 +98,12 @@ GRANT EXECUTE ON FUNCTION protean_customer(UUID, DATE, TEXT) TO authenticated;
 -- 2. The company, or one division of it.
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_company(DATE);
+
+/* And this exact signature too, for the same reason one migration
+   further on: 086 changes what this returns. The drop above clears the
+   shape this file replaces; this one clears the shape it is about to
+   create, which on a second run is already there and already different. */
+DROP FUNCTION IF EXISTS protean_company(DATE, TEXT);
 
 CREATE OR REPLACE FUNCTION protean_company(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
@@ -222,6 +234,12 @@ GRANT EXECUTE ON FUNCTION revenue_by_month_and_division(INTEGER, DATE) TO authen
 -- 4. Every customer, and every group.
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_year_on_year(DATE);
+
+/* And this exact signature too, for the same reason one migration
+   further on: 086 changes what this returns. The drop above clears the
+   shape this file replaces; this one clears the shape it is about to
+   create, which on a second run is already there and already different. */
+DROP FUNCTION IF EXISTS protean_year_on_year(DATE, TEXT);
 
 CREATE OR REPLACE FUNCTION protean_year_on_year(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (

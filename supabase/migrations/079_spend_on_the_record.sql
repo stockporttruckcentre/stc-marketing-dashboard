@@ -90,6 +90,15 @@ GRANT EXECUTE ON FUNCTION financial_year_of(DATE) TO authenticated;
 -- the drawer can say "nothing billed" rather than having to tell an
 -- empty result apart from a failed one.
 -- -------------------------------------------------------------
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is what is live, and
+   `CREATE OR REPLACE` cannot change a return type: it raises
+   "cannot change return type of existing function" and takes the
+   whole transaction with it. Dropping this exact signature first is
+   a no-op on a fresh database and the fix on a replay. */
+DROP FUNCTION IF EXISTS protean_customer(UUID, DATE);
+
 CREATE OR REPLACE FUNCTION protean_customer(p_contact UUID, p_upto DATE DEFAULT NULL)
 RETURNS TABLE (
   accounts        INTEGER,

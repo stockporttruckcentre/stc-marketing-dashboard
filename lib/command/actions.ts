@@ -100,7 +100,15 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.analytics', label: 'Analytics', blurb: 'Revenue, leaderboards and trends', kind: 'navigate',
     path: '/dashboard/analytics', verbs: GO,
-    objects: ['analytics', 'reports', 'reporting', 'figures', 'numbers', 'stats', 'performance', 'kpis', 'charts', 'revenue', 'profit', 'leaderboard', 'targets', 'how are we doing'] },
+    /* The NAMES OF THE SCREEN, and nothing that is merely on it.
+
+       This used to carry 'leaderboard', 'revenue', 'profit' and
+       'targets' as well, from when Analytics was one page. It is seven
+       views now, each with its own action, and every one of those words
+       belongs to one of them. Left here they tied with the specific
+       action at the same score and won on declaration order, so typing
+       "leaderboard" opened Analytics on the month chart. */
+    objects: ['analytics', 'reports', 'reporting', 'figures', 'numbers', 'stats', 'kpis', 'charts', 'targets', 'how are we doing'] },
 
   { id: 'nav.news', label: 'Industry news', blurb: 'Haulage press in one place', kind: 'navigate',
     path: '/dashboard/news', verbs: GO,
@@ -831,25 +839,117 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.create', verbs: [...MAKE, 'bulk'],
     objects: ['all of these to the crm', 'the selection', 'everything selected', 'these companies'] },
 
-  /* ---------- analytics ---------- */
+  /* ---------- analytics ----------
 
-  { id: 'analytics.period', label: 'Change the analytics period', blurb: 'Month, quarter or year', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: CHANGE,
-    objects: ['period', 'the range', 'to this quarter', 'to last year', 'the date range', 'timeframe'] },
+     ---- Rewritten, and eleven entries deleted ----
 
-  { id: 'analytics.leaderboard', label: 'Rep leaderboard', blurb: 'Who is selling what', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
-    objects: ['leaderboard', 'league table', 'top rep', 'best salesman', 'rankings', 'who is winning'],
-    phrases: ['who has sold the most'] },
+     The screen these described no longer exists. It had a six way
+     period selector, a rep filter, a stock donut and a manufacturer
+     chart, and the entries pointed at `?period=30d`, `?period=ytd` and
+     the rest. Nothing on the current page reads `period` at all, so
+     every one of those actions took somebody to the analytics screen
+     and silently did nothing, which is the failure this whole file
+     exists to prevent: an action that appears and then does not work
+     teaches people the bar is unreliable.
 
-  { id: 'analytics.revenue', label: 'Revenue and profit', blurb: 'Over time, against last period', kind: 'navigate',
+     `analytics.periodYtd` was worse than useless. It said "Since the
+     first of January" on a company whose year runs April to April.
+
+     The page is now seven views behind `?view=`, and each entry below
+     lands on the one that answers the sentence somebody typed. */
+
+  { id: 'analytics.revenue', label: 'Revenue and profit', blurb: 'Every division, on the company year', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
-    objects: ['revenue', 'profit', 'turnover', 'margin', 'the numbers', 'performance'],
-    phrases: ['how are we doing', 'how is the month looking'] },
+    objects: ['revenue', 'profit', 'turnover', 'margin', 'the numbers', 'performance', 'the figures'],
+    phrases: ['how are we doing', 'how is the month looking', 'how is the year going'] },
 
-  { id: 'analytics.breakdown', label: 'Break the numbers down', blurb: 'By make, status or depot', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'split', 'break down', 'group'],
-    objects: ['by make', 'by depot', 'by status', 'by rep', 'a breakdown', 'split by'] },
+  { id: 'analytics.asAt', label: 'Read the figures as at a date', blurb: 'So a number quoted on Tuesday is the same on Friday', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...CHANGE, 'set'],
+    objects: ['as at date', 'the date', 'as at', 'read to a date', 'the cut off', 'point in time'],
+    phrases: ['as it stood at the end of the quarter', 'how did it look in june'] },
+
+  { id: 'analytics.trend', label: 'Month by month', blurb: 'Two years of it, and the figures underneath', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=overview', verbs: GO,
+    objects: ['trend', 'monthly trend', 'month by month', 'the trend line', 'last 12 months',
+              'monthly figures', 'by month', 'the monthly table'] },
+
+  { id: 'analytics.deals', label: 'The trailers sold this year', blurb: 'Every deal, with its margin', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=deals', verbs: [...GO, 'list', 'which'],
+    objects: ['deals', 'the deals', 'individual deals', 'deal list', 'trailers sold',
+              'what we have sold', 'sales list', 'every sale', 'deal review'],
+    phrases: ['what trailers have we sold', 'show me the deals'] },
+
+  { id: 'analytics.avgDeal', label: 'Average deal size', blurb: 'What a trailer sale is worth on average', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=deals', verbs: [...GO, 'how much', 'whats'],
+    objects: ['average deal', 'average sale', 'typical deal', 'deal size', 'average order value'] },
+
+  { id: 'analytics.leaderboard', label: 'Who is selling', blurb: 'Trailers and leads, per person', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=people', verbs: [...GO, 'who is'],
+    objects: ['leaderboard', 'league table', 'top rep', 'best salesman', 'rankings',
+              'who is winning', 'who is selling', 'per rep', 'by rep', 'sales team figures'],
+    phrases: ['who has sold the most', 'how is the team doing'] },
+
+  { id: 'analytics.commission', label: 'Commission recorded', blurb: 'What is on the leads, per person', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=people', verbs: [...GO, 'how much'],
+    objects: ['commission', 'commission paid', 'commission bill', 'what the team earned',
+              'total commission', 'commission run'] },
+
+  { id: 'analytics.funnel', label: 'What is coming', blurb: 'Every stage, per division', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: GO,
+    objects: ['funnel', 'pipeline funnel', 'the stages', 'stage breakdown', 'where deals are',
+              'what is coming', 'the pipeline'] },
+
+  { id: 'analytics.pipelineValue', label: 'Pipeline value', blurb: 'What everything still open is worth', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: [...GO, 'how much'],
+    objects: ['pipeline value', 'whats in the pipeline', 'open value', 'value of the pipeline'] },
+
+  { id: 'analytics.conversion', label: 'How leads convert', blurb: 'How many sit at each stage', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=pipeline', verbs: [...GO, 'whats'],
+    objects: ['conversion', 'conversion rate', 'close rate', 'win rate', 'strike rate'] },
+
+  { id: 'analytics.topCustomers', label: 'Top customers', blurb: 'And how much of the income they are', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'who are'],
+    objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
+
+  { id: 'analytics.movers', label: 'Who is growing and who is going', blurb: 'Against the same point last year', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'who is'],
+    /* Deliberately not "the call list", which is what the old screen
+       called this and what a rep says out loud. It collides head on
+       with cancelling a call, opening a CRM list, deleting a list and
+       five others, and the coverage sweep caught it: eight actions
+       scored above this one. A phrase somebody says is worth having
+       only where the bar can tell what they meant. */
+    objects: ['movers', 'who has moved', 'risers and fallers', 'who is spending less',
+              'who has fallen away', 'customers to chase', 'customers going elsewhere',
+              'who is growing', 'lost customers', 'declining customers'],
+    phrases: ['who is spending less than last year', 'which customers have dropped off'] },
+
+  { id: 'analytics.concentration', label: 'How exposed we are', blurb: 'What share the top ten customers are', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=customers', verbs: [...GO, 'how much', 'whats'],
+    objects: ['concentration', 'customer concentration', 'exposure', 'the top ten share',
+              'how much is one customer', 'reliance on one customer'],
+    phrases: ['how much of our income is the top ten'] },
+
+  { id: 'analytics.ageing', label: 'How old the open work is', blurb: 'Work in progress, by how long it has sat', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=work', verbs: [...GO, 'how old'],
+    objects: ['ageing', 'aged work', 'work in progress', 'wip', 'open work', 'old jobs',
+              'jobs over 90 days', 'what is on the ramps', 'unbilled work'],
+    phrases: ['what has been open the longest', 'how much work is over 90 days old'] },
+
+  { id: 'analytics.reconcile', label: 'Why the customers do not add up', blurb: 'Placed, unplaced and set aside', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?view=reconcile', verbs: [...GO, 'why'],
+    objects: ['reconciliation', 'reconcile', 'the difference', 'unattributed revenue',
+              'money on no customer', 'unplaced accounts', 'set aside', 'cash sales',
+              'why it does not add up'],
+    phrases: ['why does the total not match the customers', 'what is not on a customer record'] },
+
+  { id: 'analytics.stockValue', label: 'Stock available and its book value', blurb: 'What is sat on the yard', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
+    objects: ['stock available', 'stock value', 'nbv on the yard', 'what stock is worth'] },
+
+  { id: 'analytics.byMake', label: 'Stock by manufacturer', blurb: 'On the trailer stock list', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/sales', verbs: [...GO, 'split'],
+    objects: ['by manufacturer', 'by make', 'stock by make', 'which makes', 'manufacturer split'] },
 
   /* ---------- me ---------- */
 
@@ -864,77 +964,6 @@ export const ACTIONS: CommandActionSpec[] = [
 
   /* ---------- export pages ---------- */
 
-
-  /* ---------- analytics, read properly this time ----------
-
-     The first sweep skipped this screen and I wrote four entries for it
-     from a grep. It has six periods, a rep filter, eight KPIs, four
-     charts and a leaderboard you can click to filter by. */
-
-  { id: 'analytics.period30', label: 'Last 30 days', blurb: 'Analytics for the past month', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=30d', verbs: [...GO, 'set'],
-    objects: ['last 30 days', 'past 30 days', 'last month of figures', '30 day view'] },
-
-  { id: 'analytics.period90', label: 'Last 90 days', blurb: 'Analytics for the past quarter', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=90d', verbs: [...GO, 'set'],
-    objects: ['last 90 days', 'past 90 days', 'last three months', '90 day view'] },
-
-  { id: 'analytics.periodMtd', label: 'This month so far', blurb: 'Month to date', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=mtd', verbs: [...GO, 'set'],
-    objects: ['month to date', 'mtd', 'this month so far', 'so far this month'] },
-
-  { id: 'analytics.periodQtd', label: 'This quarter', blurb: 'Quarter to date', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=qtd', verbs: [...GO, 'set'],
-    objects: ['this quarter', 'quarter to date', 'qtd', 'the quarter'] },
-
-  { id: 'analytics.periodYtd', label: 'Year to date', blurb: 'Since the first of January', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=ytd', verbs: [...GO, 'set'],
-    objects: ['year to date', 'ytd', 'this year so far', 'since january'] },
-
-  { id: 'analytics.periodAll', label: 'All time', blurb: 'Every dated record', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics?period=all', verbs: [...GO, 'set'],
-    objects: ['all time', 'ever', 'the lot', 'everything we have done', 'since the start'] },
-
-  { id: 'analytics.repFilter', label: 'Focus analytics on one rep', blurb: 'Or back to the whole team', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'filter', 'focus on'],
-    objects: ['one rep', 'just dave', 'a single rep', 'whole team', 'everybody’s figures'],
-    phrases: ['show me just dave’s numbers', 'back to the whole team'] },
-
-  { id: 'analytics.commission', label: 'Commission paid', blurb: 'Ten per cent of profit, to the team', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
-    objects: ['commission paid', 'commission bill', 'what the team earned', 'total commission'] },
-
-  { id: 'analytics.avgDeal', label: 'Average deal size', blurb: 'Revenue over deals closed', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
-    objects: ['average deal', 'average sale', 'typical deal', 'deal size', 'average order value'] },
-
-  { id: 'analytics.pipelineValue', label: 'Pipeline value', blurb: 'Estimated value of everything open', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
-    objects: ['pipeline value', 'whats in the pipeline', 'open value', 'value of the pipeline'] },
-
-  { id: 'analytics.conversion', label: 'Conversion rate', blurb: 'Open leads that become customers', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'whats'],
-    objects: ['conversion', 'conversion rate', 'close rate', 'win rate', 'strike rate'] },
-
-  { id: 'analytics.stockValue', label: 'Stock available and its book value', blurb: 'What is sat on the yard', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
-    objects: ['stock available', 'stock value', 'nbv on the yard', 'what stock is worth'] },
-
-  { id: 'analytics.funnel', label: 'Pipeline funnel', blurb: 'Lead, contacted, quoted, won, customer, lost', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
-    objects: ['funnel', 'pipeline funnel', 'the stages', 'stage breakdown', 'where deals are'] },
-
-  { id: 'analytics.topCustomers', label: 'Top customers', blurb: 'By revenue in the period', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who are'],
-    objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
-
-  { id: 'analytics.byMake', label: 'Stock by manufacturer', blurb: 'How many of each make on the yard', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'split'],
-    objects: ['by manufacturer', 'by make', 'stock by make', 'which makes', 'manufacturer split'] },
-
-  { id: 'analytics.trend', label: 'Revenue and profit trend', blurb: 'Twelve months, either line toggleable', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
-    objects: ['trend', 'monthly trend', 'the trend line', 'last 12 months', 'month by month'] },
 
   /* ---------- company finder ---------- */
 
@@ -1371,7 +1400,21 @@ export function suggestActions(input: string, caps: CrmCapabilities, limit = 6):
   }
 
   return hits
-    .sort((x, y) => y.score - x.score || x.action.label.localeCompare(y.action.label))
+    /* A LONGER MATCH BEATS A SHORTER ONE AT THE SAME SCORE.
+
+       "Unattributed revenue" matched two actions at 55: one whose
+       object is the whole phrase, and one whose object is the single
+       word "revenue". They tied, so the winner was whichever happened
+       to be declared first, and it was the vaguer of the two.
+
+       This is a tiebreak and only a tiebreak. Where the scores differ
+       it changes nothing, so it cannot reorder anything the scoring
+       above has an opinion about. It only decides between two actions
+       the scoring cannot separate, and between those, the one that
+       matched more of what somebody typed understood more of it. */
+    .sort((x, y) => y.score - x.score
+      || y.matched.length - x.matched.length
+      || x.action.label.localeCompare(y.action.label))
     .slice(0, limit);
 }
 
