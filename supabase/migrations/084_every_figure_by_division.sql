@@ -27,10 +27,19 @@
 
 -- -------------------------------------------------------------
 -- 1. Opening an import states its division.
+--
+-- The pattern through this file and 085 is DROP the old signature, then
+-- CREATE OR REPLACE the new one. Both halves matter. The drop is needed
+-- because adding an argument makes a second function rather than
+-- replacing the first, and two overloads mean PostgREST picks whichever
+-- it likes. The REPLACE is needed because on a second run the drop
+-- finds nothing and a plain CREATE then fails on a function that is
+-- already exactly right, which is what `npm run check:bundle-twice`
+-- caught here.
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_start_import(TEXT, TEXT);
 
-CREATE FUNCTION protean_start_import(p_kind TEXT, p_file TEXT, p_division TEXT DEFAULT 'stc')
+CREATE OR REPLACE FUNCTION protean_start_import(p_kind TEXT, p_file TEXT, p_division TEXT DEFAULT 'stc')
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -62,7 +71,7 @@ GRANT EXECUTE ON FUNCTION protean_start_import(TEXT, TEXT, TEXT) TO authenticate
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_take_invoices(UUID, JSONB);
 
-CREATE FUNCTION protean_take_invoices(p_import UUID, p_rows JSONB)
+CREATE OR REPLACE FUNCTION protean_take_invoices(p_import UUID, p_rows JSONB)
 RETURNS TABLE (rows_read INTEGER, rows_new INTEGER, rows_updated INTEGER,
                rows_skipped INTEGER, accounts_new INTEGER)
 LANGUAGE plpgsql
@@ -161,7 +170,7 @@ GRANT EXECUTE ON FUNCTION protean_take_invoices(UUID, JSONB) TO authenticated;
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_take_open_jobs(UUID, JSONB);
 
-CREATE FUNCTION protean_take_open_jobs(p_import UUID, p_rows JSONB)
+CREATE OR REPLACE FUNCTION protean_take_open_jobs(p_import UUID, p_rows JSONB)
 RETURNS TABLE (rows_read INTEGER, rows_new INTEGER, rows_updated INTEGER,
                rows_skipped INTEGER, rows_unmatched INTEGER)
 LANGUAGE plpgsql
@@ -348,7 +357,7 @@ $fn$;
 
 DROP FUNCTION IF EXISTS protean_jobs_without_account();
 
-CREATE FUNCTION protean_jobs_without_account(p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_jobs_without_account(p_division TEXT DEFAULT NULL)
 RETURNS TABLE (division TEXT, protean_name TEXT, jobs INTEGER, value NUMERIC)
 LANGUAGE plpgsql
 STABLE
@@ -380,7 +389,7 @@ DROP FUNCTION IF EXISTS protean_bind(TEXT, UUID);
 DROP FUNCTION IF EXISTS protean_make_customer(TEXT, TEXT);
 DROP FUNCTION IF EXISTS protean_ignore(TEXT, TEXT);
 
-CREATE FUNCTION protean_bind(p_division TEXT, p_alpha TEXT, p_contact UUID)
+CREATE OR REPLACE FUNCTION protean_bind(p_division TEXT, p_alpha TEXT, p_contact UUID)
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -415,7 +424,7 @@ $fn$;
 
 GRANT EXECUTE ON FUNCTION protean_bind(TEXT, TEXT, UUID) TO authenticated;
 
-CREATE FUNCTION protean_make_customer(p_division TEXT, p_alpha TEXT, p_name TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_make_customer(p_division TEXT, p_alpha TEXT, p_name TEXT DEFAULT NULL)
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -449,7 +458,7 @@ $fn$;
 
 GRANT EXECUTE ON FUNCTION protean_make_customer(TEXT, TEXT, TEXT) TO authenticated;
 
-CREATE FUNCTION protean_ignore(p_division TEXT, p_alpha TEXT, p_why TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_ignore(p_division TEXT, p_alpha TEXT, p_why TEXT DEFAULT NULL)
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -473,7 +482,7 @@ GRANT EXECUTE ON FUNCTION protean_ignore(TEXT, TEXT, TEXT) TO authenticated;
 
 DROP FUNCTION IF EXISTS protean_to_moderate();
 
-CREATE FUNCTION protean_to_moderate(p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_to_moderate(p_division TEXT DEFAULT NULL)
 RETURNS TABLE (division TEXT, alpha TEXT, protean_name TEXT, invoices INTEGER,
                net NUMERIC, first_billed DATE, last_billed DATE, open_jobs INTEGER)
 LANGUAGE plpgsql

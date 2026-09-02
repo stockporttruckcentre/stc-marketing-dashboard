@@ -19,7 +19,7 @@
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_customer(UUID, DATE);
 
-CREATE FUNCTION protean_customer(p_contact UUID, p_upto DATE DEFAULT NULL,
+CREATE OR REPLACE FUNCTION protean_customer(p_contact UUID, p_upto DATE DEFAULT NULL,
                                  p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
   accounts INTEGER, this_year NUMERIC, last_year NUMERIC, change NUMERIC,
@@ -93,7 +93,7 @@ GRANT EXECUTE ON FUNCTION protean_customer(UUID, DATE, TEXT) TO authenticated;
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_company(DATE);
 
-CREATE FUNCTION protean_company(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_company(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
   this_year NUMERIC, last_year NUMERIC, change NUMERIC, fy_started DATE,
   invoices INTEGER, customers INTEGER,
@@ -150,7 +150,7 @@ GRANT EXECUTE ON FUNCTION protean_company(DATE, TEXT) TO authenticated;
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_by_month(INTEGER, DATE);
 
-CREATE FUNCTION protean_by_month(p_months INTEGER DEFAULT 24, p_upto DATE DEFAULT NULL,
+CREATE OR REPLACE FUNCTION protean_by_month(p_months INTEGER DEFAULT 24, p_upto DATE DEFAULT NULL,
                                  p_division TEXT DEFAULT NULL)
 RETURNS TABLE (month DATE, net NUMERIC, invoices INTEGER)
 LANGUAGE plpgsql
@@ -223,7 +223,7 @@ GRANT EXECUTE ON FUNCTION revenue_by_month_and_division(INTEGER, DATE) TO authen
 -- -------------------------------------------------------------
 DROP FUNCTION IF EXISTS protean_year_on_year(DATE);
 
-CREATE FUNCTION protean_year_on_year(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_year_on_year(p_upto DATE DEFAULT NULL, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (
   contact_id UUID, company_name TEXT, alphas TEXT[],
   this_year NUMERIC, last_year NUMERIC, change NUMERIC,
@@ -277,7 +277,7 @@ GRANT EXECUTE ON FUNCTION protean_year_on_year(DATE, TEXT) TO authenticated;
 
 DROP FUNCTION IF EXISTS protean_accounts_of(UUID);
 
-CREATE FUNCTION protean_accounts_of(p_contact UUID)
+CREATE OR REPLACE FUNCTION protean_accounts_of(p_contact UUID)
 RETURNS TABLE (
   division TEXT, division_name TEXT, alpha TEXT, protean_name TEXT, ignored BOOLEAN,
   invoices INTEGER, net NUMERIC, first_billed DATE, last_billed DATE,
@@ -315,7 +315,7 @@ GRANT EXECUTE ON FUNCTION protean_accounts_of(UUID) TO authenticated;
 
 DROP FUNCTION IF EXISTS protean_spend(UUID);
 
-CREATE FUNCTION protean_spend(p_contact UUID, p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_spend(p_contact UUID, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (year INTEGER, net NUMERIC, invoices INTEGER,
                first_billed DATE, last_billed DATE)
 LANGUAGE plpgsql
@@ -345,7 +345,7 @@ GRANT EXECUTE ON FUNCTION protean_spend(UUID, TEXT) TO authenticated;
 
 DROP FUNCTION IF EXISTS protean_open_work(UUID);
 
-CREATE FUNCTION protean_open_work(p_contact UUID, p_division TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION protean_open_work(p_contact UUID, p_division TEXT DEFAULT NULL)
 RETURNS TABLE (division TEXT, job_no TEXT, job_type TEXT, status TEXT, depot TEXT,
                logged_on DATE, job_total NUMERIC, equip_no TEXT)
 LANGUAGE plpgsql
@@ -434,7 +434,7 @@ $fn$;
 
 DROP FUNCTION IF EXISTS group_breakdown(UUID, DATE);
 
-CREATE FUNCTION group_breakdown(p_group UUID, p_upto DATE DEFAULT NULL)
+CREATE OR REPLACE FUNCTION group_breakdown(p_group UUID, p_upto DATE DEFAULT NULL)
 RETURNS TABLE (
   division TEXT, alpha TEXT, protean_name TEXT, contact_id UUID, company_name TEXT,
   this_year NUMERIC, last_year NUMERIC, change NUMERIC,
