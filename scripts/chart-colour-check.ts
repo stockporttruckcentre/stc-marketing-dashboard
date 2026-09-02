@@ -29,21 +29,41 @@
    4. Every chart colour clears a readable contrast against the surface
       of its own theme, so a division is visible and not merely present.
    5. The chart components hold no raw hex.
+   6. Where two division colours are too close to tell apart, the charts
+      carry a second signal that is not colour.
    ============================================================= */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const TOKENS = readFileSync('app/kit-tokens.css', 'utf8');
-/* Every file that draws data, not a hand written list of two. The list
-   went stale the moment the screen was rebuilt: `monthly.tsx` and
-   `sections.tsx` did not exist when this was written, and the check
-   carried on passing without looking at either. */
+
+/* EVERY FILE THAT DRAWS, FOUND RATHER THAN LISTED.
+
+   This was a hand written list of four, and it went stale twice. First
+   when the screen was rebuilt and the drawing moved into files that did
+   not exist when the list was written, so the check passed without
+   reading either. Then again when the rebuild was rejected and the
+   drawing moved a second time, into a donut, a bar module and a texture
+   module the list had never heard of.
+
+   A list of file names is a claim about a directory, and the directory
+   is right there. So it is read: everything under components/analytics
+   plus the screen itself, and a floor on the count so an empty read is
+   a failure rather than a quiet pass. */
 const DRAWERS = [
-  'components/analytics/chart.tsx',
-  'components/analytics/monthly.tsx',
-  'components/analytics/sections.tsx',
+  ...readdirSync('components/analytics')
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => `components/analytics/${f}`),
   'components/AnalyticsHub.tsx',
 ].map((path) => [path, readFileSync(path, 'utf8')] as const);
+
+if (DRAWERS.length < 5) {
+  console.log(`  FAIL  only ${DRAWERS.length} drawing files found. This check is not looking at the screen.`);
+  process.exit(1);
+}
+
+/** Comments stripped. Rule 5 is about code; prose may quote a value. */
+const codeOf = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '');
 
 const ALL = DRAWERS.map(([, src]) => src).join('\n');
 
@@ -199,23 +219,108 @@ ok('every chart colour reads against the card of its own theme');
 
 /* ---- 5. No raw hex in anything that draws ----
 
-   `#fff` on the split strip is the one exception and is written as
-   such: it is text ON a division's own colour, and every one of those
-   is dark enough to need white on it in both themes. A token would be
-   wrong there, because the surface it sits on is a data colour rather
-   than a themed one. */
+   Comments are excluded. `texture.tsx` quotes the six token values and
+   the measured distance between them in its header, because that
+   measurement is the whole reason the module exists, and a check that
+   cannot tell a documented value from a hardcoded one would force the
+   explanation out of the file that needs it. */
 for (const [file, src] of DRAWERS) {
-  const hexes = [...src.matchAll(/#[0-9A-Fa-f]{3,8}\b/g)]
-    .map((m) => m[0]).filter((h) => h.toLowerCase() !== '#fff');
+  const hexes = [...codeOf(src).matchAll(/#[0-9A-Fa-f]{3,8}\b/g)].map((m) => m[0]);
   if (hexes.length) {
     bad(`${file} holds a raw hex`, `${[...new Set(hexes)].join(', ')}. The kit takes tokens only.`);
   }
 }
 if (!failed) ok(`no raw hex across ${DRAWERS.length} files that draw`);
 
+/* ---- 6. Two colours nobody can tell apart need a second signal ----
+
+   Contrast against the CARD, which checks 3 and 4 measure, says whether
+   a band is visible. It says nothing about whether two bands can be
+   told from EACH OTHER, and that is the question a stacked chart of
+   three divisions actually asks.
+
+   Measured, the dark palette fails it:
+
+     light  worst adjacent pair  ΔE 16.9   over the floor
+     dark   worst adjacent pair  ΔE 12.8   under it
+
+   Fifteen is the floor for somebody with full colour vision. Below it,
+   two bands read as one shape with a change of tone in it.
+
+   Changing a token value is a rebrand step and belongs to whoever is
+   ordering the rebrand, so this does not demand it. What it demands is
+   that a palette that close is never the ONLY thing separating two
+   series: the charts fill each band with its own pattern as well as its
+   own colour, name the bands on themselves, and repeat the pattern in
+   the key. Take that away while the palette is this close and this
+   fails. */
+{
+  /* OKLab, and the Euclidean distance in it that every threshold in
+     this area is quoted against. */
+  const oklab = (hex: string): [number, number, number] => {
+    const [r, g, b] = rgb(hex).map((v) => {
+      const c = v / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    ];
+  };
+  const deltaE = (a: string, b: string) => {
+    const [x, y, z] = oklab(a);
+    const [p, q, r] = oklab(b);
+    return Math.hypot(x - p, y - q, z - r) * 100;
+  };
+
+  const SERIES = ['chart-stc', 'chart-trailer', 'chart-rental'];
+  const FLOOR = 15;
+  let tooClose: string | null = null;
+
+  for (const theme of ['light', 'dark'] as const) {
+    const block = theme === 'light' ? LIGHT : DARK;
+    const hexes = SERIES.map((n) => valueOf(block, n)).filter((h): h is string => !!h);
+    for (let i = 0; i < hexes.length; i += 1) {
+      for (let j = i + 1; j < hexes.length; j += 1) {
+        const d = deltaE(hexes[i]!, hexes[j]!);
+        if (d < FLOOR) {
+          tooClose = `${theme}: ${hexes[i]} and ${hexes[j]} are ΔE ${d.toFixed(1)} apart`;
+        }
+      }
+    }
+  }
+
+  if (!tooClose) {
+    ok(`every pair of division colours is at least ΔE ${FLOOR} apart in both themes`);
+  } else {
+    /* The second signal, asserted where it has to be rather than
+       anywhere in the screen: the patterns have to be DRAWN by the
+       charts and REPEATED in the key, because a pattern the key does
+       not carry is one more thing to decode. */
+    const drawn = DRAWERS.filter(([, src]) => src.includes('patternId(')).length;
+    const key = readFileSync('components/analytics/panel.tsx', 'utf8');
+    const missing: string[] = [];
+    if (drawn < 2) missing.push(`only ${drawn} chart draws a pattern fill`);
+    if (!key.includes('pattern')) missing.push('the key carries no pattern beside the name');
+    if (!ALL.includes('textured')) missing.push('nothing on the screen can turn the patterns on');
+
+    if (missing.length) {
+      bad('two division colours are too close, and colour is the only thing separating them',
+        `${tooClose}. ${missing.join('; ')}.`);
+    } else {
+      ok(`${tooClose}, and every chart separates them by pattern as well as by hue`);
+    }
+  }
+}
+
 console.log(
   failed === 0
-    ? '\n  Charts have their own colours, and neither theme is a surprise.\n'
+    ? '\n  Charts have their own colours, neither theme is a surprise, and no two\n'
+      + '  series are told apart by hue alone.\n'
     : `\n  ${failed} to fix.\n`,
 );
 process.exit(failed === 0 ? 0 : 1);

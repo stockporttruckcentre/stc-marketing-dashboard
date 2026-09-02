@@ -1,58 +1,77 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ArrowRight, Container, KeyRound, Minus, RotateCcw, TrendingDown, TrendingUp, Wrench,
-} from 'lucide-react';
+import { ArrowRight, Container, KeyRound, RotateCcw, Wrench, X } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import {
-  Alert, Badge, Button, Card, EmptyState, Label, PageHead, compactMoney, money,
+  Alert, Button, Chip, EmptyState, PageHead, compactMoney, money,
 } from '@/components/kit/primitives';
 import { TextInput } from '@/components/kit/forms';
-import { MonthlyStack, Sparkline, type MonthPoint } from '@/components/analytics/monthly';
-import { RankRow } from '@/components/analytics/chart';
-import { DivisionDetail, WaitingOnARecord } from '@/components/analytics/sections';
+import { MonthlyStack, type MonthPoint, type Shape } from '@/components/analytics/monthly';
+import { Donut } from '@/components/analytics/donut';
+import { DivergingBars, RankedBars, type BarRow } from '@/components/analytics/bars';
+import {
+  Key, Panel, PanelGrid, Segments, Toggle, type TableRow,
+} from '@/components/analytics/panel';
+import { swatchImage } from '@/components/analytics/texture';
+import { Tile } from '@/components/analytics/tiles';
+import { NeedsARecord } from '@/components/analytics/sections';
 import { readable } from '@/lib/protean/rpc';
 import {
+  OPEN_STAGES, STAGE_LABEL,
   concentration, customerMovement, openWorkAgeing, pipelineByStage, reconciliation,
-  salesByPerson, trailerCustomersWaiting, trailerDeals,
-  type AgeBand, type Concentration, type Deal, type Mover, type Person,
+  trailerCustomersWaiting,
+  type AgeBand, type Concentration, type Mover,
   type Reconciliation, type Stage, type TrailerWaiting,
 } from '@/lib/protean/finance';
 
 /* =============================================================
-   The company, three divisions wide.
+   The company, as a dashboard.
 
-   ---- Why three columns and not tabs ----
+   ---- What was wrong with the version before this ----
 
-   Because the question is comparative. "How is rental doing" is nearly
-   always "how is rental doing compared with the rest of it", and tabs
-   make somebody hold one number in their head while they go and find
-   the other.
-
-   That applied to the drill downs too, and I built them as tabs anyway.
    From the business:
 
-     Not keen on tabs here, people miss tabs. I'm sure you could fit it
-     in the columns still.
+     analytics page rebuild won't work. It's extremely messy, ui broken
+     on lower section, columns all different sized, text formatting not
+     great to understand. It's just information overload. ... Lots of
+     visual data, interactivity, ability to drill in deeper, not just
+     tons of text and numbers on a page.
 
-   Right on both counts. Everything that was behind a tab is now in the
-   column it belongs to, because every one of those questions was about
-   a division: which deals, who is selling, what is coming, how old the
-   open work is, and what is not on a customer record.
+   Four complaints and one cause. The page was three cards, and each
+   card appended however many blocks its own division happened to have.
+   Trailer sales carried deals, sellers, a funnel, a customer list and a
+   form for creating records; rental carried an ageing bar and a funnel.
+   So the columns were different sizes because their CONTENT decided
+   their height, the lower section broke because a card had a form
+   growing out of the bottom of it, and it read as overload because
+   every figure any division could produce was quoted at once, in eight
+   type sizes, whether or not anybody had asked.
 
-   ---- And what was dropped rather than moved ----
+   ---- What replaces it ----
 
-     Tabulating all the deals/who is selling etc - not keen on these
-     tabulated lists. We have this data in the crm already, it's more
-     duplication than quick summary for the finance team
+   A twelve column grid of panels. A panel says how many columns it
+   spans and nothing about its height, so panels on a row are equal by
+   construction and no panel can push its neighbour out of shape. That
+   is `panel.tsx`, and it is the whole answer to three of the four.
 
-   So the tables went. A hundred row list of every trailer sold is the
-   trailer sales screen's job and it does it better. What a column
-   carries instead is the shape of it: how many, worth how much, at what
-   margin, and the biggest few, each of which goes through to the
-   record. Everything else is one click away on the screen that owns it.
+   The fourth is answered by making the page ANSWER a question rather
+   than recite everything:
+
+     A CHART CARRIES THE MEANING. Every panel draws. Nothing on this
+     page is a list of numbers by default.
+
+     THE NUMBERS ARE ONE PRESS AWAY. Every panel that draws also
+     tabulates, on a toggle. The finance team asked for enough to brief
+     the managing director and then reported the result as overload;
+     both were true, and the fix is that the detail exists without being
+     shouted. It is also the accessible reading of every chart here.
+
+     ONE THING DRILLS IN. Pressing a division, on the ring or on a chip,
+     scopes the entire page to it: the tiles become that division's
+     figures, the chart becomes its line, and every panel below filters.
+     One axis, so nobody has to remember what is filtered.
    ============================================================= */
 
 type Division = {
@@ -95,9 +114,7 @@ const HUE: Record<string, string> = {
 };
 
 const ICON: Record<string, typeof Wrench> = {
-  stc: Wrench,
-  trailer: Container,
-  rental: KeyRound,
+  stc: Wrench, trailer: Container, rental: KeyRound,
 };
 
 /** Where a division's own screen lives, for the drill in. */
@@ -107,16 +124,19 @@ const GOES_TO: Record<string, string> = {
   trailer: '/dashboard/sales',
 };
 
-/** Everything the columns read beyond the headline figures. */
+const SHAPES: { value: Shape; label: string }[] = [
+  { value: 'stack' as const, label: 'Stacked' },
+  { value: 'line', label: 'Lines' },
+  { value: 'column', label: 'Columns' },
+];
+
 type Deep = {
-  deals: Deal[];
-  people: Person[];
-  stages: Stage[];
   movers: Mover[];
   conc: Concentration | null;
   bands: AgeBand[];
   recon: Reconciliation[];
   waiting: TrailerWaiting[];
+  stages: Stage[];
 };
 
 export function AnalyticsHub() {
@@ -131,6 +151,17 @@ export function AnalyticsHub() {
 
   const [deep, setDeep] = useState<Deep | null>(null);
   const [deepFailed, setDeepFailed] = useState<string | null>(null);
+
+  /* THE ONE DRILL IN. Null is the company; a slug is one division, and
+     every panel on the page reads it. */
+  const [only, setOnly] = useState<string | null>(null);
+
+  /* How the month chart is drawn, and which divisions are on it. Held
+     here rather than in the chart so the key under it and the toolbar
+     above it are looking at the same state. */
+  const [shape, setShape] = useState<Shape>('stack');
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [textured, setTextured] = useState(true);
 
   /* THE AS AT DATE.
 
@@ -167,7 +198,7 @@ export function AnalyticsHub() {
 
       const lists = await Promise.all(rows.map(async (d) => {
         const { data } = await supabase.rpc('division_customers', {
-          p_division: d.division, p_upto: upto ?? null, p_limit: 5,
+          p_division: d.division, p_upto: upto ?? null, p_limit: 8,
         });
         return [d.division, (data ?? []) as TopCustomer[]] as const;
       }));
@@ -185,17 +216,15 @@ export function AnalyticsHub() {
   const loadDeep = useCallback(async () => {
     setDeepFailed(null);
     try {
-      const [deals, people, stages, movers, conc, bands, recon, waiting] = await Promise.all([
-        trailerDeals(supabase, upto, 500),
-        salesByPerson(supabase, upto),
-        pipelineByStage(supabase),
-        customerMovement(supabase, upto, 8),
+      const [movers, conc, bands, recon, waiting, stages] = await Promise.all([
+        customerMovement(supabase, upto, 14),
         concentration(supabase, null, upto),
         openWorkAgeing(supabase, null, upto),
         reconciliation(supabase, upto),
         trailerCustomersWaiting(supabase, upto),
+        pipelineByStage(supabase),
       ]);
-      setDeep({ deals, people, stages, movers, conc, bands, recon, waiting });
+      setDeep({ movers, conc, bands, recon, waiting, stages });
     } catch (e) {
       setDeepFailed(e instanceof Error ? e.message : 'The detail would not load.');
     }
@@ -204,12 +233,23 @@ export function AnalyticsHub() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setDeep(null); void loadDeep(); }, [loadDeep]);
 
-  const company = useMemo(() => ({
-    thisYear: divisions.reduce((s, d) => s + Number(d.this_year || 0), 0),
-    lastYear: divisions.reduce((s, d) => s + Number(d.last_year || 0), 0),
-    lastYearFull: divisions.reduce((s, d) => s + Number(d.last_year_full || 0), 0),
-    outstanding: divisions.reduce((s, d) => s + Number(d.outstanding || 0), 0),
-  }), [divisions]);
+  /* What the page is currently about: every division, or one of them.
+     Every figure below reads `scope`, so there is one place where "is
+     this filtered" is decided. */
+  const scope = useMemo(
+    () => (only ? divisions.filter((d) => d.division === only) : divisions),
+    [divisions, only],
+  );
+  const picked = only ? divisions.find((d) => d.division === only) ?? null : null;
+
+  const sum = useMemo(() => ({
+    thisYear: scope.reduce((s, d) => s + Number(d.this_year || 0), 0),
+    lastYear: scope.reduce((s, d) => s + Number(d.last_year || 0), 0),
+    lastYearFull: scope.reduce((s, d) => s + Number(d.last_year_full || 0), 0),
+    outstanding: scope.reduce((s, d) => s + Number(d.outstanding || 0), 0),
+    outstandingN: scope.reduce((s, d) => s + Number(d.outstanding_n || 0), 0),
+    deals: scope.reduce((s, d) => s + Number(d.deals || 0), 0),
+  }), [scope]);
 
   const yearLabel = divisions[0]?.fy_started
     ? new Date(`${divisions[0].fy_started}T00:00:00`).toLocaleDateString('en-GB', {
@@ -220,35 +260,152 @@ export function AnalyticsHub() {
     ? Number(divisions[0].fy_started.slice(5, 7))
     : undefined;
 
-  /* One point per month carrying every division's figure, which is what
-     the stack needs and what a per division filter would have to be
+  /* One point per month carrying every division in scope, which is what
+     a stack needs and what a per division filter would have to be
      undone to get. */
   const stack = useMemo<MonthPoint[]>(() => {
     const at = new Map<string, number>();
     for (const m of months) at.set(`${m.month}|${m.division}`, Number(m.net || 0));
     return [...new Set(months.map((m) => m.month))].sort().map((month) => ({
       month,
-      values: divisions.map((d) => at.get(`${month}|${d.division}`) ?? 0),
+      values: scope.map((d) => at.get(`${month}|${d.division}`) ?? 0),
     }));
-  }, [months, divisions]);
+  }, [months, scope]);
 
-  const seriesOf = useCallback((slug: string): number[] => {
-    const mine = months.filter((m) => m.division === slug)
-      .sort((a, b) => a.month.localeCompare(b.month));
-    /* The year running only. The column is about this year, and a two
-       year sparkline in a 46 pixel box says nothing about either. */
+  /* The financial year running, for the tile sparklines. A two year
+     line inside a 34 pixel box says nothing about either year. */
+  const yearRunning = useMemo(() => {
+    const at = new Map<string, number>();
+    for (const m of months) {
+      if (only && m.division !== only) continue;
+      at.set(m.month, (at.get(m.month) ?? 0) + Number(m.net || 0));
+    }
+    const all = [...at.keys()].sort();
     const from = yearStartMonth
-      ? [...mine].reverse().find((m) => Number(m.month.slice(5, 7)) === yearStartMonth)?.month
+      ? [...all].reverse().find((m) => Number(m.slice(5, 7)) === yearStartMonth)
       : undefined;
-    return (from ? mine.filter((m) => m.month >= from) : mine.slice(-12))
-      .map((m) => Number(m.net || 0));
-  }, [months, yearStartMonth]);
+    return (from ? all.filter((m) => m >= from) : all.slice(-12)).map((m) => at.get(m) ?? 0);
+  }, [months, only, yearStartMonth]);
+
+  const series = useMemo(
+    () => scope.map((d) => ({
+      key: d.division, name: d.name, colour: HUE[d.division] ?? 'var(--chart-company)',
+    })),
+    [scope],
+  );
+
+  /* ---- what each panel below draws ---- */
+
+  const customers = useMemo<BarRow[]>(() => {
+    const from = only
+      ? (top[only] ?? []).map((c) => ({ ...c, division: only }))
+      : Object.entries(top).flatMap(([div, list]) => list.map((c) => ({ ...c, division: div })));
+    /* Netted by customer where the page is not scoped, because a
+       haulier who buys maintenance and rents is one customer and two
+       rows for them is the fault the movers panel already had. */
+    const byName = new Map<string, BarRow & { raw: number }>();
+    for (const c of from) {
+      const key = c.contact_id ?? c.company_name;
+      const got = byName.get(key);
+      const value = Number(c.this_year || 0);
+      if (got) { got.raw += value; got.value = got.raw; continue; }
+      byName.set(key, {
+        key,
+        name: c.company_name,
+        value,
+        raw: value,
+        note: c.placed ? undefined : 'no record',
+        href: c.contact_id ? `/dashboard/crm?contact=${c.contact_id}` : undefined,
+      });
+    }
+    return [...byName.values()].sort((a, b) => b.value - a.value).slice(0, 8);
+  }, [top, only]);
+
+  const movers = useMemo<BarRow[]>(() => {
+    if (!deep) return [];
+    /* Trailer purchases are deliberately absent from the underlying
+       figure: a customer who bought a trailer last year and not this one
+       has a trailer, not a problem. So this panel is hidden entirely
+       when the page is scoped to trailer sales rather than drawn empty,
+       which would read as "nobody moved". */
+    return [...deep.movers]
+      .filter((m) => Number(m.change) !== 0)
+      .sort((a, b) => Math.abs(Number(b.change)) - Math.abs(Number(a.change)))
+      .slice(0, 8)
+      .sort((a, b) => Number(b.change) - Number(a.change))
+      .map((m) => ({
+        key: m.contact_id ?? m.company_name,
+        name: m.company_name,
+        value: Number(m.change),
+        note: compactMoney(Number(m.last_year)),
+        href: m.contact_id ? `/dashboard/crm?contact=${m.contact_id}` : undefined,
+      }));
+  }, [deep]);
+
+  const ageing = useMemo<BarRow[]>(() => {
+    if (!deep) return [];
+    const mine = deep.bands.filter((b) => (only ? b.division === only : true) && b.jobs > 0);
+    const byBand = new Map<string, { at: number; value: number; jobs: number }>();
+    for (const b of mine) {
+      const got = byBand.get(b.band) ?? { at: b.band_at, value: 0, jobs: 0 };
+      got.value += Number(b.value || 0);
+      got.jobs += Number(b.jobs || 0);
+      byBand.set(b.band, got);
+    }
+    return [...byBand.entries()]
+      .sort((a, b) => a[1].at - b[1].at)
+      .map(([band, v]) => ({
+        key: band,
+        name: band,
+        value: v.value,
+        note: `${v.jobs} ${v.jobs === 1 ? 'job' : 'jobs'}`,
+        /* The oldest band always in red. Anything past ninety days on
+           the ramps is the reason this panel exists. */
+        colour: v.at === 4 ? 'var(--danger)' : 'var(--chart-company)',
+      }));
+  }, [deep, only]);
+
+  const funnel = useMemo<BarRow[]>(() => {
+    if (!deep) return [];
+    const mine = deep.stages
+      .filter((s) => (only ? s.division === only : true) && OPEN_STAGES.has(s.stage));
+    const byStage = new Map<string, { at: number; leads: number; value: number }>();
+    for (const s of mine) {
+      const got = byStage.get(s.stage) ?? { at: s.stage_at, leads: 0, value: 0 };
+      got.leads += Number(s.leads || 0);
+      got.value += Number(s.value || 0);
+      byStage.set(s.stage, got);
+    }
+    return [...byStage.entries()]
+      .sort((a, b) => a[1].at - b[1].at)
+      .map(([stage, v]) => ({
+        key: stage,
+        name: STAGE_LABEL[stage] ?? stage,
+        value: v.leads,
+        note: v.value ? compactMoney(v.value) : undefined,
+      }));
+  }, [deep, only]);
+
+  const oldest = useMemo(() => {
+    if (!deep) return null;
+    const mine = deep.bands.filter((b) => (only ? b.division === only : true) && b.band_at === 4);
+    const value = mine.reduce((s, b) => s + Number(b.value || 0), 0);
+    const jobs = mine.reduce((s, b) => s + Number(b.jobs || 0), 0);
+    return { value, jobs };
+  }, [deep, only]);
+
+  const gaps = useMemo(() => {
+    if (!deep) return 0;
+    return deep.recon
+      .filter((r) => (only ? r.division === only : true))
+      .reduce((s, r) => s + Number(r.unattributed || 0), 0);
+  }, [deep, only]);
 
   if (loading) {
     return (
       <div className="kit" style={PAGE}>
         <PageHead eyebrow="Analytics" title="The company" />
-        <Card><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the figures.</span></Card>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the figures.</span>
       </div>
     );
   }
@@ -266,485 +423,403 @@ export function AnalyticsHub() {
     );
   }
 
-  const nothingYet = company.thisYear === 0 && company.lastYear === 0 && company.outstanding === 0;
+  const nothingYet = divisions.every((d) =>
+    !Number(d.this_year) && !Number(d.last_year) && !Number(d.outstanding));
+
+  if (nothingYet) {
+    return (
+      <div className="kit" style={PAGE}>
+        <PageHead eyebrow="Analytics" title="The company" />
+        <EmptyState
+          what="Nothing to measure yet"
+          why="No revenue has been imported and no trailers are recorded as sold. Import the Protean and Sage exports under Revenue and this fills in."
+          action={
+            <Link href="/dashboard/revenue/stc"><Button variant="primary">Go to Revenue</Button></Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  /* The key repeats whatever the chart is actually drawing, so a
+     swatch is never a pattern beside a line that has none. */
+  const keyItems = series.map((s, i) => ({
+    ...s, pattern: swatchImage(i, textured && shape !== 'line'),
+  }));
 
   return (
     <div className="kit" style={PAGE}>
+      {/* ---- the one control bar ----
+
+          Everything that changes what the page is about, on one line:
+          which division, and as at when.
+
+          Deliberately NOT sticky. It was, and a sticky header on this
+          screen would be the only one in the application: every other
+          tab scrolls its head away under the top bar, and a header that
+          slides under a fixed bar is the class of fault this rebuild
+          exists to remove. What keeps the drill in visible instead is
+          the band below, which is drawn whenever the page is scoped. */}
       <div style={{
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
-        gap: 20, flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        padding: '2px 0 12px',
       }}>
         <PageHead
           eyebrow="Analytics"
-          title="The company"
+          title={picked ? picked.name : 'The company'}
           sub={yearLabel
             ? `The year from ${yearLabel}, against the same point in the year before it.`
             : 'Every division, on the company year.'}
         />
-        <AsAt value={asked} onChange={setAsked} />
-      </div>
 
-      {nothingYet ? (
-        <EmptyState
-          what="Nothing to measure yet"
-          why="No revenue has been imported and no trailers are recorded as sold. Import the Protean exports under Revenue and this fills in."
-          action={
-            <Link href="/dashboard/revenue/stc">
-              <Button variant="primary">Go to Revenue</Button>
-            </Link>
-          }
-        />
-      ) : (
-        <>
-          {/* ---- The company, in one line ----
-
-              This was a card with a 38px number and four figures
-              stacked under their own labels, and it was reported as
-              looking awful. It was: four columns of Panton at four
-              sizes, arranged by accident, taking a third of the fold to
-              say one thing.
-
-              One number is the headline. Everything else is a
-              supporting figure at one size on one baseline, and the
-              division split is a strip on the same card rather than a
-              separate block with a legend under it. */}
-          <Card style={{ marginBottom: 14 }}>
-            <div style={{
-              display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap',
-            }}>
-              <div style={{
-                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 34, lineHeight: 1,
-                letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums',
-                color: 'var(--text)',
-              }}>{money(company.thisYear)}</div>
-              <Movement from={company.lastYear} to={company.thisYear} big />
-              <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-                invoiced{yearLabel ? ` since ${yearLabel}` : ' this year'}
-              </span>
-
-              <div style={{
-                marginLeft: 'auto', display: 'flex', gap: 22, flexWrap: 'wrap',
-                alignItems: 'baseline',
-              }}>
-                <Beside label="Same point last year" value={money(company.lastYear)} />
-                <Beside label="All of last year" value={money(company.lastYearFull)} />
-                <Beside
-                  label="Committed, not billed"
-                  value={money(company.outstanding)}
-                  note="On the ramps, plus stock"
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', height: 26, marginTop: 14, gap: 2 }}>
-              {divisions.map((d) => {
-                const share = company.thisYear > 0
-                  ? Math.max(0, Number(d.this_year)) / company.thisYear : 0;
-                return (
-                  <div
-                    key={d.division}
-                    title={`${d.name}: ${money(d.this_year)}`}
-                    style={{
-                      width: `${Math.max(share * 100, 6)}%`,
-                      background: HUE[d.division] ?? 'var(--chart-company)',
-                      borderRadius: 'var(--r-sm)',
-                      display: 'flex', alignItems: 'center', paddingLeft: 8,
-                      overflow: 'hidden', whiteSpace: 'nowrap',
-                      color: '#fff', fontSize: 11.5, fontWeight: 600,
-                    }}
-                  >
-                    {share > 0.1 && `${d.name} ${Math.round(share * 100)}%`}
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* ---- Month by month, drawn in real pixels ---- */}
-          <Card style={{ marginBottom: 16 }}>
-            <div style={{
-              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-              gap: 12, marginBottom: 10, flexWrap: 'wrap',
-            }}>
-              <Label>Invoiced by month</Label>
-              <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-                Two years. The top of the stack is the company.
-              </span>
-            </div>
-            <MonthlyStack
-              points={stack}
-              series={divisions.map((d) => ({
-                key: d.division,
-                name: d.name,
-                colour: HUE[d.division] ?? 'var(--chart-company)',
-              }))}
-              yearStart={yearStartMonth}
-            />
-          </Card>
-
-          {deepFailed && (
-            <div style={{ marginBottom: 14 }}>
-              <Alert tone="warning">
-                {deepFailed}
-                <Button variant="ghost" size="sm" onClick={() => void loadDeep()}>Try again</Button>
-              </Alert>
-            </div>
-          )}
-
-          {/* ---- The three columns, carrying everything ---- */}
-          <div style={{
-            display: 'grid', gap: 16, alignItems: 'start',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))',
-          }}>
-            {divisions.map((d) => (
-              <DivisionColumn
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
+          <Chip active={only == null} onClick={() => setOnly(null)}>Whole company</Chip>
+          {divisions.map((d) => {
+            const Icon = ICON[d.division] ?? Wrench;
+            return (
+              <Chip
                 key={d.division}
-                d={d}
-                spark={seriesOf(d.division)}
-                pipeline={pipeline.find((p) => p.division === d.division)}
-                customers={top[d.division] ?? []}
-                deep={deep}
-              />
-            ))}
+                active={only === d.division}
+                onClick={() => setOnly(only === d.division ? null : d.division)}
+                title={`Scope every panel to ${d.name}`}
+              >
+                <Icon size={12} /> {d.name}
+              </Chip>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ width: 146 }}>
+            <TextInput type="date" value={asked} onChange={setAsked} />
           </div>
-
-          {/* ---- The one thing that is not per division ----
-
-              A customer who has moved their maintenance elsewhere and
-              started renting from us is not a riser in one column and a
-              faller in another, they are one haulier who changed what
-              they buy. Netted, on one list, which is why it sits below
-              the three rather than inside one of them. */}
-          {deep && deep.movers.length > 0 && (
-            <Card style={{ marginTop: 16 }}>
-              <div style={{
-                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                gap: 12, marginBottom: 10, flexWrap: 'wrap',
-              }}>
-                <Label>Who has moved</Label>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)', maxWidth: 620 }}>
-                  Maintenance and rental netted together, against the same point last year.
-                  Trailer purchases are left out: a customer who bought last year and not this
-                  one has a trailer, not a problem.
-                </span>
-              </div>
-              <div style={{
-                display: 'grid', gap: 18,
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-              }}>
-                <Movers title="Growing" rows={deep.movers.filter((m) => Number(m.change) > 0)} up />
-                <Movers title="Spending less" rows={deep.movers.filter((m) => Number(m.change) < 0)} />
-              </div>
-              {deep.conc && deep.conc.billed > 0 && (
-                <div style={{
-                  marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
-                  display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'baseline',
-                }}>
-                  <Beside label="Customers billing" value={deep.conc.customers.toLocaleString('en-GB')} />
-                  <Beside
-                    label="Biggest is"
-                    value={`${((deep.conc.top_1 / deep.conc.billed) * 100).toFixed(1)}%`}
-                    note={deep.conc.biggest ?? undefined}
-                  />
-                  <Beside label="Top ten are"
-                    value={`${((deep.conc.top_10 / deep.conc.billed) * 100).toFixed(1)}%`}
-                    note={compactMoney(deep.conc.top_10)} />
-                  <Beside label="Middle customer" value={money(Math.round(deep.conc.median))}
-                    note="Half spend more, half less" />
-                </div>
-              )}
-            </Card>
+          {asked && (
+            <Button variant="ghost" size="sm" onClick={() => setAsked('')}>
+              <RotateCcw size={12} /> Today
+            </Button>
           )}
-        </>
-      )}
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------
-   One division, and everything about it.
-   ------------------------------------------------------------- */
-function DivisionColumn({ d, spark, pipeline, customers, deep }: {
-  d: Division;
-  spark: number[];
-  pipeline?: Pipeline;
-  customers: TopCustomer[];
-  deep: Deep | null;
-}) {
-  const colour = HUE[d.division] ?? 'var(--chart-company)';
-  const Icon = ICON[d.division] ?? Wrench;
-  const recon = deep?.recon.find((r) => r.division === d.division);
-
-  return (
-    <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
-        <span style={{
-          width: 26, height: 26, borderRadius: 'var(--r)', flexShrink: 0,
-          background: colour, opacity: 0.16,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Icon size={14} style={{ color: colour, opacity: 1 }} />
-        </span>
-        <span style={{
-          fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 16,
-          letterSpacing: '-0.01em', color: 'var(--text)', flex: 1,
-        }}>{d.name}</span>
-        <Link href={GOES_TO[d.division] ?? '/dashboard'}>
-          <Button variant="ghost" size="sm">
-            Open
-            <ArrowRight size={12} />
-          </Button>
-        </Link>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{
-          fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 26, lineHeight: 1,
-          letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-        }}>{money(d.this_year)}</div>
-        <Movement from={Number(d.last_year || 0)} to={Number(d.this_year || 0)} />
-      </div>
-
-      <div style={{ marginTop: 10 }}>
-        <Sparkline points={spark} colour={colour} />
-      </div>
-
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12,
-        paddingTop: 12, borderTop: '1px solid var(--border)',
-      }}>
-        <Small label="All of last year" value={money(d.last_year_full)} />
-        <Small
-          label={d.division === 'trailer' ? 'Trailers sold' : 'Invoices'}
-          value={Number(d.deals || 0).toLocaleString('en-GB')}
-          note={Number(d.deals) > 0
-            ? `${money(Math.round(Number(d.this_year) / Number(d.deals)))} each on average`
-            : undefined}
-        />
-        <Small
-          label={d.outstanding_of === 'in stock' ? 'Stock on the yard' : 'Open on the system'}
-          value={money(d.outstanding)}
-          note={`${Number(d.outstanding_n || 0).toLocaleString('en-GB')} ${d.outstanding_of}`}
-        />
-        {/* Margin only where a cost is recorded. Nought would read as
-            "we made nothing on it", which is a different sentence. */}
-        {d.margin != null ? (
-          <Small
-            label="Margin"
-            value={money(d.margin)}
-            note={Number(d.this_year)
-              ? `${((Number(d.margin) / Number(d.this_year)) * 100).toFixed(1)}% of the sale value`
-              : undefined}
-          />
-        ) : (
-          <Small label="Margin" value="Not recorded" quiet note="No cost is held for this work" />
-        )}
-      </div>
-
-      {/* Everything that used to be a tab, for this division only. */}
-      <DivisionDetail division={d.division} name={d.name} colour={colour} deep={deep} />
-
-      {pipeline && (pipeline.leads > 0 || pipeline.won_this_year > 0) && (
-        <div style={{
-          marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-        }}>
-          <Label>Won this year</Label>
-          <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-            {pipeline.won_this_year > 0
-              ? `${pipeline.won_this_year} ${pipeline.won_this_year === 1 ? 'lead' : 'leads'}`
-              : 'none yet'}
-          </span>
-          {pipeline.won_this_year > 0 && <Badge tone="success">closed</Badge>}
         </div>
-      )}
+      </div>
 
-      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-        <Label>Biggest this year</Label>
-        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {customers.length === 0 && (
-            <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-              Nothing billed in this division yet.
+      {picked && (
+        <div style={{ marginBottom: 12 }}>
+          <Alert tone="info">
+            <span style={{ flex: 1 }}>
+              Every panel is showing {picked.name} only.
             </span>
-          )}
-          {customers.map((c) => (
-            <RankRow
-              key={`${c.contact_id ?? c.company_name}`}
-              name={c.company_name}
-              value={Number(c.this_year || 0)}
-              of={Number(d.this_year || 0)}
-              colour={colour}
-              note={c.placed ? undefined : 'no record'}
-              onClick={c.contact_id
-                ? () => window.location.assign(`/dashboard/crm?contact=${c.contact_id}`)
-                : undefined}
-            />
-          ))}
+            <Link href={GOES_TO[picked.division] ?? '/dashboard'} style={{ textDecoration: 'none' }}>
+              <Button variant="secondary" size="sm">
+                Open {picked.name}
+                <ArrowRight size={12} />
+              </Button>
+            </Link>
+            <Button variant="ghost" size="sm" onClick={() => setOnly(null)}>
+              <X size={12} /> Whole company
+            </Button>
+          </Alert>
         </div>
-      </div>
+      )}
 
-      {/* WHAT IS NOT ON A CUSTOMER RECORD, and what to do about it.
+      {deepFailed && (
+        <div style={{ marginBottom: 12 }}>
+          <Alert tone="warning">
+            <span style={{ flex: 1 }}>{deepFailed}</span>
+            <Button variant="ghost" size="sm" onClick={() => void loadDeep()}>Try again</Button>
+          </Alert>
+        </div>
+      )}
 
-          The old alert said this money was "waiting under Revenue,
-          Accounts". For trailer sales that screen is empty and always
-          will be: trailer customers do not come from Protean and have
-          no account code. From the business: "nothing is under accounts
-          so this is broken hardcoded code." */}
-      {recon && <WaitingOnARecord division={d.division} recon={recon} waiting={deep?.waiting ?? []} />}
-    </Card>
-  );
-}
+      <PanelGrid>
+        {/* ---- row 1: four figures, one shape each ---- */}
+        <Tile
+          label={picked ? `${picked.name} invoiced` : 'Invoiced this year'}
+          value={money(sum.thisYear)}
+          movement={{ from: sum.lastYear, to: sum.thisYear }}
+          note={`${money(sum.lastYearFull)} in all of last year`}
+          spark={yearRunning}
+          colour={picked ? HUE[picked.division] : 'var(--chart-company)'}
+        />
+        <Tile
+          label="Committed, not billed"
+          value={money(sum.outstanding)}
+          note={picked
+            ? `${sum.outstandingN.toLocaleString('en-GB')} ${picked.outstanding_of}`
+            : `${sum.outstandingN.toLocaleString('en-GB')} on the ramps and in stock`}
+        />
+        <Tile
+          label={picked?.division === 'trailer' ? 'Trailers sold' : 'Invoices raised'}
+          value={sum.deals.toLocaleString('en-GB')}
+          note={sum.deals > 0
+            ? `${money(Math.round(sum.thisYear / sum.deals))} each on average`
+            : 'nothing yet this year'}
+        />
+        <Tile
+          label="Open over ninety days"
+          value={oldest ? money(oldest.value) : '—'}
+          tone={oldest && oldest.value > 0 ? 'danger' : 'plain'}
+          note={oldest && oldest.jobs > 0
+            ? `${oldest.jobs} ${oldest.jobs === 1 ? 'job' : 'jobs'} on the ramps`
+            : 'nothing sitting'}
+        />
 
-/* -------------------------------------------------------------
-   Risers and fallers, half a card each.
-   ------------------------------------------------------------- */
-function Movers({ title, rows, up }: { title: string; rows: Mover[]; up?: boolean }) {
-  const open = (id: string | null) => {
-    if (id) window.location.assign(`/dashboard/crm?contact=${id}`);
-  };
-  return (
-    <div>
-      <Label>{title}</Label>
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {rows.length === 0 && (
-          <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-            {up ? 'Nobody is spending more than last year.' : 'Nobody is spending less.'}
-          </span>
-        )}
-        {rows.slice(0, 6).map((m) => (
-          <div
-            key={m.contact_id ?? m.company_name}
-            onClick={() => open(m.contact_id)}
-            role={m.contact_id ? 'button' : undefined}
-            tabIndex={m.contact_id ? 0 : undefined}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(m.contact_id); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5,
-              padding: '5px 0', cursor: m.contact_id ? 'pointer' : 'default',
+        {/* ---- row 2: the shape of the year, and the mix ---- */}
+        <Panel
+          span={7}
+          title="Invoiced by month"
+          hint="Two years, against the same month a year before"
+          minBody={300}
+          toolbar={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Segments value={shape} onChange={setShape} options={SHAPES} />
+              {/* Nothing is filled in Lines, so a Patterns toggle
+                  there is a control that appears to do nothing, which
+                  is how people learn to stop trusting a toolbar. */}
+              {shape !== 'line' && (
+                <Toggle
+                  on={textured}
+                  onChange={setTextured}
+                  title="Fill each division with its own pattern as well as its own colour"
+                >Patterns</Toggle>
+              )}
+            </div>
+          }
+          table={{
+            columns: ['Month', ...series.map((s) => s.name), 'Total'],
+            rows: stack.slice(-14).reverse().map<TableRow>((p) => ({
+              name: new Date(`${p.month}T00:00:00`)
+                .toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+              cells: [
+                ...p.values.map((v) => Math.max(0, v)),
+                p.values.reduce((s, v) => s + Math.max(0, v), 0),
+              ],
+            })),
+          }}
+          foot={
+            <>
+              <Key
+                items={keyItems}
+                hidden={off}
+                onToggle={(k) => setOff((s) => {
+                  const next = new Set(s);
+                  /* Never all of them. An empty chart is not a filter,
+                     it is a chart that has stopped working. */
+                  if (next.has(k)) next.delete(k);
+                  else if (next.size < series.length - 1) next.add(k);
+                  return next;
+                })}
+              />
+              <span style={{ marginLeft: 'auto', color: 'var(--text-subtle)' }}>
+                Hover for the month. Press a division to hide it.
+              </span>
+            </>
+          }
+        >
+          <MonthlyStack
+            points={stack}
+            series={series}
+            yearStart={yearStartMonth}
+            shape={shape}
+            hidden={off}
+            textured={textured}
+            height={300}
+          />
+        </Panel>
+
+        <Panel
+          span={5}
+          title="Where it came from"
+          hint={only ? 'Press another to move the whole page' : 'Press a division to drill in'}
+          minBody={300}
+          table={{
+            columns: ['Division', 'This year', 'Share'],
+            rows: divisions.map<TableRow>((d) => ({
+              name: d.name,
+              colour: HUE[d.division],
+              cells: [
+                Number(d.this_year || 0),
+                `${(divisions.reduce((s, x) => s + Number(x.this_year || 0), 0) > 0
+                  ? (Number(d.this_year || 0) * 100)
+                    / divisions.reduce((s, x) => s + Number(x.this_year || 0), 0)
+                  : 0).toFixed(1)}%`,
+              ],
+            })),
+          }}
+        >
+          <Donut
+            slices={divisions.map((d) => ({
+              key: d.division,
+              name: d.name,
+              value: Number(d.this_year || 0),
+              colour: HUE[d.division] ?? 'var(--chart-company)',
+            }))}
+            total={divisions.reduce((s, d) => s + Number(d.this_year || 0), 0)}
+            caption="invoiced"
+            active={only}
+            onPick={setOnly}
+            textured={textured}
+            height={260}
+          />
+        </Panel>
+
+        {/* ---- row 3: who pays us, and who changed ---- */}
+        <Panel
+          span={6}
+          title="Biggest customers"
+          hint={only ? `${picked?.name}, this year` : 'Every division netted, this year'}
+          minBody={252}
+          table={{
+            columns: ['Customer', 'This year'],
+            rows: customers.map<TableRow>((c) => ({ name: c.name, cells: [c.value] })),
+          }}
+          foot={deep?.conc && deep.conc.billed > 0 ? (
+            <>
+              <span>
+                <strong style={{ fontFamily: 'var(--panton)' }}>
+                  {deep.conc.customers.toLocaleString('en-GB')}
+                </strong>{' '}customers billing
+              </span>
+              <span>
+                Top ten are{' '}
+                <strong style={{ fontFamily: 'var(--panton)' }}>
+                  {((deep.conc.top_10 / deep.conc.billed) * 100).toFixed(0)}%
+                </strong>
+              </span>
+              <span>
+                Middle customer{' '}
+                <strong style={{ fontFamily: 'var(--panton)' }}>
+                  {compactMoney(Math.round(deep.conc.median))}
+                </strong>
+              </span>
+            </>
+          ) : undefined}
+        >
+          <RankedBars
+            rows={customers}
+            colour={picked ? HUE[picked.division]! : 'var(--chart-company)'}
+            empty="Nothing billed yet in this scope."
+          />
+        </Panel>
+
+        {only === 'trailer' ? (
+          <Panel
+            span={6}
+            title="Who moved"
+            hint="Maintenance and rental only"
+            minBody={252}
+          >
+            <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+              Movement is measured on maintenance and rental, which recur. Trailer purchases are
+              left out on purpose: a customer who bought last year and not this one has a
+              trailer, not a problem.
+              <div style={{ marginTop: 9 }}>
+                <Button variant="secondary" size="sm" onClick={() => setOnly(null)}>
+                  See it for the whole company
+                </Button>
+              </div>
+            </span>
+          </Panel>
+        ) : (
+          <Panel
+            span={6}
+            title="Who moved"
+            hint="Against the same point last year"
+            minBody={252}
+            table={{
+              columns: ['Customer', 'Last year', 'Change'],
+              rows: movers.map<TableRow>((m) => ({
+                name: m.name, cells: [m.note ?? null, m.value],
+              })),
             }}
           >
-            <span style={{
-              flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap', color: 'var(--text)',
-            }}>{m.company_name}</span>
-            <span style={{
-              color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums', fontSize: 11.5,
-            }}>{compactMoney(Number(m.last_year))}</span>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 76,
-              justifyContent: 'flex-end',
-              color: up ? 'var(--success)' : 'var(--danger)',
-              fontFamily: 'var(--panton)', fontWeight: 700,
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-              {compactMoney(Math.abs(Number(m.change)))}
+            <DivergingBars
+              rows={movers}
+              empty="Nobody has moved against last year."
+              caption="Maintenance and rental netted together. Trailer purchases are left out: a customer who bought last year and not this one has a trailer, not a problem."
+            />
+          </Panel>
+        )}
+
+        {/* ---- row 4: what is stuck, and what is coming ---- */}
+        <Panel
+          span={6}
+          title="How old the open work is"
+          hint="From the day the job was raised"
+          minBody={214}
+          table={{
+            columns: ['Age', 'Value', 'Jobs'],
+            rows: ageing.map<TableRow>((b) => ({
+              name: b.name, colour: b.colour, cells: [b.value, b.note ?? null],
+            })),
+          }}
+          foot={oldest && oldest.jobs > 0 ? (
+            <span style={{ color: 'var(--danger)' }}>
+              {money(oldest.value)} of it has been open over ninety days.
             </span>
-          </div>
-        ))}
-      </div>
+          ) : undefined}
+        >
+          <RankedBars
+            rows={ageing}
+            colour="var(--chart-company)"
+            empty="No open work on the ramps."
+          />
+        </Panel>
+
+        <Panel
+          span={6}
+          title="What is coming"
+          hint="Open leads on the tracker, by stage"
+          minBody={214}
+          table={{
+            columns: ['Stage', 'Leads', 'Worth'],
+            rows: funnel.map<TableRow>((s) => ({
+              name: s.name, cells: [s.value.toString(), s.note ?? null],
+            })),
+          }}
+          foot={
+            <>
+              <span>
+                {pipeline
+                  .filter((p) => (only ? p.division === only : true))
+                  .reduce((s, p) => s + Number(p.won_this_year || 0), 0)} won this year
+              </span>
+              <Link href="/dashboard/sales" style={{ textDecoration: 'none', marginLeft: 'auto' }}>
+                <Button variant="ghost" size="sm">Open the tracker <ArrowRight size={12} /></Button>
+              </Link>
+            </>
+          }
+        >
+          <RankedBars
+            rows={funnel}
+            colour={picked ? HUE[picked.division]! : 'var(--chart-company)'}
+            format={(n) => n.toLocaleString('en-GB')}
+            empty="Nothing open on the tracker in this scope."
+          />
+        </Panel>
+
+        {/* ---- row 5: the one thing on this page you DO ----
+
+            Its own panel, full width, because a form that grows is what
+            broke the bottom of the last version when it lived inside a
+            division card. */}
+        {gaps > 0 && (
+          <Panel
+            span={12}
+            title="Billed to a name with no customer record"
+            hint="Counted in the totals above, and on nobody's customer page"
+            minBody={0}
+          >
+            <NeedsARecord
+              recon={deep?.recon ?? []}
+              waiting={deep?.waiting ?? []}
+              only={only}
+            />
+          </Panel>
+        )}
+      </PanelGrid>
     </div>
   );
 }
-
-/* ---------- the small shared pieces ---------- */
 
 const PAGE: React.CSSProperties = {
-  padding: '22px 24px 40px', maxWidth: 1480, margin: '0 auto',
+  padding: '18px 24px 40px', maxWidth: 1480, margin: '0 auto',
 };
-
-/** A figure that sits beside another on one baseline. */
-function Beside({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <div style={{
-        fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 16, marginTop: 3,
-        fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-      }}>{value}</div>
-      {note && (
-        <div style={{
-          fontSize: 11, color: 'var(--text-subtle)', marginTop: 2,
-          maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{note}</div>
-      )}
-    </div>
-  );
-}
-
-function Small({ label, value, note, quiet }: {
-  label: string; value: string; note?: string; quiet?: boolean;
-}) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <div style={{
-        fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 15, marginTop: 4,
-        fontVariantNumeric: 'tabular-nums',
-        color: quiet ? 'var(--text-subtle)' : 'var(--text)',
-      }}>{value}</div>
-      {note && (
-        <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 2 }}>{note}</div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Up, down or level against the same point last year.
- *
- * Red only ever means down here. The kit keeps red for the single most
- * important thing on a screen and for destructive intent, and on a
- * board's revenue page a division going backwards is exactly that.
- */
-function Movement({ from, to, big }: { from: number; to: number; big?: boolean }) {
-  const diff = to - from;
-  const pct = from ? (100 * diff) / from : null;
-  const colour = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text-subtle)';
-  const Icon = diff > 0 ? TrendingUp : diff < 0 ? TrendingDown : Minus;
-
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      color: colour, fontSize: big ? 14 : 12.5,
-      fontVariantNumeric: 'tabular-nums',
-    }}>
-      <Icon size={big ? 15 : 13} style={{ flexShrink: 0 }} />
-      <span style={{ fontFamily: 'var(--panton)', fontWeight: 700 }}>
-        {diff === 0 ? 'level with last year' : `${diff > 0 ? '+' : '-'}${compactMoney(Math.abs(diff))}`}
-      </span>
-      {pct != null && diff !== 0 && (
-        <span style={{ opacity: 0.85 }}>{Math.abs(pct).toFixed(1)}%</span>
-      )}
-      {from === 0 && diff !== 0 && (
-        <span style={{ color: 'var(--text-subtle)', fontSize: 11.5 }}>nothing last year</span>
-      )}
-    </span>
-  );
-}
-
-/**
- * The date every figure on the screen is read to.
- *
- * A board pack is dated. Somebody quoting a number on Tuesday has to be
- * able to produce the same number on Friday, and "the year to date"
- * quietly means something different on each of those days.
- */
-function AsAt({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, paddingBottom: 4 }}>
-      <div>
-        <Label>Read as at</Label>
-        <div style={{ width: 148, marginTop: 5 }}>
-          <TextInput type="date" value={value} onChange={onChange} />
-        </div>
-      </div>
-      {value && (
-        <Button variant="ghost" size="sm" onClick={() => onChange('')}>
-          <RotateCcw size={12} />
-          Today
-        </Button>
-      )}
-    </div>
-  );
-}
