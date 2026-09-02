@@ -516,10 +516,19 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['pin to the address', 'the geocode', 'back to the postcode'],
     phrases: ['snap it back to the address'] },
 
+  /* NOW IT GOES SOMEWHERE.
+
+     This carried no path, from when the balance lived in a top bar
+     pill: there was nowhere to send anybody, because the number was
+     already on whatever screen they were on. The pill is gone and the
+     figure is on the finder, beside the button that spends it, so
+     asking for it now lands on it. */
   { id: 'data.lushaBalance', label: 'Lusha credits left', blurb: 'What is on the allowance this month', kind: 'data',
-    capability: 'crm.view', verbs: [...GO, 'check', 'how many'],
-    objects: ['lusha credits', 'credits', 'lusha balance', 'enrichment credits', 'allowance'],
-    phrases: ['how many credits have we got'] },
+    capability: 'crm.view', path: '/dashboard/finder',
+    verbs: [...GO, 'check', 'how many'],
+    objects: ['lusha credits', 'credits', 'lusha balance', 'enrichment credits', 'allowance',
+              'credits left', 'credits remaining'],
+    phrases: ['how many credits have we got', 'how many lusha credits are left'] },
 
   /* ---------- sales tracker ---------- */
 

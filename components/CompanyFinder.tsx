@@ -9,6 +9,7 @@ import { DEPOTS, type CrmList } from '@/lib/types';
 import { asContactRows } from '@/lib/crm/finder';
 import { commitImport } from '@/lib/import/commit';
 import { BusinessActivityStrip } from './BusinessActivityStrip';
+import { LushaCredits } from './finder/credits';
 
 // LinkedIn / Lusha numeric industry IDs (mainIndustriesIds)
 const INDUSTRIES = [
@@ -51,6 +52,11 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
   const [diag, setDiag] = useState<any>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [listPickerFor, setListPickerFor] = useState<{ kind: 'single'; company: FinderResult } | { kind: 'bulk'; companies: FinderResult[] } | null>(null);
+  /* Bumped after anything that costs a credit, which is what makes the
+     balance strip re-read. Not a poll: Lusha's usage endpoint is rate
+     limited at five a minute, and a number that only changes when
+     somebody presses a button does not need watching. */
+  const [spent, setSpent] = useState(0);
 
   const isCustom = depotKey === '__custom__';
 
@@ -80,7 +86,13 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
       setMessage(`Found ${json.companies.length} companies within ${radius} mi of ${locationLabel()}`);
     } catch (e: any) {
       setMessage(e.message); setResults([]);
-    } finally { setSearching(false); }
+    } finally {
+      setSearching(false);
+      /* Whether it found anything or not. A search that came back empty
+         still cost a credit, and a balance that only moves on success
+         is a balance that drifts out of step with the real one. */
+      setSpent((n) => n + 1);
+    }
   }
 
   /* The same operation the command bar performs, in one transaction.
@@ -160,7 +172,7 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
           somebody reading company news that a service they were not
           using was unavailable. A notice on a screen it does not apply
           to is how people learn to stop reading notices. */}
-      {LUSHA_LOCKED && (
+      {LUSHA_LOCKED ? (
         <div className="kit" style={{ marginBottom: 14 }}>
           <Alert tone="warning">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -172,6 +184,17 @@ export function CompanyFinder({ lists }: { lists: CrmList[] }) {
               </span>
             </div>
           </Alert>
+        </div>
+      ) : (
+        /* THE ALLOWANCE, BESIDE THE BUTTON THAT SPENDS IT.
+
+           From the business: "Just show the lusha balance on that page,
+           not back in the global top bar." Fifty a month is not a lot,
+           and a number in the top bar is on every screen, which is
+           furniture everywhere and information nowhere. Here it is read
+           in the second before somebody presses Search. */
+        <div style={{ marginBottom: 14 }}>
+          <LushaCredits spent={spent} />
         </div>
       )}
 
