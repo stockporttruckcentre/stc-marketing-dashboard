@@ -433,4 +433,118 @@ BEGIN
   RAISE NOTICE 'ok  a viewer can read a group and change nothing about it';
 END $$;
 
+-- -------------------------------------------------------------
+-- 12. A GROUP SHOWS ON THE SCREEN FOR THE DIVISION ITS MONEY IS IN.
+--
+--   Ensure only groups relating to STC show on STC's groups tab and
+--   vice versa, currently I see maintenance customers on the S&L rental
+--   group tab.
+--
+-- Every other figure learned about divisions and this one did not, so
+-- both screens showed every group and rental listed maintenance
+-- customers with rental totals of nought beside them.
+--
+-- "Relating to" cannot mean "made on that screen": a group is a
+-- commercial relationship and Montgomery is one group however you
+-- arrive at it. It means the group has money in that division, so the
+-- same group can honestly appear on both showing its own half.
+-- -------------------------------------------------------------
+DO $$
+DECLARE g UUID; r RECORD; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+
+  /* One customer in the Montgomery group also bills on rental. */
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at)
+  VALUES ('rental', 'MONTTRAN', 'Montgomery Transport Limited',
+          '91000000-0000-0000-0000-000000000001', NOW())
+  ON CONFLICT (division, alpha) DO NOTHING;
+  INSERT INTO protean_invoices (division, invoice_no, alpha, tax_point, net)
+  VALUES ('rental', 'MR1', 'MONTTRAN', '2026-05-01', 11000)
+  ON CONFLICT (division, invoice_no) DO NOTHING;
+
+  g := name_a_group('Montgomery');
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000001', g);
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000002', g);
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000003', g);
+
+  /* A group with no rental money at all does not appear on rental. */
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000004', name_a_group('Holman Fleet'));
+
+  SELECT count(*) INTO n FROM group_revenue('2026-08-01', 'rental')
+   WHERE group_name = 'Holman Fleet';
+  IF n <> 0 THEN
+    RAISE EXCEPTION 'a group with no rental money is showing on the rental screen';
+  END IF;
+
+  /* Montgomery does appear, showing its RENTAL half only. */
+  SELECT * INTO r FROM group_revenue('2026-08-01', 'rental') WHERE group_name = 'Montgomery';
+  IF r.group_id IS NULL THEN
+    RAISE EXCEPTION 'a group with rental money is missing from the rental screen';
+  END IF;
+  IF r.this_year <> 11000 THEN
+    RAISE EXCEPTION 'the rental screen shows Montgomery at %, not its rental half of 11000',
+      r.this_year;
+  END IF;
+
+  /* And its maintenance half on the maintenance screen. */
+  SELECT * INTO r FROM group_revenue('2026-08-01', 'stc') WHERE group_name = 'Montgomery';
+  IF r.this_year <> 312905 THEN
+    RAISE EXCEPTION 'the maintenance screen shows Montgomery at %, not 312905', r.this_year;
+  END IF;
+
+  /* Asked for everything, it is both halves. */
+  SELECT * INTO r FROM group_revenue('2026-08-01', NULL) WHERE group_name = 'Montgomery';
+  IF r.this_year <> 323905 THEN
+    RAISE EXCEPTION 'the whole company shows Montgomery at %, not 323905', r.this_year;
+  END IF;
+
+  RAISE NOTICE 'ok  a group shows its own half on each division, and not at all where it has none';
+END $$;
+
+-- -------------------------------------------------------------
+-- 12b. And the breakdown inside it follows the same division.
+-- -------------------------------------------------------------
+DO $$
+DECLARE g UUID; n INTEGER; r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+  g := name_a_group('Montgomery');
+
+  SELECT count(*) INTO n FROM group_breakdown(g, '2026-08-01', 'rental');
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'the rental breakdown lists % accounts, not the 1 with rental money', n;
+  END IF;
+  SELECT * INTO r FROM group_breakdown(g, '2026-08-01', 'rental');
+  IF r.division <> 'rental' THEN
+    RAISE EXCEPTION 'the rental breakdown returned a % account', r.division;
+  END IF;
+
+  SELECT count(*) INTO n FROM group_breakdown(g, '2026-08-01', 'stc');
+  IF n <> 3 THEN
+    RAISE EXCEPTION 'the maintenance breakdown lists % accounts, not 3', n;
+  END IF;
+
+  SELECT count(*) INTO n FROM group_breakdown(g, '2026-08-01', NULL);
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'the whole company breakdown lists %, not 4', n;
+  END IF;
+  RAISE NOTICE 'ok  opening a group shows that division''s accounts, not every division''s';
+END $$;
+
+-- -------------------------------------------------------------
+-- 12c. The whole of last year, on a group as well.
+-- -------------------------------------------------------------
+DO $$
+DECLARE r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+  SELECT * INTO r FROM group_revenue('2026-08-01', 'stc') WHERE group_name = 'Montgomery';
+  IF r.last_year_full < r.last_year THEN
+    RAISE EXCEPTION 'the whole of last year %, is smaller than the same point in it %',
+      r.last_year_full, r.last_year;
+  END IF;
+  RAISE NOTICE 'ok  a group carries the whole of last year alongside the same point in it';
+END $$;
+
 ROLLBACK;

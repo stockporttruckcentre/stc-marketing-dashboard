@@ -38,6 +38,7 @@ export type GroupRevenue = {
   accounts: number;
   this_year: number;
   last_year: number;
+  last_year_full: number;
   change: number;
   open_jobs: number;
   open_value: number;
@@ -191,14 +192,30 @@ export async function yearOnYear(
   return rows<YearOnYear>(data);
 }
 
-export async function groupRevenue(db: Db, upto?: string): Promise<GroupRevenue[]> {
-  const { data, error } = await db.rpc('group_revenue', { p_upto: upto ?? null });
+/**
+ * The groups with money in a division.
+ *
+ * A group is a commercial relationship rather than something made on a
+ * screen, so the same group can honestly appear on both, showing that
+ * division's half each time. What it must not do is appear on rental
+ * with a rental total of nought because its money is all maintenance.
+ */
+export async function groupRevenue(
+  db: Db, division: DivisionFilter = null, upto?: string,
+): Promise<GroupRevenue[]> {
+  const { data, error } = await db.rpc('group_revenue', {
+    p_upto: upto ?? null, p_division: division,
+  });
   if (error) throw new Error(error.message);
   return rows<GroupRevenue>(data);
 }
 
-export async function groupBreakdown(db: Db, group: string, upto?: string): Promise<GroupLine[]> {
-  const { data, error } = await db.rpc('group_breakdown', { p_group: group, p_upto: upto ?? null });
+export async function groupBreakdown(
+  db: Db, group: string, division: DivisionFilter = null, upto?: string,
+): Promise<GroupLine[]> {
+  const { data, error } = await db.rpc('group_breakdown', {
+    p_group: group, p_upto: upto ?? null, p_division: division,
+  });
   if (error) throw new Error(error.message);
   return rows<GroupLine>(data);
 }
