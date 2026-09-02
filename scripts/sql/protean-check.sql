@@ -290,4 +290,31 @@ BEGIN
   RAISE NOTICE 'ok  a job finds its account by name, and one that cannot is kept and reported';
 END $$;
 
+-- -------------------------------------------------------------
+-- 10. A real file, in the number of slices a real file takes.
+--
+-- 20,817 invoices at 500 a slice is 42 calls in one session. Three
+-- calls proves nothing about forty two: a plpgsql function that builds
+-- a temp table caches a plan referencing it, and the classic symptom is
+-- "relation with OID does not exist" on a later call. It passes in
+-- testing and fails on the first real import.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; n INTEGER; total NUMERIC;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+  FOR n IN 1..45 LOOP
+    i := protean_start_import('invoices', 'a real sized file');
+    PERFORM protean_take_invoices(i, jsonb_build_array(jsonb_build_object(
+      'invoice_no', 'S' || n, 'alpha', 'SLICE', 'protean_name', 'Slice Ltd',
+      'tax_point', '2026-02-01', 'net', '100')));
+  END LOOP;
+
+  SELECT count(*), SUM(net) INTO n, total FROM protean_invoices WHERE alpha = 'SLICE';
+  IF n <> 45 OR total <> 4500 THEN
+    RAISE EXCEPTION 'forty five slices landed % rows worth %, not 45 and 4500', n, total;
+  END IF;
+  RAISE NOTICE 'ok  a file arriving in forty five slices lands whole';
+END $$;
+
 ROLLBACK;
