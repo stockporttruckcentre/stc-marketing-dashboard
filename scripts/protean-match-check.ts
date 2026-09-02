@@ -204,6 +204,32 @@ const named = (v: ReturnType<typeof decide>) =>
   ]);
   ok('an initial is not a brand, so no group is offered on one',
     initials.length === 0, JSON.stringify(initials.map((g) => g.name)));
+
+  /* THE ONE THE BUSINESS HIT. A forename says nothing about which
+     company this is, and this suggestion undid a group they had
+     already confirmed. */
+  const johns = suggestGroups([
+    { account: 'JHT', name: 'John Hudson Trailers' },
+    { account: 'JDK', name: 'John Dickinson' },
+  ]);
+  ok('a forename is not a brand either, so John is not offered as a group',
+    johns.length === 0, JSON.stringify(johns.map((g) => g.name)));
+
+  /* And the real ones all still clear the bar, which is the half of a
+     threshold change that is easy to forget to check. */
+  const real = suggestGroups([
+    { account: 'A', name: 'Dawson Group Truck & Trailer Ltd' },
+    { account: 'B', name: 'Dawson Rentals Vans Ltd' },
+    { account: 'C', name: 'Hireco' },
+    { account: 'D', name: 'Hireco NI Limited' },
+    { account: 'E', name: 'Fleet Assist Limited' },
+    { account: 'F', name: 'Fleet Operations Limited' },
+    { account: 'G', name: 'Montgomery Transport Limited' },
+    { account: 'H', name: 'Montgomery Distribution Limited' },
+  ]);
+  ok('Dawson, Hireco, Fleet and Montgomery all still clear the bar',
+    ['Dawson', 'Hireco', 'Fleet', 'Montgomery'].every((n) => real.some((g) => g.name === n)),
+    JSON.stringify(real.map((g) => g.name)));
 }
 
 /* -------------------------------------------------------------
@@ -260,6 +286,22 @@ const named = (v: ReturnType<typeof decide>) =>
     { account: 'DAWFIN', name: 'Dawson Finance Ltd', contactId: 'c4' }];
   ok('a newcomer outside an existing group is offered',
     groupsToOffer(withANewcomer, (id) => (id === 'c4' ? null : 'g1')).length === 1);
+
+  /* DECLINING IS REMEMBERED.
+
+     A threshold will eventually be wrong about something, so the answer
+     is not a cleverer threshold, it is that a person can overrule it
+     and the overruling sticks. Without this, a wrong suggestion comes
+     back on every visit and on every import until the queue is one
+     nobody reads. */
+  ok('a suggestion somebody declined is not offered again',
+    groupsToOffer(dawsons, ungrouped, new Set(['dawson'])).length === 0);
+  ok('and declining one does not silence the others',
+    groupsToOffer(
+      [...dawsons, { account: 'MT', name: 'Montgomery Transport', contactId: 'm1' },
+        { account: 'MD', name: 'Montgomery Distribution', contactId: 'm2' }],
+      ungrouped, new Set(['dawson']),
+    ).length === 1);
 }
 
 /* -------------------------------------------------------------

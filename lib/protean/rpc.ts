@@ -27,6 +27,8 @@ export type YearOnYear = {
   last_billed: string | null;
   /** The day the current financial year began. */
   fy_started: string;
+  /** The whole of the year before, start to finish. */
+  last_year_full: number;
 };
 
 export type GroupRevenue = {
@@ -61,6 +63,8 @@ export type CompanyRevenue = {
   last_year: number;
   change: number;
   fy_started: string;
+  /** The whole of the year before, start to finish. */
+  last_year_full: number;
   invoices: number;
   customers: number;
   unattributed: number;
@@ -206,6 +210,8 @@ export type CustomerSpend = {
   change: number;
   /** The day the current financial year began, for labelling. */
   fy_started: string;
+  /** The whole of the year before, start to finish. */
+  last_year_full: number;
   lifetime: number;
   invoices: number;
   first_billed: string | null;
@@ -323,6 +329,43 @@ export async function putInGroup(db: Db, contact: string, group: string | null) 
   if (error) throw new Error(error.message);
 }
 
+export async function renameGroup(db: Db, group: string, name: string) {
+  const { error } = await db.rpc('rename_group', { p_group: group, p_name: name });
+  if (error) throw new Error(error.message);
+}
+
+export type GroupMember = {
+  contact_id: string;
+  company_name: string;
+  accounts: number;
+  net: number;
+};
+
+export async function groupMembers(db: Db, group: string): Promise<GroupMember[]> {
+  const { data, error } = await db.rpc('group_members', { p_group: group });
+  if (error) throw new Error(error.message);
+  return rows<GroupMember>(data);
+}
+
+/**
+ * Say no to a suggestion, and have it stay said.
+ *
+ * A threshold will eventually be wrong about something. The answer is
+ * not a cleverer threshold, it is that a person can overrule it and the
+ * overruling sticks, because a queue showing the same wrong row on
+ * every visit is a queue nobody reads.
+ */
+export async function declineGroupSuggestion(db: Db, name: string) {
+  const { error } = await db.rpc('decline_group_suggestion', { p_name: name });
+  if (error) throw new Error(error.message);
+}
+
+export async function declinedGroupNames(db: Db): Promise<Set<string>> {
+  const { data, error } = await db.from('declined_group_suggestions').select('name');
+  if (error) return new Set();
+  return new Set(((data ?? []) as { name: string }[]).map((r) => r.name.toLowerCase()));
+}
+
 export async function forgetGroup(db: Db, group: string) {
   const { error } = await db.rpc('forget_group', { p_group: group });
   if (error) throw new Error(error.message);
@@ -409,13 +452,50 @@ export async function relinkJobs(db: Db): Promise<number> {
   return (data as number) ?? 0;
 }
 
-export type OrphanJobs = { protean_name: string; jobs: number; value: number };
+export type OrphanJobs = {
+  division: Division;
+  protean_name: string;
+  jobs: number;
+  value: number;
+  oldest: string | null;
+};
 
-/** Companies with open work and no invoice, so no account. */
-export async function jobsWithoutAccount(db: Db): Promise<OrphanJobs[]> {
-  const { data, error } = await db.rpc('protean_jobs_without_account');
+/**
+ * Companies with open work and no account.
+ *
+ * Accounts come from the invoice file, so a company with work on the
+ * ramps and no invoice since the export began never got one. They could
+ * not appear in a queue that lists accounts, which is why SAF Holland
+ * was invisible on a screen that showed its jobs.
+ */
+export async function jobsWithoutAccount(
+  db: Db, division: DivisionFilter = null,
+): Promise<OrphanJobs[]> {
+  const { data, error } = await db.rpc('protean_jobs_without_account', { p_division: division });
   if (error) throw new Error(error.message);
   return rows<OrphanJobs>(data);
+}
+
+/** Say whose that work is, by name, now and in next week's file. */
+export async function placeOpenWork(
+  db: Db, division: Division, name: string, contact: string,
+): Promise<number> {
+  const { data, error } = await db.rpc('protean_place_open_work', {
+    p_division: division, p_name: name, p_contact: contact,
+  });
+  if (error) throw new Error(error.message);
+  return (data as number) ?? 0;
+}
+
+/** A customer we do not have, named as the workshop names them. */
+export async function makeCustomerForWork(
+  db: Db, division: Division, name: string,
+): Promise<string> {
+  const { data, error } = await db.rpc('protean_make_customer_for_work', {
+    p_division: division, p_name: name,
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
 }
 
 export async function closeWhatWentAway(db: Db, importId: string): Promise<number> {
