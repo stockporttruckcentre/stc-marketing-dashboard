@@ -119,7 +119,23 @@ export interface CRMContact {
  */
 export interface Lead {
   id: string;
-  contact_id: string;
+  /* NULLABLE, and it has been since migration 040.
+
+     A lead with no account is the honest way to say "I am trying to
+     sell this trailer" before there is anybody to sell it to, and it is
+     what a price built in a meeting produces before somebody makes the
+     CRM record. This said `string`, so every reader that handled the
+     null case looked like it was handling something that could not
+     happen, and the one that did not handle it typechecked fine. */
+  contact_id: string | null;
+  /* The company's name, carried on the lead as well as on the account.
+
+     Missing from this type entirely until now, which is why the tracker
+     could print "Unknown company" over a row that had the name sitting
+     right here: reading it would not have compiled. Written by
+     `crm_lead_carries_its_company` from the account where there is one,
+     and set directly where there is not. Never written by hand. */
+  company_name: string | null;
   owner_id: string | null;
   shared_with: string[];
   type: LeadType;

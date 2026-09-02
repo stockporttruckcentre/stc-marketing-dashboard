@@ -21,6 +21,8 @@ import {
   Drawer, Field, Modal, OptionCard, Select, Split, TextArea, TextInput,
 } from '@/components/kit/forms';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule } from '@/components/kit/menus';
+import { hasAnAccount, nameOfLead } from '@/lib/crm/lead-identity';
+import { applyOrder, readOrder, writeOrder } from '@/lib/ui/order';
 import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { trackerFromCrm } from '@/lib/crm/tracker-operations';
@@ -65,7 +67,10 @@ const ACCOUNT_FIELDS = new Set([
 function flatten(l: LeadWithAccount): TrackerRow {
   return {
     ...l,
-    company_name:    l.account?.company_name ?? 'Unknown company',
+    /* Three states, not two: an account, no account with a name, and
+       nothing at all. Only the last is genuinely unknown. See
+       `lib/crm/lead-identity.ts` for the row this used to get wrong. */
+    company_name:    nameOfLead(l),
     contact_name:    l.account?.contact_name ?? null,
     email:           l.account?.email ?? null,
     phone:           l.account?.phone ?? null,
@@ -83,6 +88,13 @@ const TYPE_LABEL: Record<LeadType, string> = {
   maintenance:   'Maintenance',
   rental:        'Rental & leasing',
 };
+
+/* The three divisions as the application declares them, which is the
+   order anybody who has never dragged one sees. A fourth added here
+   appears at the END of somebody's saved order rather than vanishing
+   from it: see `applyOrder`. */
+const SIDES: LeadType[] = ['trailer_sales', 'maintenance', 'rental'];
+const SIDE_ORDER = 'tracker-divisions';
 
 // Tracker has 3 tabs that group the existing CRM statuses
 type TrackerTab = 'all' | 'working' | 'customer' | 'lost' | 'commission';
@@ -120,6 +132,7 @@ export function SalesTracker({
   const router = useRouter();
   const [rows, setRows] = useState<TrackerRow[]>(() => initialLeads.map(flatten));
   const [side, setSide] = useState<LeadType>('trailer_sales');
+
   const [whatFilter, setWhatFilter] = useState<string | null>(null);
   const [tab, setTab] = useState<TrackerTab>('working');
   const [query, setQuery] = useState('');
@@ -205,6 +218,33 @@ export function SalesTracker({
     return ([r.company_name, r.contact_name, r.email, r.phone, r.description, r.requirement, r.action, r.what, r.vehicles]
       .filter(Boolean).join(' ').toLowerCase().includes(q));
   }, [tab, query]);
+
+  /* THE ORDER OF THE THREE DIVISIONS.
+
+     From the business: "make it so people can re-order them by drag and
+     it saves forever device-wide."
+
+     Read after the first paint rather than during it. This component
+     renders on the server as well, and `localStorage` does not exist
+     there, so reading it in a `useState` initialiser is a hydration
+     mismatch: the server sends the declared order, the browser paints a
+     different one, and React throws away the tree it was given. So the
+     first paint is always the declared order and the saved one arrives
+     a frame later, which nobody sees and nothing breaks. */
+  const [order, setOrder] = useState<string[] | null>(null);
+  useEffect(() => { setOrder(readOrder(SIDE_ORDER)); }, []);
+
+  const sideTabs = useMemo(
+    () => applyOrder(SIDES.map((s) => ({
+      key: s, label: TYPE_LABEL[s], count: sideCounts[s],
+    })), order),
+    [order, sideCounts],
+  );
+
+  const reorderSides = useCallback((keys: LeadType[]) => {
+    setOrder(keys);
+    writeOrder(SIDE_ORDER, keys);
+  }, []);
 
   /* The kinds of work on the maintenance side, each with the number of
      rows it would actually show.
@@ -614,11 +654,8 @@ export function SalesTracker({
       <Tabs
         value={side}
         onChange={(v) => { setSide(v); if (v !== 'maintenance') setWhatFilter(null); }}
-        tabs={[
-          { key: 'trailer_sales' as LeadType, label: 'Trailer sales', count: sideCounts.trailer_sales },
-          { key: 'maintenance' as LeadType, label: 'Maintenance', count: sideCounts.maintenance },
-          { key: 'rental' as LeadType, label: 'Rental & leasing', count: sideCounts.rental },
-        ]}
+        tabs={sideTabs}
+        onReorder={reorderSides}
       />
 
       {/* One toolbar, like the CRM's. Status filters, the kind of work
@@ -787,6 +824,17 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
   }, [supabase, row.contact_id]);
 
   function handleSchedule() {
+    /* A MEETING NEEDS SOMEBODY TO BE WITH.
+
+       `contact_id` is nullable on a lead and the type used to say it
+       was not, so this passed null straight into the booking modal and
+       wrote a meeting attached to nobody. Caught by correcting the
+       type, not by anybody seeing it happen.
+
+       Refused rather than worked around: the fix is to give the lead a
+       CRM record, and inventing one here would put a half filled
+       company in the CRM as a side effect of booking a call. */
+    if (!hasAnAccount(row)) return;
     // Find any existing meeting within +/- 14 days from now - warn before opening modal
     const now = Date.now();
     const window = 14 * 86_400_000;
@@ -954,7 +1002,8 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
               title="Scheduled meetings"
               count={meetings.length || undefined}
               action={
-                <Button size="sm" variant="secondary" onClick={handleSchedule}>
+                <Button size="sm" variant="secondary" onClick={handleSchedule}
+                  disabled={!hasAnAccount(row)}>
                   <CalendarPlus size={12} /> Schedule
                 </Button>
               }
@@ -963,6 +1012,11 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
               {loadingMeetings ? (
                 <div style={{ display: 'flex', gap: 7, alignItems: 'center', color: 'var(--text-subtle)', fontSize: 12.5 }}>
                   <Loader size={12} className="spin" /> Loading
+                </div>
+              ) : !hasAnAccount(row) ? (
+                <div style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
+                  This lead has no CRM record behind it yet, so there is nobody to book a
+                  meeting with. Pick or create the account and this fills in.
                 </div>
               ) : meetings.length === 0 ? (
                 <div style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
@@ -1054,7 +1108,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
           </Modal>
         )}
 
-        {showSchedule && (
+        {showSchedule && edit.contact_id && (
           <ScheduleMeetingModal
             contact={{ id: edit.contact_id, company_name: edit.company_name }}
             profile={profile}

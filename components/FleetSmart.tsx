@@ -10,6 +10,7 @@ import {
 import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
 import { blankContract, blankExtras, type ContractExtras } from '@/lib/fleetsmart/contract';
+import { seedFromContract } from '@/lib/fleetsmart/copy';
 import type { PickableAccount } from '@/lib/fleetsmart/account';
 import type { RateCard } from '@/lib/fleetsmart/ratecard';
 import { RateEditor } from '@/components/fleetsmart/rate-editor';
@@ -186,7 +187,14 @@ export function FleetSmart({
      both, so they are one piece of state rather than two booleans that
      can disagree. */
   const [open, setOpen] = useState<
-    | { kind: 'wizard'; row: ContractRow | null; seed: ContractInput; extras: ContractExtras }
+    /* `account` is separate from `row` because a copy has no row and
+       still has a customer. Everywhere else it is simply the row's own
+       account, and `account: open.row?.account_id` would have been the
+       tidier shape were it not for exactly that case. */
+    | {
+      kind: 'wizard'; row: ContractRow | null; account?: string | null;
+      seed: ContractInput; extras: ContractExtras;
+    }
     | { kind: 'document'; row: ContractRow }
     /* Amending a live contract. Its own thing rather than the wizard,
        because the questions are different: not "what is this contract"
@@ -270,15 +278,38 @@ export function FleetSmart({
   /* Copying is deliberately a new draft in the wizard rather than a row
      written straight to the database. Nobody copies a contract without
      changing something, and a saved copy nobody edits is a second
-     reference against the same customer for no reason. */
+     reference against the same customer for no reason.
+
+     ---- The account comes with it, the lead does not ----
+
+     `row: null` used to be the whole of it, and the wizard reads the
+     account and the lead off `row`. So a copy arrived with the
+     customer's NAME on the Customer step, out of `input`, and no
+     account behind it. Saving then wrote a contract with a null
+     `account_id`, the lead trigger raised a lead with no `contact_id`,
+     and the tracker showed it as an unknown company with nothing on
+     it. From the business: "it doesn't populate any details in the
+     tracker and says unknown customer."
+
+     The customer is one of the details being duplicated. Showing their
+     name on step one and not linking the record is the inconsistency,
+     not the fix.
+
+     The LEAD is the opposite case and stays null on purpose. A copy is
+     a second contract, and pointing it at the first one's lead would
+     make the trigger update that pitch instead of opening a new one:
+     two prices against one lead, and the first contract's status
+     quietly overwritten by the second. */
   function copyRow(row: ContractRow) {
     setError(null);
     setNotice(null);
+    const seed = seedFromContract(row);
     setOpen({
       kind: 'wizard',
       row: null,
-      seed: { ...row.input, assets: row.input.assets.map((a, i) => ({ ...a, key: `a${i}` })) },
-      extras: { ...blankExtras(), ...row.extras },
+      account: seed.accountId,
+      seed: seed.input,
+      extras: seed.extras,
     });
   }
 
@@ -661,7 +692,7 @@ export function FleetSmart({
           initial={{
             input: open.seed,
             extras: open.extras,
-            accountId: open.row?.account_id ?? null,
+            accountId: open.account ?? open.row?.account_id ?? null,
             leadId: open.row?.lead_id ?? null,
           }}
           contractId={open.row?.id ?? null}

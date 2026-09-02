@@ -597,42 +597,16 @@ export function Chip({
   );
 }
 
-/** Underline tabs, per the kit's navigation page. */
-export function Tabs<T extends string>({
-  value, onChange, tabs,
-}: { value: T; onChange: (v: T) => void; tabs: { key: T; label: string; count?: number }[] }) {
-  return (
-    <div style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)' }}>
-      {tabs.map((t) => {
-        const on = t.key === value;
-        return (
-          <button
-            key={t.key}
-            onClick={() => onChange(t.key)}
-            aria-selected={on}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              height: 34, padding: '0 13px', border: 'none', background: 'transparent',
-              borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`,
-              color: on ? 'var(--text)' : 'var(--text-muted)',
-              fontFamily: 'var(--inter)', fontSize: 13, fontWeight: on ? 600 : 500,
-              cursor: 'pointer', marginBottom: -1,
-              transition: `color 120ms ${EASE}, border-color 120ms ${EASE}`,
-            }}
-          >
-            {t.label}
-            {t.count != null && (
-              <span style={{
-                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
-                color: on ? 'var(--accent)' : 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums',
-              }}>{t.count}</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+/* `Tabs` lives in `./tabs` now.
+
+   It grew drag to reorder, which needs `useState`, and this file has no
+   `use client` on purpose: it is imported by server components for
+   Card, Badge, Label and the rest, and marking the whole kit as client
+   would drag every one of them into the browser bundle. A component
+   that needs state gets its own file with its own boundary, and is
+   re-exported here so nothing that imports it has to know. */
+export { Tabs } from './tabs';
+
 
 /** Text input with a leading icon. 32px, per the kit's density. */
 export function SearchInput({

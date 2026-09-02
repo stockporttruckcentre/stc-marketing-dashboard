@@ -33,9 +33,71 @@ UPDATE profiles SET role = 'sales',  role_template_id = NULL, full_name = 'Acces
  WHERE id = 'ac000000-0000-0000-0000-000000000002';
 
 /* Reading `auth.users` is not something `authenticated` may do, and
-   that is right. These two are how the check looks anyway, from the
+   that is right. These are how the check looks anyway, from the
    owner's position, so an assertion about whether an account can sign
    in does not require weakening the thing it is asserting about. */
+
+/* WHAT GOTRUE DOES BEFORE IT EVER LOOKS AT THE PASSWORD.
+
+   `can_sign_in` below compares the hash, and its comment used to call
+   that "the same test Supabase makes at sign in". It is not, and the
+   difference cost somebody a working account:
+
+     I requested access, request came through and I accepted them and
+     set their role which was all fine. Now i'm trying to log in to
+     that account and I get "Database error querying schema"
+
+   Before any password is checked, GoTrue reads the row into a Go
+   struct. Eight token columns on `auth.users` are nullable in the
+   table and NOT nullable in that struct, and the service itself always
+   writes an empty string, so they are never null unless somebody
+   inserts a user by hand. Ours does. The scan then fails with
+   `converting NULL to string is unsupported`, which the API returns as
+   "Database error querying schema".
+
+   So the hash was right, the role was right, the confirmation was
+   right, and the account could not be used. This is that read,
+   asserted. */
+CREATE OR REPLACE FUNCTION pg_temp.gotrue_can_read(p_user UUID)
+RETURNS BOOLEAN
+/* SECURITY DEFINER, exactly as `can_sign_in` below is and for the same
+   reason. Everything past the ROLE line runs as `authenticated`, which
+   cannot read `auth.users` at all.
+
+   Without it this counted nulls over zero visible rows, found none, and
+   returned TRUE for every account including a broken one. It passed
+   against the bug it was written to catch, and only saying so out loud
+   found that: the first thing I did after writing it was remove the
+   migration and watch it go green. */
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth
+AS $fn$
+DECLARE col TEXT; nulls INT := 0; n INT; seen INT;
+BEGIN
+  /* And it must never pass vacuously again. A user id that matches
+     nothing is a broken assertion, not a healthy account. */
+  SELECT count(*) INTO seen FROM auth.users WHERE id = p_user;
+  IF seen <> 1 THEN
+    RAISE EXCEPTION 'gotrue_can_read was given % which matches % rows in auth.users',
+      p_user, seen;
+  END IF;
+
+  FOREACH col IN ARRAY ARRAY[
+    'confirmation_token', 'recovery_token', 'email_change',
+    'email_change_token_new', 'email_change_token_current',
+    'phone_change', 'phone_change_token', 'reauthentication_token'
+  ] LOOP
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = col
+    ) THEN
+      EXECUTE format('SELECT count(*) FROM auth.users WHERE id = $1 AND %I IS NULL', col)
+        INTO n USING p_user;
+      nulls := nulls + n;
+    END IF;
+  END LOOP;
+  RETURN nulls = 0;
+END;
+$fn$;
 CREATE OR REPLACE FUNCTION pg_temp.can_sign_in(p_user UUID, p_password TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions, auth
@@ -270,8 +332,14 @@ BEGIN
 
   IF made IS NULL THEN RAISE EXCEPTION 'approving made no account'; END IF;
 
-  /* The same test Supabase makes at sign in. An account that exists and
-     cannot sign in is the failure this catches. */
+  /* THE READ COMES FIRST, because that is the order GoTrue does it in
+     and because it is the half that was broken. */
+  IF NOT pg_temp.gotrue_can_read(made) THEN
+    RAISE EXCEPTION 'the new account has null auth token columns, so every sign in on it '
+                    'answers "Database error querying schema" whatever the password is';
+  END IF;
+
+  /* And then the password. */
   IF NOT pg_temp.can_sign_in(made, '123') THEN
     RAISE EXCEPTION 'the new account cannot sign in with the password it was given';
   END IF;
@@ -338,6 +406,14 @@ BEGIN
   END IF;
   IF NOT (got ->> 'existed_already')::BOOLEAN THEN
     RAISE EXCEPTION 'the screen was not told the account already existed';
+  END IF;
+
+  /* An account that already existed was made by hand at some point, so
+     it is in exactly the state that cannot sign in. Resetting its
+     password has to bring it out of that state as well, or the person
+     who asked for access because they could not get in still cannot. */
+  IF NOT pg_temp.gotrue_can_read('ac000000-0000-0000-0000-000000000001') THEN
+    RAISE EXCEPTION 'resetting the password on an account left it unable to sign in';
   END IF;
 
   RAISE NOTICE 'ok  approving an address that already has an account resets it instead of duplicating it';
