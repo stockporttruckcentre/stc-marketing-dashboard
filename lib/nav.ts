@@ -50,6 +50,19 @@ export type NavItem = {
   hidden?: boolean;
   /** When the breadcrumb should read differently from the row. */
   crumb?: string;
+  /**
+   * Rows that open underneath this one.
+   *
+   * Revenue is two screens, one per division, and they cannot be two
+   * top level rows: STC and S&L Rental are the same question asked of
+   * two systems, and a sidebar that lists them apart invites somebody
+   * to read one as the company. Nested, the parent names the subject
+   * and the children name the division.
+   *
+   * A child is a NavItem in its own right, so it carries its own
+   * capability and its own breadcrumb, and `NAV_ITEMS` flattens them.
+   */
+  children?: NavItem[];
 };
 
 export type NavSection = {
@@ -79,7 +92,13 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'crm.view' },
       { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'crm.view' },
       { href: '/dashboard/fleetsmart', label: 'FleetSmart+', icon: 'fleetsmart', capability: 'fleetsmart.view' },
-      { href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view' },
+      {
+        href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view',
+        children: [
+          { href: '/dashboard/revenue/stc', label: 'STC', icon: 'revenue', capability: 'crm.view', crumb: 'STC revenue' },
+          { href: '/dashboard/revenue/rental', label: 'S&L Rental', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
+        ],
+      },
     ],
   },
   {
@@ -118,8 +137,10 @@ export const NAVIGATION: NavSection[] = [
   },
 ];
 
-/** Every item, sidebar or not. What the breadcrumb reads. */
-export const NAV_ITEMS: NavItem[] = NAVIGATION.flatMap((s) => s.items);
+/** Every item, sidebar or not, children included. What the breadcrumb reads. */
+export const NAV_ITEMS: NavItem[] = NAVIGATION
+  .flatMap((s) => s.items)
+  .flatMap((i) => [i, ...(i.children ?? [])]);
 
 /**
  * What a person may actually reach, given what they may do.
@@ -132,7 +153,16 @@ export function visibleSections(has: (c: CrmCapability) => boolean): NavSection[
   return NAVIGATION
     .map((s) => ({
       ...s,
-      items: s.items.filter((i) => !i.hidden && (i.capability === null || has(i.capability))),
+      items: s.items
+        .filter((i) => !i.hidden && (i.capability === null || has(i.capability)))
+        /* A parent whose children are all withheld keeps its own row
+           only if it is a real screen in its own right. Revenue is not:
+           it redirects to a division, so with no divisions to show
+           there is nothing to open. */
+        .map((i) => (i.children
+          ? { ...i, children: i.children.filter((c) => !c.hidden && (c.capability === null || has(c.capability))) }
+          : i))
+        .filter((i) => !i.children || i.children.length > 0),
     }))
     .filter((s) => s.items.length > 0);
 }
@@ -149,7 +179,11 @@ export function crumbsFor(path: string): [string, string] {
   let best: { section: string; item: NavItem } | null = null;
 
   for (const section of NAVIGATION) {
-    for (const item of section.items) {
+    /* Children are candidates in their own right. Without this, both
+       revenue screens match only their parent's `/dashboard/revenue`
+       and the breadcrumb says "Revenue" on a page whose whole purpose
+       is to say which division you are looking at. */
+    for (const item of section.items.flatMap((i) => [i, ...(i.children ?? [])])) {
       const hit = path === item.href || path.startsWith(`${item.href}/`);
       if (!hit) continue;
       if (!best || item.href.length > best.item.href.length) {

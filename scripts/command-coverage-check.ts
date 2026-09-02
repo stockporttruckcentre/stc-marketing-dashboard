@@ -1415,6 +1415,35 @@ ok('an admin is offered importing the Protean export',
   suggestActions('import the protean export', CAPS.admin, 8)
     .some((h) => h.action.id === 'import.protean'));
 
+/* Revenue is two screens now, one per division, because the two
+   systems use the same account code for different companies. Somebody
+   typing "rental revenue" means the rental one. */
+for (const said of [
+  'rental revenue', 'rental invoices', 'rental billing', 'leasing revenue',
+  'what rental has billed', 'rental turnover',
+]) {
+  ok(`"${said}" reaches the rental revenue screen`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'nav.rentalRevenue'));
+}
+
+for (const said of [
+  'stc revenue', 'maintenance revenue', 'workshop revenue',
+]) {
+  ok(`"${said}" reaches the STC revenue screen`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'nav.revenue'));
+}
+
+for (const said of [
+  'import the rental invoices', 'upload the rental export', 'update the rental figures',
+]) {
+  ok(`"${said}" reaches the rental import`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'import.rental'));
+}
+
+ok('a viewer is not offered importing the rental invoices',
+  !suggestActions('import the rental invoices', CAPS.viewer, 8)
+    .some((h) => h.action.id === 'import.rental'));
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);

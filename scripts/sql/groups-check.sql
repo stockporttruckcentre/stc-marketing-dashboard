@@ -56,13 +56,13 @@ INSERT INTO crm_contacts (id, company_name, source, status) VALUES
   ('91000000-0000-0000-0000-000000000004', 'Holman', 'protean', 'won')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO protean_accounts (alpha, protean_name, contact_id, bound_at) VALUES
-  ('MONTTRAN', 'Montgomery Transport Limited',     '91000000-0000-0000-0000-000000000001', NOW()),
-  ('MONTDIST', 'Montgomery Distribution Limited',  '91000000-0000-0000-0000-000000000002', NOW()),
-  ('MONTTANK', 'Montgomery Tank Services Limited', '91000000-0000-0000-0000-000000000003', NOW()),
-  ('ARIFLEET', 'Holman Fleet Limited',             '91000000-0000-0000-0000-000000000004', NOW()),
-  ('ARIVMS',   'Holman Fleet Limited (VMS)',       '91000000-0000-0000-0000-000000000004', NOW())
-ON CONFLICT (alpha) DO NOTHING;
+INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at) VALUES
+  ('stc', 'MONTTRAN', 'Montgomery Transport Limited',     '91000000-0000-0000-0000-000000000001', NOW()),
+  ('stc', 'MONTDIST', 'Montgomery Distribution Limited',  '91000000-0000-0000-0000-000000000002', NOW()),
+  ('stc', 'MONTTANK', 'Montgomery Tank Services Limited', '91000000-0000-0000-0000-000000000003', NOW()),
+  ('stc', 'ARIFLEET', 'Holman Fleet Limited',             '91000000-0000-0000-0000-000000000004', NOW()),
+  ('stc', 'ARIVMS', 'Holman Fleet Limited (VMS)',   '91000000-0000-0000-0000-000000000004', NOW())
+ON CONFLICT (division, alpha) DO NOTHING;
 
 /* Two years each, so the like for like cut is exercised rather than
    assumed, and more than one invoice per account so a fan out over the
@@ -71,28 +71,28 @@ ON CONFLICT (alpha) DO NOTHING;
    figure below is read at 1 August 2026, so the year running is the one
    that began 1 April 2026 and the comparison is the same point in the
    year that began 1 April 2025. */
-INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
+INSERT INTO protean_invoices (division, invoice_no, alpha, tax_point, net) VALUES
   /* T1 sits exactly on the read date on purpose: the window is
      inclusive of it, and an off by one there would drop a day's
      invoicing from every figure on every screen. */
-  ('T1', 'MONTTRAN', '2026-08-01', 100000), ('T2', 'MONTTRAN', '2026-06-01', 21440),
-  ('T3', 'MONTTRAN', '2025-05-01',  90000),
-  ('D1', 'MONTDIST', '2026-05-01', 108110), ('D2', 'MONTDIST', '2025-05-01', 100000),
-  ('K1', 'MONTTANK', '2026-05-01',  83355),
-  ('H1', 'ARIFLEET', '2026-05-01',  50000), ('H2', 'ARIFLEET', '2026-07-01', 25000),
-  ('V1', 'ARIVMS',   '2026-05-01',  30000),
+  ('stc', 'T1', 'MONTTRAN', '2026-08-01', 100000), ('stc', 'T2', 'MONTTRAN', '2026-06-01', 21440),
+  ('stc', 'T3', 'MONTTRAN', '2025-05-01',  90000),
+  ('stc', 'D1', 'MONTDIST', '2026-05-01', 108110), ('stc', 'D2', 'MONTDIST', '2025-05-01', 100000),
+  ('stc', 'K1', 'MONTTANK', '2026-05-01',  83355),
+  ('stc', 'H1', 'ARIFLEET', '2026-05-01',  50000), ('stc', 'H2', 'ARIFLEET', '2026-07-01', 25000),
+  ('stc', 'V1', 'ARIVMS',   '2026-05-01',  30000),
   /* Last December. Inside the previous year and AFTER the same point in
      it, so it counts to neither figure. That is the like for like cut. */
-  ('H3', 'ARIFLEET', '2025-12-01',  40000)
-ON CONFLICT (invoice_no) DO NOTHING;
+  ('stc', 'H3', 'ARIFLEET', '2025-12-01',  40000)
+ON CONFLICT (division, invoice_no) DO NOTHING;
 
-INSERT INTO protean_open_jobs (job_no, protean_name, alpha, job_total, still_open) VALUES
-  ('J1', 'Montgomery Transport Limited', 'MONTTRAN', 5000, TRUE),
-  ('J2', 'Montgomery Transport Limited', 'MONTTRAN', 2500, TRUE),
-  ('J3', 'Holman Fleet Limited (VMS)',   'ARIVMS',   1000, TRUE),
+INSERT INTO protean_open_jobs (division, job_no, protean_name, alpha, job_total, still_open) VALUES
+  ('stc', 'J1', 'Montgomery Transport Limited', 'MONTTRAN', 5000, TRUE),
+  ('stc', 'J2', 'Montgomery Transport Limited', 'MONTTRAN', 2500, TRUE),
+  ('stc', 'J3', 'Holman Fleet Limited (VMS)',   'ARIVMS',   1000, TRUE),
   /* Closed, so it must not be counted anywhere. */
-  ('J4', 'Holman Fleet Limited',         'ARIFLEET', 9999, FALSE)
-ON CONFLICT (job_no) DO NOTHING;
+  ('stc', 'J4', 'Holman Fleet Limited',         'ARIFLEET', 9999, FALSE)
+ON CONFLICT (division, job_no) DO NOTHING;
 
 -- -------------------------------------------------------------
 -- 1. Grouping needs permission, and a viewer does not have it.

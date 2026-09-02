@@ -148,13 +148,17 @@ DECLARE made UUID; rel TEXT; spent NUMERIC; waiting INTEGER;
 BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
 
-  made := protean_make_customer('ACME');
+  made := protean_make_customer('stc', 'ACME');
   SELECT relationship INTO rel FROM crm_contacts WHERE id = made;
   IF rel <> 'existing' THEN
     RAISE EXCEPTION 'a company that is billing us reads as a %', rel;
   END IF;
 
-  SELECT net INTO spent FROM protean_spend(made) WHERE year = 2026;
+  /* Labelled by the FINANCIAL year it falls in, so these February 2026
+     invoices belong to the year that began April 2025. Labelling them
+     2026 while every other figure on the screen calls them last year is
+     exactly the two-definitions problem 082 removed. */
+  SELECT net INTO spent FROM protean_spend(made) WHERE year = 2025;
   IF spent <> 1500 THEN RAISE EXCEPTION 'the new record shows %, not 1500', spent; END IF;
 
   SELECT count(*) INTO waiting FROM protean_to_moderate();
@@ -162,7 +166,7 @@ BEGIN
 
   /* Twice would make a second Acme, and both would look right. */
   BEGIN
-    made := protean_make_customer('ACME');
+    made := protean_make_customer('stc', 'ACME');
     RAISE EXCEPTION 'the same account made a customer twice';
   EXCEPTION WHEN SQLSTATE 'P0001' THEN
     IF SQLERRM = 'the same account made a customer twice' THEN RAISE; END IF;
@@ -178,7 +182,7 @@ DO $$
 DECLARE waiting INTEGER; still NUMERIC;
 BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
-  PERFORM protean_ignore('BEES', 'our own leasing company');
+  PERFORM protean_ignore('stc', 'BEES', 'our own leasing company');
   SELECT count(*) INTO waiting FROM protean_to_moderate();
   IF waiting <> 1 THEN RAISE EXCEPTION '% are waiting after one was set aside', waiting; END IF;
 
@@ -435,21 +439,21 @@ BEGIN
   VALUES ('81000000-0000-0000-0000-000000000001', 'Record Test Ltd', 'protean', 'customer')
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO protean_accounts (alpha, protean_name, contact_id, bound_at)
-  VALUES ('RECTEST', 'Record Test Ltd', '81000000-0000-0000-0000-000000000001', NOW())
-  ON CONFLICT (alpha) DO NOTHING;
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at)
+  VALUES ('stc', 'RECTEST', 'Record Test Ltd', '81000000-0000-0000-0000-000000000001', NOW())
+  ON CONFLICT (division, alpha) DO NOTHING;
 
-  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
-    ('R1', 'RECTEST', '2026-05-01', 1000),   -- this April year
-    ('R2', 'RECTEST', '2026-02-01',  400),   -- calendar 2026, PREVIOUS April year
-    ('R3', 'RECTEST', '2025-05-01',  700),   -- last April year, before the cut
-    ('R4', 'RECTEST', '2025-11-01',  900)    -- last April year, AFTER the cut
-  ON CONFLICT (invoice_no) DO NOTHING;
+  INSERT INTO protean_invoices (division, invoice_no, alpha, tax_point, net) VALUES
+    ('stc', 'R1', 'RECTEST', '2026-05-01', 1000),   -- this April year
+    ('stc', 'R2', 'RECTEST', '2026-02-01',  400),   -- calendar 2026, PREVIOUS April year
+    ('stc', 'R3', 'RECTEST', '2025-05-01',  700),   -- last April year, before the cut
+    ('stc', 'R4', 'RECTEST', '2025-11-01',  900)    -- last April year, AFTER the cut
+  ON CONFLICT (division, invoice_no) DO NOTHING;
 
-  INSERT INTO protean_open_jobs (job_no, protean_name, alpha, job_total, logged_on, still_open)
-  VALUES ('RJ1', 'Record Test Ltd', 'RECTEST', 250, '2026-04-02', TRUE),
-         ('RJ2', 'Record Test Ltd', 'RECTEST', 150, '2026-06-02', TRUE)
-  ON CONFLICT (job_no) DO NOTHING;
+  INSERT INTO protean_open_jobs (division, job_no, protean_name, alpha, job_total, logged_on, still_open)
+  VALUES ('stc', 'RJ1', 'Record Test Ltd', 'RECTEST', 250, '2026-04-02', TRUE),
+         ('stc', 'RJ2', 'Record Test Ltd', 'RECTEST', 150, '2026-06-02', TRUE)
+  ON CONFLICT (division, job_no) DO NOTHING;
 
   /* Read at 1 June 2026. The year began 1 April 2026. */
   SELECT * INTO r FROM protean_customer('81000000-0000-0000-0000-000000000001', '2026-06-01');
@@ -575,19 +579,19 @@ DECLARE r RECORD; expect_unplaced NUMERIC; expect_aside NUMERIC;
 BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
 
-  INSERT INTO protean_accounts (alpha, protean_name) VALUES ('NOBODY', 'Nobody Placed Ltd')
-  ON CONFLICT (alpha) DO NOTHING;
-  INSERT INTO protean_accounts (alpha, protean_name, ignored, ignored_why)
-  VALUES ('CASHSALE', 'Cash Sale', TRUE, 'not a customer')
-  ON CONFLICT (alpha) DO UPDATE SET ignored = TRUE;
+  INSERT INTO protean_accounts (division, alpha, protean_name) VALUES ('stc', 'NOBODY', 'Nobody Placed Ltd')
+  ON CONFLICT (division, alpha) DO NOTHING;
+  INSERT INTO protean_accounts (division, alpha, protean_name, ignored, ignored_why)
+  VALUES ('stc', 'CASHSALE', 'Cash Sale', TRUE, 'not a customer')
+  ON CONFLICT (division, alpha) DO UPDATE SET ignored = TRUE;
 
   /* Inside the April year that is running at 1 June 2026. March would
      be the year before, which is the difference this whole migration is
      about. */
-  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net) VALUES
-    ('C1', 'NOBODY',   '2026-05-01', 5000),
-    ('C2', 'CASHSALE', '2026-05-01', 3000)
-  ON CONFLICT (invoice_no) DO NOTHING;
+  INSERT INTO protean_invoices (division, invoice_no, alpha, tax_point, net) VALUES
+    ('stc', 'C1', 'NOBODY',   '2026-05-01', 5000),
+    ('stc', 'C2', 'CASHSALE', '2026-05-01', 3000)
+  ON CONFLICT (division, invoice_no) DO NOTHING;
 
   SELECT * INTO r FROM protean_company('2026-06-01');
 
@@ -741,6 +745,159 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'ok  jobs find their account whichever file lands first, and one that cannot is named';
+END $$;
+
+-- -------------------------------------------------------------
+-- 14. THE ALLIANCE CASE. One code, two systems, two companies.
+--
+-- Comparing the real STC and rental exports, five account codes appear
+-- in both and two of them are different companies:
+--
+--   ALLIANCE   rental: Alliance Flooring Distribution Ltd
+--   ALLIANCE   stc:    Alliance Automotive UK CV Ltd
+--
+-- Keyed on the code alone, importing rental would have put Alliance
+-- Flooring's revenue onto Alliance Automotive's record. Silently,
+-- permanently, and on the first import.
+--
+-- This is the assertion the whole division change exists for.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; auto UUID; floor UUID; r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+
+  /* The same code, imported into each system. */
+  i := protean_start_import('invoices', 'stc.csv', 'stc');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"A1","alpha":"ALLIANCE","protean_name":"Alliance Automotive UK CV Ltd",
+     "tax_point":"2026-05-01","net":"7000"}]'::JSONB);
+
+  i := protean_start_import('invoices', 'rental.xlsx', 'rental');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"A1","alpha":"ALLIANCE","protean_name":"Alliance Flooring Distribution Ltd",
+     "tax_point":"2026-05-01","net":"3000"}]'::JSONB);
+
+  /* Two accounts, not one, and the invoice numbers collide harmlessly
+     because the division is part of that key too. */
+  IF (SELECT count(*) FROM protean_accounts WHERE alpha = 'ALLIANCE') <> 2 THEN
+    RAISE EXCEPTION 'one code in two systems made % accounts, not 2',
+      (SELECT count(*) FROM protean_accounts WHERE alpha = 'ALLIANCE');
+  END IF;
+  IF (SELECT count(*) FROM protean_invoices WHERE invoice_no = 'A1') <> 2 THEN
+    RAISE EXCEPTION 'two invoices numbered A1 in two systems did not both survive';
+  END IF;
+
+  /* Two different companies in the CRM. */
+  auto  := protean_make_customer('stc', 'ALLIANCE');
+  floor := protean_make_customer('rental', 'ALLIANCE');
+  IF auto = floor THEN
+    RAISE EXCEPTION 'the two Alliances became one customer';
+  END IF;
+
+  /* And neither can see the other's money. This is the whole point. */
+  SELECT * INTO r FROM protean_customer(auto, '2026-06-01');
+  IF r.this_year <> 7000 THEN
+    RAISE EXCEPTION 'Alliance Automotive reads %, not 7000. It is being shown rental revenue',
+      r.this_year;
+  END IF;
+  SELECT * INTO r FROM protean_customer(floor, '2026-06-01');
+  IF r.this_year <> 3000 THEN
+    RAISE EXCEPTION 'Alliance Flooring reads %, not 3000', r.this_year;
+  END IF;
+
+  RAISE NOTICE 'ok  one account code in two systems is two companies, and neither sees the other''s money';
+END $$;
+
+-- -------------------------------------------------------------
+-- 14b. And one company really in both divisions adds up.
+--
+-- Booker is BOOKER in both systems and IS one company. Two accounts,
+-- two divisions, one CRM record, and the record has to read three ways:
+-- each division alone, and both together.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; booker UUID; r RECORD; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+
+  i := protean_start_import('invoices', 'stc.csv', 'stc');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"BK1","alpha":"BOOKER","protean_name":"Booker Limited",
+     "tax_point":"2026-05-01","net":"40000"}]'::JSONB);
+  i := protean_start_import('invoices', 'rental.xlsx', 'rental');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"BK1","alpha":"BOOKER","protean_name":"Booker",
+     "tax_point":"2026-05-01","net":"25000"}]'::JSONB);
+
+  booker := protean_make_customer('stc', 'BOOKER');
+  PERFORM protean_bind('rental', 'BOOKER', booker);
+
+  SELECT * INTO r FROM protean_customer(booker, '2026-06-01', 'stc');
+  IF r.this_year <> 40000 THEN
+    RAISE EXCEPTION 'Booker maintenance reads %, not 40000', r.this_year;
+  END IF;
+  SELECT * INTO r FROM protean_customer(booker, '2026-06-01', 'rental');
+  IF r.this_year <> 25000 THEN
+    RAISE EXCEPTION 'Booker rental reads %, not 25000', r.this_year;
+  END IF;
+  SELECT * INTO r FROM protean_customer(booker, '2026-06-01', NULL);
+  IF r.this_year <> 65000 THEN
+    RAISE EXCEPTION 'Booker altogether reads %, not 65000', r.this_year;
+  END IF;
+  IF r.accounts <> 2 THEN
+    RAISE EXCEPTION 'Booker has % accounts, not 2', r.accounts;
+  END IF;
+
+  /* And the divisions are DERIVED, which is the answer to "how does it
+     know". Nothing was declared on the customer record. */
+  SELECT count(*) INTO n FROM customer_divisions(booker);
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'Booker reads as being in % divisions, not 2', n;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM customer_divisions(booker)
+                  WHERE division = 'rental' AND net = 25000) THEN
+    RAISE EXCEPTION 'the rental half of Booker is not attributed to rental';
+  END IF;
+
+  RAISE NOTICE 'ok  one company in two divisions reads each alone and both together, without a field saying so';
+END $$;
+
+-- -------------------------------------------------------------
+-- 14c. A rental snapshot must not close the maintenance workshop.
+--
+-- The loudest way division could go wrong. None of the maintenance jobs
+-- appear in a rental file, so a close that ignored division would mark
+-- the entire workshop finished in one press.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; stc_open_before INTEGER; stc_open_after INTEGER; closed INTEGER; r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+  SELECT count(*) INTO stc_open_before
+    FROM protean_open_jobs WHERE division = 'stc' AND still_open;
+  IF stc_open_before = 0 THEN
+    RAISE EXCEPTION 'the fixture has no maintenance jobs open, so this proves nothing';
+  END IF;
+
+  i := protean_start_import('open_jobs', 'rental jobs.csv', 'rental');
+  PERFORM protean_take_open_jobs(i, '[
+    {"job_no":"RENT1","protean_name":"Somebody Renting","job_total":"900"}]'::JSONB);
+
+  SELECT * INTO r FROM protean_would_close(i);
+  IF r.would_close <> 0 THEN
+    RAISE EXCEPTION 'a rental import says it would close % jobs, and every one of them is maintenance',
+      r.would_close;
+  END IF;
+
+  closed := protean_finish_open_jobs(i);
+  SELECT count(*) INTO stc_open_after
+    FROM protean_open_jobs WHERE division = 'stc' AND still_open;
+  IF stc_open_after <> stc_open_before THEN
+    RAISE EXCEPTION 'a rental snapshot closed % maintenance jobs', stc_open_before - stc_open_after;
+  END IF;
+
+  RAISE NOTICE 'ok  a rental snapshot closes rental work and leaves the maintenance workshop alone';
 END $$;
 
 ROLLBACK;

@@ -74,9 +74,27 @@ const text = (row: Record<string, unknown>, col: string): string | null => {
 };
 
 export type Read =
-  | { ok: true; kind: 'invoices'; rows: InvoiceRow[]; read: number; unusable: number }
-  | { ok: true; kind: 'open_jobs'; rows: OpenJobRow[]; read: number; unusable: number }
+  | { ok: true; kind: 'invoices'; rows: InvoiceRow[]; read: number; unusable: number; blank: number }
+  | { ok: true; kind: 'open_jobs'; rows: OpenJobRow[]; read: number; unusable: number; blank: number }
   | { ok: false; why: string };
+
+/**
+ * A row that is empty rather than wrong.
+ *
+ * The rental export lists every invoice number the system has ever
+ * issued and fills in only the ones inside the date range asked for.
+ * On the first real file that is 335 invoices and 2,653 bare numbers:
+ * invoice 2654 is dated 1 April 2025, the first day of the range, and
+ * everything numbered below it predates it.
+ *
+ * Those 2,653 are not rejected data. Counting them as "will not go in"
+ * puts a four figure warning on a screen where nothing is wrong, and a
+ * warning that is usually wrong is a warning nobody reads on the day it
+ * is right.
+ */
+function isBlankRow(carries: unknown[]): boolean {
+  return carries.every((v) => v === null || v === undefined || String(v).trim() === '');
+}
 
 /**
  * One dropped file, read as whichever export it is.
@@ -90,12 +108,25 @@ export function readProteanExport(csv: string): Read {
   const res = Papa.parse<Record<string, unknown>>(csv, CSV_OPTIONS);
   const headers = (res.meta?.fields ?? []).filter((h) => h && h.trim() !== '');
   const rows = usableRows((res.data ?? []) as Record<string, unknown>[]);
+  return readProteanRows(headers as string[], rows);
+}
 
+/**
+ * The same reader, from headers and rows rather than from text.
+ *
+ * A spreadsheet arrives already parsed and with real types on it: a
+ * Date where a CSV has "27-Aug-26", a number where a CSV has "£250.30".
+ * Both go through here, because two readers for two file formats is two
+ * readers that will eventually disagree about what a column means, and
+ * the rental export and the maintenance export are the same report out
+ * of two systems.
+ */
+export function readProteanRows(headers: string[], rows: Record<string, unknown>[]): Read {
   if (!headers.length || !rows.length) {
     return {
       ok: false,
       why: 'that file has no header row with rows underneath it. '
-        + 'Export it from Protean as CSV and try again.',
+        + 'Export it as CSV or XLSX and try again.',
     };
   }
 
@@ -111,11 +142,16 @@ export function readProteanExport(csv: string): Read {
 
     const out: InvoiceRow[] = [];
     let unusable = 0;
+    let blank = 0;
     for (const r of rows) {
       const invoice_no = text(r, 'Invoice No');
       const alpha = text(r, 'Alpha');
-      const tax_point = proteanDate(String(r['Tax Point'] ?? ''));
-      const net = proteanMoney(String(r[netCol] ?? ''));
+      const tax_point = proteanDate(r['Tax Point']);
+      const net = proteanMoney(r[netCol]);
+
+      /* Everything but the number missing means the export left the row
+         behind, not that the row is broken. See `isBlankRow`. */
+      if (isBlankRow([alpha, r['Tax Point'], r[netCol], r['Customer']])) { blank += 1; continue; }
       if (!invoice_no || !alpha || !tax_point || net === null) { unusable += 1; continue; }
 
       out.push({
@@ -125,16 +161,16 @@ export function readProteanExport(csv: string): Read {
         customer_ref: text(r, 'Customer Ref'),
         protean_name: text(r, 'Customer'),
         site_name: text(r, 'Site Name'),
-        created_on: proteanDate(String(r['Created'] ?? '')),
+        created_on: proteanDate(r['Created']),
         tax_point,
-        due_on: proteanDate(String(r['Due'] ?? '')),
+        due_on: proteanDate(r['Due']),
         created_by: text(r, 'Created By'),
         net,
-        tax: taxCol ? proteanMoney(String(r[taxCol] ?? '')) : null,
-        gross: grossCol ? proteanMoney(String(r[grossCol] ?? '')) : null,
+        tax: taxCol ? proteanMoney(r[taxCol]) : null,
+        gross: grossCol ? proteanMoney(r[grossCol]) : null,
       });
     }
-    return { ok: true, kind: 'invoices', rows: out, read: rows.length, unusable };
+    return { ok: true, kind: 'invoices', rows: out, read: rows.length, unusable, blank };
   }
 
   if (has(OPEN_JOB_MARKERS)) {
@@ -142,9 +178,13 @@ export function readProteanExport(csv: string): Read {
 
     const out: OpenJobRow[] = [];
     let unusable = 0;
+    let blank = 0;
     for (const r of rows) {
       const job_no = text(r, 'Job No');
       const protean_name = text(r, 'Customer');
+      if (isBlankRow([protean_name, r['Job Type'], r['Logged Date'], totalCol ? r[totalCol] : null])) {
+        blank += 1; continue;
+      }
       if (!job_no || !protean_name) { unusable += 1; continue; }
 
       out.push({
@@ -155,16 +195,16 @@ export function readProteanExport(csv: string): Read {
         protean_name,
         site: text(r, 'Site'),
         depot: text(r, 'Depot'),
-        logged_on: proteanDate(String(r['Logged Date'] ?? '')),
-        last_visit_on: proteanDate(String(r['Last Visit Date'] ?? '')),
+        logged_on: proteanDate(r['Logged Date']),
+        last_visit_on: proteanDate(r['Last Visit Date']),
         entered_by: text(r, 'Entered By'),
-        job_total: totalCol ? proteanMoney(String(r[totalCol] ?? '')) : null,
+        job_total: totalCol ? proteanMoney(r[totalCol]) : null,
         order_no: text(r, 'Order No'),
         sales_rep: text(r, 'Sales Rep'),
         mileage: text(r, 'Mileage'),
       });
     }
-    return { ok: true, kind: 'open_jobs', rows: out, read: rows.length, unusable };
+    return { ok: true, kind: 'open_jobs', rows: out, read: rows.length, unusable, blank };
   }
 
   return {
@@ -210,4 +250,54 @@ export function inBatches<T>(rows: T[], size = 500): T[][] {
 export async function readFileAsProtean(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
   return new TextDecoder('windows-1252').decode(buf);
+}
+
+/**
+ * One dropped file, whatever it is.
+ *
+ * The maintenance export comes out of Protean as CSV. The rental one
+ * arrives as a spreadsheet, and asking somebody to save it as CSV first
+ * is a step they will forget on the week it matters, having also lost
+ * the encoding on the way through.
+ *
+ * A workbook is read with the first sheet only. Both exports are one
+ * report on one sheet, and quietly concatenating a second sheet would
+ * double a figure nobody could then explain.
+ */
+export async function readDroppedFile(file: File): Promise<Read> {
+  const isSheet = /\.xlsx?$/i.test(file.name);
+  if (!isSheet) return readProteanExport(await readFileAsProtean(file));
+
+  const ExcelJS = (await import('exceljs')).default ?? (await import('exceljs'));
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const sheet = wb.worksheets[0];
+  if (!sheet) return { ok: false, why: 'that workbook has no sheets in it.' };
+
+  const headerRow = sheet.getRow(1);
+  const headers: string[] = [];
+  headerRow.eachCell({ includeEmpty: true }, (cell, col) => {
+    headers[col - 1] = String(cell.value ?? '').trim();
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  sheet.eachRow({ includeEmpty: false }, (row, i) => {
+    if (i === 1) return;
+    const out: Record<string, unknown> = {};
+    let any = false;
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      const key = headers[col - 1];
+      if (!key) return;
+      /* A formula cell carries both the formula and its last result.
+         The result is what the report means. */
+      const v = cell.value && typeof cell.value === 'object' && 'result' in cell.value
+        ? (cell.value as { result: unknown }).result
+        : cell.value;
+      out[key] = v ?? null;
+      if (v !== null && v !== undefined && String(v).trim() !== '') any = true;
+    });
+    if (any) rows.push(out);
+  });
+
+  return readProteanRows(headers.filter(Boolean), rows);
 }

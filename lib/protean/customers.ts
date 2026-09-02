@@ -368,8 +368,22 @@ const MONTHS: Record<string, number> = {
  * exports is recent and Protean has no data before 2000, so 20xx is the
  * only reading that is ever right.
  */
-export function proteanDate(raw: string): string | null {
-  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec((raw ?? '').trim());
+export function proteanDate(raw: unknown): string | null {
+  /* A spreadsheet hands over a real Date where a CSV hands over text.
+     Both arrive here rather than each caller remembering which it has,
+     because a Date stringified by accident reads as
+     "Tue Sep 01 2026 13:36:36 GMT+0100" and parses as nothing. */
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return null;
+    return `${raw.getFullYear()}-${String(raw.getMonth() + 1).padStart(2, '0')}-${String(raw.getDate()).padStart(2, '0')}`;
+  }
+  const text = String(raw ?? '').trim();
+  /* Already an ISO date, which is what a spreadsheet cell sometimes
+     becomes on the way through. */
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]|$)/.exec(text);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(text);
   if (!m) return null;
   const month = MONTHS[m[2]!.toLowerCase()];
   if (!month) return null;
@@ -385,8 +399,10 @@ export function proteanDate(raw: string): string | null {
  * are none in the first file, and treating them as positive the day one
  * appears would overstate revenue by twice the credit.
  */
-export function proteanMoney(raw: string): number | null {
-  let s = (raw ?? '').replace(/[£$,\s]/g, '').replace(/�/g, '').trim();
+export function proteanMoney(raw: unknown): number | null {
+  /* A spreadsheet hands over a number. Only text needs unpicking. */
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  let s = String(raw ?? '').replace(/[£$,\s]/g, '').replace(/�/g, '').trim();
   if (!s) return null;
   let negative = false;
   if (s.startsWith('(') && s.endsWith(')')) { negative = true; s = s.slice(1, -1); }

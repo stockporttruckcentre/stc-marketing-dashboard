@@ -365,7 +365,7 @@ const RESERVED = new Set([
   'protean', 'invoice', 'invoices', 'invoiced', 'revenue', 'turnover',
   'billing', 'billed', 'spend', 'spent', 'alpha', 'tax point', 'credit note',
   'import', 'imports', 'export', 'exports', 'spreadsheet', 'csv',
-  'group', 'groups',
+  'group', 'groups', 'division', 'divisions', 'rental revenue',
   ...Object.keys(BODY_TYPES),
 ]);
 

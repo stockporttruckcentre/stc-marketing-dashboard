@@ -15,7 +15,7 @@ import { ModeratePanel } from '@/components/revenue/moderate-panel';
 import {
   yearOnYear, groupRevenue, groupBreakdown, companyRevenue, everyOpenJob,
   type YearOnYear, type GroupRevenue, type GroupLine, type CompanyRevenue,
-  type OpenJob,
+  type OpenJob, type Division,
 } from '@/lib/protean/rpc';
 import { whatToShow, REVENUE_TABS, type RevenueTab } from '@/lib/protean/screen';
 import { groupsToOffer } from '@/lib/protean/customers';
@@ -59,7 +59,14 @@ import { nameGroup, putInGroup } from '@/lib/protean/rpc';
    every state and the screen that draws them cannot drift apart. */
 type Tab = RevenueTab;
 
-export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
+export function RevenuePanel({ mayImport, division, divisionName }: {
+  mayImport: boolean;
+  /* One screen per division. Two systems that use the same account code
+     for different companies cannot share a page without somebody
+     eventually reading one as the other. */
+  division: Division;
+  divisionName: string;
+}) {
   const supabase = createClient();
   const { say } = useToast();
 
@@ -76,11 +83,11 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
     setLoading(true);
     try {
       const [totals, yoy, grp, jobs, queue] = await Promise.all([
-        companyRevenue(supabase),
-        yearOnYear(supabase),
+        companyRevenue(supabase, division),
+        yearOnYear(supabase, division),
         groupRevenue(supabase),
-        everyOpenJob(supabase),
-        supabase.rpc('protean_to_moderate'),
+        everyOpenJob(supabase, division),
+        supabase.rpc('protean_to_moderate', { p_division: division }),
       ]);
       setCompany(totals);
       setCustomers(yoy);
@@ -92,7 +99,7 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
     } finally {
       setLoading(false);
     }
-  }, [supabase, say]);
+  }, [supabase, say, division]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -251,8 +258,10 @@ export function RevenuePanel({ mayImport }: { mayImport: boolean }) {
         {showing.body === 'customers' && <Customers rows={shown} loading={loading} />}
         {showing.body === 'groups' && <Groups rows={groups} onChanged={() => void load()} />}
         {showing.body === 'open' && <OpenWork rows={shownJobs} loading={loading} />}
-        {showing.body === 'accounts' && <ModeratePanel onChanged={() => void load()} />}
-        {showing.body === 'import' && <ImportPanel onDone={() => void load()} />}
+        {showing.body === 'accounts' && <ModeratePanel division={division} onChanged={() => void load()} />}
+        {showing.body === 'import' && (
+          <ImportPanel division={division} divisionName={divisionName} onDone={() => void load()} />
+        )}
       </div>
     </div>
   );

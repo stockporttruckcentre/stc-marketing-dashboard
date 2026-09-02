@@ -114,6 +114,54 @@ const OPEN_JOBS = [
   ok('one is usable', ragged.rows.length === 1, String(ragged.rows.length));
   ok('and the other three are counted rather than dropped in silence',
     ragged.unusable === 3, String(ragged.unusable));
+  ok('none of them are blank rows: every one carries real data',
+    ragged.blank === 0, String(ragged.blank));
+}
+
+/* -------------------------------------------------------------
+   3b. A BLANK row is not a broken one.
+
+   The real rental export lists every invoice number the system has ever
+   issued and fills in only the ones inside the date range asked for.
+   The first file is 335 invoices and 2,653 bare numbers: invoice 2654
+   is dated 1 April 2025, the first day of the range, and everything
+   below it predates it.
+
+   Counting those as rejected data puts a four figure warning on a
+   screen where nothing is wrong, and a warning that is usually wrong is
+   a warning nobody reads on the day it is right.
+   ------------------------------------------------------------- */
+{
+  const header = 'Invoice No,Alpha,Customer,Site Name,Created,Created By,Tax Point,Due,Net(£),Tax(£),Gross(£)';
+  const rental = readProteanExport([
+    header,
+    '2988,ABG,ABG Enterprises LLP,ABG Enterprises LLP,01-Sep-26,RD,01-Sep-26,01-Sep-26,12500,2500,15000',
+    '2987,ABG,ABG Enterprises LLP,ABG Enterprises LLP,01-Sep-26,RD,01-Sep-26,01-Sep-26,400,80,480',
+    /* Everything but the number. The export left these behind. */
+    '2653,,,,,,,,,,',
+    '2652,,,,,,,,,,',
+    '2651,,,,,,,,,,',
+    /* Genuinely broken: it has a customer and a figure and no date. */
+    '2650,BROKE,Broken Ltd,Broken Ltd,01-Sep-26,RD,,01-Sep-26,999,0,999',
+  ].join('\n'));
+  if (!rental.ok || rental.kind !== 'invoices') throw new Error('the rental fixture stopped parsing');
+
+  ok('the rental export is read as invoices', rental.kind === 'invoices');
+  ok('two real invoices come through', rental.rows.length === 2, String(rental.rows.length));
+  ok('three bare invoice numbers are counted as blank',
+    rental.blank === 3, String(rental.blank));
+  ok('and only the genuinely broken row is counted as unusable',
+    rental.unusable === 1, String(rental.unusable));
+  ok('a spreadsheet number needs no unpicking',
+    rental.rows[0]!.net === 12500, String(rental.rows[0]!.net));
+
+  /* A file that is ENTIRELY blank rows still says nothing came through,
+     rather than reporting a clean import of nought. */
+  const allBlank = readProteanExport([header, '10,,,,,,,,,,', '9,,,,,,,,,,'].join('\n'));
+  ok('a file of nothing but bare numbers yields no invoices',
+    allBlank.ok && allBlank.kind === 'invoices' && allBlank.rows.length === 0
+      && allBlank.blank === 2,
+    allBlank.ok ? `${allBlank.rows.length} rows, ${allBlank.blank} blank` : allBlank.why);
 }
 
 /* -------------------------------------------------------------
