@@ -54,10 +54,15 @@ export type NavItem = {
    * Rows that open underneath this one.
    *
    * Revenue is two screens, one per division, and they cannot be two
-   * top level rows: STC and S&L Rental are the same question asked of
-   * two systems, and a sidebar that lists them apart invites somebody
-   * to read one as the company. Nested, the parent names the subject
-   * and the children name the division.
+   * top level rows: STC and S&L are the same question asked of two
+   * systems, and a sidebar that lists them apart invites somebody to
+   * read one as the company. Nested, the parent names the subject and
+   * the children name the division.
+   *
+   * S&L is not called S&L Rental any more, because it is not only
+   * rental: "the tab covers trailer sales and rentals". There may be a
+   * third row for trailer sales later, which is a row and a page and
+   * nothing here has to move for it.
    *
    * A child is a NavItem in its own right, so it carries its own
    * capability and its own breadcrumb, and `NAV_ITEMS` flattens them.
@@ -96,7 +101,7 @@ export const NAVIGATION: NavSection[] = [
         href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view',
         children: [
           { href: '/dashboard/revenue/stc', label: 'STC', icon: 'revenue', capability: 'crm.view', crumb: 'STC revenue' },
-          { href: '/dashboard/revenue/rental', label: 'S&L Rental', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
+          { href: '/dashboard/revenue/rental', label: 'S&L', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
         ],
       },
     ],

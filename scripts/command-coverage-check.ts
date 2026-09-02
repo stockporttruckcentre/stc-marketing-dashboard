@@ -1275,6 +1275,33 @@ for (const said of [
 }
 
 /* -------------------------------------------------------------
+   The two imports come out of two different systems.
+
+   From the business: "it's not accepting the attached file on Revenue
+   which is from SAGE not protean. We can only take rental information
+   from sage."
+
+   Somebody looking for where the Sage export goes types Sage. Until
+   the rental export existed the only file the bar knew by name was
+   Protean's, which is the other screen entirely, so the words had to
+   land somewhere and landed on the wrong division.
+   ------------------------------------------------------------- */
+for (const [said, where] of [
+  ['sage', '/dashboard/revenue/rental?tab=import'],
+  ['sage export', '/dashboard/revenue/rental?tab=import'],
+  ['import the sage export', '/dashboard/revenue/rental?tab=import'],
+  ['rental invoices', '/dashboard/revenue/rental?tab=import'],
+  ['s&l export', '/dashboard/revenue/rental?tab=import'],
+  ['protean export', '/dashboard/revenue/stc?tab=import'],
+  ['open jobs', '/dashboard/revenue/stc?tab=import'],
+] as [string, string][]) {
+  const hit = suggestActions(said, CAPS.admin, 8)
+    .find((h) => h.action.path?.includes('tab=import') ?? false);
+  ok(`"${said}" reaches ${where.includes('rental') ? 'the Sage import' : 'the Protean import'}`,
+    hit?.action.path === where, hit ? `landed on ${hit.action.path}` : 'reached no import');
+}
+
+/* -------------------------------------------------------------
    Notifications.
 
    The bell is the feed. The toggles are a tab on Settings. The words

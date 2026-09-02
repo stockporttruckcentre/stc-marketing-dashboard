@@ -187,11 +187,168 @@ const OPEN_JOBS = [
   ok('an empty file is no slices at all', inBatches([], 500).length === 0);
 }
 
+
+/* =============================================================
+   THE SAGE RENTAL EXPORT.
+
+   From the business:
+
+     it's not accepting the attached file on Revenue which is from SAGE
+     not protean. We can only take rental information from sage.
+
+   It was refused for two reasons at once, and either alone would have
+   done it: different column names, and a byte order mark that the
+   Windows-1252 decode turned into three characters on the front of the
+   first header, so even the columns it did share did not match.
+
+   Every figure below is taken from the real file the business sent.
+   ============================================================= */
+
+const SAGE = [
+  'Document No,Type,Date,Code,Customer Name,Invoiced Net Value,Total Gross Value',
+  '0000007388,Invoice,01/04/2025,BOOKER,Booker,5200.00,6240.00',
+  '0000007369,Invoice,01/04/2025,GOWER,Gower Granary Ltd,411.67,494.00',
+  /* A CREDIT NOTE, written positive, as Sage writes them. */
+  '0000007418,Credit Note,12/05/2025,DAVIESTU,Davies Turner,200.00,240.00',
+  /* The last row of the real file, and the one that proves the date is
+     read day first: there is no month 24. */
+  '0000007982,Invoice,24/08/2026,SUTTLE,Suttle Transport Service Ltd,145.00,174.00',
+].join('\n');
+
+{
+  const read = readProteanExport(SAGE);
+  ok('the Sage export is recognised', read.ok, read.ok ? '' : read.why);
+
+  if (read.ok && read.kind === 'invoices') {
+    ok('every row is usable', read.rows.length === 4 && read.unusable === 0,
+      `${read.rows.length} rows, ${read.unusable} unusable`);
+
+    const booker = read.rows.find((r) => r.alpha === 'BOOKER');
+    ok('the document number is the invoice number', booker?.invoice_no === '0000007388',
+      String(booker?.invoice_no));
+    ok('Code becomes the account', booker?.alpha === 'BOOKER');
+    ok('Customer Name becomes the name', booker?.protean_name === 'Booker');
+    ok('the net is the net', booker?.net === 5200, String(booker?.net));
+    /* Sage has no tax column. Gross less net IS the tax, and 6240 less
+       5200 is 1040, which is twenty per cent. */
+    ok('the tax is worked out from gross and net', booker?.tax === 1040, String(booker?.tax));
+
+    /* DAY FIRST. `01/04/2025` is the first of April, not the fourth of
+       January, and a whole year of figures moves by a quarter if this
+       is wrong, with nothing on any screen to show for it. */
+    ok('01/04/2025 is the first of April', booker?.tax_point === '2025-04-01',
+      String(booker?.tax_point));
+    const last = read.rows.find((r) => r.alpha === 'SUTTLE');
+    ok('24/08/2026 is the twenty fourth of August', last?.tax_point === '2026-08-24',
+      String(last?.tax_point));
+
+    /* A CREDIT NOTE COMES OFF. Sage writes 200.00 positive and puts the
+       sign in the Type column. Taken at face value a credit ADDS to
+       revenue, so it is wrong by twice its own value. */
+    const credit = read.rows.find((r) => r.alpha === 'DAVIESTU');
+    ok('a credit note is negative', credit?.net === -200, String(credit?.net));
+    ok('and so is its gross', credit?.gross === -240, String(credit?.gross));
+    ok('and so is its tax', credit?.tax === -40, String(credit?.tax));
+
+    const total = read.rows.reduce((s, r) => s + Number(r.net ?? 0), 0);
+    ok('the total is the invoices less the credits',
+      Math.round(total * 100) === Math.round((5200 + 411.67 - 200 + 145) * 100), String(total));
+
+    ok('the accounts are found', accountsIn(read).length === 4,
+      String(accountsIn(read).length));
+  }
+}
+
+/* ---- A type nobody has seen yet comes off rather than on ----
+
+   Two types appear in the real file. A third arriving one day and being
+   counted as income by default is the expensive way round to be wrong. */
+{
+  const read = readProteanExport([
+    'Document No,Type,Date,Code,Customer Name,Invoiced Net Value,Total Gross Value',
+    '0000009999,Refund,01/06/2026,BOOKER,Booker,50.00,60.00',
+  ].join('\n'));
+  ok('an unfamiliar document type comes off rather than on',
+    read.ok && read.kind === 'invoices' && read.rows[0]?.net === -50,
+    read.ok && read.kind === 'invoices' ? String(read.rows[0]?.net) : 'not read');
+}
+
+/* ---- The ENCODING, which is the other half of why the file was refused ----
+
+   The Sage export is UTF-8 with a byte order mark. `readFileAsProtean`
+   used to decode every dropped file as Windows-1252, which turns those
+   three bytes into three CHARACTERS rather than into a mark:
+
+     ï»¿Document No
+
+   Papa strips a real U+FEFF and cannot strip that, because it is not a
+   byte order mark any more, it is a company name as far as anything
+   downstream is concerned. So the first column was named something no
+   marker matched, and the file was refused with every column present.
+
+   Asserted from the real bytes rather than from a string with a mark
+   typed into it: a test that prefixes U+FEFF proves nothing, because
+   Papa handles that case and always did. I wrote that test first and it
+   failed, which is how this note exists. */
+{
+  const bytes = new Uint8Array([
+    0xEF, 0xBB, 0xBF,
+    ...Array.from(SAGE).map((c) => c.charCodeAt(0)),
+  ]);
+
+  const asCp1252 = new TextDecoder('windows-1252').decode(bytes);
+  ok('read as Windows-1252, the mark becomes text on the front of the first header',
+    asCp1252.startsWith('ï»¿Document No'), asCp1252.slice(0, 20));
+  ok('and the file is then refused', !readProteanExport(asCp1252).ok,
+    'the mojibake header matched a marker anyway, so this check is not reproducing the fault');
+
+  /* And the rule `readFileAsProtean` follows now. */
+  let asUtf8: string;
+  try {
+    const s = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    asUtf8 = s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s;
+  } catch { asUtf8 = new TextDecoder('windows-1252').decode(bytes); }
+
+  ok('read as UTF-8 with the mark taken off, the same bytes are read',
+    readProteanExport(asUtf8).ok);
+}
+
+/* ---- And a Windows-1252 file with a pound sign in it still reads ----
+
+   That is the whole reason this decoded as cp1252 in the first place.
+   Byte A3 is a pound sign there and is not valid UTF-8 on its own, so
+   the strict decode throws and the fallback is taken. */
+{
+  const line = 'Invoice No,Document No,Customer Ref,Alpha,Customer,Site Name,'
+    + 'Created,Tax Point,Created By,Due,Net(\u00A3),Tax(\u00A3),Gross(\u00A3)';
+  const bytes = new Uint8Array(Array.from(line).map((c) => c.charCodeAt(0)));
+  let out: string;
+  try {
+    out = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch { out = new TextDecoder('windows-1252').decode(bytes); }
+  ok('a lone pound sign byte falls back to Windows-1252 and stays a pound sign',
+    out.includes('Net(\u00A3)'), out.slice(-24));
+}
+
+/* ---- And the two Protean exports still read as themselves ----
+
+   The Sage test runs first in the reader, so a marker set that was too
+   loose would swallow the maintenance invoices. */
+{
+  const inv = readProteanExport(INVOICES);
+  ok('the Protean invoice export is still read as itself',
+    inv.ok && inv.kind === 'invoices' && !!inv.rows[0]?.alpha);
+  const jobs = readProteanExport(OPEN_JOBS);
+  ok('the Protean open jobs export is still read as itself',
+    jobs.ok && jobs.kind === 'open_jobs');
+}
+
 console.log(`\n  ${pass}/${pass + fail} hold.\n`);
 if (fail) {
   console.log('  failures:');
   for (const f of failures) console.log(f);
   process.exit(1);
 }
-console.log('  Both exports are read as themselves, every money column parses, '
-  + 'and a row that will not go in is counted before it is offered.\n');
+console.log('  All three exports are read as themselves, a credit note comes off rather '
+  + 'than on, a slash date is read day first, and a row that will not go in is counted '
+  + 'before it is offered.\n');

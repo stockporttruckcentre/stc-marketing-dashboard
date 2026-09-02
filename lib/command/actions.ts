@@ -1254,7 +1254,7 @@ export const ACTIONS: CommandActionSpec[] = [
      that use the same account code for different companies are two
      screens, and somebody typing "rental revenue" means the rental
      one. */
-  { id: 'nav.rentalRevenue', label: 'S&L Rental revenue',
+  { id: 'nav.rentalRevenue', label: 'S&L revenue',
     blurb: 'What the rental side has invoiced', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/revenue/rental', verbs: GO,
     objects: ['rental revenue', 's&l revenue', 'sl revenue', 'rental invoices',
@@ -1284,13 +1284,21 @@ export const ACTIONS: CommandActionSpec[] = [
               "put this week's invoices in", 'upload the open jobs',
               'load the protean spreadsheet'] },
 
-  { id: 'import.rental', label: 'Import the rental invoices',
-    blurb: 'The S&L Rental invoiced report', kind: 'data',
+  /* SAGE, by name, because that is what somebody will type.
+
+     Rental invoicing is not raised in Protean: "We can only take rental
+     information from sage." Somebody looking for where the Sage export
+     goes types Sage, and until now the only file the bar knew the name
+     of was Protean's, which is the other screen. */
+  { id: 'import.rental', label: 'Import the Sage export',
+    blurb: 'The S&L invoiced report, out of Sage', kind: 'data',
     capability: 'crm.import', path: '/dashboard/revenue/rental?tab=import',
     verbs: ['import', 'upload', 'load', 'bring in', 'put in', 'update', 'sync'],
-    objects: ['rental invoices', 'rental export', 'rental spreadsheet',
-              'the rental report', 's&l invoices', 'rental sales'],
-    phrases: ['import the rental invoices', 'upload the rental export',
+    objects: ['sage export', 'sage', 'sage invoices', 'sage csv', 'sage spreadsheet',
+              'rental invoices', 'rental export', 'rental spreadsheet',
+              'the rental report', 's&l invoices', 's&l export', 'rental sales'],
+    phrases: ['import the sage export', 'upload the sage file',
+              'import the rental invoices', 'upload the rental export',
               'update the rental figures'] },
 ];
 

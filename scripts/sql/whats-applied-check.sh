@@ -42,7 +42,7 @@ export PGHOST=/var/tmp/pgtest
 
 STOP_AT=073_the_permission_hub
 # Every "Migration" cell that must say NO on the database that stops there.
-MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092"
+MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093"
 
 FAILED=0
 say() { printf '  %-6s %s\n' "$1" "$2"; }
@@ -101,6 +101,23 @@ echo "  ------------------------------------------------------------------------
 
 build stcbehind "$STOP_AT"
 BEHIND=$(verdicts stcbehind)
+
+# THE READBACK HAS TO RUN AT ALL ON A DATABASE THAT IS BEHIND.
+#
+# It is the only database it will ever be run on that matters, and it is
+# the one most likely to break it: half the tables the markers name do
+# not exist there yet. Naming one directly makes the whole statement
+# fail to PARSE, and an empty result then reads as "every migration is
+# missing", which passed the two checks below without either of them
+# noticing. That is exactly what happened when a row was added for 093.
+BROWS=$(printf '%s\n' "$BEHIND" | grep -c '|')
+if [ "$BROWS" != "$ROWS" ]; then
+  say FAIL "the readback returned $BROWS rows against a database that is behind, and $ROWS against one that is not"
+  say ""    "an empty result is not 'everything is missing', it is a readback that did not run"
+  FAILED=1
+else
+  say ok "it runs against a database that is behind, and returns every row"
+fi
 
 for m in $MISSING; do
   ANS=$(printf '%s\n' "$BEHIND" | awk -F'|' -v m="$m" '$1 == m { print $2 }')
