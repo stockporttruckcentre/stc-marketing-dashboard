@@ -106,7 +106,8 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     (55, '092',        'Trailer customers reconcile, and can be created', 'make_customer_for_trailer',  'function'),
     /* 093 only renames a row, so the marker is the row itself. Every
        function it could name has existed since 083. */
-    (56, '093',        'The rental division is called S&L',               'S&L',                        'division')
+    (56, '093',        'The rental division is called S&L',               'S&L',                        'division'),
+    (57, '094',        'A group says which question it is answering',     'group_members:p_upto',       'signature')
 )
 SELECT
   e.migration                                AS "Migration",

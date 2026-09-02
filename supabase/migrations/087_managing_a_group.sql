@@ -71,6 +71,13 @@ GRANT EXECUTE ON FUNCTION rename_group(UUID, TEXT) TO authenticated;
 --
 -- Needed to take somebody out, and the screen had no way to ask.
 -- -------------------------------------------------------------
+/* Dropped first because a later migration changes this function's
+   return type, and the catch-up bundle is meant to be safe to run
+   twice. On a second run the LATER shape is live and
+   `CREATE OR REPLACE` cannot change a return type. No-op on a fresh
+   database, the fix on a replay. */
+DROP FUNCTION IF EXISTS group_members(UUID);
+
 CREATE OR REPLACE FUNCTION group_members(p_group UUID)
 RETURNS TABLE (contact_id UUID, company_name TEXT, accounts INTEGER, net NUMERIC)
 LANGUAGE plpgsql

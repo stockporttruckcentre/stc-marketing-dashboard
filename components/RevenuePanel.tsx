@@ -500,8 +500,22 @@ function Groups({ rows, division, onChanged }: {
           />
           <span style={{ fontWeight: 600 }}>{g.group_name}</span>
           <Badge tone="neutral">
-            {g.customers} {g.customers === 1 ? 'customer' : 'customers'} · {g.accounts} accounts
+            {g.customers} {g.customers === 1 ? 'customer' : 'customers'} ·{' '}
+            {g.accounts} {g.accounts === 1 ? 'account' : 'accounts'}
           </Badge>
+          {/* WHERE THE TWO COUNTS DIFFER, SAY SO.
+
+              The row counts members with an account in THIS division.
+              Manage lists the whole group. Both are right and the
+              screen said neither, so a group of two showing as one
+              customer read as a fault. From the business: "the dropdown
+              only shows one, the manage screen shows 2." */}
+          {g.members > g.customers && (
+            <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+              {g.members - g.customers} more in the group,
+              {' '}{g.members - g.customers === 1 ? 'billing' : 'billing'} elsewhere
+            </span>
+          )}
         </span>
       ),
     },
@@ -568,15 +582,37 @@ function Groups({ rows, division, onChanged }: {
                   {l.alpha} · {l.company_name}
                 </span>
               </span>
-              <span style={{ flex: 1.1, minWidth: 100, padding: '0 14px', textAlign: 'right' }}>
-                <Money>{money(l.this_year)}</Money>
-              </span>
-              <span style={{ flex: 1.1, minWidth: 100, padding: '0 14px', textAlign: 'right' }}>
-                <Money quiet>{money(l.last_year)}</Money>
-              </span>
-              <span style={{ flex: 1.2, minWidth: 110, padding: '0 14px', textAlign: 'right' }}>
-                <Change from={Number(l.last_year || 0)} to={Number(l.this_year || 0)} />
-              </span>
+              {/* AN ACCOUNT THAT HAS NEVER BILLED IS NOT A ZERO.
+
+                  It used to render as "£0, £0, level", which reads as a
+                  figure that did not load. From the business: "one of
+                  them has never had any revenue so it technically
+                  doesn't belong in a revenue group yet."
+
+                  It stays on the list, because taking it off would make
+                  the member count and the list disagree, which is the
+                  other half of the same report. It just says what it
+                  is. */}
+              {Number(l.billed_ever) === 0 ? (
+                <span style={{
+                  flex: 3.4, minWidth: 310, padding: '0 14px', textAlign: 'right',
+                  color: 'var(--text-subtle)',
+                }}>
+                  Nothing billed on this account yet
+                </span>
+              ) : (
+                <>
+                  <span style={{ flex: 1.1, minWidth: 100, padding: '0 14px', textAlign: 'right' }}>
+                    <Money>{money(l.this_year)}</Money>
+                  </span>
+                  <span style={{ flex: 1.1, minWidth: 100, padding: '0 14px', textAlign: 'right' }}>
+                    <Money quiet>{money(l.last_year)}</Money>
+                  </span>
+                  <span style={{ flex: 1.2, minWidth: 110, padding: '0 14px', textAlign: 'right' }}>
+                    <Change from={Number(l.last_year || 0)} to={Number(l.this_year || 0)} />
+                  </span>
+                </>
+              )}
               <span style={{ flex: 0.8, minWidth: 84, padding: '0 14px', textAlign: 'right' }}>
                 <Count n={Number(l.open_jobs || 0)} />
               </span>
@@ -781,8 +817,26 @@ function ManageGroup({ group, onClose, onChanged }: {
                 <span style={{ color: 'var(--text-subtle)', marginLeft: 8, fontSize: 11.5 }}>
                   {m.accounts} {m.accounts === 1 ? 'account' : 'accounts'}
                 </span>
+                {/* WHICH DIVISION THEIR MONEY IS IN.
+
+                    This is the line that turns "why is this member not
+                    on the row behind this dialog" into something
+                    readable. A member who bills on S&L is correctly
+                    absent from the STC row, and now says so. */}
+                <span style={{
+                  display: 'block', fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 1,
+                }}>
+                  {m.divisions
+                    ? `Bills on ${m.divisions}`
+                    : 'No Protean account yet, so nothing counts towards a division'}
+                </span>
               </span>
-              <Money quiet>{money(m.net)}</Money>
+              <span style={{ textAlign: 'right' }}>
+                <Money quiet>{money(m.net)}</Money>
+                <span style={{
+                  display: 'block', fontSize: 11, color: 'var(--text-subtle)',
+                }}>all time</span>
+              </span>
               <Button
                 variant="ghost" size="sm" disabled={!!busy}
                 onClick={() => void remove(m)}

@@ -22,6 +22,15 @@ export type YearOnYear = {
   this_year: number;
   last_year: number;
   change: number;
+  /**
+   * Everything this account has ever been invoiced in this division.
+   *
+   * Nought here and nought in `this_year` are different states, and the
+   * screen used to render both as "£0, £0, level", which reads as a
+   * figure that failed to load rather than as a customer who has not
+   * bought anything yet.
+   */
+  billed_ever: number;
   open_jobs: number;
   open_value: number;
   last_billed: string | null;
@@ -43,6 +52,15 @@ export type GroupRevenue = {
   open_jobs: number;
   open_value: number;
   last_billed: string | null;
+  /**
+   * Every member of the group, whatever division they bill in.
+   *
+   * `customers` above counts the ones with an account in the division
+   * being looked at. Where the two differ the screen has to say so:
+   * a row reading "1 customer" beside a dialog listing two is a
+   * contradiction to anybody who has not read the SQL.
+   */
+  members: number;
 };
 
 export type GroupLine = {
@@ -54,6 +72,15 @@ export type GroupLine = {
   this_year: number;
   last_year: number;
   change: number;
+  /**
+   * Everything this account has ever been invoiced in this division.
+   *
+   * Nought here and nought in `this_year` are different states, and the
+   * screen rendered both as "£0, £0, level", which reads as a figure
+   * that failed to load rather than as a customer who has not bought
+   * anything yet.
+   */
+  billed_ever: number;
   open_jobs: number;
   open_value: number;
   last_billed: string | null;
@@ -400,11 +427,20 @@ export type GroupMember = {
   contact_id: string;
   company_name: string;
   accounts: number;
+  /** Everything they have ever been invoiced, across every division. */
   net: number;
+  /** Named, so a member missing from one division's row explains itself. */
+  divisions: string | null;
+  /** And what they have billed in the year being read. */
+  this_year: number;
 };
 
-export async function groupMembers(db: Db, group: string): Promise<GroupMember[]> {
-  const { data, error } = await db.rpc('group_members', { p_group: group });
+export async function groupMembers(
+  db: Db, group: string, upto?: string,
+): Promise<GroupMember[]> {
+  const { data, error } = await db.rpc('group_members', {
+    p_group: group, p_upto: upto ?? null,
+  });
   if (error) throw readable(error);
   return rows<GroupMember>(data);
 }
