@@ -183,6 +183,50 @@ export async function reconciliation(db: Db, upto?: string): Promise<Reconciliat
   return rows<Reconciliation>(data);
 }
 
+/**
+ * The trailer customers with nobody behind them.
+ *
+ * The equivalent of the Protean moderation queue, for the division that
+ * has never had one. `stock_trailers.customer` is free text, so a
+ * trailer sale sits in exactly the same state an unplaced Protean
+ * account does: real revenue, on no customer's page.
+ */
+export type TrailerWaiting = {
+  customer: string;
+  trailers: number;
+  value: number;
+  last_sold: string | null;
+  /** A CRM record spelled almost the same. A suggestion, never applied. */
+  looks_like: string | null;
+  looks_like_name: string | null;
+};
+
+export async function trailerCustomersWaiting(db: Db, upto?: string): Promise<TrailerWaiting[]> {
+  const { data, error } = await db.rpc('trailer_customers_waiting', { p_upto: upto ?? null });
+  if (error) throw readable(error);
+  return rows<TrailerWaiting>(data);
+}
+
+/**
+ * Make the record, and move every trailer that name ever bought onto it.
+ *
+ * From the business: "customers should exist if they don't already have
+ * a CRM record".
+ *
+ * `contact` binds to a record that already exists, which is the answer
+ * where the suggestion above was right. Without it the name is matched
+ * exactly first, so pressing twice cannot make a second Dawson.
+ */
+export async function makeCustomerForTrailer(
+  db: Db, name: string, contact?: string | null,
+): Promise<string> {
+  const { data, error } = await db.rpc('make_customer_for_trailer', {
+    p_name: name, p_contact: contact ?? null,
+  });
+  if (error) throw readable(error);
+  return data as string;
+}
+
 /* -------------------------------------------------------------
    The stage names, in the words the tracker already uses.
    ------------------------------------------------------------- */
@@ -206,39 +250,19 @@ export const STAGE_LABEL: Record<string, string> = {
 export const OPEN_STAGES = new Set(['lead', 'contacted', 'quoted', 'won']);
 
 /* -------------------------------------------------------------
-   The seven views, and the two bits of month arithmetic behind the
-   table on the first one.
+   The month arithmetic behind the chart.
 
-   Here rather than in the component because they are the parts that
-   can be wrong without looking wrong. A month table that quietly
-   starts in January on an April year is a correct looking table of the
-   wrong months, and nobody reading it in a meeting would catch it.
+   Here rather than in the component because these are the parts that
+   can be wrong without looking wrong. A chart that quietly starts in
+   January on an April year is a correct looking chart of the wrong
+   months, and nobody reading it in a meeting would catch it.
+
+   The seven `?view=` names that used to live here went with the tabs.
+   Everything they held is in the division column it belongs to now.
    ------------------------------------------------------------- */
-
-export type AnalyticsView =
-  'overview' | 'deals' | 'people' | 'pipeline' | 'customers' | 'work' | 'reconcile';
-
-export const VIEWS: { key: AnalyticsView; label: string }[] = [
-  { key: 'overview', label: 'Month by month' },
-  { key: 'deals', label: 'Trailer deals' },
-  { key: 'people', label: 'Who is selling' },
-  { key: 'pipeline', label: 'What is coming' },
-  { key: 'customers', label: 'Customers' },
-  { key: 'work', label: 'Open work' },
-  { key: 'reconcile', label: 'Reconciliation' },
-];
-
-/** `?view=deals` from the command bar, and anything else is the overview. */
-export function viewFrom(said: string | null | undefined): AnalyticsView {
-  return VIEWS.some((v) => v.key === said) ? (said as AnalyticsView) : 'overview';
-}
 
 /**
  * Which of the months on hand belong to the year being read.
- *
- * The chart carries two years so the comparison is visible. The table
- * carries one, because a table somebody reads out loud in a meeting is
- * twice as long and half as useful with last year interleaved.
  *
  * The year began at the LAST month in the range whose month number is
  * the financial year's start. The range always ends in the month being

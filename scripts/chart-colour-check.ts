@@ -34,8 +34,18 @@
 import { readFileSync } from 'node:fs';
 
 const TOKENS = readFileSync('app/kit-tokens.css', 'utf8');
-const CHART = readFileSync('components/analytics/chart.tsx', 'utf8');
-const HUB = readFileSync('components/AnalyticsHub.tsx', 'utf8');
+/* Every file that draws data, not a hand written list of two. The list
+   went stale the moment the screen was rebuilt: `monthly.tsx` and
+   `sections.tsx` did not exist when this was written, and the check
+   carried on passing without looking at either. */
+const DRAWERS = [
+  'components/analytics/chart.tsx',
+  'components/analytics/monthly.tsx',
+  'components/analytics/sections.tsx',
+  'components/AnalyticsHub.tsx',
+].map((path) => [path, readFileSync(path, 'utf8')] as const);
+
+const ALL = DRAWERS.map(([, src]) => src).join('\n');
 
 /** The tokens a chart is allowed to fill with. */
 const WANTED = [
@@ -94,26 +104,63 @@ for (const name of WANTED) {
 }
 if (!failed) ok(`all ${WANTED.length} chart tokens are defined in both themes`);
 
-/* ---- 2. Charts do not borrow action or text colours ---- */
-const FORBIDDEN = ['--primary', '--accent', '--text', '--text-muted', '--surface-inverse'];
-/* Both shapes a fill is written in: the prop on a chart, and the entry
-   in the HUE map that says which colour a division is. The narrower
-   pattern only saw the prop, which is half the fills on the screen and
-   the wrong half: the three division colours are the ones somebody is
-   most likely to reach for an action token for. */
+/* ---- 2. A SERIES is not an action colour ----
+
+   The distinction this check got wrong on its first pass at the
+   rewritten screen: it flagged `--text` on the hover marker and
+   `--text-subtle` on the last year line, both of which are correct.
+   Those are CHROME. An axis, a gridline, the rule under the pointer and
+   the dashed comparison line are all meant to follow the text colour,
+   and they are meant to invert with the theme, because they are read
+   against the card like text is.
+
+   What must never invert is the colour that IDENTIFIES a series. Navy
+   in light and white in dark is a fine button and a nonsense identity,
+   and drawn at two hundred pixels tall it is the blinding chart this
+   file is named after.
+
+   So the rule is narrower and exactly right: the division colours come
+   from the chart ramp and nowhere else, and no shape anywhere reaches
+   for an action token. */
+const NEVER = ['--primary', '--accent', '--accent-hover', '--surface-inverse'];
+
 const fills = [
-  ...HUB.matchAll(/colour[=:]\s*['"]var\((--[a-z0-9-]+)/g),
-  ...HUB.matchAll(/^\s*(?:stc|trailer|rental):\s*'var\((--[a-z0-9-]+)/gm),
+  ...ALL.matchAll(/(?:colour|color)\s*[=:]\s*\{?\s*['"`]var\((--[a-z0-9-]+)/g),
+  ...ALL.matchAll(/(?:fill|stroke)\s*=\s*["{]\s*["']?var\((--[a-z0-9-]+)/g),
+  ...ALL.matchAll(/background:\s*['"`]?var\((--[a-z0-9-]+)/g),
 ].map((m) => m[1]!);
-if (fills.length < 4) {
-  bad('the fills could not be found', `only ${fills.length} matched, so this check is not looking at the screen`);
+
+if (fills.length < 10) {
+  bad('the fills could not be found',
+    `only ${fills.length} matched across ${DRAWERS.length} files, so this check is not `
+    + 'looking at the screen. That is the failure mode this line exists for: a rewrite '
+    + 'moves the drawing somewhere the pattern does not reach and the check goes quiet.');
 }
-const borrowed = fills.filter((f) => FORBIDDEN.includes(f));
+
+const borrowed = fills.filter((f) => NEVER.includes(f));
 if (borrowed.length) {
-  bad('a chart is filled with an action colour',
-    `${[...new Set(borrowed)].join(', ')}. Those invert between themes; a series must not.`);
+  bad('a drawn shape is filled with an action colour',
+    `${[...new Set(borrowed)].join(', ')}. Those are buttons, and they invert between themes.`);
 } else {
-  ok(`${fills.length} chart fills, none of them an action or text colour`);
+  ok(`${fills.length} drawn fills across ${DRAWERS.length} files, none an action colour`);
+}
+
+/* THE DIVISION IDENTITIES, specifically. Every HUE map on the screen,
+   wherever it was copied to, has to name a chart token. */
+{
+  const maps = [...ALL.matchAll(/^\s*(?:stc|trailer|rental):\s*'var\((--[a-z0-9-]+)\)/gm)]
+    .map((m) => m[1]!);
+  if (maps.length < 3) {
+    bad('the division colours could not be found',
+      `${maps.length} matched, and there are three divisions`);
+  }
+  const off = maps.filter((c) => !c.startsWith('--chart-'));
+  if (off.length) {
+    bad('a division is coloured from outside the chart ramp',
+      `${[...new Set(off)].join(', ')}`);
+  } else {
+    ok(`${maps.length} division colours, every one from the chart ramp`);
+  }
 }
 
 /* ---- 3. Nowhere near white, nowhere near black ---- */
@@ -150,14 +197,21 @@ for (const theme of ['light', 'dark'] as const) {
 }
 ok('every chart colour reads against the card of its own theme');
 
-/* ---- 5. No raw hex in the chart components ---- */
-for (const [file, src] of [['chart.tsx', CHART], ['AnalyticsHub.tsx', HUB]] as const) {
-  const hexes = [...src.matchAll(/#[0-9A-Fa-f]{6}\b/g)].map((m) => m[0]);
+/* ---- 5. No raw hex in anything that draws ----
+
+   `#fff` on the split strip is the one exception and is written as
+   such: it is text ON a division's own colour, and every one of those
+   is dark enough to need white on it in both themes. A token would be
+   wrong there, because the surface it sits on is a data colour rather
+   than a themed one. */
+for (const [file, src] of DRAWERS) {
+  const hexes = [...src.matchAll(/#[0-9A-Fa-f]{3,8}\b/g)]
+    .map((m) => m[0]).filter((h) => h.toLowerCase() !== '#fff');
   if (hexes.length) {
     bad(`${file} holds a raw hex`, `${[...new Set(hexes)].join(', ')}. The kit takes tokens only.`);
   }
 }
-if (!failed) ok('no raw hex in either chart component');
+if (!failed) ok(`no raw hex across ${DRAWERS.length} files that draw`);
 
 console.log(
   failed === 0

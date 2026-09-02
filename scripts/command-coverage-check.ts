@@ -1234,72 +1234,44 @@ ok('a viewer can still see what is next',
   suggestActions('what is next', CAPS.viewer, 8).some((h) => h.action.id === 'cal.next'));
 
 /* -------------------------------------------------------------
-   Analytics, which is seven views and used to be one.
+   Analytics, and the words it has to answer to.
 
-   ---- Why this block exists ----
+   ---- Why the target is no longer asserted, and what replaced it ----
 
-   Eleven entries used to point at `/dashboard/analytics?period=30d`
-   and its five siblings, plus a rep filter, a stock donut and a
-   manufacturer chart. Nothing on the page has read `period` for months.
-   Every one of those actions was offered, accepted, navigated, and did
-   nothing, and no check noticed because the ONLY thing being asserted
-   was that a phrase reached SOME action.
+   Eleven actions used to point at `/dashboard/analytics?period=30d` and
+   its siblings. Nothing had read `period` for months, so every one of
+   them was offered, accepted, navigated, and did nothing.
 
-   So this asserts the target as well as the reach. A sentence about
-   deals has to land on the deals view, not merely on the screen the
-   deals view happens to sit behind.
+   I replaced them with seven `?view=` targets and asserted those. They
+   lasted one commit: the tabs behind them went, because "people miss
+   tabs", and everything they held moved into the division column it
+   belongs to.
+
+   Twice now the specific target has been the thing that rotted. So what
+   is asserted is the rule that survives both: an analytics action
+   carries NO query string, because the page has no addressable states
+   left, and every phrase somebody would type still reaches the screen.
    ------------------------------------------------------------- */
-for (const [said, view] of [
-  ['the deals', 'deals'],
-  ['what trailers have we sold', 'deals'],
-  ['individual deals', 'deals'],
-  ['deal review', 'deals'],
-  ['average deal size', 'deals'],
-  ['who is selling', 'people'],
-  ['leaderboard', 'people'],
-  ['who has sold the most', 'people'],
-  ['commission', 'people'],
-  ['what is coming', 'pipeline'],
-  ['pipeline funnel', 'pipeline'],
-  ['pipeline value', 'pipeline'],
-  ['who has moved', 'customers'],
-  ['who is spending less', 'customers'],
-  ['customers to chase', 'customers'],
-  ['top customers', 'customers'],
-  ['customer concentration', 'customers'],
-  ['work in progress', 'work'],
-  ['how old the open work is', 'work'],
-  ['jobs over 90 days', 'work'],
-  ['reconciliation', 'reconcile'],
-  ['unattributed revenue', 'reconcile'],
-  ['why does the total not match the customers', 'reconcile'],
-  ['month by month', 'overview'],
-  ['monthly trend', 'overview'],
-] as [string, string][]) {
+for (const said of [
+  'the deals', 'what trailers have we sold', 'individual deals', 'deal review',
+  'average deal size', 'who is selling', 'leaderboard', 'who has sold the most',
+  'commission', 'what is coming', 'pipeline funnel', 'pipeline value',
+  'who has moved', 'who is spending less', 'customers to chase', 'top customers',
+  'customer concentration', 'work in progress', 'how old the open work is',
+  'jobs over 90 days', 'reconciliation', 'unattributed revenue',
+  'why does the total not match the customers', 'month by month', 'monthly trend',
+  'how are we doing', 'as at date',
+]) {
   const hit = suggestActions(said, CAPS.admin, 8)
     .find((h) => h.action.path?.startsWith('/dashboard/analytics') ?? false);
-  ok(`"${said}" reaches the ${view} view`,
-    hit?.action.path === `/dashboard/analytics?view=${view}`,
-    hit ? `landed on ${hit.action.path}` : 'reached no analytics action at all');
+  ok(`"${said}" reaches Analytics`, !!hit, 'reached no analytics action at all');
 }
 
-/* NOTHING STILL POINTS AT A PERIOD THE PAGE CANNOT READ.
-
-   The specific defect, asserted as a rule rather than as eleven
-   deletions, so it cannot come back the next time somebody adds a
-   filter to this screen and an action for it. */
 {
-  const stale = ACTIONS.filter((a) => a.path?.includes('/dashboard/analytics')
-    && a.path.includes('period='));
-  ok('no analytics action navigates to a period the screen does not read',
+  const stale = ACTIONS.filter((a) => a.path?.startsWith('/dashboard/analytics')
+    && a.path.includes('?'));
+  ok('no analytics action carries a query the screen does not read',
     stale.length === 0, stale.map((a) => `${a.id} -> ${a.path}`).join(', '));
-
-  /* And every view the page has is reachable by somebody typing. A view
-     nobody can ask for is a view nobody will find. */
-  for (const view of ['overview', 'deals', 'people', 'pipeline', 'customers', 'work', 'reconcile']) {
-    ok(`the ${view} view has an action pointing at it`,
-      ACTIONS.some((a) => a.path === `/dashboard/analytics?view=${view}`));
-  }
 }
 
 /* -------------------------------------------------------------

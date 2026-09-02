@@ -468,6 +468,141 @@ BEGIN
 END $$;
 
 -- -------------------------------------------------------------
+-- 7b. AND TRAILER SALES IS ON IT.
+--
+-- From the business: "Unsure why trailer sales isn't on reconciliation
+-- tab - you've put that it doesn't get included but why."
+--
+-- No good reason. `stock_trailers.customer` is free text, so a trailer
+-- sale sits in exactly the same state an unplaced Protean account does:
+-- real revenue, on no customer's page. Leaving it off meant the screen
+-- whose whole job is naming that gap was silent about a third of the
+-- company.
+-- -------------------------------------------------------------
+DO $$
+DECLARE r RECORD; expect NUMERIC; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('b0000000-0000-0000-0000-000000000001');
+
+  SELECT * INTO r FROM division_reconciliation('2026-08-01') WHERE division = 'trailer';
+  IF r IS NULL THEN
+    RAISE EXCEPTION 'trailer sales is not on the reconciliation at all';
+  END IF;
+
+  /* The same rule as the other two: the parts add to the whole. */
+  IF r.on_customers + r.unattributed + r.set_aside <> r.billed THEN
+    RAISE EXCEPTION 'trailer: customers % + unplaced % + aside % <> billed %',
+      r.on_customers, r.unattributed, r.set_aside, r.billed;
+  END IF;
+
+  /* And the whole is what the Trailer Sales column says. */
+  SELECT this_year INTO expect FROM division_revenue('2026-08-01') WHERE division = 'trailer';
+  IF r.billed <> expect THEN
+    RAISE EXCEPTION 'trailer reconciliation says % and the column says %', r.billed, expect;
+  END IF;
+
+  /* Nothing is set aside on the stock list. Nought, not null: there is
+     no Cash Sale equivalent and saying so is different from not
+     knowing. */
+  IF r.set_aside <> 0 OR r.set_aside_n <> 0 THEN
+    RAISE EXCEPTION 'the stock list has no set aside accounts and reports % at %',
+      r.set_aside_n, r.set_aside;
+  END IF;
+
+  /* THE GAP IS COUNTED IN CUSTOMERS, NOT TRAILERS.
+
+     STC904 and the unnamed one below both belong to Newstart, who is
+     linked. The one that is NOT linked is 'Nowhere Transport', which
+     bought two trailers. Counting trailers would say two jobs to do
+     where there is one record to make. */
+  INSERT INTO stock_trailers (id, status, stc_no, make, customer, sales_price, profit,
+                              nbv, total_nbv, order_date, dispatch_date)
+  VALUES ('b2000000-0000-0000-0000-00000000000a', 'sold', 'STC910', 'Krone',
+          'Nowhere Transport Ltd', 11000, 1000, 9000, 10000, '2026-06-01', '2026-06-02'),
+         ('b2000000-0000-0000-0000-00000000000b', 'sold', 'STC911', 'Krone',
+          'Nowhere Transport Ltd',  9000,  900, 7000,  8000, '2026-06-05', '2026-06-06')
+  ON CONFLICT (id) DO NOTHING;
+
+  SELECT * INTO r FROM division_reconciliation('2026-08-01') WHERE division = 'trailer';
+  IF r.unattributed_n <> 1 THEN
+    RAISE EXCEPTION 'two trailers to one unlinked haulier count as % records to make, not 1',
+      r.unattributed_n;
+  END IF;
+  IF r.unattributed <> 20000 THEN
+    RAISE EXCEPTION 'the unlinked trailer money reads %, not 20000', r.unattributed;
+  END IF;
+
+  RAISE NOTICE 'ok  trailer sales reconciles too, and the gap is counted in customers';
+END $$;
+
+-- -------------------------------------------------------------
+-- 7c. AND SOMETHING CAN BE DONE ABOUT IT.
+--
+-- From the business: "customers should exist if they don't already
+-- have a CRM record".
+-- -------------------------------------------------------------
+DO $$
+DECLARE w RECORD; made UUID; n INTEGER; r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('b0000000-0000-0000-0000-000000000001');
+
+  SELECT * INTO w FROM trailer_customers_waiting('2026-08-01')
+   WHERE customer = 'Nowhere Transport Ltd';
+  IF w IS NULL THEN
+    RAISE EXCEPTION 'the unlinked haulier is not in the queue';
+  END IF;
+  IF w.trailers <> 2 OR w.value <> 20000 THEN
+    RAISE EXCEPTION 'the queue says % trailers at %, not 2 at 20000', w.trailers, w.value;
+  END IF;
+  /* Nobody in the CRM is spelled like that, so nothing is suggested. */
+  IF w.looks_like IS NOT NULL THEN
+    RAISE EXCEPTION 'a customer nobody resembles was matched to %', w.looks_like_name;
+  END IF;
+
+  made := make_customer_for_trailer('Nowhere Transport Ltd');
+  IF made IS NULL THEN RAISE EXCEPTION 'making the customer returned nothing'; END IF;
+
+  /* Both trailers moved onto it, not just one. */
+  SELECT count(*) INTO n FROM stock_trailers
+   WHERE contact_id = made AND status = 'sold';
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'the new record picked up % trailers, not 2', n;
+  END IF;
+
+  /* And the gap it was counted in has closed by exactly that much. */
+  SELECT * INTO r FROM division_reconciliation('2026-08-01') WHERE division = 'trailer';
+  IF r.unattributed <> 0 OR r.unattributed_n <> 0 THEN
+    RAISE EXCEPTION 'after making the record, % is still unattributed across %',
+      r.unattributed, r.unattributed_n;
+  END IF;
+  IF r.on_customers <> r.billed THEN
+    RAISE EXCEPTION 'every trailer is now on a customer and the two figures differ: % vs %',
+      r.on_customers, r.billed;
+  END IF;
+
+  /* PRESSING IT TWICE MAKES ONE COMPANY, NOT TWO. */
+  IF make_customer_for_trailer('Nowhere Transport Ltd') <> made THEN
+    RAISE EXCEPTION 'doing it again made a second record for the same haulier';
+  END IF;
+  SELECT count(*) INTO n FROM crm_contacts
+   WHERE lower(btrim(company_name)) = 'nowhere transport ltd';
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'there are now % records for that haulier', n;
+  END IF;
+
+  /* A blank name is refused rather than making a company called
+     nothing. */
+  BEGIN
+    PERFORM make_customer_for_trailer('   ');
+    RAISE EXCEPTION 'a customer with no name was created';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'a customer with no name was created' THEN RAISE; END IF;
+  END;
+
+  RAISE NOTICE 'ok  a trailer customer can be made, picks up every trailer, and cannot be doubled';
+END $$;
+
+-- -------------------------------------------------------------
 -- 8. THE YEAR BOUNDARY, one day either side.
 --
 -- 99999 on 31 March and 1 on 1 April. If a single figure here moves,

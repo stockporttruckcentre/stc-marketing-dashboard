@@ -20,15 +20,16 @@
                         row is wrong by a whole year, in a column headed
                         "Same month last year".
 
-   And the view names, because `?view=` is what the command bar
-   navigates to. A name that drifts between the two files is an action
-   that lands on the overview whatever somebody typed, which is the
-   exact defect that made this rewrite necessary.
+   The `?view=` names that used to be asserted here are gone with the
+   tabs. From the business: "Not keen on tabs here, people miss tabs."
+   Everything behind them is in the division column it belongs to now,
+   so there is no view to name and nothing for an action to land on
+   beyond the page itself. What replaces that assertion is the one
+   below: no command bar action may still point at a `?view=` that no
+   longer exists.
    ============================================================= */
 
-import {
-  VIEWS, monthsOfTheYear, sameMonthLastYear, viewFrom,
-} from '../lib/protean/finance';
+import { monthsOfTheYear, sameMonthLastYear } from '../lib/protean/finance';
 
 let failed = 0;
 const ok = (what: string, cond: boolean, why = '') => {
@@ -137,35 +138,30 @@ for (const [month, want] of [
     `got ${sameMonthLastYear(month)}`);
 }
 
-console.log('\n  The views\n  ---------');
+console.log('\n  The command bar\n  ---------------');
 
-ok('there are seven views', VIEWS.length === 7, `${VIEWS.length} declared`);
-for (const v of VIEWS) {
-  ok(`?view=${v.key} resolves to itself`, viewFrom(v.key) === v.key);
-}
-/* Anything else is the overview rather than a blank screen. The command
-   bar is not the only thing that puts a URL in front of this page:
-   somebody's bookmark from before the rename is the commoner case. */
-for (const junk of [null, undefined, '', 'leaderboard', 'period=30d', 'DEALS', '../etc']) {
-  ok(`"${String(junk)}" falls back to the overview`, viewFrom(junk) === 'overview');
-}
+/* NOTHING POINTS AT A SCREEN THAT NO LONGER EXISTS.
 
-/* AND THE ACTIONS AGREE WITH THE PAGE.
+   Two rounds of this now. First eleven actions navigated to
+   `?period=30d` and its siblings, which nothing had read for months.
+   Then seven pointed at `?view=deals` and the rest, which existed for
+   one commit and went with the tabs.
 
-   `command-coverage-check` asserts that each view has an action
-   pointing at it. This asserts the other direction: no action points at
-   a view the page does not have. Together they are the pair that would
-   have caught six actions navigating to `?period=30d` for months. */
+   Both times the action was offered, accepted, navigated, and did
+   nothing. So the rule is asserted rather than the list: an analytics
+   action may carry no query string at all, because the page has no
+   states left to address. */
 {
   const actions = require('../lib/command/actions') as
     { ACTIONS: { id: string; path?: string }[] };
-  const named = actions.ACTIONS
-    .filter((a) => a.path?.startsWith('/dashboard/analytics?view='))
-    .map((a) => ({ id: a.id, view: a.path!.split('view=')[1]! }));
-  const strays = named.filter((n) => !VIEWS.some((v) => v.key === n.view));
-  ok('no command bar action points at a view the page does not have',
-    strays.length === 0, strays.map((s) => `${s.id} -> ${s.view}`).join(', '));
-  ok('actions exist for the views', named.length >= 6, `${named.length} found`);
+  const withQuery = actions.ACTIONS
+    .filter((a) => a.path?.startsWith('/dashboard/analytics') && a.path.includes('?'));
+  ok('no analytics action navigates to a query the screen does not read',
+    withQuery.length === 0,
+    withQuery.map((a) => `${a.id} -> ${a.path}`).join(', '));
+
+  const plain = actions.ACTIONS.filter((a) => a.path === '/dashboard/analytics');
+  ok('and the screen is still reachable', plain.length > 0);
 }
 
 console.log(
