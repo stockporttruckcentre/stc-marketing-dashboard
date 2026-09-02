@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Plus, CircleSlash, Loader, Search, Link2,
+  Check, Plus, CircleSlash, Loader, Search, Link2, Wrench,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -13,7 +13,8 @@ import { useToast } from '@/components/kit/toast';
 import { decide, type Verdict, type CrmCustomer } from '@/lib/protean/customers';
 import {
   waitingOnUs, bindAccount, makeCustomer, setAside,
-  type Waiting, type Division, type DivisionFilter,
+  jobsWithoutAccount, placeOpenWork, makeCustomerForWork,
+  type Waiting, type Division, type DivisionFilter, type OrphanJobs,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -67,17 +68,25 @@ export function ModeratePanel({ division, onChanged }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [picking, setPicking] = useState<Decision | null>(null);
+  /* Work with no account at all. A separate list because it is a
+     different question: the queue above asks which ACCOUNTS need a
+     customer, and this asks which WORK does. Answering only the first
+     is why SAF Holland was invisible on a screen showing its jobs. */
+  const [orphans, setOrphans] = useState<OrphanJobs[]>([]);
+  const [pickingWork, setPickingWork] = useState<OrphanJobs | null>(null);
   const [aside, setAsideFor] = useState<Decision | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [queue, contacts] = await Promise.all([
+      const [queue, contacts, unplaced] = await Promise.all([
         waitingOnUs(supabase, division),
         supabase.from('crm_contacts').select('id, company_name').order('company_name'),
+        jobsWithoutAccount(supabase, division),
       ]);
       setWaiting(queue);
       setCrm((contacts.data ?? []) as CrmCustomer[]);
+      setOrphans(unplaced);
     } catch (e) {
       say({ tone: 'danger', title: e instanceof Error ? e.message : 'The queue would not load.' });
     } finally {
@@ -142,7 +151,19 @@ export function ModeratePanel({ division, onChanged }: {
     return <Card><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the queue.</span></Card>;
   }
 
-  const nothingWaiting = !decisions.length;
+  const placeWork = async (o: OrphanJobs, contact: string | null, name: string) => {
+    setBusy(`work:${o.protean_name}`);
+    try {
+      if (contact) await placeOpenWork(supabase, o.division, o.protean_name, contact);
+      else await makeCustomerForWork(supabase, o.division, o.protean_name);
+      say({ tone: 'success', title: `${o.jobs} ${o.jobs === 1 ? 'job is' : 'jobs are'} now ${name}.` });
+      await after();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setBusy(null); }
+  };
+
+  const nothingWaiting = !decisions.length && !orphans.length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -266,6 +287,68 @@ export function ModeratePanel({ division, onChanged }: {
         </Card>
       )}
 
+      {orphans.length > 0 && (
+        <Card>
+          <SectionHead
+            title="Work with no account"
+            hint="Open on the system, and never invoiced since the export began, so no account was ever made."
+          />
+          <Alert tone="info">
+            Accounts come from the invoice file, which is the only export carrying a code. These
+            companies have work on the ramps and no invoice in the range, so they could not appear
+            above. Placing them puts the work on a customer record now, and an invoice arriving
+            later takes it over cleanly.
+          </Alert>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {orphans.map((o) => (
+              <div key={`${o.division}:${o.protean_name}`} style={{
+                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                borderBottom: '1px solid var(--border)', paddingBottom: 8,
+              }}>
+                <Wrench size={14} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{
+                    fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14, color: 'var(--text)',
+                  }}>{o.protean_name}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 3 }}>
+                    {o.jobs} {o.jobs === 1 ? 'job' : 'jobs'} open
+                    {o.oldest ? `, oldest since ${o.oldest}` : ''}
+                  </div>
+                </div>
+                <div style={{
+                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 16,
+                  color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                }}>{money(o.value)}</div>
+                <Button variant="primary" size="sm" disabled={!!busy}
+                  onClick={() => void placeWork(o, null, o.protean_name)}>
+                  {busy === `work:${o.protean_name}`
+                    ? <Loader size={13} className="spin" /> : <Plus size={13} />}
+                  Add to the CRM
+                </Button>
+                <Button variant="ghost" size="sm" disabled={!!busy}
+                  onClick={() => setPickingWork(o)}>
+                  <Search size={13} />
+                  Pick a customer
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {pickingWork && (
+        <PickForWork
+          work={pickingWork}
+          crm={crm}
+          onClose={() => setPickingWork(null)}
+          onPick={(c) => {
+            const o = pickingWork;
+            setPickingWork(null);
+            void placeWork(o, c.id, c.company_name);
+          }}
+        />
+      )}
+
       {/* Group suggestions used to sit here and were worked out from
           this queue, which holds only the accounts nobody has placed.
           So they vanished at the moment they became usable: place the
@@ -333,9 +416,50 @@ function Row({ row, children }: { row: Waiting; children?: React.ReactNode }) {
   );
 }
 
+/** Who this open work is for. */
+function PickForWork({ work, crm, onPick, onClose }: {
+  work: OrphanJobs;
+  crm: CrmCustomer[];
+  onPick: (c: CrmCustomer) => void;
+  onClose: () => void;
+}) {
+  return (
+    <PickAnybody
+      title={`Whose work is ${work.protean_name}?`}
+      note={`${work.jobs} ${work.jobs === 1 ? 'job' : 'jobs'} worth ${money(work.value)}.`}
+      crm={crm}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  );
+}
+
 /** Any customer in the CRM, found by typing. */
 function PickCustomer({ decision, crm, onPick, onClose }: {
   decision: Decision;
+  crm: CrmCustomer[];
+  onPick: (c: CrmCustomer) => void;
+  onClose: () => void;
+}) {
+  return (
+    <PickAnybody
+      title={`Who is ${decision.row.protean_name}?`}
+      crm={crm}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  );
+}
+
+/**
+ * The picker itself, once.
+ *
+ * Two of these grew separately when open work needed one too, and two
+ * search boxes over one list is two behaviours that drift.
+ */
+function PickAnybody({ title, note, crm, onPick, onClose }: {
+  title: string;
+  note?: string;
   crm: CrmCustomer[];
   onPick: (c: CrmCustomer) => void;
   onClose: () => void;
@@ -349,7 +473,8 @@ function PickCustomer({ decision, crm, onPick, onClose }: {
 
   return (
     <Modal
-      title={`Who is ${decision.row.protean_name}?`}
+      title={title}
+      description={note}
       onClose={onClose}
       footer={<Button variant="ghost" onClick={onClose}>Leave it waiting</Button>}
     >

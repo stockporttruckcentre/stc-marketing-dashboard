@@ -41,7 +41,14 @@ export type ScreenState = {
   customers: number;
   groups: number;
   openJobs: number;
-  /** Protean accounts with nobody on them yet. */
+  /**
+   * Accounts with nobody on them, PLUS work with no account at all.
+   *
+   * Two different questions and one badge, because the person reading
+   * it wants to know whether there is anything to do. Counting only the
+   * first is why a screen showing SAF Holland's jobs said nothing was
+   * waiting.
+   */
   waiting: number;
   mayImport: boolean;
 };

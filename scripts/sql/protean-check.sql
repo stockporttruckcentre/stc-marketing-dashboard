@@ -900,4 +900,140 @@ BEGIN
   RAISE NOTICE 'ok  a rental snapshot closes rental work and leaves the maintenance workshop alone';
 END $$;
 
+-- -------------------------------------------------------------
+-- 15. OPEN WORK FOR A CUSTOMER WE HAVE NOT INVOICED.
+--
+--   some customers say no account but they're not on the accounts tab
+--   to be imported to the crm, saf holland being one of them
+--
+-- Right. Accounts come from the invoice file, so a company with work on
+-- the ramps and no invoice since the export began never got one, and a
+-- queue that lists accounts could never show them. On the real export
+-- that is four companies and £24,627 of work no record could see.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; saf UUID; r RECORD; n INTEGER; placed INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+
+  i := protean_start_import('open_jobs', 'jobs.csv', 'stc');
+  PERFORM protean_take_open_jobs(i, '[
+    {"job_no":"SAF1","protean_name":"SAF Holland","job_total":"120","logged_on":"2026-05-01"},
+    {"job_no":"SAF2","protean_name":"SAF Holland","job_total":"80","logged_on":"2026-05-02"}
+  ]'::JSONB);
+  PERFORM protean_relink_jobs();
+
+  /* Nothing to place on the accounts queue, because there is no
+     account. This is the bug, stated. */
+  IF EXISTS (SELECT 1 FROM protean_to_moderate('stc') WHERE protean_name = 'SAF Holland') THEN
+    RAISE EXCEPTION 'SAF Holland has an account after all, so this proves nothing';
+  END IF;
+
+  /* But the WORK is offered. */
+  SELECT * INTO r FROM protean_jobs_without_account('stc') WHERE protean_name = 'SAF Holland';
+  IF r.jobs <> 2 OR r.value <> 200 THEN
+    RAISE EXCEPTION 'the unplaced work reads % jobs worth %, not 2 and 200', r.jobs, r.value;
+  END IF;
+  IF r.oldest <> '2026-05-01' THEN
+    RAISE EXCEPTION 'the oldest unplaced job is %, not 1 May', r.oldest;
+  END IF;
+
+  /* Placing it makes the record and moves the work onto it. */
+  saf := protean_make_customer_for_work('stc', 'SAF Holland');
+  SELECT count(*) INTO n FROM protean_jobs_without_account('stc')
+   WHERE protean_name = 'SAF Holland';
+  IF n <> 0 THEN RAISE EXCEPTION 'it is still waiting after being placed'; END IF;
+
+  /* THE POINT: the customer record can now see the work. Before this,
+     a customer with no account fell through to the "nothing billed"
+     row and reported no open work either. */
+  SELECT * INTO r FROM protean_customer(saf, '2026-06-01');
+  IF r.open_jobs <> 2 OR r.open_value <> 200 THEN
+    RAISE EXCEPTION 'the SAF Holland record shows % jobs worth %, not 2 and 200',
+      r.open_jobs, r.open_value;
+  END IF;
+  IF r.this_year <> 0 THEN
+    RAISE EXCEPTION 'a customer we have never invoiced shows % billed', r.this_year;
+  END IF;
+
+  /* And they appear in the customer table, which is what analytics
+     reads. Zero revenue and two jobs is the honest answer. */
+  SELECT count(*) INTO n FROM protean_year_on_year('2026-06-01', 'stc')
+   WHERE contact_id = saf;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'a customer with open work and no revenue is missing from the table';
+  END IF;
+
+  RAISE NOTICE 'ok  work for a company we have never invoiced can be placed, and the record then sees it';
+END $$;
+
+-- -------------------------------------------------------------
+-- 15b. And an invoice arriving later takes over cleanly.
+--
+-- The direct link is a fallback, not a second source of truth. When the
+-- account finally exists, the account's customer wins.
+-- -------------------------------------------------------------
+DO $$
+DECLARE i UUID; saf UUID; proper UUID; r RECORD; who UUID;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+  SELECT id INTO saf FROM crm_contacts WHERE company_name = 'SAF Holland';
+
+  i := protean_start_import('invoices', 'later.csv', 'stc');
+  PERFORM protean_take_invoices(i, '[
+    {"invoice_no":"SAFI1","alpha":"SAFHOLL","protean_name":"SAF Holland",
+     "tax_point":"2026-05-20","net":"5000"}]'::JSONB);
+  PERFORM protean_bind('stc', 'SAFHOLL', saf);
+  PERFORM protean_relink_jobs();
+
+  /* The jobs now reach the customer through the account. */
+  IF (SELECT alpha FROM protean_open_jobs WHERE job_no = 'SAF1' AND division = 'stc')
+     <> 'SAFHOLL' THEN
+    RAISE EXCEPTION 'the job did not pick up the account that now exists';
+  END IF;
+
+  SELECT * INTO r FROM protean_customer(saf, '2026-06-01');
+  IF r.open_jobs <> 2 THEN
+    RAISE EXCEPTION 'the work was counted % times after relinking, not 2', r.open_jobs;
+  END IF;
+  IF r.this_year <> 5000 THEN
+    RAISE EXCEPTION 'the record shows % billed, not 5000', r.this_year;
+  END IF;
+
+  RAISE NOTICE 'ok  an invoice arriving later takes the work over, and it is not counted twice';
+END $$;
+
+-- -------------------------------------------------------------
+-- 15c. The full previous year, alongside the same point in it.
+-- -------------------------------------------------------------
+DO $$
+DECLARE r RECORD; c RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
+  SELECT * INTO r FROM protean_customer('81000000-0000-0000-0000-000000000001', '2026-06-01');
+
+  /* Three invoices sit in the year that began April 2025: R3 in May
+     2025, R4 in November 2025, and R2 in FEBRUARY 2026, which is the
+     one worth pausing on. On an April year February belongs to the year
+     before, so the whole of last year is 700 + 900 + 400.
+
+     Only R3 is before 1 June, so the same point last year is 700. */
+  IF r.last_year <> 700 THEN
+    RAISE EXCEPTION 'the same point last year reads %, not 700', r.last_year;
+  END IF;
+  IF r.last_year_full <> 2000 THEN
+    RAISE EXCEPTION 'the whole of last year reads %, not 2000', r.last_year_full;
+  END IF;
+  IF r.last_year_full <= r.last_year THEN
+    RAISE EXCEPTION 'the whole year is not larger than the part of it, which cannot be right';
+  END IF;
+
+  SELECT * INTO c FROM protean_company('2026-06-01');
+  IF c.last_year_full < c.last_year THEN
+    RAISE EXCEPTION 'the company whole year %, is smaller than the same point %',
+      c.last_year_full, c.last_year;
+  END IF;
+  RAISE NOTICE 'ok  the whole of last year sits alongside the same point in it, and is the larger';
+END $$;
+
 ROLLBACK;

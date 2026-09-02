@@ -315,4 +315,122 @@ BEGIN
   RAISE NOTICE 'ok  a viewer cannot regroup and a stranger cannot read';
 END $$;
 
+-- -------------------------------------------------------------
+-- 9. MANAGING A GROUP ONCE IT EXISTS.
+--
+--   I can't edit the group or remove a group.
+--
+-- `forget_group` had existed since the groups were built and nothing
+-- could reach it. A person who cannot undo a thing stops using it, so
+-- these are the four things a group has to allow after it is made.
+-- -------------------------------------------------------------
+DO $$
+DECLARE g UUID; n INTEGER; r RECORD;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+  g := name_a_group('Montgomery');
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000001', g);
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000002', g);
+
+  /* Read who is in it. The screen had no way to ask. */
+  SELECT count(*) INTO n FROM group_members(g);
+  IF n <> 2 THEN RAISE EXCEPTION 'the group has % members, not 2', n; END IF;
+  SELECT * INTO r FROM group_members(g) WHERE company_name = 'Montgomery Transport Limited';
+  IF r.accounts <> 1 THEN
+    RAISE EXCEPTION 'a member reads as % accounts, not 1', r.accounts;
+  END IF;
+
+  /* Rename it. */
+  PERFORM rename_group(g, 'Montgomery Group');
+  IF (SELECT name FROM customer_groups WHERE id = g) <> 'Montgomery Group' THEN
+    RAISE EXCEPTION 'the rename did not take';
+  END IF;
+
+  /* Not onto a name already taken, which would make one group two. */
+  PERFORM name_a_group('Holman Fleet');
+  BEGIN
+    PERFORM rename_group(g, 'holman fleet');
+    RAISE EXCEPTION 'two groups now share a name';
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    IF SQLERRM = 'two groups now share a name' THEN RAISE; END IF;
+  END;
+
+  /* Take one member out. The customer survives, with their revenue. */
+  PERFORM put_in_group('91000000-0000-0000-0000-000000000002', NULL);
+  SELECT count(*) INTO n FROM group_members(g);
+  IF n <> 1 THEN RAISE EXCEPTION 'after removing one, % remain, not 1', n; END IF;
+  IF NOT EXISTS (SELECT 1 FROM crm_contacts
+                  WHERE id = '91000000-0000-0000-0000-000000000002') THEN
+    RAISE EXCEPTION 'taking a customer out of a group deleted them';
+  END IF;
+
+  RAISE NOTICE 'ok  a group can be read, renamed, and have a member taken out of it';
+END $$;
+
+-- -------------------------------------------------------------
+-- 10. Declining a suggestion, and having it stay declined.
+--
+-- A threshold will eventually be wrong about something. The answer is
+-- not a cleverer threshold, it is that a person can overrule it and the
+-- overruling sticks.
+-- -------------------------------------------------------------
+DO $$
+DECLARE g UUID; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+
+  PERFORM decline_group_suggestion('John');
+  IF NOT EXISTS (SELECT 1 FROM declined_group_suggestions WHERE name = 'john') THEN
+    RAISE EXCEPTION 'declining was not remembered';
+  END IF;
+
+  /* Case does not matter: the screen offers "John" and the record is
+     the lower case of it. */
+  PERFORM decline_group_suggestion('  JOHN  ');
+  SELECT count(*) INTO n FROM declined_group_suggestions WHERE name = 'john';
+  IF n <> 1 THEN RAISE EXCEPTION 'declining twice made % rows', n; END IF;
+
+  /* Saying yes later overrides having once said no, because it is the
+     stronger statement. */
+  g := name_a_group('John');
+  IF EXISTS (SELECT 1 FROM declined_group_suggestions WHERE name = 'john') THEN
+    RAISE EXCEPTION 'a group was made under a name still marked as declined';
+  END IF;
+  PERFORM forget_group(g);
+
+  /* And declining can itself be undone. */
+  PERFORM decline_group_suggestion('John');
+  PERFORM undecline_group_suggestion('john');
+  IF EXISTS (SELECT 1 FROM declined_group_suggestions WHERE name = 'john') THEN
+    RAISE EXCEPTION 'undeclining did nothing';
+  END IF;
+
+  RAISE NOTICE 'ok  declining a suggestion sticks, saying yes overrides it, and both can be undone';
+END $$;
+
+-- -------------------------------------------------------------
+-- 11. A viewer can do none of it.
+-- -------------------------------------------------------------
+DO $$
+DECLARE g UUID;
+BEGIN
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000001');
+  g := name_a_group('Montgomery Group');
+
+  PERFORM pg_temp.act_as('90000000-0000-0000-0000-000000000002');
+  BEGIN
+    PERFORM rename_group(g, 'Whatever');
+    RAISE EXCEPTION 'a viewer renamed a group';
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    IF SQLERRM = 'a viewer renamed a group' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM decline_group_suggestion('Anything');
+    RAISE EXCEPTION 'a viewer declined a suggestion';
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    IF SQLERRM = 'a viewer declined a suggestion' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'ok  a viewer can read a group and change nothing about it';
+END $$;
+
 ROLLBACK;

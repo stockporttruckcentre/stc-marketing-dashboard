@@ -247,9 +247,26 @@ export type GroupSuggestion = {
  * Cotterill Transport` against `K.Azmeh (Textiles)`. A queue with those
  * in it is a queue somebody skims instead of reading, and the real
  * Montgomery is in the same list.
+ *
+ * `John Hudson Trailers` against `John Dickinson` is the same fault one
+ * letter longer, and it is the one the business hit: a forename says
+ * nothing about which company this is, and the suggestion undid a group
+ * they had already confirmed.
  */
-/** Below this, a shared beginning is a coincidence rather than a brand. */
-const SHORTEST_GROUP_NAME = 4;
+/**
+ * Below this, a shared beginning is a coincidence rather than a brand.
+ *
+ * Five, on evidence rather than taste. Every real group on the export
+ * clears it comfortably: Dawson and Hireco at six, Fleet and Motor at
+ * five, Montgomery and Chartrange at ten. Every false one it has
+ * produced is under it: `H`, `K`, and `John`.
+ *
+ * It is still a threshold and it will still be wrong about something
+ * eventually, which is why declining a suggestion is now remembered.
+ * A rule that can be overruled and stays overruled beats a cleverer
+ * rule that cannot.
+ */
+const SHORTEST_GROUP_NAME = 5;
 
 export function suggestGroups(
   accounts: { account: string; name: string }[],
@@ -328,6 +345,8 @@ export type OfferedGroup = GroupSuggestion & { contacts: string[] };
 export function groupsToOffer(
   accounts: PlacedAccount[],
   groupOf: (contactId: string) => string | null,
+  /** Names somebody has already said no to, lower case. */
+  declined: Set<string> = new Set(),
 ): OfferedGroup[] {
   const placed = accounts.filter((a) => a.contactId);
   const byAccount = new Map(placed.map((a) => [a.account, a]));
@@ -340,6 +359,7 @@ export function groupsToOffer(
         .filter((id): id is string => !!id))],
     }))
     .filter((g) => g.contacts.length > 1)
+    .filter((g) => !declined.has(g.name.toLowerCase()))
     .filter((g) => {
       const groups = new Set(g.contacts.map((id) => groupOf(id)));
       return !(groups.size === 1 && !groups.has(null));
