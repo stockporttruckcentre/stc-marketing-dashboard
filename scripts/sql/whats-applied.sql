@@ -102,7 +102,8 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     (51, '088',        'Three divisions on one footing, for Analytics',   'division_revenue',           'function'),
     (52, '089',        'A group belongs to a division',                   'group_revenue:p_division',   'signature'),
     (53, '090',        'The seven figures finance takes into a meeting',  'trailer_deals',              'function'),
-    (54, '091',        'An approved account can actually sign in',        'blank_auth_tokens',          'function')
+    (54, '091',        'An approved account can actually sign in',        'blank_auth_tokens',          'function'),
+    (55, '092',        'Trailer customers reconcile, and can be created', 'make_customer_for_trailer',  'function')
 )
 SELECT
   e.migration                                AS "Migration",
