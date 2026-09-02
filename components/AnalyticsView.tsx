@@ -140,13 +140,33 @@ function canonicalRep(raw: string | null | undefined, idx: ReturnType<typeof bui
 // ============================================================
 //   MAIN VIEW
 // ============================================================
+/* What Protean has billed, read on the server. Null where the revenue
+   migrations are not on the database yet, in which case this screen
+   draws exactly what it drew before rather than a blank page. */
+export type ProteanFigures = {
+  company: {
+    this_year: number; last_year: number; change: number;
+    financial_year: number; fy_started: string;
+    invoices: number; customers: number;
+    unattributed: number; set_aside: number;
+    open_jobs: number; open_value: number; last_billed: string | null;
+  } | null;
+  months: { month: string; net: number; invoices: number }[];
+  customers: {
+    contact_id: string; company_name: string;
+    this_year: number; last_year: number; change: number;
+    open_jobs: number; open_value: number; last_billed: string | null;
+  }[];
+} | null;
+
 export function AnalyticsView({
-  currentUser, teamProfiles, stock, tracker,
+  currentUser, teamProfiles, stock, tracker, protean = null,
 }: {
   currentUser: Profile | null;
   teamProfiles: Profile[];
   stock: StockTrailer[];
   tracker: CRMContact[];
+  protean?: ProteanFigures;
 }) {
   const [period, setPeriod] = useState<Period>('ytd');
   const [repFilter, setRepFilter] = useState<string>('ALL');
@@ -191,6 +211,49 @@ export function AnalyticsView({
   const COMMISSION_RATE = 0.10;
   const commissionP    = profitP    * COMMISSION_RATE;
   const commissionPrev = profitPrev * COMMISSION_RATE;
+
+  /* ===== What the workshop billed, out of Protean =====
+
+     Null until the revenue migrations are on the database, and every
+     reader below is guarded, so this screen keeps working on an
+     installation that has not run them. */
+  const workshop = protean?.company ?? null;
+
+  const workshopMonths = useMemo(
+    () => (protean?.months ?? []).map((m) => ({
+      month: m.month,
+      net: Number(m.net || 0),
+      invoices: Number(m.invoices || 0),
+    })),
+    [protean],
+  );
+
+  const workshopSpark = useMemo(
+    () => workshopMonths.slice(-12).map((m) => m.net),
+    [workshopMonths],
+  );
+
+  /* The customers behind the figure, biggest first, with the ones who
+     have fallen away marked. "If I haven't seen anything since last
+     month, alarm bells are on" was the ask, and a list sorted by size
+     alone buries exactly that customer. */
+  const workshopCustomers = useMemo(() => {
+    const rows = (protean?.customers ?? []).map((c) => ({
+      ...c,
+      this_year: Number(c.this_year || 0),
+      last_year: Number(c.last_year || 0),
+      change: Number(c.change || 0),
+    }));
+    return rows.sort((a, b) => b.this_year - a.this_year);
+  }, [protean]);
+
+  const fallenAway = useMemo(
+    () => workshopCustomers
+      .filter((c) => c.last_year > 0 && c.this_year < c.last_year * 0.5)
+      .sort((a, b) => (b.last_year - b.this_year) - (a.last_year - a.this_year))
+      .slice(0, 8),
+    [workshopCustomers],
+  );
 
   // Pipeline
   const activeCustomers = tracker.filter(c => c.status === 'customer').length;
@@ -247,7 +310,7 @@ export function AnalyticsView({
     return Array.from(map.values()).slice(-6);
   }, [sold, monthly]);
 
-  // ===== Sales leaderboard — ALWAYS shows whole team, regardless of rep filter.
+  // ===== Sales leaderboard. ALWAYS shows whole team, regardless of rep filter.
   // Selecting a rep just highlights that row; other rows stay visible (greyed via UI).
   const leaderboard = useMemo(() => {
     const map = new Map<string, { rep: string; revenue: number; profit: number; commission: number; deals: number }>();
@@ -385,9 +448,28 @@ export function AnalyticsView({
         </div>
       </div>
 
-      {/* KPI grid */}
+      {/* KPI grid
+
+          The workshop pair go first and are labelled as the workshop.
+          Everything after them is the trailer division, and until now
+          the screen's unqualified "Revenue" was the trailer division
+          alone while carrying no word that said so: on the real export
+          that is £4.9m of invoicing this page had never counted. */}
       <div className="an-kpis">
-        <Kpi className="an-kpi--accent an-kpi--rev"    label="Revenue"        accent={STC_NAVY}
+        {workshop && (
+          <>
+            <Kpi className="an-kpi--accent an-kpi--rev" label="Workshop invoiced" accent={CYAN}
+                 value={fmtMoneyCompact(Number(workshop.this_year || 0))}
+                 delta={deltaPct(Number(workshop.this_year || 0), Number(workshop.last_year || 0))}
+                 sub="vs the same point last year"
+                 spark={workshopSpark} accentColor={CYAN} />
+            <Kpi className="an-kpi--accent an-kpi--pipe" label="Open on the system" accent={WARN}
+                 value={fmtMoneyCompact(Number(workshop.open_value || 0))}
+                 sub={`${workshop.open_jobs} job${workshop.open_jobs === 1 ? '' : 's'} on Protean`}
+                 icon={<Activity size={11} />} />
+          </>
+        )}
+        <Kpi className="an-kpi--accent an-kpi--rev"    label="Trailer revenue" accent={STC_NAVY}
              value={fmtMoneyCompact(revP)} delta={deltaPct(revP, revPrev)} sub={`vs prev ${PERIOD_LABELS[period].toLowerCase()}`} spark={sparkRev} accentColor={STC_NAVY} />
         <Kpi className="an-kpi--accent an-kpi--profit" label="Profit"         accent={POS}
              value={fmtMoneyCompact(profitP)} delta={deltaPct(profitP, profitPrev)} sub={`Margin ${fmtPct(margin)}`} spark={sparkProfit} accentColor={POS} />
@@ -405,6 +487,126 @@ export function AnalyticsView({
              value={fmtPct(workingLeads.length ? activeCustomers / (activeCustomers + workingLeads.length) : 0, 0)}
              sub="Open → customer" icon={<Activity size={11} />} />
       </div>
+
+      {/* What the workshop billed.
+
+          Deliberately its own row rather than folded into the trailer
+          charts below. They are two different businesses measured in
+          two different ways: a trailer sale is one large event with a
+          margin on it, and workshop revenue is thousands of small
+          invoices with none recorded here. Putting them on one axis
+          would invite a comparison neither number supports.
+
+          The restyle into the STC kit is a separate job. This is the
+          data being on the page, in the styling the page already has. */}
+      {workshop && (
+        <div className="an-grid an-grid--equal">
+          <div className="an-card">
+            <div className="an-card__head">
+              <div className="an-card__title">
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 50, background: CYAN, boxShadow: `0 0 0 3px ${CYAN}22` }} />
+                Workshop invoiced &middot; monthly
+              </div>
+              <div className="an-card__sub">
+                Out of Protean, on the tax point. Last 24 months
+                {workshop.last_billed ? `, to ${workshop.last_billed}` : ''}.
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 300 }}>
+              <ResponsiveBar
+                data={workshopMonths.map((m) => ({
+                  month: new Date(`${m.month}T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }),
+                  net: Math.round(m.net),
+                  invoices: m.invoices,
+                }))}
+                indexBy="month"
+                keys={['net']}
+                margin={{ top: 10, right: 16, bottom: 52, left: 62 }}
+                padding={0.3}
+                colors={[CYAN]}
+                borderRadius={3}
+                theme={nivoTheme()}
+                axisLeft={{ tickSize: 0, tickPadding: 8, format: (v: any) => fmtMoneyCompact(Number(v)) }}
+                axisBottom={{ tickSize: 0, tickPadding: 8, tickRotation: -55 }}
+                enableLabel={false}
+                tooltip={({ value, indexValue, color, data }: any) => (
+                  <div className="an-tt">
+                    <div className="an-tt__row">
+                      <span className="an-tt__dot" style={{ background: color }} />
+                      <span className="an-tt__label">{indexValue}</span>
+                      <span className="an-tt__val">{fmtMoney0(value)}</span>
+                    </div>
+                    <div className="an-tt__row">
+                      <span className="an-tt__label">{data.invoices} invoices</span>
+                    </div>
+                  </div>
+                )}
+                animate={true}
+                motionConfig="gentle"
+              />
+            </div>
+          </div>
+
+          <div className="an-card">
+            <div className="an-card__head">
+              <div className="an-card__title">
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 50, background: STC_RED, boxShadow: `0 0 0 3px ${STC_RED}22` }} />
+                Spending less than last year
+              </div>
+              <div className="an-card__sub">
+                Down by half or more on the same point last year. The call list.
+              </div>
+            </div>
+            {fallenAway.length === 0 ? (
+              <div style={{ padding: '18px 4px', fontSize: 13, opacity: 0.7 }}>
+                Nobody is down by half. Either trading is steady or nothing has been imported yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {fallenAway.map((c) => (
+                  <div key={c.contact_id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '9px 2px',
+                    borderBottom: '1px solid var(--an-gridline)', fontSize: 13,
+                  }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.company_name}
+                    </span>
+                    <span style={{ opacity: 0.6, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtMoneyCompact(c.last_year)}
+                    </span>
+                    <ArrowDownRight size={13} style={{ color: STC_RED, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtMoneyCompact(c.this_year)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* The caveat next to the number rather than in somebody's
+                head. A company total that silently left out cash sales
+                and our own leasing company would be short with nothing
+                saying so, so it counts them and says how much. */}
+            {(Number(workshop.unattributed || 0) > 0 || Number(workshop.set_aside || 0) > 0) && (
+              <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
+                {Number(workshop.unattributed || 0) > 0 && (
+                  <>
+                    {fmtMoneyCompact(Number(workshop.unattributed))} of this year is on Protean
+                    accounts nobody has placed yet, so it is in the total above and on no
+                    customer&rsquo;s record.
+                  </>
+                )}
+                {Number(workshop.set_aside || 0) > 0 && (
+                  <>
+                    {' '}{fmtMoneyCompact(Number(workshop.set_aside))} is on accounts set aside as
+                    not customers, such as cash sales and our own leasing company.
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Hero line chart + Stock donut */}
       <div className="an-grid">

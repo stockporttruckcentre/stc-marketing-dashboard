@@ -106,6 +106,74 @@ export async function groupBreakdown(db: Db, group: string, upto?: string): Prom
   return rows<GroupLine>(data);
 }
 
+export type CustomerSpend = {
+  accounts: number;
+  this_year: number;
+  last_year: number;
+  change: number;
+  financial_year: number;
+  fy_started: string;
+  lifetime: number;
+  invoices: number;
+  first_billed: string | null;
+  last_billed: string | null;
+  open_jobs: number;
+  open_value: number;
+  oldest_open: string | null;
+  group_id: string | null;
+  group_name: string | null;
+};
+
+/**
+ * Everything the customer record shows, in one call.
+ *
+ * A drawer opening five round trips draws in five stages, and a figure
+ * that lands after the one beside it gets read as the one beside it.
+ * The three detail functions below are for when somebody opens the
+ * detail, not for the headline.
+ *
+ * Returns a row for a customer with no Protean account at all, so the
+ * record can say "nothing billed" rather than having to tell an empty
+ * result apart from a failed one.
+ */
+export async function customerSpend(db: Db, contact: string): Promise<CustomerSpend | null> {
+  const { data, error } = await db.rpc('protean_customer', {
+    p_contact: contact, p_upto: null,
+  });
+  if (error) throw new Error(error.message);
+  return rows<CustomerSpend>(data)[0] ?? null;
+}
+
+export type OpenWork = {
+  job_no: string;
+  job_type: string | null;
+  status: string | null;
+  depot: string | null;
+  logged_on: string | null;
+  job_total: number | null;
+  equip_no: string | null;
+};
+
+export async function openWorkFor(db: Db, contact: string): Promise<OpenWork[]> {
+  const { data, error } = await db.rpc('protean_open_work', { p_contact: contact });
+  if (error) throw new Error(error.message);
+  return rows<OpenWork>(data);
+}
+
+export type SpendYear = {
+  year: number;
+  net: number;
+  invoices: number;
+  first_billed: string | null;
+  last_billed: string | null;
+};
+
+export async function spendByYear(db: Db, contact: string): Promise<SpendYear[]> {
+  const { data, error } = await db.rpc('protean_spend', { p_contact: contact });
+  if (error) throw new Error(error.message);
+  return rows<SpendYear>(data);
+}
+
 export async function accountsOf(db: Db, contact: string): Promise<AccountLine[]> {
   const { data, error } = await db.rpc('protean_accounts_of', { p_contact: contact });
   if (error) throw new Error(error.message);
@@ -192,6 +260,30 @@ export async function sendOpenJobs(
   if (error) throw new Error(error.message);
   return (rows<BatchResult>(data)[0]) ?? {
     rows_read: 0, rows_new: 0, rows_updated: 0, rows_skipped: 0, rows_unmatched: 0,
+  };
+}
+
+export type WouldClose = {
+  would_close: number;
+  open_now: number;
+  in_this_file: number;
+  biggest_job: string | null;
+  biggest_value: number;
+};
+
+/**
+ * What finishing this import off would close, before it closes it.
+ *
+ * The open jobs export is a snapshot, so anything absent from it is
+ * treated as finished. That is right for a whole export and disastrous
+ * for a partial one, and nothing in the data tells the two apart. So
+ * the figure goes on the screen and a person presses the button.
+ */
+export async function wouldClose(db: Db, importId: string): Promise<WouldClose> {
+  const { data, error } = await db.rpc('protean_would_close', { p_import: importId });
+  if (error) throw new Error(error.message);
+  return (rows<WouldClose>(data)[0]) ?? {
+    would_close: 0, open_now: 0, in_this_file: 0, biggest_job: null, biggest_value: 0,
   };
 }
 

@@ -86,3 +86,6 @@
 075_what_protean_billed
 076_groups_of_customers
 077_taking_the_protean_export
+078_before_closing_the_workshop
+079_spend_on_the_record
+080_revenue_on_analytics

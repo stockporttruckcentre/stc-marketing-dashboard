@@ -16,6 +16,7 @@ import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { AddressMap } from './AddressMap';
 import { CustomerValue } from './CustomerValue';
+import { ProteanSpend } from './ProteanSpend';
 import type {
   CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress, Lead, LeadType,
 } from '@/lib/types';
@@ -705,6 +706,29 @@ export function ContactDrawer({
                 ))}
               </div>
             )}
+          </section>
+
+
+          {/* What they actually spend, out of Protean.
+
+              The pitches above are what somebody hopes to sell them.
+              This is what they have really been invoiced, and the two
+              belong on one screen: a customer with six open pitches and
+              nothing billed since March is a completely different
+              conversation from one with six pitches and forty thousand
+              a quarter going through the workshop.
+
+              Same block as the tracker's, from
+              `components/crm/ProteanSpend.tsx`, for the same reason
+              CustomerValue is shared. It reads its own figures, so a
+              record for somebody with no Protean account says so rather
+              than showing zeroes. */}
+          <section>
+            <SectionHead
+              title="Spend and open work"
+              hint="Invoiced through Protean, as of the last import"
+            />
+            <ProteanSpend contactId={edit.id} />
           </section>
 
 
