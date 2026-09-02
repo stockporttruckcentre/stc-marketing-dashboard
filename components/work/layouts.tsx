@@ -413,12 +413,23 @@ export function CalendarLayout(p: LayoutProps & { month: Date; onMonth: (d: Date
     <div style={{
       ...PANEL,
       display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-      gridAutoRows: 'minmax(88px, 1fr)', gap: 0, overflow: 'auto',
+      /* THE ROW TRACKS ARE DECLARED, NOT INFERRED.
+         `gridAutoRows` applies to every row a grid creates, and the seven
+         day names are rows of this grid like any other. So a 30px header
+         was being dropped into a track at least 88px tall and pinned to
+         the top of it, which drew Mon to Sun and then a band of nothing
+         above the first week. Naming the tracks gives the header the
+         height it asks for and the six weeks the height they need. */
+      gridTemplateRows: 'auto repeat(6, minmax(88px, 1fr))',
+      gap: 0, overflow: 'auto',
     }}>
-      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, i) => (
         <div key={d} style={{
           height: 30, display: 'flex', alignItems: 'center', padding: '0 9px',
           background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
+          /* The same rule the day cells carry, so the seven columns line
+             up rather than the header running as one unbroken band. */
+          borderRight: i === 6 ? undefined : '1px solid var(--border)',
           fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
           letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-subtle)',
         }}>{d}</div>
@@ -431,7 +442,8 @@ export function CalendarLayout(p: LayoutProps & { month: Date; onMonth: (d: Date
         return (
           <div key={key} style={{
             display: 'flex', flexDirection: 'column', gap: 3, padding: 6, minWidth: 0,
-            borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
+            borderRight: (d.getDay() + 6) % 7 === 6 ? undefined : '1px solid var(--border)',
+            borderBottom: '1px solid var(--border)',
             background: outside ? 'var(--surface-sunken)' : 'var(--surface)',
           }}>
             <span style={{

@@ -1121,8 +1121,11 @@ export const ACTIONS: CommandActionSpec[] = [
 
   { id: 'nav.work', label: 'Work', blurb: 'Tasks, delegation and projects', kind: 'navigate',
     capability: 'work.view', path: '/dashboard/work', verbs: GO,
+    /* "workload" moved to nav.workload below. An object word two actions
+       claim is an object word neither can win on, and the specific one
+       is the one somebody typing it means. */
     objects: ['work', 'tasks', 'task', 'todo', 'to do', 'to-do', 'my work',
-              'the work tab', 'jobs', 'workload'] },
+              'the work tab', 'jobs'] },
 
   { id: 'nav.myWork', label: 'My work', blurb: 'Everything on you right now', kind: 'navigate',
     capability: 'work.view', path: '/dashboard/work?view=my-work', verbs: [...GO, 'show'],
@@ -1137,6 +1140,20 @@ export const ACTIONS: CommandActionSpec[] = [
   { id: 'nav.overdueWork', label: 'Overdue work', blurb: 'Past its date and not finished', kind: 'navigate',
     capability: 'work.view', path: '/dashboard/work?view=overdue', verbs: [...GO, 'show'],
     objects: ['overdue work', 'late work', 'late tasks', 'overdue tasks', 'past due work'] },
+
+  /* The one action that names a layout as well as a view.
+
+     Migration 095 removed the Workload view, because its filter and its
+     grouping were byte for byte Team work's and the only difference was
+     the word in the layout column. The chart it drew is still there, one
+     chip away, and "who is busiest" is a real question somebody types.
+     So the sentence lands on the view AND the shape, rather than on a
+     row that had to exist to be typeable. */
+  { id: 'nav.workload', label: 'Who is carrying what', blurb: 'Open work per person, next fortnight', kind: 'navigate',
+    capability: 'work.view', path: '/dashboard/work?view=team-work&layout=workload',
+    verbs: [...GO, 'show', 'who has', 'how busy'],
+    objects: ['workload', 'work load', 'capacity', 'who is busy', 'who is busiest',
+              'team capacity', 'how busy is everyone', 'who has the most on'] },
 
   { id: 'nav.assignedByMe', label: 'Work I assigned', blurb: 'What you put on other people', kind: 'navigate',
     capability: 'work.assignOthers', path: '/dashboard/work?view=assigned-by-me', verbs: [...GO, 'show'],

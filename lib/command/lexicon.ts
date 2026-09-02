@@ -305,6 +305,10 @@ const RESERVED = new Set([
   'overdue', 'deadline', 'due', 'priority', 'board', 'view', 'views',
   'note', 'notes', 'comment', 'comments', 'project', 'projects', 'department',
   'somebody', 'someone', 'anybody', 'anyone', 'nobody', 'everybody', 'everyone',
+  /* How much somebody is carrying, which is a question about people and
+     therefore the one most likely to be read AS a person. "Who is busy"
+     has to be the workload chart, not a customer called Busy. */
+  'workload', 'work load', 'capacity', 'busy', 'busiest',
 
   /* The social planner's own vocabulary, for the same reason. "Post it
      to LinkedIn" was reading LinkedIn as a customer and "add a picture
