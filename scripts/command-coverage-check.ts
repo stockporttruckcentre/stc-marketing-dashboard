@@ -1172,6 +1172,26 @@ for (const said of [
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.decide'));
 }
 
+/* THE PROPOSAL, WHICH IS NOT THE CONTRACT.
+
+   The two documents are the same for a page and a half, so the bar has
+   to tell them apart from the words rather than from the noun they
+   share. "Save the proposal" must not land on sending the contract, and
+   asking for the contract must not land on the proposal. */
+for (const said of [
+  'save the proposal as a pdf', 'generate a fleetsmart proposal',
+  'fleetsmart proposal', 'maintenance proposal', 'proposal pdf',
+  'send them the price not the contract',
+]) {
+  ok(`"${said}" reaches the proposal`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'fleetsmart.proposal'));
+}
+
+for (const said of ['send the maintenance contract', 'get the fleetsmart contract out']) {
+  ok(`"${said}" does not land on the proposal`,
+    suggestActions(said, CAPS.admin, 4).every((h) => h.action.id !== 'fleetsmart.proposal'));
+}
+
 /* Both directions, per role. Sales builds and sends at rate card and
    cannot discount; a marketer and a viewer read the screen and do
    neither. An action that appears and then refuses teaches people the

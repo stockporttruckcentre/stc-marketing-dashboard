@@ -1235,6 +1235,21 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['maintenance contract', 'fleetsmart contract', 'the contract to the customer'],
     phrases: ['send the maintenance contract', 'get the fleetsmart contract out'] },
 
+  /* The proposal, which is the contract with the wording, the standard
+     terms and the signing page taken off. It is a document somebody
+     asks for by name at a particular moment, before there is anything
+     to sign, so it needs to be reachable by that name rather than only
+     by finding the contract and pressing the second button. */
+  { id: 'fleetsmart.proposal', label: 'Save a FleetSmart+ proposal',
+    blurb: 'The fleet and the price, without the terms or the signing page', kind: 'record',
+    capability: 'fleetsmart.view', path: '/dashboard/fleetsmart',
+    verbs: ['save', 'make', 'generate', 'print', 'produce', 'send', 'get'],
+    objects: ['proposal', 'fleetsmart proposal', 'maintenance proposal',
+              'contract proposal', 'proposal pdf', 'proposal for a fleet',
+              'price without the terms', 'quote without the terms'],
+    phrases: ['save the proposal as a pdf', 'generate a fleetsmart proposal',
+              'proposal before the contract', 'send them the price not the contract'] },
+
   { id: 'fleetsmart.decide', label: 'Record a contract answer',
     blurb: 'Accepted or declined, so it stops being pipeline', kind: 'record',
     capability: 'fleetsmart.build', path: '/dashboard/fleetsmart',

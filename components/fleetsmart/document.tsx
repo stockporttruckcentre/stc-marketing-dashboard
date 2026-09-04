@@ -98,17 +98,38 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+/**
+ * Which of the two documents this is.
+ *
+ * From the business:
+ *
+ *   the ability to generate a proposal, which will be the generated
+ *   contract minus all the t&c's and customer sign area ... the proposal
+ *   would end at "Prices exclude tyres and VAT." below the assets
+ *
+ * So a proposal is a PREFIX of the contract rather than a document of
+ * its own: the same masthead, the same details, the same schedule, the
+ * same total, and then it stops. Nothing is worded differently and no
+ * figure is worked out twice, which is the whole reason it is a variant
+ * of this component and not a second one. A price that could disagree
+ * between the proposal and the contract is the one fault neither
+ * document may ever have.
+ */
+export type DocumentVariant = 'contract' | 'proposal';
+
 export function ContractDocument({
-  input, priced, extras, reference,
+  input, priced, extras, reference, variant = 'contract',
 }: {
   input: ContractInput;
   priced: PricedContract;
   extras: ContractExtras;
   reference?: string | null;
+  variant?: DocumentVariant;
 }) {
   const say = (key: Parameters<typeof wordingFor>[0]) => wordingFor(key, input, priced, extras);
   const shown = priced.assets.filter((a) => a.reg.trim() && a.cls);
   const showPromo = input.promoOnContract && priced.promoDiscount !== 0;
+  const isProposal = variant === 'proposal';
 
   const manager = [extras.accountManagerName, extras.accountManagerPhone, extras.accountManagerEmail]
     .filter(Boolean).join('   ·   ');
@@ -150,12 +171,31 @@ export function ContractDocument({
             {say('planTitle')}
           </div>
         </div>
-        {reference && (
-          <div style={{
-            fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 12,
-            letterSpacing: '0.1em', color: NAVY,
-          }}>{reference}</div>
-        )}
+        <div style={{ textAlign: 'right', flex: 'none' }}>
+          {/* WHICH DOCUMENT THIS IS, ON THE DOCUMENT.
+
+              A proposal is the contract with the wording, the signing
+              area and the terms taken off, so on paper the two are
+              identical for the first page and a half. Without a word
+              saying which one somebody is holding, the difference
+              between a quote and a signed agreement is whether anybody
+              scrolled to the end. */}
+          {isProposal && (
+            <div style={{
+              display: 'inline-block', marginBottom: reference ? 5 : 0,
+              padding: '2px 8px', border: `1px solid ${NAVY}`,
+              fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 10,
+              letterSpacing: '0.16em', textTransform: 'uppercase', color: NAVY,
+              printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact',
+            } as React.CSSProperties}>Proposal</div>
+          )}
+          {reference && (
+            <div style={{
+              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 12,
+              letterSpacing: '0.1em', color: NAVY,
+            }}>{reference}</div>
+          )}
+        </div>
       </header>
 
       <div style={{ marginTop: 8, fontSize: 11.5, color: '#5A6172' }}>
@@ -278,6 +318,12 @@ export function ContractDocument({
         </div>
       </Section>
 
+      {/* ---- WHERE A PROPOSAL ENDS ----
+
+          Named by the business to the line above: everything from here
+          down is the contract, and a proposal carries none of it. */}
+      {isProposal ? null : (
+        <>
       <Section title="Term"><Prose text={say('term')} /></Section>
 
       <Section title="Services">
@@ -326,83 +372,164 @@ export function ContractDocument({
           </div>
         ))}
       </section>
+        </>
+      )}
     </article>
   );
 }
 
 /**
+ * Print one of the two documents, under a name a customer can read.
+ *
+ * ---- Why the title is set here ----
+ *
+ * A browser takes the PDF's title, and the filename it offers when
+ * somebody presses Save, from `document.title`. Every screen in this
+ * application is called "STC Marketing Dashboard", so a contract sent
+ * to a haulier arrived as `STC Marketing Dashboard.pdf` with the same
+ * name inside its properties. That is the internal name of an internal
+ * tool, on a document that leaves the building.
+ *
+ * So the title is the document, the customer and the reference, and it
+ * is put back afterwards. `afterprint` rather than a timer: the print
+ * dialog can sit open for a minute while somebody picks a printer, and
+ * a title restored underneath them is a title restored before the PDF
+ * is written.
+ *
+ * ---- Two frames before printing ----
+ *
+ * The proposal is the contract drawn with one prop changed, so the page
+ * has to change first and print second. The first frame is the state
+ * settling and the second is the document having laid out. Printing in
+ * between prints the document that was on screen a moment ago, which
+ * for a proposal means the standard terms and the signing page reach
+ * somebody who was only sent a price.
+ */
+export function printContract({ variant, customerName, reference, onReady }: {
+  variant: DocumentVariant;
+  customerName?: string | null;
+  reference?: string | null;
+  /** Called before the two frame wait, to put the right document on screen. */
+  onReady?: () => void;
+}): void {
+  onReady?.();
+
+  const before = document.title;
+  document.title = [
+    `FleetSmart+ ${variant === 'proposal' ? 'Proposal' : 'Contract'}`,
+    customerName?.trim() || null,
+    reference?.trim() || null,
+  ].filter(Boolean).join(', ');
+
+  const restore = () => {
+    document.title = before;
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+
+  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+}
+
+/**
  * What print takes off the page.
  *
- * The document is drawn inside a drawer, and a drawer is a fixed box
- * with its own scrollbar: printed as it stands, only the first
- * screenful comes out. This releases it, drops the application around
- * it, and keeps a numbered clause from being split across two pages.
+ * The contract is drawn inside a drawer, inside the dashboard shell.
+ * Printed as it stands it comes out as a screenful of a scroll box
+ * inside a grid column. This takes it out of all of that.
  *
  * Both places that show a contract mount this, so what comes out of the
  * printer does not depend on which screen it was opened from.
+ *
+ * ---- The white band down the left ----
+ *
+ * From the business:
+ *
+ *   when you save a PDF either from the builder wizard or the popup
+ *   allowing you to enter email addresses to send it to, there's a
+ *   large white space on the left of the PDF, the actual fleetsmart+
+ *   contract covers 50% of the width of the PDF
+ *
+ * The cause was two rules a long way from here. The shell is
+ *
+ *   .app  { display: grid; grid-template-columns: 248px 1fr }
+ *   .main { position: relative }
+ *
+ * so every screen in the application lays out in the second column, and
+ * that column is a positioned box. The contract was
+ * `position: absolute; left: 0; width: 100%`, which resolves against
+ * the nearest POSITIONED ancestor: `.main`. On a 1440px window that
+ * column is 1192px and everything looks right. On A4 the page is about
+ * 688 points wide, the grid still reserves 248 of them for a sidebar
+ * that is not being printed, and the contract gets the 440 that are
+ * left. 248 of white down the left of every sheet, and a contract at
+ * 64% of the width.
+ *
+ * ---- Why the fix does not name the shell ----
+ *
+ * Naming `.app` and `.main` would fix it today and break the next time
+ * anything is put between the drawer and the body, which is exactly how
+ * this broke: the rules below used to name the drawer, correctly, and
+ * knew nothing about the two elements outside it.
+ *
+ * `:has()` names the CHAIN rather than the elements. Every ancestor of
+ * the contract, whatever it happens to be, stops being a grid cell, a
+ * flex item, a scroll box and a positioned box; everything that is not
+ * on that chain leaves the layout altogether. Add a wrapper next month
+ * and it is flattened too, without anybody remembering this file.
+ *
+ * Everything is scoped to `body:has(#fs-contract)`. Without that scope,
+ * a page with no contract on it would match the "not on the chain" rule
+ * with every element it has and print a blank sheet.
  */
 export function ContractPrintRules() {
   return (
     <style>{`
       @media print {
-        /* ---- Print the contract, and nothing else ----
+        /* ---- 1. Only the contract, and only the boxes it sits in ----
 
-           This used to hide the sidebar and the top bar by name and
-           unpin the drawer, which left everything the drawer was sitting
-           over still in the page: the CRM grid, the contract list, the
-           whole dashboard, printed underneath the contract.
-
-           Hiding by name cannot work. There is no list of every element
-           that might be on the page behind a drawer, and a screen added
-           next month is one more thing nobody remembers to add to it.
-
-           So: hide everything, then show the contract and the elements
-           it sits inside. Visibility rather than display, because
-           hiding an ancestor with display:none takes the contract with
-           it however visible the contract claims to be. Its own subtree
-           is turned back on explicitly, since visibility inherits. */
-        body * { visibility: hidden !important; }
-        #fs-contract, #fs-contract * { visibility: visible !important; }
-
-        /* Out of the drawer and onto the page. Everything between the
-           body and the contract still occupies its own box, so without
-           this the contract prints in a 1180px column starting halfway
-           down the first sheet.
-
-           Absolute positions against the nearest positioned ancestor,
-           and the drawer's backdrop is fixed, so the two rules below go
-           together: the backdrop is made static first, which leaves the
-           body as the containing block and puts the contract at the top
-           left of the first sheet. Without that pair the contract is
-           laid out inside a full-viewport box and prints one page short
-           at the end. */
-        .kit-drawer-backdrop, [role="dialog"] {
-          position: static !important;
-          background: none !important;
+           Removed from the LAYOUT rather than hidden. Hiding keeps the
+           box: a hidden sidebar in a 248px grid column still reserves
+           248px, which is the fault this is fixing. */
+        body:has(#fs-contract) *:not(:has(#fs-contract)):not(#fs-contract):not(#fs-contract *) {
+          display: none !important;
         }
+
+        /* ---- 2. Every box between the body and the contract stops
+                   constraining it ---- */
+        body:has(#fs-contract) :has(#fs-contract) {
+          display: block !important;
+          position: static !important;
+          width: auto !important; min-width: 0 !important; max-width: none !important;
+          height: auto !important; min-height: 0 !important; max-height: none !important;
+          margin: 0 !important; padding: 0 !important;
+          border: 0 !important; border-radius: 0 !important;
+          box-shadow: none !important; background: none !important;
+          overflow: visible !important;
+          transform: none !important; filter: none !important;
+          grid-template-columns: none !important; grid-template-rows: none !important;
+          flex: none !important; gap: 0 !important;
+        }
+
+        /* ---- 3. The contract, in normal flow, at the page's width ----
+
+           Normal flow rather than absolutely positioned. It used to be
+           absolute because that was how it escaped the drawer; with the
+           chain above flattened there is nothing left to escape, and a
+           block paginates across sheets in a way an out of flow box
+           does not. */
         #fs-contract {
-          position: absolute !important; left: 0 !important; top: 0 !important;
+          position: static !important;
           width: 100% !important; max-width: none !important;
           margin: 0 !important; padding: 0 !important;
-          box-shadow: none !important; border: 0 !important;
+          box-shadow: none !important; border: 0 !important; border-radius: 0 !important;
           background: #fff !important;
         }
 
         html, body {
           background: #fff !important; margin: 0 !important; padding: 0 !important;
-          height: auto !important; overflow: visible !important;
+          width: auto !important; height: auto !important; overflow: visible !important;
         }
-        /* Nothing between the two may clip or scroll, or the contract is
-           cut off at the height of the drawer it came out of. */
-        [role="dialog"], [role="dialog"] * {
-          overflow: visible !important; max-height: none !important;
-          height: auto !important;
-        }
-        [role="dialog"] {
-          position: static !important; max-width: none !important; width: 100% !important;
-          box-shadow: none !important; border: 0 !important;
-        }
-        .fs-doc-frame { border: 0 !important; border-radius: 0 !important; }
+
         .fs-doc-section { break-inside: avoid; page-break-inside: avoid; }
         @page { margin: 14mm; }
       }

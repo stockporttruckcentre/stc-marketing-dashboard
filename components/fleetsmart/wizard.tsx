@@ -25,7 +25,9 @@ import {
 } from '@/lib/fleetsmart/steps';
 import { StepCoach } from './coach';
 import { DatePicker } from './date-picker';
-import { ContractDocument, ContractPrintRules } from './document';
+import {
+  ContractDocument, ContractPrintRules, printContract, type DocumentVariant,
+} from './document';
 import {
   Alert, Badge, Button, Chip, EmptyState, IconButton, Label, SearchInput,
 } from '@/components/kit/primitives';
@@ -162,7 +164,15 @@ export function ContractWizard({
      asks about. */
   const [dirty, setDirty] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [printReminder, setPrintReminder] = useState<'print' | null>(null);
+  const [printReminder, setPrintReminder] = useState<DocumentVariant | null>(null);
+  /* WHICH OF THE TWO DOCUMENTS IS ON SCREEN WHEN PRINT FIRES.
+
+     A proposal is the contract with everything below the price taken
+     off, so it is the same component drawn with one prop changed rather
+     than a second document. Printing therefore has to change the page
+     first and print second, which is the same two frame wait the step
+     swap below already needs. */
+  const [variant, setVariant] = useState<DocumentVariant>('contract');
   const [sending, setSending] = useState(false);
 
   /* The first message, on opening the builder.
@@ -318,12 +328,30 @@ export function ContractWizard({
    * second is the document having laid out. Printing in between prints
    * half a document.
    */
-  function printTheContract(): void {
-    if (step === 'Review') { window.print(); return; }
-    setStep('Review');
-    setReached((r) => Math.max(r, STEPS.length - 1));
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  function printTheContract(which: DocumentVariant = 'contract'): void {
+    printContract({
+      variant: which,
+      customerName: input.customerName,
+      reference,
+      onReady: () => {
+        setVariant(which);
+        /* The document is only in the page on the Review step, so
+           printing from the send box on the Fleet step would find
+           nothing to show: a blank sheet rather than an error. The
+           dialog is a sibling of the step, not a child, so it stays
+           open with the addresses still typed in it. */
+        if (step === 'Review') return;
+        setStep('Review');
+        setReached((r) => Math.max(r, STEPS.length - 1));
+      },
+    });
   }
+
+  useEffect(() => {
+    const back = () => setVariant('contract');
+    window.addEventListener('afterprint', back);
+    return () => window.removeEventListener('afterprint', back);
+  }, []);
 
   async function save(then: 'draft' | 'send', to?: string[]): Promise<void> {
     setBusy(true); setError(null);
@@ -509,12 +537,14 @@ export function ContractWizard({
 
       {printReminder && (
         <Confirm
-          title="Save it before you print"
+          title={printReminder === 'proposal'
+            ? 'Save it before you send a price'
+            : 'Save it before you print'}
           body={savedId
             ? 'This has been saved once. Anything changed since is on the screen and not in the record, and the print will show the screen.'
             : 'This contract has not been saved yet. Printing it does not save it, so close the drawer afterwards and it is gone.'}
           confirmLabel="Print anyway"
-          onConfirm={() => { setPrintReminder(null); window.print(); }}
+          onConfirm={() => { const which = printReminder; setPrintReminder(null); printTheContract(which); }}
           onSave={may('fleetsmart.build') && ready
             ? async () => { setPrintReminder(null); await save('draft'); }
             : undefined}
@@ -600,7 +630,8 @@ export function ContractWizard({
       {step === 'Review' && (
         <ReviewStep
           input={input} priced={priced} extras={extras} reference={reference}
-          onPrint={() => setPrintReminder('print')}
+          variant={variant}
+          onPrint={setPrintReminder}
         />
       )}
     </Drawer>
@@ -1383,31 +1414,53 @@ function WordingStep({
 /* ---------------- 6. review ---------------- */
 
 function ReviewStep({
-  input, priced, extras, reference, onPrint,
+  input, priced, extras, reference, variant, onPrint,
 }: {
   input: ContractInput;
   priced: ReturnType<typeof priceContract>;
   extras: ContractExtras;
   reference: string | null;
+  variant: DocumentVariant;
   /* The wizard's, not `window.print` directly, so printing something
      that has not been saved says so first. Printing does not save, and
      a PDF in somebody's downloads with no record behind it is the
      quietest way to lose a contract. */
-  onPrint: () => void;
+  onPrint: (which: DocumentVariant) => void;
 }) {
   const warnings = priced.assets.flatMap((a) => a.warnings.map((w) => `${a.reg}: ${w}`));
 
   return (
     <>
+      {/* TWO DOCUMENTS, TWO BUTTONS, AND EACH ONE SAYS WHAT IT MAKES.
+
+          "Print or save as PDF" was fine while there was one document.
+          With two, a label that does not name its document is the
+          difference between a customer receiving a price and a customer
+          receiving a contract with a signing page on it. So each button
+          names the document, and the line above says what separates
+          them in one sentence. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-        <Label>The contract</Label>
-        <span style={{ fontSize: 12, color: 'var(--text-subtle)', flex: 1 }}>
-          This is what the customer receives. Print it to PDF and attach it, or send the link.
+        <Label>What the customer gets</Label>
+        <span style={{ fontSize: 12, color: 'var(--text-subtle)', flex: 1, minWidth: 220 }}>
+          The proposal is the fleet and the price and stops there. The contract carries the
+          wording, the standard terms and the page they sign.
         </span>
-        <Button size="sm" variant="secondary" onClick={onPrint}>
-          <Printer size={13} /> Print or save as PDF
+        <Button size="sm" variant="secondary" onClick={() => onPrint('proposal')}>
+          <FileText size={13} /> Save proposal as PDF
+        </Button>
+        <Button size="sm" variant="primary" onClick={() => onPrint('contract')}>
+          <Printer size={13} /> Save contract as PDF
         </Button>
       </div>
+
+      {/* Which one is on screen, because the two are identical for the
+          first page and a half and the difference is off the bottom. */}
+      {variant === 'proposal' && (
+        <Alert tone="info">
+          Showing the proposal: the fleet and the price, ending at &ldquo;Prices exclude tyres
+          and VAT&rdquo;. The wording, the terms and the signing page are on the contract.
+        </Alert>
+      )}
 
       {warnings.length > 0 && (
         <Alert tone="warning">
@@ -1426,7 +1479,10 @@ function ReviewStep({
       <div className="fs-doc-frame" style={{
         border: '1px solid var(--border)', borderRadius: 'var(--r-md)', overflow: 'hidden',
       }}>
-        <ContractDocument input={input} priced={priced} extras={extras} reference={reference} />
+        <ContractDocument
+          input={input} priced={priced} extras={extras} reference={reference}
+          variant={variant}
+        />
       </div>
 
       <ContractPrintRules />
@@ -1527,11 +1583,15 @@ function SendDialog({
   /* The PDF, here rather than only on the Review step, because this is
      the moment somebody needs it: a mailto cannot carry an attachment,
      so the file has to exist before the email opens. */
-  onPrint: () => void;
+  onPrint: (which: DocumentVariant) => void;
   onCancel: () => void;
 }) {
   const [to, setTo] = useState<string[]>(() => first);
-  const [printed, setPrinted] = useState(false);
+  /* Which of the two has been saved, not whether something was. With
+     one button a tick meant "you have the PDF"; with two it has to say
+     WHICH PDF, or somebody attaches the proposal thinking it is the
+     contract. */
+  const [saved, setSaved] = useState<Set<DocumentVariant>>(new Set());
   const [typing, setTyping] = useState('');
   const [bad, setBad] = useState(false);
 
@@ -1630,13 +1690,24 @@ function SendDialog({
           >
             <Send size={14} /> Send to {to.length === 1 ? 'them' : `${to.length} people`}
           </Button>
+          {/* A mailto cannot carry an attachment, so the file has to
+              exist before the email opens. Both documents are offered
+              here for that reason, and each says which one it is. */}
           <Button
             size="sm"
-            variant={printed ? 'ghost' : 'secondary'}
-            onClick={() => { setPrinted(true); onPrint(); }}
+            variant={saved.has('proposal') ? 'ghost' : 'secondary'}
+            onClick={() => { setSaved((v) => new Set(v).add('proposal')); onPrint('proposal'); }}
           >
-            {printed ? <Check size={13} /> : <Printer size={13} />}
-            {printed ? 'Saved' : 'Save as PDF'}
+            {saved.has('proposal') ? <Check size={13} /> : <FileText size={13} />}
+            {saved.has('proposal') ? 'Proposal saved' : 'Save proposal PDF'}
+          </Button>
+          <Button
+            size="sm"
+            variant={saved.has('contract') ? 'ghost' : 'secondary'}
+            onClick={() => { setSaved((v) => new Set(v).add('contract')); onPrint('contract'); }}
+          >
+            {saved.has('contract') ? <Check size={13} /> : <Printer size={13} />}
+            {saved.has('contract') ? 'Contract saved' : 'Save contract PDF'}
           </Button>
           <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
           {to.length === 0 && (
