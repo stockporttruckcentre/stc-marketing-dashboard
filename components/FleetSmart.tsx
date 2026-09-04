@@ -16,7 +16,9 @@ import type { RateCard } from '@/lib/fleetsmart/ratecard';
 import { RateEditor } from '@/components/fleetsmart/rate-editor';
 import { AmendDrawer } from '@/components/fleetsmart/amend-drawer';
 import { priceContract } from '@/lib/fleetsmart/price';
-import { ContractDocument, ContractPrintRules } from '@/components/fleetsmart/document';
+import {
+  ContractDocument, ContractPrintRules, printContract, type DocumentVariant,
+} from '@/components/fleetsmart/document';
 import { ContractWizard } from '@/components/fleetsmart/wizard';
 import { Drawer } from '@/components/kit/forms';
 import {
@@ -792,6 +794,24 @@ function ContractDocumentDrawer({
      for the same reason. */
   const priced = row.priced?.assets ? row.priced : priceContract(row.input);
 
+  /* Which document is drawn when print fires. Two frames rather than
+     one: the first is the state settling, the second is the document
+     having laid out. Printing in between prints the one that was on
+     screen a moment ago, which for a proposal means the standard terms
+     and the signing page reach a customer who was only sent a price. */
+  const [variant, setVariant] = useState<DocumentVariant>('contract');
+  useEffect(() => {
+    const back = () => setVariant('contract');
+    window.addEventListener('afterprint', back);
+    return () => window.removeEventListener('afterprint', back);
+  }, []);
+  const printAs = (which: DocumentVariant) => printContract({
+    variant: which,
+    customerName: row.customer_name,
+    reference: row.ref,
+    onReady: () => setVariant(which),
+  });
+
   return (
     <Drawer
       eyebrow={`FleetSmart+ · ${STATUS_LABEL[row.status]}`}
@@ -848,8 +868,15 @@ function ContractDocumentDrawer({
               <Trash2 size={13} /> Delete
             </Button>
           )}
-          <Button size="sm" variant="secondary" onClick={() => window.print()}>
-            <Printer size={13} /> Print
+          {/* The same two documents the builder offers, named the same
+              way. Somebody re-sending a contract a customer never
+              signed wants the proposal, and a Print button that only
+              ever made one of them sent them back to the builder. */}
+          <Button size="sm" variant="secondary" onClick={() => printAs('proposal')}>
+            <FileText size={13} /> Save proposal PDF
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => printAs('contract')}>
+            <Printer size={13} /> Save contract PDF
           </Button>
         </>
       }
@@ -883,6 +910,7 @@ function ContractDocumentDrawer({
           priced={priced}
           extras={{ ...blankExtras(), ...row.extras }}
           reference={row.ref}
+          variant={variant}
         />
       </div>
 

@@ -315,6 +315,10 @@ const RESERVED = new Set([
      to the library" was reading Library as a depot: both are words that
      mean something in that grammar, so neither can be a name or a
      place. */
+  /* A proposal is a document, never a haulier. "Send them the proposal"
+     was reading Proposal as the customer being sent to. */
+  'proposal', 'proposals', 'quotation',
+
   'post', 'posts', 'content', 'channel', 'channels', 'library', 'campaign',
   'campaigns', 'template', 'templates', 'queue', 'slot', 'slots',
   'approval', 'approvals', 'caption', 'hashtag', 'hashtags', 'preview',

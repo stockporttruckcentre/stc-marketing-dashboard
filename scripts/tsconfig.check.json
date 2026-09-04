@@ -1,0 +1,5 @@
+{
+  "//": "The checks compile on their own, without Next's JSX transform in front of them, so the automatic runtime has to be asked for here. Without it a component that renders JSX and has no `import React` throws at the first tag.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "jsx": "react-jsx" }
+}
