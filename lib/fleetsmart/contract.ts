@@ -225,6 +225,16 @@ function services(input: ContractInput, priced: PricedContract): string {
  * rate are named together, which also means a customer who has agreed
  * one rate for everything reads one figure rather than three identical
  * ones.
+ *
+ * From the business, on the version that grouped everything except the
+ * empty fleet:
+ *
+ *   Ensure you are only showing the customer what they need. Only show
+ *   them 2 different rates if their contract has 2 different rates.
+ *
+ * So the count of figures on the paper is the count of distinct rates
+ * the customer has actually agreed, and nothing else. Two figures means
+ * two rates. One figure means one, whatever the fleet is made of.
  */
 function labourSentence(input: ContractInput, priced: PricedContract): string {
   const f = priced.flags;
@@ -235,19 +245,25 @@ function labourSentence(input: ContractInput, priced: PricedContract): string {
 
   /* No fleet yet. Naming one class would be picking a rate at random,
      which is the fault this function exists to remove, so all three are
-     named until the fleet says which apply. */
-  if (!on.length) {
-    return 'The labour rates at the date of this agreement for non-contract repairs are '
-      + `£${money(input.labourHgv)} per hour for vehicles, £${money(input.labourTrailer)} `
-      + `per hour for trailers and £${money(input.labourVan)} per hour for vans.`;
-  }
+     named until the fleet says which apply. They go through the same
+     grouping as everything else, so the defaults of 85, 65 and 85 read
+     as two rates rather than three. */
+  const fleetKnown = on.length > 0;
+  const classes = fleetKnown ? on : [
+    { word: 'vehicles', rate: input.labourHgv },
+    { word: 'trailers', rate: input.labourTrailer },
+    { word: 'vans', rate: input.labourVan },
+  ];
 
   const byRate = new Map<number, string[]>();
-  for (const { word, rate } of on) byRate.set(rate, [...(byRate.get(rate) ?? []), word]);
+  for (const { word, rate } of classes) byRate.set(rate, [...(byRate.get(rate) ?? []), word]);
 
+  /* One rate covers everything on the contract, so the classes never
+     need naming. Nobody has to work out which of their assets is a
+     "vehicle" to read a figure that applies to all of them. */
   if (byRate.size === 1) {
     return 'The labour rate at the date of this agreement for non-contract repairs is '
-      + `£${money(on[0]!.rate)} per hour.`;
+      + `£${money(classes[0]!.rate)} per hour.`;
   }
 
   const parts = [...byRate.entries()].map(([rate, words]) => {
@@ -255,6 +271,13 @@ function labourSentence(input: ContractInput, priced: PricedContract): string {
       : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
     return `£${money(rate)} per hour for ${which}`;
   });
+
+  /* A group can already contain an "and" of its own ("for vehicles and
+     vans"), and joining those with a bare "and" gives "for vehicles and
+     vans and £65.00 per hour for trailers", which has to be read twice.
+     A comma before the last one separates the rates from the classes. */
+  const grouped = parts.some((p) => p.includes(' and '));
+  const list = `${parts.slice(0, -1).join(', ')}${grouped ? ', and ' : ' and '}${parts[parts.length - 1]}`;
 
   /* WHERE "VEHICLE" IS DEFINED, SAID OUT LOUD.
 
@@ -267,11 +290,13 @@ function labourSentence(input: ContractInput, priced: PricedContract): string {
      sentence points at it rather than leaving the reader to infer that
      the mapping exists.
 
-     Only where more than one rate is quoted. With a single rate there
-     is nothing to map. */
+     Only where more than one rate is quoted, and only once there is a
+     fleet. With a single rate there is nothing to map, and on an empty
+     Schedule the pointer would be sending the reader to a column with
+     nothing under it. */
   return 'The labour rates at the date of this agreement for non-contract repairs are '
-    + `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}, `
-    + 'according to the class shown against each asset in the Schedule above.';
+    + list
+    + (fleetKnown ? ', according to the class shown against each asset in the Schedule above.' : '.');
 }
 
 function charges(input: ContractInput, priced: PricedContract): string {
