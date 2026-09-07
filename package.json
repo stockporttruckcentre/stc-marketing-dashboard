@@ -70,7 +70,8 @@
     "check:order": "tsx scripts/order-check.ts",
     "check:replay": "tsx scripts/sql/replay-check.ts",
     "check:work-views": "bash scripts/sql/work-views-check.sh",
-    "check:fleetsmart-print": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-print-check.tsx"
+    "check:fleetsmart-print": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-print-check.tsx",
+    "check:fleetsmart-dynamic": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-dynamic-check.tsx"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

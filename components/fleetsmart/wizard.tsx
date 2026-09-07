@@ -892,9 +892,16 @@ function PlanStep({
       </Split>
 
       <Label>Labour rates</Label>
+      {/* This said "the HGV rate prints in the Charges block", which was
+          an accurate description of a bug: the block printed the HGV
+          rate whatever was on the fleet, so a trailers only contract
+          quoted £85 an hour instead of £65. A customer found it. The
+          block now prints the rate for each class actually on the
+          contract, and this says so. */}
       <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: -4 }}>
-        These price collection and delivery, and the HGV rate prints in the Charges block as the
-        rate for non-contract repairs.
+        These price collection and delivery. The Charges block prints the rate for each class on
+        the fleet as the rate for non-contract repairs, so a contract with no vans on it never
+        quotes a van rate.
       </div>
       <Split cols={3}>
         <Field label="HGV, per hour">

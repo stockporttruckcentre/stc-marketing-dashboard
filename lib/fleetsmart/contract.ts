@@ -201,10 +201,68 @@ function services(input: ContractInput, priced: PricedContract): string {
   return out.join('\n');
 }
 
+/**
+ * The labour rate sentence, for the classes actually on the fleet.
+ *
+ * ---- The bug this replaces ----
+ *
+ * This read `input.labourHgv` and nothing else, so every contract quoted
+ * the HGV rate whatever was on it. A trailers only fleet was priced
+ * correctly at the trailer rate all the way through and then told the
+ * customer its non-contract repairs were charged at the HGV one:
+ *
+ *   default rates   HGV £85.00   trailer £65.00   van £85.00
+ *
+ * Twenty pounds an hour wrong, on the document rather than in the
+ * arithmetic, which is why it survived: `priceAsset` has always chosen
+ * the rate by class, so the monthly figure was right and the sentence
+ * under it was not. It was reported by a customer.
+ *
+ * ---- Grouped by rate, not listed by class ----
+ *
+ * The three rates default to 85, 65 and 85, so a mixed fleet listing
+ * each class separately says eighty five twice. Classes that share a
+ * rate are named together, which also means a customer who has agreed
+ * one rate for everything reads one figure rather than three identical
+ * ones.
+ */
+function labourSentence(input: ContractInput, priced: PricedContract): string {
+  const f = priced.flags;
+  const on: { word: string; rate: number }[] = [];
+  if (f.hasVehicles) on.push({ word: 'vehicles', rate: input.labourHgv });
+  if (f.hasTrailers) on.push({ word: 'trailers', rate: input.labourTrailer });
+  if (f.hasVans) on.push({ word: 'vans', rate: input.labourVan });
+
+  /* No fleet yet. Naming one class would be picking a rate at random,
+     which is the fault this function exists to remove, so all three are
+     named until the fleet says which apply. */
+  if (!on.length) {
+    return 'The labour rates at the date of this agreement for non-contract repairs are '
+      + `£${money(input.labourHgv)} per hour for vehicles, £${money(input.labourTrailer)} `
+      + `per hour for trailers and £${money(input.labourVan)} per hour for vans.`;
+  }
+
+  const byRate = new Map<number, string[]>();
+  for (const { word, rate } of on) byRate.set(rate, [...(byRate.get(rate) ?? []), word]);
+
+  if (byRate.size === 1) {
+    return 'The labour rate at the date of this agreement for non-contract repairs is '
+      + `£${money(on[0]!.rate)} per hour.`;
+  }
+
+  const parts = [...byRate.entries()].map(([rate, words]) => {
+    const which = words.length === 1 ? words[0]
+      : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+    return `£${money(rate)} per hour for ${which}`;
+  });
+  return 'The labour rates at the date of this agreement for non-contract repairs are '
+    + `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.`;
+}
+
 function charges(input: ContractInput, priced: PricedContract): string {
   let s = `The Charges payable for the Maintenance Services shall be £${money(priced.monthly)} per `
-    + `month (as detailed above). The labour rate at the date of this agreement for non-contract `
-    + `repairs is £${money(input.labourHgv)} per hour. All sums are exclusive of VAT.`;
+    + `month (as detailed above). ${labourSentence(input, priced)} `
+    + 'All sums are exclusive of VAT.';
 
   if (priced.flags.misc) {
     s += ' The Charges include the agreed miscellaneous items shown against the relevant assets in the Schedule.';
