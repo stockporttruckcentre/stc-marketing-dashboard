@@ -155,6 +155,41 @@ for (const [name, type, field, expected] of ONLY) {
     line.includes('£90.00') && line.includes('£70.00'), line);
 }
 
+/* ---- and the customer can tell which rate is theirs ----
+
+   From the business, on the fix above:
+
+     will the customer know which rate applies to which
+
+   Naming the class is not enough on its own. A trailer is a vehicle in
+   ordinary English, so "£85.00 for vehicles and £65.00 for trailers"
+   only parses if the reader already knows those words are STC's asset
+   classes. The Schedule prints a Class column against every
+   registration, and the sentence has to send them to it. */
+{
+  const mixed = { ...BASE, assets: fleetOf(['6x2 Truck', '3 Axle Trailer']) };
+  const line = labourLine(mixed);
+
+  ok('a mixed fleet says which rate belongs to which class',
+    line.includes('for vehicles') && line.includes('for trailers'), line);
+
+  ok('and points at the column where those classes are printed',
+    /class shown against each asset in the Schedule/.test(line), line);
+
+  /* The pointer is only true if the column is actually there. */
+  const html = render(mixed, EXTRAS);
+  ok('and that column exists on the document',
+    html.includes('>Class<') && html.includes('>Vehicle<') && html.includes('>Trailer<'),
+    'the sentence sends the customer to a Class column, so the Class column has to be printed '
+    + 'and has to use the same words');
+
+  /* One rate needs no mapping, and a sentence that sends somebody to a
+     column for no reason is a sentence they read twice. */
+  const oneRate = labourLine({ ...mixed, labourHgv: 80, labourTrailer: 80 });
+  ok('a single rate does not send anybody looking for a column',
+    !/Schedule above/.test(oneRate), oneRate);
+}
+
 /* =============================================================
    2. Change an input, and the document changes
    ============================================================= */
