@@ -255,8 +255,23 @@ function labourSentence(input: ContractInput, priced: PricedContract): string {
       : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
     return `£${money(rate)} per hour for ${which}`;
   });
+
+  /* WHERE "VEHICLE" IS DEFINED, SAID OUT LOUD.
+
+     Naming the class is not the same as the customer knowing which of
+     their assets is in it. In ordinary English a trailer is a vehicle,
+     so "£85.00 for vehicles and £65.00 for trailers" is answerable only
+     if somebody already knows the two words are being used as STC's
+     classes rather than as English. The Schedule above carries a Class
+     column saying exactly that against every registration, so the
+     sentence points at it rather than leaving the reader to infer that
+     the mapping exists.
+
+     Only where more than one rate is quoted. With a single rate there
+     is nothing to map. */
   return 'The labour rates at the date of this agreement for non-contract repairs are '
-    + `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}.`;
+    + `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}, `
+    + 'according to the class shown against each asset in the Schedule above.';
 }
 
 function charges(input: ContractInput, priced: PricedContract): string {
