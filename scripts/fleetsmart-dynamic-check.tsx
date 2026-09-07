@@ -190,6 +190,91 @@ for (const [name, type, field, expected] of ONLY) {
     !/Schedule above/.test(oneRate), oneRate);
 }
 
+/* ---- as many figures as there are rates, and no more ----
+
+   From the business:
+
+     Ensure you are only showing the customer what they need. Only show
+     them 2 different rates if their contract has 2 different rates.
+
+   The three rates default to 85, 65 and 85, so "one figure per class"
+   prints eighty five twice and invites the reader to hunt for the
+   difference between a vehicle and a van when there is none. The rule
+   is about the count on the paper, not about which classes are on the
+   fleet, so it is swept over every fleet shape against every way the
+   three rates can collide.
+   ============================================================= */
+console.log('\n  As many figures as there are rates\n  ----------------------------------');
+{
+  const CLASSES: [string, AssetType, 'labourHgv' | 'labourTrailer' | 'labourVan'][] = [
+    ['vehicles', '6x2 Truck', 'labourHgv'],
+    ['trailers', '3 Axle Trailer', 'labourTrailer'],
+    ['vans', 'LCV', 'labourVan'],
+  ];
+
+  /* Every way three numbers can be equal or different, so a collision
+     between any two classes is covered and not just the shipped one. */
+  const RATES: [string, number, number, number][] = [
+    ['the shipped rates', 85, 65, 85],
+    ['all three different', 92, 68, 55],
+    ['all three the same', 78, 78, 78],
+    ['vehicle and trailer alike', 70, 70, 55],
+    ['trailer and van alike', 90, 60, 60],
+  ];
+
+  let swept = 0;
+  let wrong = 0;
+  const examples: string[] = [];
+
+  for (let bits = 1; bits < 8; bits += 1) {
+    const on = CLASSES.filter((_, i) => bits & (1 << i));
+    for (const [name, hgv, trailer, van] of RATES) {
+      const input: ContractInput = {
+        ...BASE,
+        labourHgv: hgv, labourTrailer: trailer, labourVan: van,
+        assets: fleetOf(on.map(([, type]) => type)),
+      };
+      const line = labourLine(input);
+
+      const agreed = new Set(on.map(([, , field]) => input[field]));
+      const printed = new Set(line.match(/£[\d,]+\.\d\d/g) ?? []);
+      swept += 1;
+
+      if (printed.size !== agreed.size
+        || [...agreed].some((r) => !printed.has(`£${r.toFixed(2)}`))) {
+        wrong += 1;
+        if (examples.length < 3) {
+          examples.push(`${on.map(([w]) => w).join(' + ')}, ${name}: `
+            + `${agreed.size} agreed, ${printed.size} printed\n        ${line}`);
+        }
+      }
+    }
+  }
+
+  ok(`every fleet reads exactly the rates it agreed (${swept} combinations)`,
+    wrong === 0, examples.join('\n        '));
+
+  /* The reason the rule is not "one figure per class". */
+  const allThree = labourLine({ ...BASE, assets: fleetOf(['6x2 Truck', '3 Axle Trailer', 'LCV']) });
+  ok('a fleet of all three classes on the shipped rates reads two figures, not three',
+    (allThree.match(/£/g) ?? []).length === 2, allThree);
+  ok('and names the two classes that share a rate together',
+    allThree.includes('for vehicles and vans'), allThree);
+
+  /* Before a fleet exists there is nothing to point at, and the same
+     grouping still applies. */
+  const empty = labourLine({ ...BASE, assets: [] });
+  ok('an empty fleet still quotes each rate once',
+    (empty.match(/£/g) ?? []).length === 2, empty);
+  ok('and does not point at a Schedule with nothing on it',
+    !/Schedule above/.test(empty), empty);
+
+  /* "for vehicles and vans and £65.00 per hour for trailers" is one
+     sentence with two meanings of "and" in it. */
+  ok('a grouped class list is not run into the next rate with a bare and',
+    !/\w and £/.test(allThree), allThree);
+}
+
 /* =============================================================
    2. Change an input, and the document changes
    ============================================================= */
