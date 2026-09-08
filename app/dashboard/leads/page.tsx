@@ -87,6 +87,25 @@ export default async function SalesTrackerPage({
 
   return (
     <SalesTracker
+      /* WHOSE TRACKER IS PART OF THIS COMPONENT'S IDENTITY.
+
+         Without this key the switch did nothing you could see. Moving
+         from /dashboard/leads to /dashboard/leads?owner=X is a
+         navigation WITHIN one route, so React keeps the same
+         `SalesTracker` mounted and hands it new props. Its rows come
+         from `useState(() => initialLeads.map(flatten))`, and a state
+         initialiser runs on mount and never again, so the new owner's
+         leads arrived as a prop and were dropped on the floor: the
+         heading said STC Admin and the grid underneath was still
+         Dean's.
+
+         Keying on the owner makes it a different component, so React
+         unmounts one tracker and mounts the other. Every other piece of
+         state that is about a person rather than a screen goes with it,
+         which is the second half of what was wrong: the open drawer,
+         the search box and the status tab all belonged to the tracker
+         being left. */
+      key={ownerId}
       initialLeads={(leads ?? []) as LeadWithAccount[]}
       profile={profile}
       colleagues={(people ?? []) as Profile[]}

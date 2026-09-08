@@ -784,14 +784,24 @@ export function SalesTracker({
           {canViewOthers && (
             <WhoseTracker me={profile} viewing={viewing} colleagues={colleagues} />
           )}
-          {!viewing && <>
-            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
-              <Upload size={13} /> Import
-            </Button>
-            <Button size="sm" variant="primary" onClick={() => setShowNewLead(true)}>
-              <Plus size={13} /> New lead
-            </Button>
-          </>}
+          {/* KEPT IN PLACE RATHER THAN REMOVED WHILE VIEWING.
+
+              From the business: "The dropdown also moves after selecting
+              someone." It did: these two came out of a right aligned row,
+              so the picker slid 190px sideways under the cursor that had
+              just used it. Disabled instead, which also says why they are
+              not available rather than leaving somebody hunting for the
+              New lead button they were looking at a second ago. */}
+          <Button size="sm" variant="secondary" disabled={readOnly}
+            title={readOnly ? `Importing goes onto your own tracker, not ${whose}’s.` : undefined}
+            onClick={() => setShowImport(true)}>
+            <Upload size={13} /> Import
+          </Button>
+          <Button size="sm" variant="primary" disabled={readOnly}
+            title={readOnly ? `Raise a lead from your own tracker, or from the customer’s CRM record.` : undefined}
+            onClick={() => setShowNewLead(true)}>
+            <Plus size={13} /> New lead
+          </Button>
         </>}
       />
 
