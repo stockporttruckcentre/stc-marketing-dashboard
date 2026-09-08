@@ -199,6 +199,45 @@ ok('and says so rather than claiming nothing is outstanding',
 ok('the dot still sorts worst first',
   /comparator: \(a, b\) => healthRank\(a as Health\) - healthRank\(b as Health\)/.test(crmGrid));
 
+/* =============================================================
+   The Reports hub: featured, or listed, and never neither
+
+   The landing page shows the meeting report twice over if nothing stops
+   it, and hides it entirely if the wrong thing does. The second is what
+   actually shipped for ten minutes: the "is it featured" flag asked
+   whether the report MATCHED THE SEARCH, so typing a word that appears
+   in one of its section names set the flag, the list dropped it as a
+   duplicate, the panel stayed down because a search was running, and the
+   empty state was keyed on the same flag. A blank page, and a screenshot
+   found it rather than a person.
+
+   So the flag means one thing: is the panel on screen. These two lines
+   are the whole of that, and they are checked as text because the bug
+   was a condition rather than a behaviour.
+   ============================================================= */
+console.log('\n  The Reports hub\n  ---------------');
+
+const hub = read('components/ReportsHub.tsx');
+
+ok('whether the meeting report is featured depends on the search and nothing else',
+  /const showFeatured = !searching && Boolean\(featured\) && \(!only \|\| only === 'meeting'\);/
+    .test(hub),
+  'asking whether it MATCHES the search made a matching search hide it from both places');
+
+ok('and it leaves the list below only while that panel is actually drawn',
+  /!\(showFeatured && r\.slug === FEATURED\)/.test(hub),
+  'without the flag it is listed under its own feature panel, which reads as a bug');
+
+ok('a search that finds nothing says so',
+  /found === 0 && !showFeatured/.test(hub));
+
+ok('the hub is rows and rules rather than a grid of cards',
+  !/gridTemplateColumns: 'repeat\(auto-fill/.test(hub),
+  'nine tiles of equal weight is a gallery: you have to read all of them to find one');
+
+ok('and the rail stands down rather than stacking on a narrow screen',
+  /\.reports-rail \{ display: none !important; \}/.test(hub));
+
 console.log(
   failed === 0
     ? '\n  Every seam checked here hands its argument on, and the screen at the\n'

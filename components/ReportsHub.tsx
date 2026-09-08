@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, FileText, Loader, Printer, RefreshCw, SlidersHorizontal, AlertTriangle,
+  Search, ChevronRight, CalendarRange, Building2, GitBranch, Wrench, Play, Layers,
 } from 'lucide-react';
-import { Alert, Button, Card, Chip, Label, PageHead } from '@/components/kit/primitives';
+import { Alert, Button, Card, Chip, Label, PageHead, SearchInput } from '@/components/kit/primitives';
 import { ReportView } from '@/components/reports/ReportView';
 import {
-  CATEGORY_BLURB, CATEGORY_LABEL, reportBySlug, reportsByCategory, type ReportDef,
+  CATEGORY_BLURB, CATEGORY_LABEL, REPORTS, reportBySlug, reportsByCategory,
+  type ReportCategory, type ReportDef,
 } from '@/lib/reports/catalogue';
 import { defaultFilters, docxHref, printHref } from '@/lib/reports/link';
 import {
@@ -193,61 +195,357 @@ export function ReportsHub({ people, mayExport, initial = null }: {
 /* =============================================================
    Picking one.
 
-   Categories, because the business asked for them and because nine
-   reports in one list is a list nobody reads to the bottom of. The
-   meeting report is first and on its own, which is what it is for.
+   From the business, having seen the first version:
+
+     now re-style the reports landing page as it's just cards everywhere
+     and not much like a reports hub
+
+   They are right, and the fix is the kit's third rule rather than a
+   different card. NINE THINGS IN A GRID OF BOXES IS A GALLERY. A hub is
+   an index: you arrive knowing roughly what you want, you find its name,
+   you open it. A gallery makes you read every tile because each one is
+   the same size and weight as the last, and none of them tells you where
+   you are.
+
+   So three things changed and none of them is decoration:
+
+     1. A RAIL, so the page says what kinds of report exist before you
+        read a single title, and clicking one narrows the list rather
+        than scrolling you to it.
+     2. THE MEETING REPORT IS FEATURED, once, at the top. It is the one
+        the business asked for by name and the one that will be run
+        fortnightly forever. Nine peers in a grid gave it exactly the
+        same weight as "Bottom 10 customers".
+     3. THE REST ARE ROWS, separated by 1px rules rather than boxed.
+        "Borders before shadows", and it is the difference between
+        scanning nine names in one movement and reading nine cards.
+
+   A search box, because nine becomes fifteen and a rail alone does not
+   survive that. It matches the title, the blurb and the section names,
+   so typing "fleetsmart" finds the meeting report because FleetSmart+ is
+   a section of it.
    ============================================================= */
+
+const CATEGORY_ICON: Record<ReportCategory, typeof CalendarRange> = {
+  meeting: CalendarRange,
+  customers: Building2,
+  pipeline: GitBranch,
+  operations: Wrench,
+};
+
+/** The one that gets the top of the page. */
+const FEATURED = 'biweekly';
+
 function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
-  const groups = useMemo(() => reportsByCategory(), []);
+  const [only, setOnly] = useState<ReportCategory | null>(null);
+  const [term, setTerm] = useState('');
+
+  const featured = useMemo(() => reportBySlug(FEATURED), []);
+
+  /* Everything the report is about, as one string. A report is found by
+     what is IN it as much as by its name: somebody looking for the
+     FleetSmart+ numbers has no reason to know they live inside the
+     meeting pack. */
+  const matches = useCallback((r: ReportDef) => {
+    const q = term.trim().toLowerCase();
+    if (!q) return true;
+    const hay = [r.title, r.blurb, CATEGORY_LABEL[r.category], ...r.sections.map((s) => s.label)]
+      .join(' ').toLowerCase();
+    return q.split(/\s+/).every((word) => hay.includes(word));
+  }, [term]);
+
+  const searching = term.trim().length > 0;
+
+  /* ---- Featured, or in the list, and never neither ----
+
+     This condition had `matches(featured)` in it and that was a bug the
+     screenshot found before anybody else could: typing "fleetsmart"
+     matched the meeting report through its section names, so the flag
+     said "it is featured at the top", the list dropped it as a
+     duplicate, and the panel itself was suppressed because a search was
+     running. The report vanished, and so did the "nothing matches" line,
+     because that was keyed on the same flag. A blank page.
+
+     So the flag now says one thing only: is the panel actually drawn.
+     While a search is running it is not, and the report is therefore in
+     the list where the search can find it. */
+  const showFeatured = !searching && Boolean(featured) && (!only || only === 'meeting');
+
+  /* The featured report comes out of the list below it.
+     Listing it twice reads as a bug rather than as emphasis, and the
+     row said "Above" to explain itself, which is a label apologising
+     for a layout. While a search is running there is no featured panel,
+     so it goes back into the list where it can be found. */
+  const groups = useMemo(() => reportsByCategory()
+    .map((g) => ({
+      ...g,
+      reports: g.reports.filter((r) => matches(r) && !(showFeatured && r.slug === FEATURED)),
+    }))
+    .filter((g) => g.reports.length > 0 && (!only || g.category === only)),
+  [matches, only, showFeatured]);
+  const found = groups.reduce((n, g) => n + g.reports.length, 0);
+
   return (
-    <div>
+    /* The heading is capped to the same measure as the list under it, so
+       the search box sits over the rows it filters rather than out at
+       the window edge with a screen of nothing between them. */
+    <div style={{ maxWidth: 1154 }}>
       <PageHead
         eyebrow="Workspace"
         title="Reports"
         sub="Pick one and it runs. Narrow it by division, period or person once it is open."
+        action={(
+          <div style={{ display: 'flex', width: 260 }}>
+            <SearchInput
+              value={term}
+              onChange={setTerm}
+              placeholder="Find a report"
+              icon={<Search size={14} />}
+            />
+          </div>
+        )}
       />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
-        {groups.map((g) => (
-          <section key={g.category}>
-            <div style={{ marginBottom: 10 }}>
-              <Label>{CATEGORY_LABEL[g.category]}</Label>
-              <div style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginTop: 3 }}>
-                {CATEGORY_BLURB[g.category]}
+
+      <div className="reports-hub" style={{ display: 'flex', gap: 28, alignItems: 'flex-start' }}>
+        <Rail only={only} setOnly={setOnly} />
+
+        {/* Capped rather than filling the window. A row 1900px wide puts
+            the chevron a screen away from the title it belongs to, and
+            the eye has to travel the whole width to pair them up. The
+            kit's own reading measure does the same job everywhere else. */}
+        <div style={{
+          flex: 1, minWidth: 0, maxWidth: 940,
+          display: 'flex', flexDirection: 'column', gap: 30,
+        }}>
+          {showFeatured && <Featured def={featured!} onOpen={onOpen} />}
+
+          {groups.map((g) => (
+            <section key={g.category}>
+              <div style={{
+                display: 'flex', alignItems: 'baseline', gap: 12,
+                paddingBottom: 8, borderBottom: '2px solid var(--border-emphasis)',
+              }}>
+                <span style={{
+                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 13,
+                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text)',
+                }}>{CATEGORY_LABEL[g.category]}</span>
+                {/* Beside the heading it counts, not pinned to the far
+                    right of the page where it reads as a stray digit
+                    belonging to nothing. */}
+                <span style={{
+                  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11.5,
+                  fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
+                }}>{g.reports.length}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)', flex: 1 }}>
+                  {CATEGORY_BLURB[g.category]}
+                </span>
               </div>
-            </div>
+
+              <div>
+                {g.reports.map((r, at) => (
+                  <ReportRow key={r.slug} def={r} first={at === 0} onOpen={onOpen} />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {found === 0 && !showFeatured && (
             <div style={{
-              display: 'grid', gap: 10,
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              padding: '30px 0', borderTop: '1px solid var(--border)',
+              fontSize: 13, color: 'var(--text-muted)',
             }}>
-              {g.reports.map((r) => (
-                <button
-                  key={r.slug}
-                  onClick={() => onOpen(r)}
-                  style={{
-                    textAlign: 'left', cursor: 'pointer',
-                    padding: '14px 15px', borderRadius: 'var(--r-md)',
-                    border: '1px solid var(--border)', background: 'var(--surface)',
-                    fontFamily: 'var(--inter)',
-                    display: 'flex', flexDirection: 'column', gap: 5,
-                  }}
-                >
-                  <span style={{
-                    fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 15,
-                    letterSpacing: '-0.02em', color: 'var(--text)',
-                  }}>{r.title}</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    {r.blurb}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 2 }}>
-                    {r.sections.length} {r.sections.length === 1 ? 'section' : 'sections'}
-                  </span>
-                </button>
-              ))}
+              Nothing matches &ldquo;{term.trim()}&rdquo;. Try a customer word like spend or growth,
+              or a part of the business like stock, pipeline or complaints.
             </div>
-          </section>
+          )}
+        </div>
+      </div>
+
+      {/* The rail is a second column until there is no room for one, and
+          then it is nothing: on a narrow screen the categories are three
+          taps away from the list they filter, which is worse than
+          scrolling past nine names. */}
+      <style>{`
+        @media (max-width: 900px) {
+          .reports-hub { display: block !important; }
+          .reports-rail { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* The kinds of report there are, before anybody has read a title. */
+function Rail({ only, setOnly }: {
+  only: ReportCategory | null;
+  setOnly: (c: ReportCategory | null) => void;
+}) {
+  const counts = useMemo(() => {
+    const by = new Map<ReportCategory, number>();
+    for (const r of REPORTS) by.set(r.category, (by.get(r.category) ?? 0) + 1);
+    return by;
+  }, []);
+
+  const row = (
+    key: ReportCategory | null,
+    label: string,
+    count: number,
+    Icon: typeof Layers,
+  ) => {
+    const on = only === key;
+    return (
+      <button
+        key={label}
+        onClick={() => setOnly(key)}
+        aria-pressed={on}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+          height: 32, padding: '0 10px 0 11px', textAlign: 'left',
+          border: 'none', borderLeft: `2px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+          background: on ? 'var(--bg-subtle)' : 'transparent',
+          color: on ? 'var(--text)' : 'var(--text-muted)',
+          fontFamily: 'var(--inter)', fontSize: 12.5, fontWeight: on ? 600 : 500,
+          cursor: 'pointer',
+        }}
+      >
+        <Icon size={13} style={{ flex: 'none', color: on ? 'var(--accent)' : 'var(--text-subtle)' }} />
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {label}
+        </span>
+        <span style={{
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+          fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
+        }}>{count}</span>
+      </button>
+    );
+  };
+
+  return (
+    <nav className="reports-rail" style={{
+      position: 'sticky', top: 8, flex: 'none', width: 186,
+      display: 'flex', flexDirection: 'column', gap: 1,
+    }}>
+      <div style={{ padding: '0 0 9px 11px' }}>
+        <Label>What kind</Label>
+      </div>
+      {row(null, 'Everything', REPORTS.length, Layers)}
+      {(['meeting', 'customers', 'pipeline', 'operations'] as ReportCategory[]).map((c) =>
+        row(c, CATEGORY_LABEL[c], counts.get(c) ?? 0, CATEGORY_ICON[c]))}
+    </nav>
+  );
+}
+
+/* =============================================================
+   The meeting report, given the top of the page.
+
+   It is not a bigger card. It is the only thing on the screen that
+   states its contents, because that is what somebody about to walk into
+   a meeting wants to know: what will be on the paper. The ten section
+   names are the answer, and they are also the thing you switch off once
+   you are inside.
+   ============================================================= */
+function Featured({ def, onOpen }: { def: ReportDef; onOpen: (d: ReportDef) => void }) {
+  return (
+    <section style={{
+      border: '1px solid var(--border-strong)', borderRadius: 'var(--r-md)',
+      borderLeft: '3px solid var(--accent)', background: 'var(--surface)',
+      padding: '16px 18px 17px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <Label>Run it before every meeting</Label>
+          <h2 style={{
+            margin: '6px 0 0', fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
+            letterSpacing: '-0.03em', lineHeight: 1.15, color: 'var(--text)',
+          }}>{def.title}</h2>
+          <p style={{
+            margin: '5px 0 0', fontSize: 13, color: 'var(--text-muted)',
+            lineHeight: 1.55, maxWidth: '62ch',
+          }}>
+            {def.blurb} Reds and ambers open it, because nothing else matters if a
+            customer is walking, and the diary closes it.
+          </p>
+        </div>
+        <Button variant="accent" onClick={() => onOpen(def)}>
+          <Play size={14} /> Run it
+        </Button>
+      </div>
+
+      <div style={{
+        display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 13,
+        paddingTop: 12, borderTop: '1px solid var(--border)',
+      }}>
+        {def.sections.map((s, at) => (
+          <span key={s.id} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            height: 22, padding: '0 8px', borderRadius: 'var(--r)',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+            fontFamily: 'var(--inter)', fontSize: 11.5, color: 'var(--text-muted)',
+          }}>
+            <span style={{
+              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
+              fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
+            }}>{at + 1}</span>
+            {s.label}
+          </span>
         ))}
       </div>
-    </div>
+    </section>
+  );
+}
+
+/* One report, as a row rather than a card. */
+function ReportRow({ def, first, onOpen }: {
+  def: ReportDef;
+  first: boolean;
+  onOpen: (d: ReportDef) => void;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <button
+      onClick={() => onOpen(def)}
+      onMouseEnter={() => setOver(true)}
+      onMouseLeave={() => setOver(false)}
+      onFocus={() => setOver(true)}
+      onBlur={() => setOver(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+        padding: '11px 10px 11px 2px', textAlign: 'left',
+        border: 'none', borderTop: first ? 'none' : '1px solid var(--border)',
+        background: over ? 'var(--bg-subtle)' : 'transparent',
+        cursor: 'pointer', fontFamily: 'var(--inter)',
+        transition: 'background 120ms var(--ease, ease)',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{
+          display: 'block',
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14.5,
+          letterSpacing: '-0.01em', color: 'var(--text)',
+        }}>{def.title}</span>
+        <span style={{
+          display: 'block', fontSize: 12.5, color: 'var(--text-muted)',
+          lineHeight: 1.5, marginTop: 2, maxWidth: '78ch',
+        }}>{def.blurb}</span>
+      </div>
+
+      <span style={{
+        flex: 'none', fontSize: 11.5, color: 'var(--text-subtle)',
+        fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+      }}>
+        {def.sections.length} {def.sections.length === 1 ? 'section' : 'sections'}
+      </span>
+
+      <ChevronRight
+        size={15}
+        style={{
+          flex: 'none',
+          color: over ? 'var(--accent)' : 'var(--text-subtle)',
+          transform: over ? 'translateX(2px)' : 'none',
+          transition: 'transform 120ms var(--ease, ease), color 120ms var(--ease, ease)',
+        }}
+      />
+    </button>
   );
 }
 
