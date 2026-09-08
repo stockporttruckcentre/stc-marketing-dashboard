@@ -164,6 +164,45 @@ export function Badge({ tone = 'neutral', dot, children }: { tone?: Tone; dot?: 
 }
 
 /**
+ * A dot, where a pill would not fit.
+ *
+ * From the business, about the sales tracker: "Add a status blip in the
+ * table like the CRM tab has showing whether it's just a lead or a
+ * customer etc."
+ *
+ * A pill needs 90px and a name. In a thirty column grid that pushes the
+ * thing it describes off the screen, which is why the tracker's status
+ * badge was at the far right where nobody scrolled to. A dot needs 34px
+ * and can sit beside the company name, and the word is still there on
+ * hover and in the cell's own filter.
+ *
+ * It is deliberately NOT a smaller `GridBadge`. Colour alone cannot be
+ * the whole message: `title` is what a screen reader announces and what
+ * anybody who cannot separate the two greens gets when they hover.
+ */
+export function StatusDot({ tone, label }: { tone: Tone; label: string }) {
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      role="img"
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: '100%', height: '100%',
+      }}
+    >
+      <span style={{
+        width: 9, height: 9, borderRadius: 'var(--r-full)', flex: 'none',
+        background: TONE_FG[tone],
+        /* A ring rather than a flat dot, so the neutral one is still a
+           shape on a surface the same colour as it. */
+        boxShadow: '0 0 0 2px color-mix(in srgb, currentColor 10%, transparent)',
+      }} />
+    </span>
+  );
+}
+
+/**
  * The kit's table badge, drawn for a grid cell rather than a page.
  *
  * A cell renderer cannot inherit `Badge`'s sizing without fighting the

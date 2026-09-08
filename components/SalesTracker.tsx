@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import {
   Alert, Badge, Button, Card, Chip, EmptyState, GridBadge, GridHint, IconButton,
-  money, PanelHead, RecordHead, Row, SearchInput, StatStrip, TabShell, Tabs,
+  money, PanelHead, RecordHead, Row, SearchInput, StatStrip, StatusDot, TabShell, Tabs,
 } from '@/components/kit/primitives';
 import {
   Drawer, Field, Modal, OptionCard, Select, Split, TextArea, TextInput,
@@ -24,7 +24,7 @@ import {
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule } from '@/components/kit/menus';
 import { hasAnAccount, nameOfLead } from '@/lib/crm/lead-identity';
 import { applyOrder, readOrder, writeOrder } from '@/lib/ui/order';
-import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
+import { STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from '@/lib/crm/status';
 import { fieldsFor } from '@/lib/crm/lead-fields';
 import { convertToCustomer, relationshipOf, winsAProspect } from '@/lib/crm/conversion';
 import {
@@ -506,6 +506,32 @@ export function SalesTracker({
       { field: 'last_activity_at', headerName: 'Last updated', width: 115, editable: false,
         valueFormatter: (p) => fmtDate(p.value),
         cellStyle: { color: 'var(--text-muted)' } },
+      /* THE STATUS BLIP, LIKE THE CRM TAB HAS.
+
+         From the business: "Add a status blip in the table like the CRM
+         tab has showing whether it's just a lead or a customer etc."
+
+         The tracker had the status as a badge at the far right of a
+         thirty column grid, which is off screen on a laptop until you
+         scroll. This is the same dot the CRM pipeline draws, pinned
+         beside the company name where the eye already is, and it sorts:
+         `comparator` orders it the way a deal actually moves rather
+         than alphabetically, so sorting on it groups the pipeline by
+         how far along it is instead of by the first letter of the word. */
+      /* Its own `colId`, because the editable Status column further
+         along the row is also `field: 'status'` and AG Grid keys state
+         by column id. Two columns sharing one id is how a sort applied
+         to the dot silently moves the dropdown instead. */
+      { colId: 'statusDot', field: 'status', headerName: '', width: 34, editable: false,
+        sortable: true, filter: false, resizable: false,
+        headerTooltip: 'Where the deal has got to',
+        comparator: (a: ContactStatus, b: ContactStatus) =>
+          (STATUS_ORDER.indexOf(a) + 1 || 99) - (STATUS_ORDER.indexOf(b) + 1 || 99),
+        cellRenderer: (p: ICellRendererParams<TrackerRow, ContactStatus>) => (
+          p.value
+            ? <StatusDot tone={STATUS_TONE[p.value] ?? 'neutral'} label={STATUS_LABEL[p.value] ?? p.value} />
+            : null
+        ) },
       { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 160, editable: true, valueSetter: saveCell },
       { field: 'contact_name', headerName: 'Contact', flex: 1, minWidth: 130, editable: true, valueSetter: saveCell },
       { field: 'phone', headerName: 'Phone', width: 140, editable: true, valueSetter: saveCell },

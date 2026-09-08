@@ -1,15 +1,22 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LogOut, ChevronDown } from 'lucide-react';
+import { LogOut, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NotificationRail } from '@/components/notifications/rail';
 import { capabilitiesFor } from '@/lib/crm/permissions';
 import { visibleSections } from '@/lib/nav';
 import { ICONS } from '@/components/nav-icons';
+import { readChoiceList, writeChoiceList } from '@/lib/ui/remember';
 import type { Profile } from '@/lib/types';
+
+/** Which parent rows are folded away, remembered per machine. */
+const SHUT_KEY = 'sidebar-shut';
+
+/** The one row that is drawn in the footer instead. */
+const SETTINGS_HREF = '/dashboard/settings';
 
 /* =============================================================
    The sidebar.
@@ -62,12 +69,27 @@ export function Sidebar({
     href === '/dashboard' ? path === '/dashboard' : path.startsWith(href)
   );
 
+  /* Which parent rows somebody has deliberately folded away.
+
+     Read after the first paint, like the tracker's tab order and for
+     the same reason: this component renders on the server too, and
+     `localStorage` is not there. See `lib/ui/remember.ts`. */
+  const [shut, setShut] = useState<string[]>([]);
+  useEffect(() => { setShut(readChoiceList(SHUT_KEY)); }, []);
+  const toggle = useCallback((href: string) => {
+    setShut((was) => {
+      const next = was.includes(href) ? was.filter((h) => h !== href) : [...was, href];
+      writeChoiceList(SHUT_KEY, next);
+      return next;
+    });
+  }, []);
+
   const rows = (items: ReturnType<typeof visibleSections>[number]['items']) => (
     <div className="sidebar__nav">
       {items.map((i) => {
         const Icon = ICONS[i.icon];
         const badge = i.badge === 'content' && pendingPosts > 0 ? String(pendingPosts) : undefined;
-        const open = !!i.children?.length && isActive(i.href);
+        const open = !!i.children?.length && isActive(i.href) && !shut.includes(i.href);
 
         /* A parent with children is not a link. Revenue redirects to a
            division, so clicking it and landing somewhere the sidebar
@@ -84,14 +106,40 @@ export function Sidebar({
               >
                 <Icon size={16} />
                 <span>{i.label}</span>
-                <ChevronDown
-                  size={13}
+                {/* THE CHEVRON CLOSES IT, EVEN WHILE YOU ARE IN THERE.
+
+                    From the business: "Make it so i can click to close
+                    the revenue sidebar while on one of the pages."
+
+                    It could not be closed at all: `open` was
+                    `isActive(i.href)`, so being on a revenue page forced
+                    the three children open and the chevron was
+                    decoration. It is a button now, inside the link and
+                    stopping the click from reaching it, so pressing the
+                    row still goes to the division and pressing the arrow
+                    only folds the list.
+
+                    Shut stays shut per division: the choice is
+                    remembered on the machine, like the tracker's tab
+                    order, so somebody who works all day on STC revenue
+                    is not scrolling past two rows they never use. */}
+                <button
+                  type="button"
+                  aria-label={open ? `Collapse ${i.label}` : `Expand ${i.label}`}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(i.href); }}
                   style={{
-                    marginLeft: 'auto', opacity: 0.55,
-                    transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-                    transition: 'transform 120ms ease',
+                    marginLeft: 'auto', border: 0, background: 'transparent', padding: 2,
+                    display: 'flex', cursor: 'pointer', color: 'inherit', opacity: 0.55,
                   }}
-                />
+                >
+                  <ChevronDown
+                    size={13}
+                    style={{
+                      transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+                      transition: 'transform 120ms ease',
+                    }}
+                  />
+                </button>
               </Link>
               {open && (
                 <div style={{ marginLeft: 26, display: 'flex', flexDirection: 'column' }}>
@@ -150,11 +198,30 @@ export function Sidebar({
         ))}
       </div>
 
-      {sections.filter((s) => s.atFoot).map((s) => (
-        <div key={s.key} className="sidebar__section sidebar__section--foot">
-          {rows(s.items)}
-        </div>
-      ))}
+      {/* SETTINGS IS A COG, NOT A ROW.
+
+          From the business: "Change the settings tab to just a cog next
+          to light/dark mode."
+
+          It goes to the footer beside the theme toggle, which is where
+          somebody looks for it: the two are the same kind of thing, a
+          preference about your own account rather than a screen full of
+          the company's work. Team and Admin keep their rows, because
+          they are screens.
+
+          Filtered out here rather than removed from `lib/nav.ts`. The
+          breadcrumb, the command bar and the capability check all read
+          that file, and a screen that vanishes from it becomes a screen
+          the bar cannot reach and the crumb cannot name. */}
+      {sections.filter((s) => s.atFoot).map((s) => {
+        const items = s.items.filter((i) => i.href !== SETTINGS_HREF);
+        if (!items.length) return null;
+        return (
+          <div key={s.key} className="sidebar__section sidebar__section--foot">
+            {rows(items)}
+          </div>
+        );
+      })}
 
       <NotificationRail />
 
@@ -167,6 +234,14 @@ export function Sidebar({
           <div className="sidebar__user-role">{profile.role}</div>
         </div>
         <ThemeToggle profileId={profile.id} initialTheme={profile.theme ?? 'dark'} />
+        <Link
+          href={SETTINGS_HREF}
+          title="Settings"
+          aria-label="Settings"
+          className={`btn btn--icon${path.startsWith(SETTINGS_HREF) ? ' is-active' : ''}`}
+        >
+          <SettingsIcon size={14} />
+        </Link>
         <form action="/auth/signout" method="post">
           <button type="submit" title="Sign out" className="btn btn--icon" aria-label="Sign out">
             <LogOut size={14} />
