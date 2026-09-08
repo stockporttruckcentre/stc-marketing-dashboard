@@ -383,16 +383,21 @@ export function ContactDrawer({
 
           {canEdit && (
             <div style={{ display: 'flex', gap: 7, marginTop: 14, flexWrap: 'wrap', position: 'relative' }}>
+              {/* "Proposal", not "Generate proposal". The business's
+                  own fix, after the row wrapped on a customer record
+                  with DocuSign on it: the shorter label buys about 55px
+                  and the button is red and first, so nothing about what
+                  it does is lost. */}
               <Button size="sm" variant="accent" onClick={() => setShowProposal(true)}>
-                <FileText size={13} /> Generate proposal
+                <FileText size={13} /> Proposal
               </Button>
               {/* REMINDER, BETWEEN THE TWO IT WAS ASKED TO SIT BETWEEN.
 
                   A reminder is a personal task, so it goes to Work
                   rather than into the diary: see `ReminderModal`. It is
-                  a one word label on purpose. The row holds five
-                  buttons at 660px and "Set a reminder" is the version
-                  that wraps it onto a second line. */}
+                  a one word label on purpose. The row holds six buttons
+                  in 615px and "Set a reminder" is the version that wraps
+                  it onto a second line. */}
               <Button size="sm" variant="secondary" onClick={() => setShowReminder(true)}>
                 <Bell size={13} /> Reminder
               </Button>
@@ -428,10 +433,14 @@ export function ContactDrawer({
                   CDN @import lines in globals.css are inert (see the note
                   beside them), so this row has no font of its own and its
                   width is decided by whatever the reader's machine falls
-                  back to. `npm run check:crm-record` now measures under
-                  both, and reports 13px spare on Arial metrics, which is
-                  a margin worth watching before anybody renames a
-                  button. */}
+                  back to. `npm run check:crm-record` measures under both
+                  now.
+
+                  Thirteen points of margin was not enough for that: on a
+                  customer record it still wrapped, because 13px is
+                  inside the error bars of a scrollbar and a system sans.
+                  Shortening the first button to "Proposal" took the
+                  margin to 69px, which survives being wrong. */}
               {SIGNABLE.includes(edit.status) && (
                 <Button size="sm" variant="secondary"
                   onClick={() => window.open('https://app.docusign.com/', '_blank', 'noopener')}

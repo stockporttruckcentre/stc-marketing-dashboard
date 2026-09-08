@@ -45,6 +45,14 @@
    this for everybody. That is a rebrand step and belongs to the
    business's ordering, so it is named here rather than done.
 
+   THIRD, and this is why the margin is no longer thin: even with the
+   substituted metrics right, a customer record on a real machine still
+   wrapped, because 13px is inside the error bars of a scrollbar, a
+   zoom level and a different system sans. The business shortened
+   "Generate proposal" to "Proposal", which buys 56px and takes the
+   margin from 13 to 69. A margin that survives being wrong is worth
+   more than a measurement that has to be right.
+
    Needs `npm run dev` on port 3000. Run with `npm run check:crm-record`.
    ============================================================= */
 import { existsSync } from 'node:fs';
@@ -138,8 +146,8 @@ async function main() {
   ok('the row carries every action, DocuSign included',
     real.labels.length === 6, real.labels.join(', '));
 
-  ok('Reminder sits between Generate proposal and Schedule',
-    real.labels[0] === 'Generate proposal'
+  ok('Reminder sits between the proposal button and Schedule',
+    real.labels[0] === 'Proposal'
     && real.labels[1] === 'Reminder'
     && real.labels[2] === 'Schedule',
     real.labels.join(' | '));
@@ -159,8 +167,8 @@ async function main() {
 
   await browser.close();
   console.log(failed === 0
-    ? `\n  Six actions on one line, ${spare}px to spare. The margin is thin because\n`
-      + '  the row has no font of its own: see the @import note in globals.css.\n'
+    ? `\n  Six actions on one line, ${spare}px to spare, which is enough to survive\n`
+      + '  a scrollbar, a zoom level and a machine whose sans is wider than this one.\n'
     : `\n  ${failed} to fix.\n`);
   process.exit(failed === 0 ? 0 : 1);
 }
