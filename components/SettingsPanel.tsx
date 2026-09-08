@@ -381,13 +381,11 @@ function AppearanceTab({ profile }: { profile: Profile }) {
    of here, and take `hidden` off its row in `lib/nav.ts`.
    ============================================================= */
 const NOT_RELEASED: { href: string; label: string; blurb: string; icon: typeof ClipboardList }[] = [
-  {
-    href: '/dashboard/reports',
-    label: 'Reports',
-    blurb: 'The bi-weekly meeting pack, top and bottom customers, growth, pipeline, '
-      + 'problems, stock and jobs. Nine reports, each one printable and exportable to Word.',
-    icon: ClipboardList,
-  },
+  /* Empty, and that is the finished state rather than a gap.
+     Reports came out of here the moment the business looked at it and
+     said where the row goes: "place it on sidebar below Analytics". The
+     card below draws nothing while this is empty, so an empty list costs
+     nobody a blank panel. */
 ];
 
 function NotOnTheSidebarYet() {

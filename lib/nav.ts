@@ -84,23 +84,21 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', capability: null },
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', capability: 'crm.view' },
+      /* Directly under Analytics, which is where the business put it
+         once they had looked at it:
+
+           place it on sidebar below Analytics
+
+         It reads as the right pair. Analytics is the screen you go to
+         when you want to know something; Reports is the screen you go to
+         when somebody else needs to know it. Same figures, one on a
+         screen and one on paper.
+
+         It was `hidden` while a demonstration was running and it is not
+         any more. */
+      { href: '/dashboard/reports', label: 'Reports', icon: 'reports', capability: 'crm.view' },
       { href: '/dashboard/work', label: 'Work', icon: 'work', capability: 'work.view' },
       { href: '/dashboard/calendar', label: 'Diary', icon: 'diary', capability: null },
-      /* Below Diary, which is where the business asked for it: a report
-         is run before a meeting, next to the diary that said the meeting
-         was happening.
-
-         `hidden` for now, and only for now. From the business, while the
-         page was being built:
-
-           dont put reports on the sidebar until the page is made as
-           they're all demoing it right now while i work
-
-         So the screen is routed, reachable by its address and named
-         properly in the breadcrumb, and it is not in anybody's sidebar
-         during a demonstration. Deleting the `hidden` line is the whole
-         of switching it on. */
-      { href: '/dashboard/reports', label: 'Reports', icon: 'reports', capability: 'crm.view', hidden: true },
     ],
   },
   {
