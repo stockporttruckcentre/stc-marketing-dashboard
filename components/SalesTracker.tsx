@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueSetterParams } from 'ag-grid-community';
-import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload, ShieldCheck,
+import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calendar, DollarSign, Briefcase, CalendarPlus, AlertTriangle, Link as LinkIcon, Wrench, PoundSterling, Truck, Eye, Copy, Package, Container, Upload, ShieldCheck, Users, ChevronDown, History, BadgeCheck,
 } from 'lucide-react';
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import { CustomerValue } from './crm/CustomerValue';
@@ -24,6 +24,11 @@ import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule } from '@/components/kit
 import { hasAnAccount, nameOfLead } from '@/lib/crm/lead-identity';
 import { applyOrder, readOrder, writeOrder } from '@/lib/ui/order';
 import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
+import { fieldsFor } from '@/lib/crm/lead-fields';
+import { convertToCustomer, relationshipOf, winsAProspect } from '@/lib/crm/conversion';
+import {
+  MAINTENANCE_WHAT, WORK_KINDS, WORK_KIND_HINT, WORK_KIND_LABEL, workKindOf, type WorkKind,
+} from '@/lib/crm/work-kind';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { trackerFromCrm } from '@/lib/crm/tracker-operations';
 import { SALES_TRACKER } from '@/lib/import/dictionary';
@@ -126,14 +131,35 @@ function fmtDate(v: string | null | undefined) {
 }
 
 export function SalesTracker({
-  initialLeads, profile,
-}: { initialLeads: LeadWithAccount[]; profile: Profile }) {
+  initialLeads, profile, colleagues = [], viewing = null,
+  refused = false, unknownOwner = false, canViewOthers = false,
+}: {
+  initialLeads: LeadWithAccount[];
+  profile: Profile;
+  /** Everybody the picker can offer. Empty for anybody who cannot use it. */
+  colleagues?: Profile[];
+  /** Whose tracker is open, when it is not your own. */
+  viewing?: Profile | null;
+  /** `?owner=` was given by somebody not allowed to use it. */
+  refused?: boolean;
+  /** `?owner=` named nobody. */
+  unknownOwner?: boolean;
+  canViewOthers?: boolean;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [rows, setRows] = useState<TrackerRow[]>(() => initialLeads.map(flatten));
   const [side, setSide] = useState<LeadType>('trailer_sales');
 
-  const [whatFilter, setWhatFilter] = useState<string | null>(null);
+  /* Somebody else's tracker is read through this screen, not edited
+     through it. An administrator opening Dean's to see where a deal has
+     got to has no business typing into his grid by accident, and the
+     one thing worse than not being able to edit is editing a row you
+     did not realise was somebody else's. Changes go where they always
+     went: open the lead from the CRM record, which names the owner. */
+  const readOnly = viewing != null;
+
+  const [whatFilter, setWhatFilter] = useState<WorkKind | null>(null);
   const [tab, setTab] = useState<TrackerTab>('working');
   const [query, setQuery] = useState('');
   const [editingRow, setEditingRow] = useState<TrackerRow | null>(null);
@@ -155,13 +181,22 @@ export function SalesTracker({
      that are shared with them, so a link to a colleague's lead is a
      link to a row that is not here, and doing nothing looks exactly
      like a broken button. It says so instead. */
+  /* WHICH DIVISION IS ALREADY DECIDED.
+
+     A deep link naming a lead decides it, and so does a click on a tab.
+     Recorded so that the saved order arriving a frame later (below)
+     does not overrule either of them and drop somebody on Maintenance
+     while the drawer they asked for is a trailer sale. */
+  const chosen = useRef(false);
+  const pickSide = useCallback((s: LeadType) => { chosen.current = true; setSide(s); }, []);
+
   const sp = useSearchParams();
   useEffect(() => {
     const contact = sp?.get('contact');
     if (contact) {
       const mine = rows.filter(r => r.contact_id === contact || r.id === contact);
       const target = mine.find(r => r.type === side) ?? mine[0];
-      if (target) { setEditingRow(target); setSide(target.type); }
+      if (target) { setEditingRow(target); pickSide(target.type); }
       return;
     }
 
@@ -171,7 +206,7 @@ export function SalesTracker({
     const target = rows.find(r => r.id === lead);
     if (target) {
       setEditingRow(target);
-      setSide(target.type ?? 'trailer_sales');
+      pickSide(target.type ?? 'trailer_sales');
       /* The tab as well as the side, or a won pitch opens behind the
          Working tab and the grid underneath looks empty. */
       setTab(STATUS_TO_TAB[target.status] ?? 'all');
@@ -230,9 +265,35 @@ export function SalesTracker({
      mismatch: the server sends the declared order, the browser paints a
      different one, and React throws away the tree it was given. So the
      first paint is always the declared order and the saved one arrives
-     a frame later, which nobody sees and nothing breaks. */
+     a frame later, which nobody sees and nothing breaks.
+
+     ---- AND THE FIRST ONE IS THE ONE THAT OPENS ----
+
+     From the business:
+
+       You changed it so we can drag maintenance/trailersales/rental tab
+       headers around on the tracker but it's still defaulting your
+       primary tab that opens first as the trailer sales one. It should
+       be whichever is first in your list, so Maintenance for dean
+       currently.
+
+     Dragging a tab to the front said what it was for and then did not
+     do it. `side` was initialised to `trailer_sales` and nothing ever
+     reconsidered, so the order decided where the tabs sat and not where
+     you landed, which is the only part of it anybody feels every
+     morning.
+
+     Applied here rather than in the initialiser for the same hydration
+     reason: the server has no idea what this machine remembers. */
   const [order, setOrder] = useState<string[] | null>(null);
-  useEffect(() => { setOrder(readOrder(SIDE_ORDER)); }, []);
+  useEffect(() => {
+    const saved = readOrder(SIDE_ORDER);
+    setOrder(saved);
+    if (chosen.current) return;
+    const first = applyOrder(SIDES.map((k) => ({ key: k })), saved)[0]?.key as LeadType | undefined;
+    if (first) setSide(first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sideTabs = useMemo(
     () => applyOrder(SIDES.map((s) => ({
@@ -241,6 +302,11 @@ export function SalesTracker({
     [order, sideCounts],
   );
 
+  /* A drop moves where you land tomorrow as well as where the tab sits,
+     which is the whole point of the complaint above. It does not move
+     you now: somebody dragging Maintenance to the front while reading a
+     trailer sale is arranging their tabs, not asking to be taken
+     somewhere else. */
   const reorderSides = useCallback((keys: LeadType[]) => {
     setOrder(keys);
     writeOrder(SIDE_ORDER, keys);
@@ -249,60 +315,52 @@ export function SalesTracker({
   /* The kinds of work on the maintenance side, each with the number of
      rows it would actually show.
 
-     Two things were wrong with the old version and both produced a chip
-     that finds nothing.
+     ---- Five chips, not thirty ----
 
-     It counted across every status, so on the Customers tab a chip for
-     work that only exists on quoted rows sat there offering zero. A
-     filter that empties the grid and does not say why reads as a broken
-     screen rather than as an empty set, so a chip with nothing behind it
-     is not drawn at all now, and every chip carries its count.
+     From the business:
 
-     And it grouped on the exact string, so "All Services" and "All
-     services" were two chips for one kind of work. They fold together
-     here rather than being corrected in the data: the spelling on the
-     record is the spelling on the spreadsheet it came from, and a filter
-     is the wrong place to start rewriting somebody's typing. The most
-     common spelling is the one that gets shown. */
+       There are too many filters on Maintenance in the sales tracker,
+       things like maintenance/brake tests and maintenance/refurb mean
+       the same thing really.
+
+     This grouped on the text of `what`, folded only for case, which is
+     the right answer to "what distinct values are there" and the wrong
+     answer to "what kind of work is this". `what` came off a spreadsheet
+     where people wrote whatever described the job, so one kind of work
+     arrived spelled four ways and got four chips.
+
+     `workKindOf` decides which of five a job belongs to, and the rule
+     lives in `lib/crm/work-kind.ts` where it can be read and checked.
+     The raw text is untouched and still shows in the grid and the
+     drawer: this decides the chip, not the record.
+
+     What survives from the old version, because both were right: a chip
+     is counted against everything except the work filter itself, so the
+     number on it is the number of rows it would show, and a chip with
+     nothing behind it is not drawn at all. A filter that empties the
+     grid and does not say why reads as a broken screen. */
   const whatChips = useMemo(() => {
     if (side !== 'maintenance') return [];
 
-    const groups = new Map<string, { label: string; count: number; spellings: Map<string, number> }>();
+    const counts = new Map<WorkKind, number>();
     for (const r of sideRows) {
-      if (!r.what) continue;
-      const key = r.what.trim().toLowerCase();
-      if (!key) continue;
-      const g = groups.get(key) ?? { label: r.what.trim(), count: 0, spellings: new Map() };
-      g.spellings.set(r.what.trim(), (g.spellings.get(r.what.trim()) ?? 0) + 1);
-      if (passesExceptWork(r)) g.count++;
-      groups.set(key, g);
+      const kind = workKindOf(r.what);
+      if (passesExceptWork(r)) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      else if (!counts.has(kind)) counts.set(kind, 0);
     }
 
-    return [...groups.entries()]
-      .map(([key, g]) => ({
-        key,
-        label: [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0],
-        count: g.count,
-      }))
+    return WORK_KINDS
+      .map((kind) => ({ key: kind, label: WORK_KIND_LABEL[kind], hint: WORK_KIND_HINT[kind], count: counts.get(kind) ?? 0 }))
       /* Zero means this filter would empty the grid. The one exception
          is the filter somebody has already picked: hiding that would
          leave them looking at nothing with no way to see why or undo
          it. */
-      .filter((c) => c.count > 0 || c.key === whatFilter)
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+      .filter((c) => c.count > 0 || c.key === whatFilter);
   }, [side, sideRows, passesExceptWork, whatFilter]);
-
-  /* Kinds of work on this side, however they are spelled, for the stat
-     strip. Counted over the whole side rather than the open tab so the
-     figure does not move as somebody clicks between statuses. */
-  const whatKinds = useMemo(() => {
-    if (side !== 'maintenance') return 0;
-    return new Set(sideRows.map((r) => r.what?.trim().toLowerCase()).filter(Boolean)).size;
-  }, [side, sideRows]);
 
   const filtered = useMemo(() => sideRows.filter((r) => {
     if (!passesExceptWork(r)) return false;
-    if (side === 'maintenance' && whatFilter && (r.what || '').trim().toLowerCase() !== whatFilter) return false;
+    if (side === 'maintenance' && whatFilter && workKindOf(r.what) !== whatFilter) return false;
     return true;
   }), [sideRows, side, whatFilter, passesExceptWork]);
 
@@ -316,6 +374,25 @@ export function SalesTracker({
     sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.commission) || 0), 0),
     [sideRows]);
 
+  /* The lead somebody has just won, waiting on an answer about the
+     customer behind it. See `lib/crm/conversion.ts`. */
+  const [convert, setConvert] = useState<TrackerRow | null>(null);
+
+  /**
+   * Ask, if this write has just won something for a prospect.
+   *
+   * Read from the database rather than from the row in front of us: the
+   * tracker carries a copy of a few account fields that is as old as the
+   * page, and offering to convert a firm somebody else converted an hour
+   * ago is the version of this that makes people distrust the prompt.
+   */
+  const maybeConvert = useCallback(async (row: TrackerRow, before: string, after: string) => {
+    if (!row.contact_id) return;
+    if (after !== 'won' || before === 'won') return;
+    const rel = await relationshipOf(supabase, row.contact_id);
+    if (winsAProspect(before, after, rel)) setConvert(row);
+  }, [supabase]);
+
   /**
    * One cell, and the field decides which record it belongs to.
    *
@@ -325,7 +402,8 @@ export function SalesTracker({
    */
   const saveCell = useCallback((params: ValueSetterParams<TrackerRow>): boolean => {
     const field = params.colDef.field as string;
-    if ((params.data as any)[field] === params.newValue) return false;
+    const before = (params.data as any)[field];
+    if (before === params.newValue) return false;
     (params.data as any)[field] = params.newValue;
 
     const toAccount = ACCOUNT_FIELDS.has(field);
@@ -335,34 +413,95 @@ export function SalesTracker({
 
     supabase.from(table).update({ [field]: params.newValue }).eq('id', id)
       .then(({ error }) => { if (error) setMessage(error.message); });
+
+    /* THE ROW YOU EDITED IS THE ROW THAT MOVES.
+
+       A company field written from a lead row goes to `crm_contacts`,
+       so the trigger that keeps `crm_leads.last_activity_at` honest
+       never sees it, and correcting a phone number here would leave the
+       lead reading as untouched. Stamped from this side rather than
+       cascaded in the database, because a cascade from the account
+       would mark all four of Dawson's open pitches as worked on when
+       only this one was in front of anybody. */
+    if (toAccount) {
+      const now = new Date().toISOString();
+      (params.data as any).last_activity_at = now;
+      supabase.from('crm_leads').update({ last_activity_at: now }).eq('id', params.data.id)
+        .then(({ error }) => { if (error) setMessage(error.message); });
+    }
+
+    if (field === 'status') void maybeConvert(params.data, before, String(params.newValue));
     return true;
-  }, [supabase]);
+  }, [supabase, maybeConvert]);
 
   const isCustomerTab = tab === 'customer';
   const isMaintenance = side === 'maintenance';
 
   const columnDefs = useMemo<ColDef<TrackerRow>[]>(() => {
+    const words = fieldsFor(side);
     const commonStart: ColDef<TrackerRow>[] = [
-      { field: 'date_of_enquiry', headerName: isMaintenance ? 'Last update' : 'Enquiry', width: 110,
+      { field: 'date_of_enquiry', headerName: 'Enquiry', width: 100,
         valueFormatter: (p) => fmtDate(p.value), editable: true, valueSetter: saveCell, cellEditor: 'agTextCellEditor' },
+      /* LAST UPDATED, MEANING IT.
+
+         The maintenance side printed the heading "Last update" above
+         `date_of_enquiry`, which is the day the enquiry arrived and
+         never moves again. So a lead worked for a month with nine notes
+         on it read as last touched the day it was raised, which is the
+         complaint. Two fixes, and this is the visible half: the heading
+         goes back on the enquiry date, and the real column is here.
+
+         Never editable. It is evidence of work rather than a field, and
+         a date somebody can type is not evidence of anything. It is
+         written by `crm_leads_touch_activity`, migration 096. */
+      { field: 'last_activity_at', headerName: 'Last updated', width: 115, editable: false,
+        valueFormatter: (p) => fmtDate(p.value),
+        cellStyle: { color: 'var(--text-muted)' } },
       { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 160, editable: true, valueSetter: saveCell },
       { field: 'contact_name', headerName: 'Contact', flex: 1, minWidth: 130, editable: true, valueSetter: saveCell },
       { field: 'phone', headerName: 'Phone', width: 140, editable: true, valueSetter: saveCell },
       { field: 'email', headerName: 'Email', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
     ];
+    /* THE MIDDLE OF THE GRID IS WHAT THIS DIVISION SELLS.
+
+       Trailer sales asks new or used and describes a specification.
+       Maintenance asks what kind of work and lists the fleet. Rental had
+       neither: it fell through to the trailer sales columns, so a hire
+       enquiry was asked whether the hire was new or used. The words
+       come from `lib/crm/lead-fields.ts`, once, so the grid, the drawer
+       and the new lead modal cannot drift apart. */
     const salesMid: ColDef<TrackerRow>[] = [
+      { field: 'what', headerName: 'What', flex: 1, minWidth: 140, editable: true, valueSetter: saveCell },
       { field: 'new_or_used', headerName: 'New/Used', width: 110, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'New', 'Used', 'New/Used', 'Used/Refurb', 'Refurb'] } },
       { field: 'estimated_value', headerName: 'Est. value', width: 120, editable: true, valueSetter: saveCell,
         valueParser: p => p.newValue === '' ? null : Number(p.newValue),
         valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' } },
       { field: 'source', headerName: 'Source', width: 140, editable: true, valueSetter: saveCell },
-      { field: 'description', headerName: 'Description', flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
+      { field: 'description', headerName: words.description.label, flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
+    ];
+    const rentalMid: ColDef<TrackerRow>[] = [
+      { field: 'what', headerName: 'Hire', width: 150, editable: true, valueSetter: saveCell,
+        cellEditor: 'agSelectCellEditor',
+        cellEditorParams: { values: ['', ...(words.what.options ?? [])] } },
+      { field: 'estimated_value', headerName: 'Est. value', width: 120, editable: true, valueSetter: saveCell,
+        valueParser: p => p.newValue === '' ? null : Number(p.newValue),
+        valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' } },
+      { field: 'source', headerName: 'Source', width: 130, editable: true, valueSetter: saveCell },
+      { field: 'vehicles', headerName: 'Units', flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
+      { field: 'description', headerName: words.description.label, flex: 1.2, minWidth: 150, editable: true, valueSetter: saveCell },
     ];
     const maintMid: ColDef<TrackerRow>[] = [
-      { field: 'what', headerName: 'What', width: 150, editable: true, valueSetter: saveCell,
+      /* The editor offers the seven words a NEW record can use, from
+         `MAINTENANCE_WHAT`. Anything already written stays exactly as it
+         was typed: `agSelectCellEditor` shows the current value even
+         when it is not on the list, and the chips group it either way. */
+      { field: 'what', headerName: 'What', width: 160, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
-        cellEditorParams: { values: ['', 'Maintenance', 'Trukplan', 'All Services', 'Maintenance and MOT', 'Maintenance and Trukplan', 'Van Maintenance and Repair', 'Accident Repair', 'All Services and Parking'] } },
+        cellEditorParams: { values: ['', ...(words.what.options ?? [])] } },
+      { field: 'estimated_value', headerName: 'Est. value', width: 120, editable: true, valueSetter: saveCell,
+        valueParser: p => p.newValue === '' ? null : Number(p.newValue),
+        valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' } },
       { field: 'category', headerName: 'Cat', width: 70, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor', cellEditorParams: { values: ['', 'A', 'B', 'C'] },
         cellRenderer: (p: ICellRendererParams<TrackerRow, string>) => p.value
@@ -373,9 +512,9 @@ export function SalesTracker({
       { field: 'vehicles', headerName: 'Vehicles', flex: 1.4, minWidth: 180, editable: true, valueSetter: saveCell },
     ];
     const commonEnd: ColDef<TrackerRow>[] = [
-      { field: 'requirement', headerName: 'Requirement', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
+      { field: 'requirement', headerName: words.requirementLabel, flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
       { field: 'action', headerName: 'Action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell },
-      ...(isMaintenance ? [{ field: 'next_action' as keyof TrackerRow, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
+      ...(side === 'maintenance' ? [{ field: 'next_action' as keyof TrackerRow, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
       { field: 'status', headerName: 'Status', width: 120, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
         cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
@@ -383,32 +522,53 @@ export function SalesTracker({
           ? <GridBadge tone={STATUS_TONE[p.value] ?? 'neutral'}>{STATUS_LABEL[p.value]}</GridBadge> : null },
       { field: 'notes', headerName: 'Latest update', flex: 1.5, minWidth: 200, editable: true, valueSetter: saveCell },
     ];
-    const base = [...commonStart, ...(isMaintenance ? maintMid : salesMid), ...commonEnd];
+    const mid = side === 'maintenance' ? maintMid : side === 'rental' ? rentalMid : salesMid;
+    const base = [...commonStart, ...mid, ...commonEnd];
     if (isCustomerTab) {
-      // Show closing financials only on the Customer tab
-      base.splice(7, 0,
-        { field: 'order_date',    headerName: 'Order date',    width: 110, valueFormatter: p => fmtDate(p.value), editable: true, valueSetter: saveCell },
-        { field: 'dispatch_date', headerName: 'Dispatch date', width: 110, valueFormatter: p => fmtDate(p.value), editable: true, valueSetter: saveCell },
-        { field: 'sale_price',    headerName: 'Sale price',    width: 110, valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' },
+      /* The closing figures, in this division's words. What a trailer
+         sale calls an order date a contract calls the day it was agreed,
+         and it is the same column: see the header of
+         `lib/crm/lead-fields.ts` for why one column and three names
+         rather than three columns.
+
+         Placed by NAME rather than at index 7. It was at index 7, which
+         was the end of the middle block until a column was added in
+         front of it, and an index into a list built four lines earlier
+         is a number that goes wrong silently. */
+      const closing: ColDef<TrackerRow>[] = [
+        { field: 'order_date',    headerName: words.closing.orderDate,    width: 115, valueFormatter: p => fmtDate(p.value), editable: true, valueSetter: saveCell },
+        { field: 'dispatch_date', headerName: words.closing.dispatchDate, width: 115, valueFormatter: p => fmtDate(p.value), editable: true, valueSetter: saveCell },
+        { field: 'sale_price',    headerName: words.closing.salePrice.replace(' (£)', ''), width: 115, valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' },
           valueParser: p => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
-        { field: 'profit',        headerName: 'Profit',        width: 100, valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' },
-          valueParser: p => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
-        { field: 'profit_pct',    headerName: 'Profit %',      width: 90,  valueFormatter: p => p.value != null ? `${(Number(p.value) * 100).toFixed(1)}%` : '', cellStyle: { textAlign: 'right' },
-          valueParser: p => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
+        ...(words.closing.profit ? [
+          { field: 'profit' as keyof TrackerRow, headerName: 'Profit', width: 100, valueFormatter: (p: any) => fmtMoney(p.value), cellStyle: { textAlign: 'right' },
+            valueParser: (p: any) => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
+          { field: 'profit_pct' as keyof TrackerRow, headerName: 'Profit %', width: 90, valueFormatter: (p: any) => p.value != null ? `${(Number(p.value) * 100).toFixed(1)}%` : '', cellStyle: { textAlign: 'right' },
+            valueParser: (p: any) => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
+        ] : []),
         { field: 'commission',    headerName: 'Commission',    width: 110, valueFormatter: p => fmtMoney(p.value), cellStyle: { textAlign: 'right' },
           valueParser: p => p.newValue === '' ? null : Number(p.newValue), editable: true, valueSetter: saveCell },
-      );
+      ];
+      const at = base.findIndex((c) => c.field === 'requirement');
+      base.splice(at === -1 ? base.length : at, 0, ...closing);
     }
+    /* Somebody else's tracker is read, not typed into. Applied to every
+       column at once rather than remembered on each of the thirty
+       above, because a column added later would inherit the wrong
+       answer and nothing would say so. */
+    if (readOnly) for (const c of base) c.editable = false;
+
     base.push({
-      headerName: '', width: 56, pinned: 'right', sortable: false, filter: false, editable: false,
+      headerName: '', width: readOnly ? 40 : 56, pinned: 'right', sortable: false, filter: false, editable: false,
       cellRenderer: (p: ICellRendererParams<TrackerRow>) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: '100%' }}>
           <IconButton label="Open the lead" onClick={() => setEditingRow(p.data!)}>
-            <Edit2 size={13} />
+            {readOnly ? <Eye size={13} /> : <Edit2 size={13} />}
           </IconButton>
           {/* Removes the pitch, never the customer. Dropping a quote is
               not the same as saying you have never heard of them, and
               before leads existed those were the same button. */}
+          {!readOnly && (
           <IconButton label="Drop this lead" danger onClick={async () => {
             if (!confirm(`Drop this ${TYPE_LABEL[p.data!.type].toLowerCase()} lead for "${p.data!.company_name}"?\n\nThe customer stays in the CRM.`)) return;
             const { error } = await supabase.from('crm_leads').delete().eq('id', p.data!.id);
@@ -417,6 +577,7 @@ export function SalesTracker({
           }}>
             <Trash2 size={13} />
           </IconButton>
+          )}
         </div>
       ),
     });
@@ -433,8 +594,12 @@ export function SalesTracker({
        "What" on maintenance while trailer sales has its own What field
        for the type of unit. So the stale header sat above the right
        data with the wrong name on it, on a screen people read figures
-       off. */
-  }, [saveCell, supabase, isCustomerTab, isMaintenance]);
+       off.
+
+       `side` rather than `isMaintenance` now, because there are three
+       sets of columns and not two: rental used to be given trailer
+       sales' and was asked whether a hire was new or used. */
+  }, [saveCell, supabase, isCustomerTab, side, readOnly]);
 
   const defaultColDef = useMemo<ColDef>(() => ({
     resizable: true, sortable: true, filter: true, floatingFilter: false,
@@ -570,7 +735,7 @@ export function SalesTracker({
     if (!done.rowId) { setMessage('That lead was raised but did not come back.'); return; }
 
     const row = await readLead(done.rowId);
-    setSide(newSide);
+    pickSide(newSide);
     setShowNewLead(false);
     if (!row) return;
     setRows(r => [row, ...r]);
@@ -586,45 +751,91 @@ export function SalesTracker({
 
 
   const firstName = (profile?.full_name ?? 'My').split(' ')[0];
+  const whose = viewing ? (viewing.full_name || viewing.email || 'a colleague') : firstName;
+  const whoseFirst = whose.split(' ')[0];
 
   return (
     <TabShell>
 
       {/* Same header shape the CRM pipeline uses: icon tile, Panton
           title, what qualifies it, one line of context, and the two
-          actions that are always available. */}
+          actions that are always available.
+
+          WHOSE TRACKER, IN THE TITLE. Not in a corner and not only in
+          the picker: a manager who forgets they are reading Dean's and
+          starts working it has done something they cannot see they did.
+          The eye badge is the second half of the same sentence. */}
       <RecordHead
-        icon={<TrendingUp size={20} />}
-        title={`${firstName}’s leads`}
+        icon={viewing ? <Eye size={20} /> : <TrendingUp size={20} />}
+        title={`${whoseFirst}’s leads`}
         badges={<>
+          {viewing && <Badge tone="accent" dot>Viewing</Badge>}
           <Badge tone="neutral" dot>{TYPE_LABEL[side]}</Badge>
           {tab !== 'all' && <Badge tone="neutral">{TAB_LABEL[tab]}</Badge>}
         </>}
         sub={<>
-          Your own and any shared with you.
+          {viewing
+            ? `${whose}’s own leads and any shared with them. Read only.`
+            : 'Your own and any shared with you.'}
           {' '}{sideRows.length} {TYPE_LABEL[side].toLowerCase()} lead{sideRows.length === 1 ? '' : 's'}
           {filtered.length !== sideRows.length ? `, ${filtered.length} showing.` : '.'}
         </>}
         actions={<>
-          <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
-            <Upload size={13} /> Import
-          </Button>
-          <Button size="sm" variant="primary" onClick={() => setShowNewLead(true)}>
-            <Plus size={13} /> New lead
-          </Button>
+          {canViewOthers && (
+            <WhoseTracker me={profile} viewing={viewing} colleagues={colleagues} />
+          )}
+          {!viewing && <>
+            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
+              <Upload size={13} /> Import
+            </Button>
+            <Button size="sm" variant="primary" onClick={() => setShowNewLead(true)}>
+              <Plus size={13} /> New lead
+            </Button>
+          </>}
         </>}
       />
+
+      {/* Both refusals, said in the words of what happened. A screen
+          that quietly shows your own tracker when you asked for
+          somebody else's is a screen you stop trusting. */}
+      {refused && (
+        <Alert tone="warning">
+          You asked for a colleague&rsquo;s tracker. Reading somebody else&rsquo;s is an
+          administrator&rsquo;s, so this is yours. Ask an administrator if you need that access.
+        </Alert>
+      )}
+      {unknownOwner && (
+        <Alert tone="warning">
+          That link names somebody who is no longer on the system, so this is your own tracker.
+        </Alert>
+      )}
 
       {/* The pipeline at a glance, in the kit's stat strip. These were
           bold figures crammed into the sub-line, where three sums ran
           together and none of them could be read at a glance. No colour
           on any value: rule one. */}
+      {/* THE MAINTENANCE SIDE COUNTS MONEY TOO.
+
+          From the business: "We have estimated sales value on each
+          maintenance lead but the value isn't showing at the top of the
+          maintenance tab and it should."
+
+          It was true and it had a cause. This strip was written when the
+          maintenance sheet was a list of jobs rather than a pipeline, so
+          it counted rows in four states and then filled the fifth slot
+          with how many kinds of work were on it, which is a fact about
+          the spreadsheet rather than about the business. The estimated
+          value was on every row and totalled nowhere.
+
+          Same five slots, same order, same figures as trailer sales
+          wherever they mean the same thing: a maintenance rep and a
+          trailer rep now read the same strip. */}
       <StatStrip items={isMaintenance ? [
         { label: 'Total', value: counts.all, note: 'on this side' },
         { label: 'Working', value: counts.working, note: 'jobs in hand' },
-        { label: 'Customers', value: counts.customer, note: 'ongoing' },
+        { label: 'Pipeline', value: fmtMoney(totalEstValue) || '—', note: 'estimated' },
+        { label: 'Won', value: fmtMoney(totalCustomerRevenue) || '—', note: `${counts.customer} on contract` },
         { label: 'Lost', value: counts.lost, note: 'not pursuing' },
-        { label: 'Kinds', value: whatKinds, note: 'of work' },
       ] : [
         { label: 'Total', value: counts.all, note: 'on this side' },
         { label: 'Working', value: counts.working, note: 'chasing the deal' },
@@ -653,7 +864,7 @@ export function SalesTracker({
           pills could not say which was which. */}
       <Tabs
         value={side}
-        onChange={(v) => { setSide(v); if (v !== 'maintenance') setWhatFilter(null); }}
+        onChange={(v) => { pickSide(v); if (v !== 'maintenance') setWhatFilter(null); }}
         tabs={sideTabs}
         onReorder={reorderSides}
       />
@@ -677,7 +888,7 @@ export function SalesTracker({
             <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
             <Chip active={whatFilter === null} onClick={() => setWhatFilter(null)}>All work</Chip>
             {whatChips.map(w => (
-              <Chip key={w.key} active={whatFilter === w.key} count={w.count}
+              <Chip key={w.key} active={whatFilter === w.key} count={w.count} title={w.hint}
                 onClick={() => setWhatFilter(w.key === whatFilter ? null : w.key)}>{w.label}</Chip>
             ))}
           </>
@@ -741,6 +952,8 @@ export function SalesTracker({
         <LeadEditDrawer
           row={editingRow}
           profile={profile}
+          readOnly={readOnly}
+          onWon={maybeConvert}
           onClose={() => setEditingRow(null)}
           onSave={(patch) => {
             setRows(r => r.map(x => x.id === editingRow.id ? { ...x, ...patch } : x));
@@ -748,7 +961,114 @@ export function SalesTracker({
           }}
         />
       )}
+
+      {convert && (
+        <ConvertProspectModal
+          row={convert}
+          onClose={() => setConvert(null)}
+          onConvert={async () => {
+            const done = await convertToCustomer(supabase, convert.contact_id!);
+            setConvert(null);
+            setMessage(done.ok
+              ? `${convert.company_name} is an active customer account now.`
+              : done.why);
+          }}
+        />
+      )}
     </TabShell>
+  );
+}
+
+/* =============================================================
+   Whose tracker is open.
+
+   Two controls in one, and deliberately not a third row of tabs: an
+   administrator spends nearly all of their time on their own tracker,
+   so the picker is a select that says "Mine" until it does not.
+
+   Navigation rather than state. `?owner=` is read by the page on the
+   server, which is where the capability is checked and where the leads
+   are actually loaded, so a link to somebody's tracker is a link that
+   works when it is pasted into a message.
+   ============================================================= */
+function WhoseTracker({ me, viewing, colleagues }: {
+  me: Profile; viewing: Profile | null; colleagues: Profile[];
+}) {
+  const router = useRouter();
+  const others = colleagues.filter((p) => p.id !== me.id && (p.full_name || p.email));
+
+  if (others.length === 0) return null;
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', height: 32, position: 'relative',
+      background: 'var(--surface)', border: '1px solid var(--border-strong)',
+      borderRadius: 'var(--r)',
+    }}>
+      <span style={{ display: 'flex', paddingLeft: 9, color: 'var(--text-subtle)' }}>
+        <Users size={13} />
+      </span>
+      <select
+        aria-label="Whose tracker"
+        value={viewing?.id ?? ''}
+        onChange={(e) => router.push(e.target.value
+          ? `/dashboard/leads?owner=${e.target.value}`
+          : '/dashboard/leads')}
+        style={{
+          appearance: 'none', background: 'transparent', border: 0, outline: 0,
+          color: viewing ? 'var(--text)' : 'var(--text-muted)',
+          fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+          padding: '0 24px 0 7px', height: '100%', cursor: 'pointer',
+        }}
+      >
+        <option value="">My tracker</option>
+        {others.map((p) => (
+          <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+        ))}
+      </select>
+      <span style={{
+        position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)',
+        pointerEvents: 'none', color: 'var(--text-subtle)', display: 'flex',
+      }}><ChevronDown size={13} /></span>
+    </div>
+  );
+}
+
+/* =============================================================
+   Make them a customer, now that you have won something.
+
+   Asked at the moment of the handshake rather than done quietly. The
+   reasoning is in `lib/crm/conversion.ts`; what matters on screen is
+   that both answers are safe and both are one click, and that the
+   question says what will change rather than asking for a decision in
+   the abstract.
+   ============================================================= */
+function ConvertProspectModal({ row, onClose, onConvert }: {
+  row: TrackerRow; onClose: () => void; onConvert: () => void;
+}) {
+  return (
+    <Modal
+      title={`Make ${row.company_name} an active customer?`}
+      description="You have just marked this lead as won."
+      width={480}
+      onClose={onClose}
+      footer={<>
+        <Button size="sm" variant="ghost" onClick={onClose}>Leave them a prospect</Button>
+        <Button size="sm" variant="primary" onClick={onConvert}>
+          <BadgeCheck size={13} /> Make them a customer
+        </Button>
+      </>}
+    >
+      <p style={{ margin: 0, fontFamily: 'var(--inter)', fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+        They are recorded as a prospect. Converting them marks the CRM record as an active
+        customer account, which is what the customer reports, the proposal pipelines and the
+        analytics split on.
+      </p>
+      <p style={{ margin: 0, fontFamily: 'var(--inter)', fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.55 }}>
+        The lead stays won either way. If the deal is not certain yet, leave them a prospect:
+        the Relationship control on their record does this whenever you are ready.
+      </p>
+    </Modal>
   );
 }
 
@@ -763,7 +1083,16 @@ type SiblingLead = {
 };
 
 // ===== Detail drawer for full edit of a single lead =====
-function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; profile: Profile; onClose: () => void; onSave: (patch: Partial<TrackerRow>) => void }) {
+function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave }: {
+  row: TrackerRow;
+  profile: Profile;
+  /** Somebody else's tracker. Read, do not type. */
+  readOnly?: boolean;
+  /** Told when the status moves, so the prospect question can be asked. */
+  onWon?: (row: TrackerRow, before: string, after: string) => void;
+  onClose: () => void;
+  onSave: (patch: Partial<TrackerRow>) => void;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [edit, setEdit] = useState<TrackerRow>(row);
   const [saving, setSaving] = useState(false);
@@ -772,6 +1101,24 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
   const [showSchedule, setShowSchedule] = useState(false);
   const [conflictMeeting, setConflictMeeting] = useState<CalendarEvent | null>(null);
   const tab = STATUS_TO_TAB[edit.status];
+
+  /* WHICH DIVISION THIS LEAD IS FOR, AND ITS OWN VOCABULARY.
+
+     From the business: "on the sales tracker, make the lead type more
+     prominent when you click in to it and ensure they're wired depending
+     on which tab they're on, if maintenance, trailer sales or rental.
+     Currently it says Sales on them all and it's not prominent either."
+
+     Both halves were true. The eyebrow was the literal string "Sales"
+     followed by the status tab, so a maintenance contract and a hire
+     both announced themselves as Sales; and the fields underneath were
+     one set for all three, so a maintenance lead was asked whether it
+     was new or used and what the trailer sold for.
+
+     `words` is where the second half is fixed, once, from
+     `lib/crm/lead-fields.ts`. The grid reads the same file. */
+  const side: LeadType = (edit.type ?? 'trailer_sales') as LeadType;
+  const words = fieldsFor(side);
 
   /* Every other pitch to the same customer, and what they come to.
 
@@ -874,7 +1221,13 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
    * nothing renders from it.
    */
   async function saveField<K extends keyof TrackerRow>(field: K, value: TrackerRow[K]) {
+    /* Reading somebody else's tracker. Every control below is already
+       disabled, so this is the belt to that pair of braces: a commit
+       that arrives from a keyboard shortcut or a stale handler writes
+       nothing. */
+    if (readOnly) return;
     if (persisted.current[field] === value) return;
+    const before = persisted.current[field];
     setEdit(e => ({ ...e, [field]: value }));
     setSaving(true);
     const toAccount = ACCOUNT_FIELDS.has(field as string);
@@ -888,7 +1241,18 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
     /* Only once the write came back. A field marked saved before the
        round trip is a field that stops retrying after a refusal. */
     persisted.current = { ...persisted.current, [field]: value };
-    onSave({ [field]: value } as any);
+
+    /* The row you edited is the row that moves. A company field written
+       from here goes to `crm_contacts`, where the lead's activity
+       trigger never sees it. Same reasoning as `saveCell`. */
+    const now = new Date().toISOString();
+    if (toAccount) {
+      await supabase.from('crm_leads').update({ last_activity_at: now }).eq('id', row.id);
+    }
+    setEdit((e) => ({ ...e, last_activity_at: now }));
+    onSave({ [field]: value, last_activity_at: now } as any);
+
+    if (field === 'status') onWon?.(row, String(before ?? ''), String(value ?? ''));
   }
 
   // Same guard as the other drawers: the shade is easy to clip on the
@@ -897,14 +1261,48 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
 
   return (
     <Drawer
-      eyebrow={`Sales · ${TAB_LABEL[tab]}`}
-      title={edit.company_name || 'Untitled lead'}
-      icon={<Container size={18} />}
+      /* The division, in the eyebrow, in the icon and in a badge beside
+         the name. Three places for one fact is not repetition here: the
+         eyebrow is read on the way in, the icon is what the eye lands
+         on, and the badge is what stays visible while you scroll. */
+      eyebrow={`${words.label} · ${TAB_LABEL[tab]}`}
+      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {edit.company_name || 'Untitled lead'}
+        </span>
+        <Badge tone={side === 'maintenance' ? 'accent' : side === 'rental' ? 'info' : 'neutral'} dot>
+          {words.label}
+        </Badge>
+        {/* WHEN IT LAST MOVED, BESIDE THE NAME.
+
+            Asked for with the column: "Show this to the right of the
+            customer name when you open a lead up too." It is the one
+            fact that decides whether the next thing you do is ring them
+            or read the notes, and it was on neither screen. */}
+        {edit.last_activity_at && (
+          <span title={new Date(edit.last_activity_at).toLocaleString('en-GB')}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, flex: 'none',
+              fontFamily: 'var(--inter)', fontSize: 11.5, fontWeight: 500,
+              color: 'var(--text-subtle)', letterSpacing: 0,
+            }}>
+            <History size={12} /> Updated {fmtDate(edit.last_activity_at)}
+          </span>
+        )}
+      </span>}
+      icon={side === 'maintenance' ? <Wrench size={18} />
+        : side === 'rental' ? <Truck size={18} />
+        : <Container size={18} />}
       onClose={onClose}
       backdropProps={dismiss.backdropProps as Record<string, unknown>}
       hint={dismiss.hint}
       footer={<>
-        <span style={{ flex: 1 }} />
+        {readOnly && (
+          <span style={{ flex: 1, fontFamily: 'var(--inter)', fontSize: 12, color: 'var(--text-subtle)' }}>
+            Somebody else&rsquo;s lead. Open it from the customer&rsquo;s CRM record to work on it.
+          </span>
+        )}
+        {!readOnly && <span style={{ flex: 1 }} />}
         {saving && <Loader size={14} className="spin" />}
         <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
       </>}
@@ -932,50 +1330,84 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
 
           <Split>
             <Field label="Contact">
-              <TextInput value={edit.contact_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, contact_name: v }))} onCommit={(v) => saveField('contact_name', v)} />
+              <TextInput readOnly={readOnly} value={edit.contact_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, contact_name: v }))} onCommit={(v) => saveField('contact_name', v)} />
             </Field>
             <Field label="Company">
-              <TextInput value={edit.company_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, company_name: v }))} onCommit={(v) => saveField('company_name', v)} />
+              <TextInput readOnly={readOnly} value={edit.company_name ?? ''} onChange={(v) => setEdit(s => ({ ...s, company_name: v }))} onCommit={(v) => saveField('company_name', v)} />
             </Field>
           </Split>
           <Split>
             <Field label="Phone">
-              <TextInput value={edit.phone ?? ''} onChange={(v) => setEdit(s => ({ ...s, phone: v }))} onCommit={(v) => saveField('phone', v)} />
+              <TextInput readOnly={readOnly} value={edit.phone ?? ''} onChange={(v) => setEdit(s => ({ ...s, phone: v }))} onCommit={(v) => saveField('phone', v)} />
             </Field>
             <Field label="Email">
-              <TextInput value={edit.email ?? ''} onChange={(v) => setEdit(s => ({ ...s, email: v }))} onCommit={(v) => saveField('email', v)} />
+              <TextInput readOnly={readOnly} value={edit.email ?? ''} onChange={(v) => setEdit(s => ({ ...s, email: v }))} onCommit={(v) => saveField('email', v)} />
             </Field>
           </Split>
+
+          {/* WHAT THIS PITCH IS FOR.
+
+              The field a maintenance lead is most about, and it was on
+              the grid, on the new lead modal, and not here. A trailer
+              sale describes a unit in its own words, so that one is free
+              text; the other two pick from a short list, which is what
+              keeps the filter chips down to five. */}
           <Split>
-            <Field label="Date of enquiry">
-              <TextInput type="date" value={edit.date_of_enquiry ?? ''} onChange={(v) => saveField('date_of_enquiry', v || null)} />
+            <Field label={words.what.label} hint={words.what.hint}>
+              {words.what.options ? (
+                <Select disabled={readOnly} value={edit.what ?? ''} onChange={(v) => saveField('what', v || null)}>
+                  <option value="">—</option>
+                  {/* Whatever is already on the record, even where it is
+                      not one of the seven. A select that silently drops
+                      an unrecognised value shows the first option
+                      instead and looks like the record says that. */}
+                  {edit.what && !words.what.options.includes(edit.what) && (
+                    <option value={edit.what}>{edit.what}</option>
+                  )}
+                  {words.what.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                </Select>
+              ) : (
+                <TextInput readOnly={readOnly} placeholder="Curtainsider, 4.7m, tri-axle"
+                  value={edit.what ?? ''} onChange={(v) => setEdit(s => ({ ...s, what: v }))}
+                  onCommit={(v) => saveField('what', v || null)} />
+              )}
             </Field>
+            <Field label="Date of enquiry">
+              <TextInput readOnly={readOnly} type="date" value={edit.date_of_enquiry ?? ''} onChange={(v) => saveField('date_of_enquiry', v || null)} />
+            </Field>
+          </Split>
+
+          <Split>
+            <Field label="Source">
+              <TextInput readOnly={readOnly} placeholder="LinkedIn, Prospect call, Website enquiry, Walk-in" value={edit.source ?? ''} onChange={(v) => setEdit(s => ({ ...s, source: v }))} onCommit={(v) => saveField('source', v || '')} />
+            </Field>
+            <Field label={words.estimatedLabel} hint={words.estimatedHint}>
+              <TextInput readOnly={readOnly} type="number" value={edit.estimated_value == null ? '' : String(edit.estimated_value)} onChange={(v) => saveField('estimated_value', v === '' ? null : Number(v))} />
+            </Field>
+          </Split>
+
+          {/* New or used describes a trailer. A maintenance contract is
+              neither, and a hire is neither, so they are not asked. */}
+          {words.newOrUsed && (
             <Field label="New / Used">
-              <Select value={edit.new_or_used ?? ''} onChange={(v) => saveField('new_or_used', v || null)}>
+              <Select disabled={readOnly} value={edit.new_or_used ?? ''} onChange={(v) => saveField('new_or_used', v || null)}>
                 <option value="">—</option>
                 <option>New</option><option>Used</option><option>New/Used</option><option>Used/Refurb</option><option>Refurb</option>
               </Select>
             </Field>
-          </Split>
-          <Split>
-            <Field label="Source">
-              <TextInput placeholder="LinkedIn, Prospect call, Website enquiry, Walk-in" value={edit.source ?? ''} onChange={(v) => setEdit(s => ({ ...s, source: v }))} onCommit={(v) => saveField('source', v || '')} />
-            </Field>
-            <Field label="Estimated sales value">
-              <TextInput type="number" value={edit.estimated_value == null ? '' : String(edit.estimated_value)} onChange={(v) => saveField('estimated_value', v === '' ? null : Number(v))} />
-            </Field>
-          </Split>
-          <Field label="Description">
-            <TextInput placeholder="4.7m curtain, PSK flats, drawbar" value={edit.description ?? ''} onChange={(v) => setEdit(s => ({ ...s, description: v }))} onCommit={(v) => saveField('description', v || null)} />
+          )}
+
+          <Field label={words.description.label}>
+            <TextInput readOnly={readOnly} placeholder={words.description.placeholder} value={edit.description ?? ''} onChange={(v) => setEdit(s => ({ ...s, description: v }))} onCommit={(v) => saveField('description', v || null)} />
           </Field>
-          <Field label="Requirement">
-            <TextArea rows={2} value={edit.requirement ?? ''} onChange={(v) => setEdit(s => ({ ...s, requirement: v }))} onCommit={(v) => saveField('requirement', v || null)} />
+          <Field label={words.requirementLabel}>
+            <TextArea readOnly={readOnly} rows={2} value={edit.requirement ?? ''} onChange={(v) => setEdit(s => ({ ...s, requirement: v }))} onCommit={(v) => saveField('requirement', v || null)} />
           </Field>
           <Field label="Action / next step">
-            <TextArea rows={2} value={edit.action ?? ''} onChange={(v) => setEdit(s => ({ ...s, action: v }))} onCommit={(v) => saveField('action', v || null)} />
+            <TextArea readOnly={readOnly} rows={2} value={edit.action ?? ''} onChange={(v) => setEdit(s => ({ ...s, action: v }))} onCommit={(v) => saveField('action', v || null)} />
           </Field>
           <Field label="Status">
-            <Select value={edit.status} onChange={(v) => saveField('status', v as ContactStatus)}>
+            <Select disabled={readOnly} value={edit.status} onChange={(v) => saveField('status', v as ContactStatus)}>
               <option value="lead">Lead</option>
               <option value="contacted">Contacted</option>
               <option value="quoted">Quoted</option>
@@ -1003,7 +1435,7 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
               count={meetings.length || undefined}
               action={
                 <Button size="sm" variant="secondary" onClick={handleSchedule}
-                  disabled={!hasAnAccount(row)}>
+                  disabled={readOnly || !hasAnAccount(row)}>
                   <CalendarPlus size={12} /> Schedule
                 </Button>
               }
@@ -1049,40 +1481,50 @@ function LeadEditDrawer({ row, profile, onClose, onSave }: { row: TrackerRow; pr
           </Card>
 
           <Field label="Latest update / notes">
-            <TextArea rows={3} value={edit.notes ?? ''}
+            <TextArea readOnly={readOnly} rows={3} value={edit.notes ?? ''}
               onChange={(v) => setEdit(s => ({ ...s, notes: v }))}
               onCommit={(v) => saveField('notes', v || null)} />
           </Field>
 
-          {/* Only once there is a sale to describe. */}
+          {/* Only once there is something to describe, and in the words
+              of the thing that was agreed. A maintenance contract has no
+              dispatch date and a hire has no sale price: same four
+              columns, three vocabularies, from `lib/crm/lead-fields.ts`.
+
+              Profit is trailer sales only. On a maintenance contract it
+              is a workshop figure that arrives months later out of the
+              invoices, not a number a rep types at the handshake, and a
+              box asking for it at the wrong moment gets a guess. */}
           {(edit.status === 'customer' || edit.status === 'won') && (
             <Card padded={false}>
-              <PanelHead title="Closing details" hint="What the sale was worth" />
+              <PanelHead title={words.closing.title} hint={words.closing.hint} />
               <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <Split>
-                  <Field label="Order date">
-                    <TextInput type="date" value={edit.order_date ?? ''} onChange={(v) => saveField('order_date', v || null)} />
+                  <Field label={words.closing.orderDate}>
+                    <TextInput readOnly={readOnly} type="date" value={edit.order_date ?? ''} onChange={(v) => saveField('order_date', v || null)} />
                   </Field>
-                  <Field label="Dispatch date">
-                    <TextInput type="date" value={edit.dispatch_date ?? ''} onChange={(v) => saveField('dispatch_date', v || null)} />
-                  </Field>
-                </Split>
-                <Split>
-                  <Field label="Sale price (£)">
-                    <TextInput type="number" value={edit.sale_price == null ? '' : String(edit.sale_price)} onChange={(v) => saveField('sale_price', v === '' ? null : Number(v))} />
-                  </Field>
-                  <Field label="Profit (£)">
-                    <TextInput type="number" value={edit.profit == null ? '' : String(edit.profit)} onChange={(v) => saveField('profit', v === '' ? null : Number(v))} />
+                  <Field label={words.closing.dispatchDate}>
+                    <TextInput readOnly={readOnly} type="date" value={edit.dispatch_date ?? ''} onChange={(v) => saveField('dispatch_date', v || null)} />
                   </Field>
                 </Split>
                 <Split>
-                  <Field label="Profit rate" hint="0.15 is 15%">
-                    <TextInput type="number" value={edit.profit_pct == null ? '' : String(edit.profit_pct)} onChange={(v) => saveField('profit_pct', v === '' ? null : Number(v))} />
+                  <Field label={words.closing.salePrice}>
+                    <TextInput readOnly={readOnly} type="number" value={edit.sale_price == null ? '' : String(edit.sale_price)} onChange={(v) => saveField('sale_price', v === '' ? null : Number(v))} />
                   </Field>
                   <Field label="Commission (£)">
-                    <TextInput type="number" value={edit.commission == null ? '' : String(edit.commission)} onChange={(v) => saveField('commission', v === '' ? null : Number(v))} />
+                    <TextInput readOnly={readOnly} type="number" value={edit.commission == null ? '' : String(edit.commission)} onChange={(v) => saveField('commission', v === '' ? null : Number(v))} />
                   </Field>
                 </Split>
+                {words.closing.profit && (
+                  <Split>
+                    <Field label="Profit (£)">
+                      <TextInput readOnly={readOnly} type="number" value={edit.profit == null ? '' : String(edit.profit)} onChange={(v) => saveField('profit', v === '' ? null : Number(v))} />
+                    </Field>
+                    <Field label="Profit rate" hint="0.15 is 15%">
+                      <TextInput readOnly={readOnly} type="number" value={edit.profit_pct == null ? '' : String(edit.profit_pct)} onChange={(v) => saveField('profit_pct', v === '' ? null : Number(v))} />
+                    </Field>
+                  </Split>
+                )}
               </div>
             </Card>
           )}
@@ -1151,7 +1593,17 @@ function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [type, setType] = useState<LeadType>('trailer_sales');
-  const [what, setWhat] = useState<string>('Maintenance');
+  const words = fieldsFor(type);
+  /* The first option of whichever division is picked, not the word
+     "Maintenance" whatever you picked. Switching from maintenance to
+     rental used to leave "Maintenance" in the box and write it onto a
+     hire enquiry, which is a row that then groups under the wrong chip
+     for the rest of its life. */
+  const [what, setWhat] = useState<string>(MAINTENANCE_WHAT[0]);
+  useEffect(() => {
+    const first = fieldsFor(type).what.options?.[0];
+    if (first) setWhat(first);
+  }, [type]);
   const [company, setCompany] = useState('');
   const [website, setWebsite] = useState('');
   const [searching, setSearching] = useState(false);
@@ -1276,18 +1728,22 @@ function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
         on this tracker, and the two move together after that.
       </p>
 
-      {type === 'maintenance' && (
-        <Field label="What kind of maintenance work?">
+      {/* WHAT THIS LEAD IS FOR, ASKED IN THIS DIVISION'S WORDS.
+
+          Maintenance was the only one asked, from a list of nine
+          phrasings of four jobs, which is where half of the thirty
+          filter chips came from. It is seven now, one per kind of work,
+          and rental is asked as well: a hire enquiry with nothing in
+          `what` is a row nobody can group.
+
+          Trailer sales is deliberately not asked here. The unit gets
+          described in the drawer where there is room for it, and a
+          required select in front of "which customer" is a step between
+          somebody and the thing they opened this for. */}
+      {words.what.options && (
+        <Field label={words.what.label} hint={words.what.hint}>
           <Select value={what} onChange={setWhat}>
-            <option>Maintenance</option>
-            <option>Trukplan</option>
-            <option>All Services</option>
-            <option>Maintenance and MOT</option>
-            <option>Maintenance and Trukplan</option>
-            <option>Van Maintenance and Repair</option>
-            <option>Accident Repair</option>
-            <option>All Services and Parking</option>
-            <option>MOT only</option>
+            {words.what.options.map((o) => <option key={o} value={o}>{o}</option>)}
           </Select>
         </Field>
       )}
@@ -1320,7 +1776,7 @@ function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
                       </div>
                     </div>
                     <Button size="sm" variant="primary"
-                      onClick={() => onCreate(m.id, m.company_name, '', type, type === 'maintenance' ? what : null, owner)}>
+                      onClick={() => onCreate(m.id, m.company_name, '', type, words.what.options ? what : null, owner)}>
                       <LinkIcon size={11} /> Start lead
                     </Button>
                   </div>
@@ -1341,7 +1797,7 @@ function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
               </Field>
               <div>
                 <Button size="sm" variant="primary"
-                  onClick={() => onCreate(null, company, website, type, type === 'maintenance' ? what : null, owner)}>
+                  onClick={() => onCreate(null, company, website, type, words.what.options ? what : null, owner)}>
                   <Plus size={12} /> Add to the CRM and start the lead
                 </Button>
               </div>

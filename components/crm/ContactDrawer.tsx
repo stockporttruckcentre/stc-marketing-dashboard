@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
-  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Briefcase
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Briefcase, Bell
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
@@ -12,8 +12,10 @@ import {
 } from '@/components/kit/primitives';
 import { Segmented } from '@/components/kit/forms';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
+import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
+import { ReminderModal } from './ReminderModal';
 import { AddressMap } from './AddressMap';
 import { CustomerValue } from './CustomerValue';
 import { ProteanSpend } from './ProteanSpend';
@@ -56,10 +58,10 @@ const SIDE_LABEL: Record<string, string> = {
   maintenance: 'Maintenance',
 };
 
-const STATUS_TONE: Record<string, Tone> = {
-  lead: 'info', contacted: 'warning', quoted: 'accent',
-  won: 'success', customer: 'success', lost: 'neutral',
-};
+/* `STATUS_TONE` and `STATUS_LABEL` come from `lib/crm/status.ts`. This
+   file kept its own copy of the tones, identical to that one, which is
+   how the two screens would eventually have disagreed about what "won"
+   looks like. That file exists to stop exactly this. */
 
 type Member = { list_id: string; user_id: string; can_edit: boolean };
 
@@ -78,6 +80,7 @@ export function ContactDrawer({
   const [meetings, setMeetings] = useState<any[]>([]);
   const [showSchedule, setShowSchedule] = useState(false);
   const [showProposal, setShowProposal] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
   const [showAddLink, setShowAddLink] = useState<null | 'website' | 'linkedin' | 'other'>(null);
   const [movePickerOpen, setMovePickerOpen] = useState<'move' | 'duplicate' | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -327,8 +330,38 @@ export function ContactDrawer({
                   margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
                   lineHeight: 1.2, letterSpacing: '-0.025em', color: 'var(--text)',
                 }}>{edit.company_name}</h2>
-                <Badge tone={STATUS_TONE[edit.status] ?? 'neutral'} dot>{edit.status}</Badge>
-              {edit.relationship === 'existing' && <Badge tone="success">Customer</Badge>}
+                {/* TWO BADGES, TWO FACTS.
+
+                    From production testing: "when you click into a
+                    customer in the crm it says Customer twice next to
+                    their name."
+
+                    It did, and both were correct. The first is the
+                    status, which prints the column verbatim, and one of
+                    the six values that column takes is the word
+                    "customer". The second is the relationship, which
+                    said "Customer" for `existing`. So exactly one record
+                    in six hit the collision, and it was the commonest
+                    one on the screen.
+
+                    Fixed by making each badge say its own thing. The
+                    status is capitalised through `STATUS_LABEL`, the
+                    same words the tracker uses. The relationship says
+                    Prospect or Active account, which is the question it
+                    answers and is not a synonym of any status. And where
+                    the status already IS customer, the relationship is
+                    implied and the badge is dropped: an active account
+                    with a customer status is one fact said twice, which
+                    is where this started. */}
+                <Badge tone={STATUS_TONE[edit.status] ?? 'neutral'} dot>
+                  {STATUS_LABEL[edit.status as ContactStatus] ?? edit.status}
+                </Badge>
+                {edit.relationship === 'existing' && edit.status !== 'customer' && (
+                  <Badge tone="success">Active account</Badge>
+                )}
+                {(edit.relationship ?? 'prospect') === 'prospect' && (
+                  <Badge tone="neutral">Prospect</Badge>
+                )}
               </div>
               {metaLine && (
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{metaLine}</div>
@@ -353,6 +386,16 @@ export function ContactDrawer({
               <Button size="sm" variant="accent" onClick={() => setShowProposal(true)}>
                 <FileText size={13} /> Generate proposal
               </Button>
+              {/* REMINDER, BETWEEN THE TWO IT WAS ASKED TO SIT BETWEEN.
+
+                  A reminder is a personal task, so it goes to Work
+                  rather than into the diary: see `ReminderModal`. It is
+                  a one word label on purpose. The row holds five
+                  buttons at 660px and "Set a reminder" is the version
+                  that wraps it onto a second line. */}
+              <Button size="sm" variant="secondary" onClick={() => setShowReminder(true)}>
+                <Bell size={13} /> Reminder
+              </Button>
               <Button size="sm" variant="secondary" onClick={() => setShowSchedule(true)}>
                 <CalendarPlus size={13} /> Schedule
               </Button>
@@ -360,25 +403,23 @@ export function ContactDrawer({
                 onClick={() => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener')}>
                 <Share2 size={13} /> Export
               </Button>
-              {/* Only on a converting prospect, which is when it is any
-                  use. On a fresh lead it would be a fourth button in the
-                  row earning nothing.
+              {/* DocuSign is in the overflow menu below rather than on
+                  this row. Measured, not guessed: `npm run check:crm-record`
+                  lays the row out in a browser at the drawer's own 660px
+                  and reads the tops back. With Reminder added and
+                  DocuSign still here, the row came to 612px of a 616px
+                  space and the More button dropped onto a second line.
 
-                  It opens the DocuSign home page and stops there. That
-                  was decided in the meeting and it is not laziness: the
-                  CRM sits behind the VPN, so anything it generates is a
-                  file rather than something signable through a link, and
-                  a half-built envelope would be worse than none. The user
-                  picks their own template, of which Tom keeps two because
-                  sales and leasing and the workshop are separate
-                  entities. */}
-              {SIGNABLE.includes(edit.status) && (
-                <Button size="sm" variant="secondary"
-                  onClick={() => window.open('https://app.docusign.com/', '_blank', 'noopener')}
-                  title="Opens DocuSign so you can build and send the envelope yourself">
-                  <PenLine size={13} /> DocuSign
-                </Button>
-              )}
+                  It is the right one to move for a reason beyond the
+                  arithmetic. It is the only button whose presence
+                  depends on the deal's status, so the row changed length
+                  as a deal progressed; it is now the same five actions on
+                  every record. And it does nothing to the record: it
+                  opens the DocuSign home page and stops there. That was
+                  decided in the meeting and it is not laziness, the CRM
+                  sits behind the VPN, so anything it generates is a file
+                  rather than something signable through a link, and a
+                  half-built envelope would be worse than none. */}
               <Button size="sm" variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
                 <MoreHorizontal size={15} />
               </Button>
@@ -391,6 +432,14 @@ export function ContactDrawer({
                     borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 4,
                   }}>
                     {[
+                      /* Still only offered once a deal is far enough
+                         along to be worth signing, which is the rule it
+                         has always had. On a fresh lead it would be a
+                         line in the menu that leads nowhere useful. */
+                      ...(SIGNABLE.includes(edit.status) ? [{
+                        label: 'Open DocuSign',
+                        on: () => window.open('https://app.docusign.com/', '_blank', 'noopener'),
+                      }] : []),
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
                       { label: 'Also show on another list', on: () => setMovePickerOpen('duplicate') },
                     ].map((a) => (
@@ -778,6 +827,14 @@ export function ContactDrawer({
 
         {showSchedule && (
           <ScheduleMeetingModal contact={edit} profile={profile} allProfiles={[]} onClose={() => setShowSchedule(false)} />
+        )}
+        {showReminder && (
+          <ReminderModal
+            contact={edit}
+            me={profile.id}
+            onClose={() => setShowReminder(false)}
+            onDone={(m) => { setShowReminder(false); setMessage(m); }}
+          />
         )}
         {showProposal && (
           <GenerateProposalPicker contact={edit} onClose={() => setShowProposal(false)} />

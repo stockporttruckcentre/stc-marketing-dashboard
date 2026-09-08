@@ -565,6 +565,18 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['maintenance', 'workshop', 'trailer sales', 'the other side', 'service side'],
     phrases: ['show me the maintenance side'] },
 
+  /* Somebody else's tracker, which is a manager's question and reads
+     nothing like the CRM one above it. "What is Dave working on" is his
+     accounts; "open Dave's tracker" is his open pitches, on the screen
+     he works them on. The capability is the same one, and the bar
+     filters on it before scoring, so a rep never sees this offered. */
+  { id: 'tracker.person', label: 'Somebody’s sales tracker', blurb: 'Their open leads, read only', kind: 'navigate',
+    capability: 'crm.viewOthers', path: '/dashboard/leads', verbs: [...GO, 'view', 'check'],
+    objects: ['dave’s tracker', 'their tracker', 'somebody’s tracker', 'his tracker', 'her tracker',
+      'a colleague’s tracker', 'their leads', 'their deals', 'their pipeline', 'somebody else’s leads'],
+    phrases: ['open dean’s tracker', 'what has dave got open', 'show me their tracker',
+      'whose leads are these', 'look at somebody else’s tracker'] },
+
   /* ---------- trailer stock ---------- */
 
   { id: 'stock.bulkStatus', label: 'Change status on several units', blurb: 'Everything you have selected', kind: 'record',
@@ -1163,6 +1175,19 @@ export const ACTIONS: CommandActionSpec[] = [
   { id: 'make.task', label: 'Raise a task', blurb: 'Work for you or for somebody else', kind: 'create',
     capability: 'work.create', path: '/dashboard/work', verbs: MAKE, seed: 'add task ',
     objects: ['task', 'todo', 'to do', 'job', 'piece of work', 'ticket'] },
+
+  /* A reminder is a task on yourself about a customer, raised from the
+     CRM record. Its own entry rather than a phrasing of `make.task`,
+     because the words are different ("remind me to ring them on
+     Thursday" contains no word for task) and because it starts on the
+     customer rather than in Work: the path is the CRM, which is where
+     the button is. */
+  { id: 'make.reminder', label: 'Set a reminder', blurb: 'A task on you about a customer, due when you say', kind: 'create',
+    capability: 'work.create', path: '/dashboard/crm', verbs: [...MAKE, 'remind', 'nudge', 'chase'],
+    objects: ['reminder', 'a reminder', 'follow up', 'follow-up', 'a nudge', 'a prompt',
+      'me to call them', 'me to ring them', 'me about this customer', 'to chase them'],
+    phrases: ['remind me to ring dawson on thursday', 'set a reminder', 'remind me about this one',
+      'nudge me next week', 'chase this in a fortnight'] },
 
   { id: 'work.assign', label: 'Assign a task', blurb: 'Put work on a person or a department', kind: 'record',
     capability: 'work.assignOthers', path: '/dashboard/work',

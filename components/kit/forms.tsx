@@ -127,21 +127,30 @@ export function TextInput({
   );
 }
 
-export function TextArea({ value, onChange, onCommit, placeholder, rows = 3, invalid }: {
+/* `readOnly` matches `TextInput`'s, down to the sunken background: a
+   field somebody may read and not change looks the same whichever
+   control it happens to be. Without it, a screen showing a record it
+   cannot write had to choose between a live box that silently discards
+   what you type and no box at all. */
+export function TextArea({ value, onChange, onCommit, placeholder, rows = 3, invalid, readOnly }: {
   value: string; onChange: (v: string) => void; onCommit?: (v: string) => void;
-  placeholder?: string; rows?: number; invalid?: boolean;
+  placeholder?: string; rows?: number; invalid?: boolean; readOnly?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   return (
-    <div style={{ ...shellStyle(invalid ? 'error' : 'rest', focused), display: 'block' }}>
+    <div style={{
+      ...shellStyle(invalid ? 'error' : 'rest', focused), display: 'block',
+      background: readOnly ? 'var(--surface-sunken)' : 'var(--surface)',
+    }}>
       <textarea
-        value={value} placeholder={placeholder} rows={rows}
+        value={value} placeholder={placeholder} rows={rows} readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={(e) => { setFocused(false); onCommit?.(e.target.value); }}
         style={{
           width: '100%', padding: '9px 10px', background: 'transparent', border: 0, outline: 0,
-          resize: 'vertical', fontFamily: 'var(--inter)', fontSize: 13, color: 'var(--text)',
+          resize: 'vertical', fontFamily: 'var(--inter)', fontSize: 13,
+          color: readOnly ? 'var(--text-muted)' : 'var(--text)',
           letterSpacing: '-0.01em', lineHeight: 1.5, display: 'block',
         }}
       />
@@ -150,19 +159,28 @@ export function TextArea({ value, onChange, onCommit, placeholder, rows = 3, inv
 }
 
 /** The chevron is drawn here rather than left to the platform, because the native one ignores the theme. */
-export function Select({ value, onChange, children, invalid }: {
-  value: string; onChange: (v: string) => void; children: ReactNode; invalid?: boolean;
+export function Select({ value, onChange, children, invalid, disabled }: {
+  value: string; onChange: (v: string) => void; children: ReactNode;
+  invalid?: boolean;
+  /** A select has no readOnly, so this is the same idea by its own name. */
+  disabled?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   return (
-    <div style={{ ...shellStyle(invalid ? 'error' : 'rest', focused), height: 32, position: 'relative' }}>
+    <div style={{
+      ...shellStyle(invalid ? 'error' : 'rest', focused), height: 32, position: 'relative',
+      background: disabled ? 'var(--surface-sunken)' : 'var(--surface)',
+    }}>
       <select
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         style={{
-          ...CONTROL, appearance: 'none', paddingRight: 28, cursor: 'pointer',
+          ...CONTROL, appearance: 'none', paddingRight: 28,
+          cursor: disabled ? 'default' : 'pointer',
+          color: disabled ? 'var(--text-muted)' : 'var(--text)',
         }}
       >{children}</select>
       <span style={{

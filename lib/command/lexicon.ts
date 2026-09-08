@@ -272,6 +272,24 @@ const RESERVED = new Set([
   'trailer', 'trailers', 'unit', 'units', 'vehicle', 'vehicles', 'customer',
   'customers', 'deal', 'deals', 'order', 'orders', 'hire', 'rental', 'storage',
   'site', 'depot', 'yard', 'stockport truck centre', 'stc',
+
+  /* The tracker itself, now that somebody else's can be opened.
+
+     "Open Dean's tracker" runs a possessive straight into the word, and
+     without it here the bar looks for a customer called Tracker and
+     finds nobody. Same for the two words people use instead of it.
+
+     `prospect` joins them because a record is a prospect or an active
+     account now, and "convert this prospect to a customer" is a
+     sentence somebody will type: `customer` was already reserved and
+     its opposite was not. */
+  'tracker', 'trackers', 'pipeline', 'portfolio', 'prospect', 'prospects',
+
+  /* What a maintenance lead is for, folded into five kinds. Each of
+     these turns up mid sentence beside a preposition ("the refurb work
+     at Carrington"), and none of them is a place or a person. */
+  'refurb', 'refurbishment', 'brake test', 'brake tests', 'mot', 'mots',
+  'servicing', 'trukplan',
   /* Time words. A preposition runs straight into a period constantly,
      and "trailers booked in between May and July" was answered for a
      depot called Between, in a month called May, with the range thrown
