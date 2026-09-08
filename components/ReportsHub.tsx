@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, FileText, Loader, Printer, RefreshCw, SlidersHorizontal, AlertTriangle,
-  Search, ChevronRight, CalendarRange, Building2, GitBranch, Wrench, Play, Layers,
+  Search, CalendarRange, Building2, GitBranch, Wrench, Play, Layers,
 } from 'lucide-react';
 import { Alert, Button, Card, Chip, Label, PageHead, SearchInput } from '@/components/kit/primitives';
 import { ReportView } from '@/components/reports/ReportView';
@@ -494,30 +494,67 @@ function Featured({ def, onOpen }: { def: ReportDef; onOpen: (d: ReportDef) => v
   );
 }
 
-/* One report, as a row rather than a card. */
+/* =============================================================
+   One report, as a row you can run.
+
+   From the business:
+
+     my issue is only the top one looks like a report. The rest don't as
+     there's no run buttons
+
+   The row was a link wearing a chevron, and a chevron says "there is
+   more of this somewhere" rather than "this produces a document". Every
+   row now carries the same verb the featured panel does, so the list
+   reads as nine things you run rather than nine things you navigate to.
+
+   ---- Why the Run buttons are not red ----
+
+   The kit's first rule: red is the single most important action on a
+   screen, and three red buttons means none. Nine of them means the
+   featured report stops standing out at all, and the one report the
+   business runs fortnightly is the one that has to.
+
+   So the featured panel keeps the accent and says "Run it"; the rows
+   are secondary and say "Run". Same verb, same weight of meaning,
+   different weight on the page.
+
+   ---- Why the row is a div and the buttons are buttons ----
+
+   A button inside a button is invalid, and the row needs two things to
+   click: the title, because people click titles, and Run, because the
+   business asked for it. So the row is a plain element, the title is a
+   button covering the whole left side, and Run is its own. Both open the
+   same report, and hovering either lights the whole row so it still
+   reads as one thing.
+   ============================================================= */
 function ReportRow({ def, first, onOpen }: {
   def: ReportDef;
   first: boolean;
   onOpen: (d: ReportDef) => void;
 }) {
   const [over, setOver] = useState(false);
+  const wake = { onMouseEnter: () => setOver(true), onMouseLeave: () => setOver(false) };
+
   return (
-    <button
-      onClick={() => onOpen(def)}
-      onMouseEnter={() => setOver(true)}
-      onMouseLeave={() => setOver(false)}
-      onFocus={() => setOver(true)}
-      onBlur={() => setOver(false)}
+    <div
+      {...wake}
       style={{
-        display: 'flex', alignItems: 'center', gap: 14, width: '100%',
-        padding: '11px 10px 11px 2px', textAlign: 'left',
-        border: 'none', borderTop: first ? 'none' : '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 14,
+        borderTop: first ? 'none' : '1px solid var(--border)',
         background: over ? 'var(--bg-subtle)' : 'transparent',
-        cursor: 'pointer', fontFamily: 'var(--inter)',
         transition: 'background 120ms var(--ease, ease)',
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <button
+        onClick={() => onOpen(def)}
+        onFocus={() => setOver(true)}
+        onBlur={() => setOver(false)}
+        style={{
+          flex: 1, minWidth: 0, display: 'block', textAlign: 'left',
+          padding: '11px 0 11px 2px', border: 'none', background: 'transparent',
+          cursor: 'pointer', fontFamily: 'var(--inter)',
+        }}
+      >
         <span style={{
           display: 'block',
           fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14.5,
@@ -525,9 +562,9 @@ function ReportRow({ def, first, onOpen }: {
         }}>{def.title}</span>
         <span style={{
           display: 'block', fontSize: 12.5, color: 'var(--text-muted)',
-          lineHeight: 1.5, marginTop: 2, maxWidth: '78ch',
+          lineHeight: 1.5, marginTop: 2, maxWidth: '72ch',
         }}>{def.blurb}</span>
-      </div>
+      </button>
 
       <span style={{
         flex: 'none', fontSize: 11.5, color: 'var(--text-subtle)',
@@ -536,16 +573,16 @@ function ReportRow({ def, first, onOpen }: {
         {def.sections.length} {def.sections.length === 1 ? 'section' : 'sections'}
       </span>
 
-      <ChevronRight
-        size={15}
-        style={{
-          flex: 'none',
-          color: over ? 'var(--accent)' : 'var(--text-subtle)',
-          transform: over ? 'translateX(2px)' : 'none',
-          transition: 'transform 120ms var(--ease, ease), color 120ms var(--ease, ease)',
-        }}
-      />
-    </button>
+      <span
+        style={{ flex: 'none', paddingRight: 2 }}
+        onFocus={() => setOver(true)}
+        onBlur={() => setOver(false)}
+      >
+        <Button variant="secondary" onClick={() => onOpen(def)}>
+          <Play size={13} /> Run
+        </Button>
+      </span>
+    </div>
   );
 }
 

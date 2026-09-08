@@ -238,6 +238,23 @@ ok('the hub is rows and rules rather than a grid of cards',
 ok('and the rail stands down rather than stacking on a narrow screen',
   /\.reports-rail \{ display: none !important; \}/.test(hub));
 
+/* From the business, on the first version of the rows:
+
+     my issue is only the top one looks like a report. The rest don't as
+     there's no run buttons
+
+   A chevron says "there is more of this somewhere". A Run button says
+   "this produces a document", which is what a report is. */
+ok('every report in the list carries a Run button, not just a chevron',
+  /<Play size=\{13\} \/> Run/.test(hub)
+  && !/<ChevronRight/.test(hub),
+  'a chevron reads as navigation, and the row is not navigation, it runs something');
+
+ok('and the featured one keeps the only red button on the screen',
+  /variant="accent" onClick=\{\(\) => onOpen\(def\)\}/.test(hub)
+  && /variant="secondary" onClick=\{\(\) => onOpen\(def\)\}/.test(hub),
+  'nine red Run buttons is the kit rule broken nine times: red points at one thing');
+
 console.log(
   failed === 0
     ? '\n  Every seam checked here hands its argument on, and the screen at the\n'
