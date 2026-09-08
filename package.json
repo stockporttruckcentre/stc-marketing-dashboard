@@ -71,7 +71,10 @@
     "check:replay": "tsx scripts/sql/replay-check.ts",
     "check:work-views": "bash scripts/sql/work-views-check.sh",
     "check:lead-activity": "bash scripts/sql/lead-activity-check.sh",
+    "check:lead-trailers": "bash scripts/sql/lead-trailers-check.sh",
     "check:tracker": "tsx --tsconfig scripts/tsconfig.check.json scripts/tracker-check.tsx",
+    "check:wiring": "tsx scripts/wiring-check.ts",
+    "check:tracker-switch": "tsx scripts/tracker-switch-check.ts",
     "check:crm-record": "tsx scripts/crm-record-check.ts",
     "check:fleetsmart-print": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-print-check.tsx",
     "check:fleetsmart-dynamic": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-dynamic-check.tsx"

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, Trash2, Truck, X, Search, Edit2, Package, Loader, Briefcase, Wrench, ShoppingCart, Archive, Eye, Copy, MoreHorizontal, MapPin, Move, Paintbrush, PoundSterling, Send, ArrowRight, AlertCircle, Upload } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
+import { LeadPicker } from '@/components/crm/LeadPicker';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { STOCK_TRAILERS } from '@/lib/import/dictionary';
 import { commitStockImport as writeStock, prepareStock } from '@/lib/import/stock';
@@ -642,6 +643,8 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
   const [othersTracking, setOthersTracking] = useState<Array<{ owner_name: string; status: string }>>([]);
   // Sold-by info (visible to anyone when trailer is sold; never includes commission)
   const [soldBy, setSoldBy] = useState<{ sold_by: string; customer: string | null; sale_price: number | null; order_date: string | null; dispatch_date: string | null } | null>(null);
+  // Putting this unit onto a deal somebody is already working.
+  const [addingToLead, setAddingToLead] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -744,6 +747,56 @@ function StockDrawer({ row, focusField, canEdit, onClose, onSave }: { row: Stock
                 ))}.
               </span>
             </Alert>
+          )}
+
+          {/* ONTO A DEAL THAT ALREADY EXISTS.
+
+              From the business: "move one to an existing lead from the
+              stock page itself."
+
+              Send to my tracker, in the row menu, raises a NEW lead
+              against this unit. That is right for a walk-in and wrong
+              when the conversation is already open, because it leaves
+              two deals for one customer and the customer's name on
+              neither. This puts the unit on the quote somebody is
+              already working, without changing whose quote it is.
+
+              See `components/crm/LeadPicker.tsx`. */}
+          {canEdit && (
+            <Row>
+              <Briefcase size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                Quoting this unit on a deal that is already open?
+              </span>
+              <Button size="sm" variant="secondary" onClick={() => setAddingToLead(true)}>
+                <Plus size={12} /> Add to a deal
+              </Button>
+            </Row>
+          )}
+
+          {addingToLead && (
+            <LeadPicker
+              trailerLabel={edit.stc_no || edit.chassis_number || 'This unit'}
+              onClose={() => setAddingToLead(false)}
+              onPick={async (lead) => {
+                const { data, error } = await supabase.rpc('crm_attach_trailer', {
+                  p_lead: lead.id, p_trailer: row.id, p_note: null,
+                });
+                if (error) return error.message;
+                const res = data as { ok?: boolean; why?: string } | null;
+                if (res && res.ok === false) return res.why ?? 'That did not attach.';
+                /* Re-ask who has this unit, so the panel above stops
+                   saying it is on nobody's tracker the moment it is. */
+                const r = await fetch('/api/tracker/check-link', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ stock_trailer_id: row.id }),
+                });
+                const j = await r.json();
+                setMyTrackerRow(j.myEntry ?? null);
+                setOthersTracking(j.othersEntries ?? []);
+                return null;
+              }}
+            />
           )}
 
           {/* Sold by panel - visible to anyone when status is sold (no commission shown) */}

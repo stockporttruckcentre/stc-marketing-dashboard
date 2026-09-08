@@ -141,11 +141,19 @@ const TONE_BG: Record<Tone, string> = {
   accent:  'color-mix(in srgb, var(--accent) 12%, transparent)',
 };
 
+/* Inter, semibold, said outright rather than inherited.
+
+   A badge takes the font of whatever it is sitting in, and it sits in
+   headings: the lead drawer's title is Panton 800, so the division pill
+   inside it came out in Panton at 11.5px, which is below the size that
+   face is meant to be set at. Asked for directly by the business, and
+   it is the right call for a pill anyway. */
 export function Badge({ tone = 'neutral', dot, children }: { tone?: Tone; dot?: boolean; children: ReactNode }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       height: 20, padding: '0 7px', borderRadius: 'var(--r)',
+      fontFamily: 'var(--inter)', letterSpacing: 0,
       fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap',
       color: TONE_FG[tone], background: TONE_BG[tone],
     }}>

@@ -11,7 +11,7 @@ import type { Plan } from '@/lib/fleetsmart/ratecard';
 import type { ContractInput, PricedContract } from '@/lib/fleetsmart/types';
 import { blankContract, blankExtras, type ContractExtras } from '@/lib/fleetsmart/contract';
 import { seedFromContract } from '@/lib/fleetsmart/copy';
-import type { PickableAccount } from '@/lib/fleetsmart/account';
+import { fillFrom, type PickableAccount } from '@/lib/fleetsmart/account';
 import type { RateCard } from '@/lib/fleetsmart/ratecard';
 import { RateEditor } from '@/components/fleetsmart/rate-editor';
 import { AmendDrawer } from '@/components/fleetsmart/amend-drawer';
@@ -248,17 +248,52 @@ export function FleetSmart({
   useEffect(() => {
     if (params.get('new') !== '1') return;
     if (!may('fleetsmart.build')) return;
-    startNew();
+    startNew(params.get('contact'));
     router.replace('/dashboard/fleetsmart');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function startNew() {
+  /**
+   * A new contract, for a customer if one was named on the way in.
+   *
+   * ---- The customer was being asked for twice ----
+   *
+   * From the business:
+   *
+   *   When I do CRM > select customer > generate > fleetsmart+ it's
+   *   asking me to type my customer. I've already selected it.
+   *
+   * They had. Every route into this builder threw the answer away:
+   * `?new=1` carried no customer, so `startNew` opened a blank contract
+   * and step one asked again. Somebody who has just clicked a company's
+   * name is then typing that company's name.
+   *
+   * `?contact=<id>` fixes it at the seam where it was lost. The account
+   * is looked up in the list this page already loaded, and `fillFrom`
+   * pours the name, the contact and the address into the seed, which is
+   * the same function the picker inside the wizard uses. One filling
+   * rule, so arriving with a customer and choosing one inside give the
+   * same contract.
+   *
+   * An id that matches nothing opens a blank builder rather than
+   * refusing: the parameter is a convenience, not a permission, and
+   * this page has already decided what this reader may see.
+   */
+  function startNew(contactId?: string | null) {
     setError(null); setNotice(null);
+    const account = contactId ? accounts.find((a) => a.id === contactId) ?? null : null;
+    const seed = blankContract();
     setOpen({
       kind: 'wizard',
       row: null,
-      seed: blankContract(),
+      account: account?.id ?? null,
+      seed: account
+        ? { ...seed, ...fillFrom(account, {
+            customerName: seed.customerName,
+            customerContact: seed.customerContact,
+            customerAddress: seed.customerAddress,
+          }) }
+        : seed,
       extras: {
         ...blankExtras(),
         accountManagerName: manager.name,
@@ -438,7 +473,7 @@ export function FleetSmart({
         sub="Fixed price maintenance contracts, priced off the STC rate card as you build them. Contracts built here will show on your sales tracker and update in unison."
         actions={
           may('fleetsmart.build')
-            ? <Button variant="accent" onClick={startNew}><Plus size={14} /> New contract</Button>
+            ? <Button variant="accent" onClick={() => startNew()}><Plus size={14} /> New contract</Button>
             : undefined
         }
       />
@@ -551,7 +586,7 @@ export function FleetSmart({
               }
               action={
                 contracts.length === 0 && may('fleetsmart.build')
-                  ? <Button variant="accent" onClick={startNew}><Plus size={14} /> New contract</Button>
+                  ? <Button variant="accent" onClick={() => startNew()}><Plus size={14} /> New contract</Button>
                   : undefined
               }
             />

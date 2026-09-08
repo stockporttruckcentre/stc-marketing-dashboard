@@ -10,6 +10,7 @@ import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calen
 } from 'lucide-react';
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import { CustomerValue } from './crm/CustomerValue';
+import { LeadTrailers } from './crm/LeadTrailers';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
@@ -784,14 +785,24 @@ export function SalesTracker({
           {canViewOthers && (
             <WhoseTracker me={profile} viewing={viewing} colleagues={colleagues} />
           )}
-          {!viewing && <>
-            <Button size="sm" variant="secondary" onClick={() => setShowImport(true)}>
-              <Upload size={13} /> Import
-            </Button>
-            <Button size="sm" variant="primary" onClick={() => setShowNewLead(true)}>
-              <Plus size={13} /> New lead
-            </Button>
-          </>}
+          {/* KEPT IN PLACE RATHER THAN REMOVED WHILE VIEWING.
+
+              From the business: "The dropdown also moves after selecting
+              someone." It did: these two came out of a right aligned row,
+              so the picker slid 190px sideways under the cursor that had
+              just used it. Disabled instead, which also says why they are
+              not available rather than leaving somebody hunting for the
+              New lead button they were looking at a second ago. */}
+          <Button size="sm" variant="secondary" disabled={readOnly}
+            title={readOnly ? `Importing goes onto your own tracker, not ${whose}’s.` : undefined}
+            onClick={() => setShowImport(true)}>
+            <Upload size={13} /> Import
+          </Button>
+          <Button size="sm" variant="primary" disabled={readOnly}
+            title={readOnly ? `Raise a lead from your own tracker, or from the customer’s CRM record.` : undefined}
+            onClick={() => setShowNewLead(true)}>
+            <Plus size={13} /> New lead
+          </Button>
         </>}
       />
 
@@ -1386,6 +1397,21 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
             </Field>
           </Split>
 
+          {/* THE UNITS THIS QUOTE IS ABOUT.
+
+              Only on trailer sales: a maintenance contract is about a
+              fleet the customer already owns, and a hire is about a unit
+              that comes back. Placed above the free text fields because
+              it is the answer to "what are we quoting", and the boxes
+              underneath describe it rather than replace it.
+
+              See `components/crm/LeadTrailers.tsx`. Before this, the
+              only way to record which trailer a deal was for was to type
+              the stock number into the notes. */}
+          {words.stockTrailer && (
+            <LeadTrailers leadId={row.id} readOnly={readOnly} />
+          )}
+
           {/* New or used describes a trailer. A maintenance contract is
               neither, and a hire is neither, so they are not asked. */}
           {words.newOrUsed && (
@@ -1823,72 +1849,14 @@ function NewLeadModal({ profile, onCreate, onFleetSmart, onClose }: {
 
 
 
-// ===== Stock trailer picker (typeahead by STC No / chassis / make/model) =====
-function StockTrailerPicker({ onPick, onClose }: { onPick: (t: StockTrailer | null) => void; onClose: () => void }) {
-  const supabase = useMemo(() => createClient(), []);
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<StockTrailer[]>([]);
-  const [searching, setSearching] = useState(false);
+/* The typeahead that used to live here is gone.
 
-  useEffect(() => {
-    if (q.trim().length < 2) { setResults([]); return; }
-    const handle = setTimeout(async () => {
-      setSearching(true);
-      const like = `%${q.trim()}%`;
-      const { data } = await supabase.from('stock_trailers')
-        .select('id, stc_no, chassis_number, year, make, model, status, location, nbv, refurb_costs, refurb_costs_at_sale, category')
-        .or(`stc_no.ilike.${like},chassis_number.ilike.${like},make.ilike.${like},model.ilike.${like}`)
-        .limit(20);
-      setResults((data ?? []) as StockTrailer[]);
-      setSearching(false);
-    }, 200);
-    return () => clearTimeout(handle);
-  }, [q, supabase]);
-
-  return (
-    <Modal
-      title="Link a stock trailer"
-      description="Search by stock number, chassis, make or model."
-      width={560}
-      onClose={onClose}
-      footer={<Button size="sm" variant="ghost" onClick={onClose}>Cancel</Button>}
-    >
-      <SearchInput value={q} onChange={setQ}
-        placeholder="STC number, chassis, make, model" icon={<Search size={14} />} />
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' }}>
-        {searching && (
-          <div style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5, color: 'var(--text-subtle)' }}>
-            <Loader size={12} className="spin" /> Searching
-          </div>
-        )}
-        {!searching && q.trim().length >= 2 && results.length === 0 && (
-          <div style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-            Nothing in stock matches that.
-          </div>
-        )}
-        {results.map((t) => (
-          <button key={t.id} onClick={() => onPick(t)} style={{
-            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
-            padding: '9px 11px', borderRadius: 'var(--r)',
-            border: '1px solid var(--border)', background: 'var(--surface-sunken)',
-            color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--inter)',
-          }}>
-            <Truck size={14} style={{ flexShrink: 0, color: 'var(--accent)' }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {t.stc_no || t.chassis_number} · {t.year} {t.make} {t.model}
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
-                {[t.category, t.status, t.location].filter(Boolean).join(' · ')}
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-    </Modal>
-  );
-}
+   It searched stock by number, chassis, make and model, it was 90
+   lines long, and nothing rendered it: the trailer sales lead had no
+   place to put a unit, so the picker had nowhere to open from. Its
+   replacement is `components/crm/StockSearch.tsx`, which searches the
+   same columns plus the three filters a yard is actually narrowed by,
+   and is opened from the lead drawer and from the stock page both. */
 
 // ===== Mark-as-Sold confirm modal, previewing commission before saving =====
 function MarkAsSoldModal({ trailer, totalNbv, rate, onConfirm, onClose }: {
