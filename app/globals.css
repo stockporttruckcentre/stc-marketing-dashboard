@@ -63,7 +63,57 @@
   font-display: swap;
 }
 
-/* Inter (body) + IBM Plex Mono (numbers/code in dashboard) loaded from CDN */
+/* =========================================================
+   RUBIK
+
+   Self hosted, from `public/fonts`, exactly as Panton is above.
+
+   ---- Why not an @import like the two lines below ----
+
+   Because those two lines do nothing, and this is where that was
+   found. `@import` is only valid at the TOP of a stylesheet, before
+   any other rule. Next bundles this file after `kit-tokens.css`, so in
+   the built stylesheet those two imports land at line 1140 with a
+   thousand rules above them, where the CSS parser is required to
+   discard them. Confirmed in a browser against the served bundle: no
+   request is ever made to rsms.me or to fonts.googleapis.com, and
+   `document.fonts` holds nothing but Panton.
+
+   So Inter and IBM Plex Mono are being drawn by whatever the machine
+   has, which is a separate thing worth fixing and is left exactly as
+   it is: changing the face the whole application is set in is a
+   rebrand step, and those happen in the order the business asks for
+   them. Rubik is not going to join them in not working.
+
+   One file per range, and one file covers 400 to 700: this is the
+   variable build, so the weight axis comes free rather than as four
+   downloads.
+   ========================================================= */
+@font-face {
+  font-family: "Rubik";
+  src: url("/fonts/Rubik-latin.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Rubik";
+  src: url("/fonts/Rubik-latin-ext.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+  /* Accented names. A Polish or Czech haulier in the sidebar is not a
+     hypothetical at a firm that moves freight across Europe. */
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Inter (body) + IBM Plex Mono (numbers/code in dashboard) loaded from CDN.
+   See the Rubik note above: these two are inert where they sit. */
 @import url("https://rsms.me/inter/inter.css");
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
@@ -388,7 +438,11 @@ a { color: inherit; text-decoration: none; }
 
 .sidebar__section { padding: 14px 8px 4px 16px; }
 .sidebar__section-head {
-  font-family: "IBM Plex Mono", monospace;
+  /* Rubik, and only here for now. Every other rule in this file that
+     wanted a label face still asks for IBM Plex Mono, deliberately:
+     changing them all is a rebrand step and those go in the order the
+     business sets, one at a time. */
+  font-family: "Rubik", "IBM Plex Mono", monospace;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.14em;

@@ -136,6 +136,49 @@ export async function GET(req: NextRequest) {
     contactId: d.id,
   }));
 
+  /* WORK DUE TODAY, INCLUDING THE REMINDERS SET FROM A CRM RECORD.
+
+     From the business, on the Reminder button:
+
+       it should push to Work (and to dashboard if it's one of today's
+       tasks to see on login)
+
+     "Needs you today" read two things: meetings in the diary today, and
+     deals that had gone quiet. Neither is a task, so a reminder somebody
+     set for this morning appeared nowhere on the page they open first.
+
+     Overdue as well as due today, which is the same reason the strip
+     exists. A task that was due yesterday and is still open is more
+     urgent than one due this afternoon, not less, and dropping it at
+     midnight is how a reminder system quietly stops being trusted.
+
+     Row level security decides which tasks come back, so this asks for
+     the reader's own and does not have to be the thing that enforces
+     it. The table may not exist on an installation that has not run
+     migration 056, which is why the whole thing is behind a probe. */
+  const { error: taskErr } = await supabase.from('tasks').select('id').limit(1);
+  const taskActions = taskErr ? [] : await (async () => {
+    const { data } = await supabase
+      .from('tasks')
+      .select('id, title, due_at, status, source, organisation_id')
+      .eq('assignee_id', user.id)
+      .not('status', 'in', '(done,cancelled)')
+      .not('due_at', 'is', null)
+      .lt('due_at', endOfToday.toISOString())
+      .order('due_at', { ascending: true })
+      .limit(8);
+    return ((data ?? []) as any[]).map((t) => ({
+      kind: 'task' as const,
+      id: t.id,
+      title: t.title,
+      subtitle: new Date(t.due_at).getTime() < startOfToday.getTime()
+        ? 'Overdue'
+        : t.source === 'reminder' ? 'Reminder you set' : 'Due today',
+      due: t.due_at as string,
+      contactId: (t.organisation_id ?? null) as string | null,
+    }));
+  })();
+
   // Portfolio. account_ownership does not exist, so fall back to the free
   // text assigned_to matching this user's name, which is what the CRM grid
   // uses today. Partial by construction, and labelled as such in the UI.
@@ -198,7 +241,11 @@ export async function GET(req: NextRequest) {
     profile: { full_name: fullName },
     staleDays,
     usingRealActivity,
-    actions: { available: true, derived: true, items: [...meetingActions, ...followUpActions] },
+    /* Tasks first: they are the only ones somebody deliberately put
+       there. A meeting is in the diary whether you thought about it
+       this morning or not, and a stale deal is the page's own
+       inference. */
+    actions: { available: true, derived: true, items: [...taskActions, ...meetingActions, ...followUpActions] },
     stale: { available: true, items: stale },
     topStuck: { available: true, items: stale.slice(0, 5) },
     inFlight: {

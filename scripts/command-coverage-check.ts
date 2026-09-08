@@ -1011,6 +1011,53 @@ for (const said of ['new task', 'add a task', 'create a task', 'new job', 'raise
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'make.task'));
 }
 
+/* Reminders, which are tasks on yourself raised from a customer.
+
+   Asserted separately from `make.task` because none of these sentences
+   contains a word for task. "Remind me to ring Dawson on Thursday" is
+   how somebody asks for one, and if that reaches only the notification
+   bell then the feature is unreachable by the words people use for it. */
+for (const said of [
+  'set a reminder', 'remind me to ring dawson on thursday', 'remind me about this one',
+  'nudge me next week', 'create a follow up',
+]) {
+  ok(`"${said}" sets a reminder`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'make.reminder'));
+}
+/* Everybody who can raise work can set one, and a read only viewer
+   cannot raise work, so they are not offered it. */
+for (const role of ['admin', 'sales', 'marketer'] as const) {
+  ok(`a ${role} can set a reminder`,
+    suggestActions('set a reminder', CAPS[role], 8).some((h) => h.action.id === 'make.reminder'));
+}
+ok('a read only viewer is not offered setting a reminder',
+  !suggestActions('set a reminder', CAPS.viewer, 8).some((h) => h.action.id === 'make.reminder'));
+
+/* Somebody else's sales tracker, which is now a screen and therefore
+   has to be reachable by the words a manager would use for it.
+
+   Both directions, because this one carries other people's pipelines:
+   an administrator reaches it, and nobody else is shown it at all. An
+   action that appears and then refuses teaches people the tool is
+   unreliable, and this one would refuse on the server. */
+for (const said of [
+  'open dean’s tracker', 'their tracker', 'somebody’s tracker',
+  'what has dave got open', 'show me their tracker',
+]) {
+  ok(`"${said}" reaches a colleague's tracker`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'tracker.person'));
+}
+for (const role of ['sales', 'marketer', 'viewer'] as const) {
+  ok(`a ${role} is not offered a colleague's tracker`,
+    !suggestActions('open dean’s tracker', CAPS[role], 8)
+      .some((h) => h.action.id === 'tracker.person'));
+  /* And their own is still there. Hiding one must not hide the other:
+     they are two entries with the same path and different capabilities,
+     which is exactly the shape that goes wrong quietly. */
+  ok(`a ${role} can still open their own tracker`,
+    suggestActions('my tracker', CAPS[role], 8).some((h) => h.action.id === 'nav.tracker'));
+}
+
 /* Delegation, both directions. Being handed work you cannot do is the
    case the whole feature exists for, so the words for handing it back
    are asserted rather than hoped for. */

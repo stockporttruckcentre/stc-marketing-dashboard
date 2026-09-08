@@ -26,6 +26,14 @@ const PRIORITIES = ['p0', 'p1', 'p2', 'p3'];
    them here would be a second set of rules to keep in step. */
 const OPENING = ['backlog', 'ready', 'in_progress'];
 
+/* Where the work came from. Free text on the column, an allow list
+   here, because it is what every later question groups by and a typo
+   makes a category of one that nobody notices. `reminder` is the CRM
+   record's Reminder button: a personal task raised against a customer,
+   which is a task like any other and is worth being able to count
+   separately from work somebody typed into the Work tab. */
+const SOURCES = ['manual', 'reminder'];
+
 export async function POST(req: NextRequest) {
   const gate = await requireCapability('work.create');
   if (!gate.ok) return gate.response;
@@ -84,7 +92,7 @@ export async function POST(req: NextRequest) {
     classification: b.classification ?? 'internal',
     is_sensitive: b.is_sensitive === true,
     created_by: gate.user.id,
-    source: 'manual',
+    source: SOURCES.includes(b.source) ? b.source : 'manual',
   };
 
   /* Only sent when somebody who works for both companies picked one.

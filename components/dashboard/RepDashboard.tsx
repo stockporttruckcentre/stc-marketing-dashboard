@@ -136,14 +136,24 @@ export function RepDashboard({ profile }: { profile: Profile }) {
                 {data.actions.items.length === 0 ? (
                   <EmptyState
                     what="Nothing is waiting on you."
-                    why="Today's meetings and anything that has gone quiet land here. Setting a next action when you add a prospect will put it here too."
+                    why="Reminders you set, today's meetings and anything that has gone quiet land here."
                   />
                 ) : (
                   <div>
                     {data.actions.items.map((a: any) => (
-                      <Row key={`${a.kind}-${a.id}`} onClick={() => a.contactId && router.push(`/dashboard/leads?contact=${a.contactId}`)}>
+                      /* A task opens in Work, which is where it can be
+                         finished. The other two are about a customer,
+                         so they open the customer. Sending a reminder to
+                         the tracker instead would be a row you cannot
+                         tick off from the screen you landed on. */
+                      <Row key={`${a.kind}-${a.id}`} onClick={() => {
+                        if (a.kind === 'task') { router.push('/dashboard/work'); return; }
+                        if (a.contactId) router.push(`/dashboard/leads?contact=${a.contactId}`);
+                      }}>
                         {a.kind === 'meeting'
                           ? <CalendarDays size={15} style={{ color: 'var(--info)', flexShrink: 0 }} />
+                          : a.kind === 'task'
+                          ? <Bell size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
                           : <Clock size={15} style={{ color: 'var(--warning)', flexShrink: 0 }} />}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--text)' }}>{a.title}</div>

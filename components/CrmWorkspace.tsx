@@ -22,7 +22,7 @@ import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
 import { STATUS_TONE } from '@/lib/crm/status';
-import { Modal, Field, TextInput, Select, OptionCard, Checkbox } from '@/components/kit/forms';
+import { Modal, Field, TextInput, Select, OptionCard, Checkbox, Segmented } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
 } from '@/lib/crm/ownership';
@@ -612,6 +612,12 @@ export function CrmWorkspace({
         contact_name: fields?.contact_name?.trim() || null,
         email: fields?.email?.trim() || null,
         phone: fields?.phone?.trim() || null,
+        location: fields?.location?.trim() || null,
+        /* Answered on the form now, and not left NULL. It reads as
+           prospect wherever it is read, so a record made with it blank
+           was silently asserting something about a firm nobody had been
+           asked about. */
+        relationship: fields?.relationship ?? 'prospect',
         assigned_to: caps.has('crm.edit') ? (fields?.assigned_to ?? profile.full_name) : null,
         status: 'lead',
         source: 'manual',
@@ -1562,12 +1568,32 @@ function AssignMenu({ x, y, count, owners, me, onPick, onClose }: {
 
    Dave's complaint was that the inline row is fiddly: you type into a
    36px grid cell with no sense of which of twenty columns matter. This
-   asks for the four fields that make a record worth having and leaves
+   asks for the fields that make a record worth having and leaves
    everything else to the drawer, which is where the detail belongs.
 
    Only the company name is required. A prospect scribbled off a phone
    call often is just a name, and refusing to save it is how notes end up
    back on paper.
+
+   ---- WHAT THEY ARE TO US ----
+
+   From production testing:
+
+     The Add Contact wizard in the crm looks like it misses major fields
+     such as whether it's a prospect customer or an active account.
+
+   `relationship` is the column, it has existed since migration 004, and
+   every record made through this modal was leaving it NULL. It reads as
+   prospect wherever it is read, so entering a firm STC has serviced for
+   nine years produced a prospect, and nothing on this screen said so.
+
+   It is here rather than left to the drawer because it is the one field
+   whose default is WRONG some of the time. A missing phone number is
+   blank and looks blank. A missing relationship looks like an answer.
+
+   Location joins it for the same reason it is on every list and export,
+   and because a company name on its own is not enough to tell two
+   hauliers apart when the next person searches.
    ============================================================= */
 function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }: {
   owners: string[];
@@ -1581,14 +1607,16 @@ function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }:
   const [contact, setContact] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [location, setLocation] = useState('');
+  const [relationship, setRelationship] = useState('prospect');
   const [owner, setOwner] = useState(me);
 
   function submit() {
     if (!company.trim()) return;
     onCreate({
       company_name: company, contact_name: contact,
-      email, phone, assigned_to: owner,
-    });
+      email, phone, location, relationship, assigned_to: owner,
+    } as Partial<CRMContact>);
   }
 
   return (
@@ -1609,6 +1637,25 @@ function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }:
       <Field label="Company">
         <TextInput value={company} onChange={setCompany} placeholder="Bredbury Haulage Ltd" />
       </Field>
+
+      {/* Asked before the contact details, because it changes what the
+          record is for. A prospect is somebody to win; an active account
+          is somebody to look after, and they are read by different
+          reports. */}
+      <Field label="What are they to us?"
+        hint="A prospect becomes a customer when you win a lead for them.">
+        <div>
+          <Segmented
+            value={relationship}
+            onChange={setRelationship}
+            options={[
+              { value: 'prospect', label: 'Prospect' },
+              { value: 'existing', label: 'Active customer' },
+            ]}
+          />
+        </div>
+      </Field>
+
       <Field label="Contact name" hint="Who you actually speak to.">
         <TextInput value={contact} onChange={setContact} placeholder="Optional" />
       </Field>
@@ -1620,6 +1667,9 @@ function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }:
           <TextInput value={phone} onChange={setPhone} placeholder="Optional" />
         </Field>
       </div>
+      <Field label="Where they are" hint="Town is enough. It is how two firms with one name get told apart.">
+        <TextInput value={location} onChange={setLocation} placeholder="Optional" />
+      </Field>
       {canAssign && owners.length > 1 && (
         <Field label="Owner" hint="Whose portfolio this lands in.">
           <Select value={owner} onChange={setOwner}>
