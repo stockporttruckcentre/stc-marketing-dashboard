@@ -342,6 +342,50 @@ console.log('\n  What the maintenance strip counts\n  --------------------------
   }
 }
 
+/* =============================================================
+   9. Won means somebody closed it here
+
+     Tracker is deals you're on with. That imported data was just to
+     show on the revenue and analytic tabs ... That reads like dean's
+     won 2.9m in revenue alone, he's not.
+
+   A maintenance customer list was loaded through the tracker importer,
+   whose dictionary claims a column headed "invoice value" as a sale
+   price. So a year of group invoicing sat on one rep's tracker as
+   deals he had closed: £2,907,995 across 144 rows.
+
+   The rule that tells them apart was already in this application and
+   this strip was the only place not using it. An imported spend figure
+   has no order date. A deal somebody won on a day does.
+   ============================================================= */
+console.log('\n  What counts as won\n  ------------------');
+
+ok('the money figures require a date the deal was agreed on',
+  /STATUS_TO_TAB\[r\.status\] === 'customer' && r\.order_date/.test(source),
+  'without it, anything imported at status customer is counted as revenue somebody earned');
+
+ok('and both the revenue and the commission are counted off the same rows',
+  /wonHere\.reduce\(\(sum, r\) => sum \+ \(Number\(r\.sale_price\)/.test(source)
+  && /wonHere\.reduce\(\(sum, r\) => sum \+ \(Number\(r\.commission\)/.test(source),
+  'two definitions of won is two figures that cannot both be right');
+
+ok('this is the same test the exec dashboard uses',
+  /order_date >= \$\{yearStart\}/.test(readFileSync('app/api/dashboard/exec/route.ts', 'utf8')),
+  'the tracker disagreeing with the dashboard about revenue is how both stop being believed');
+
+ok('and the same one the rep dashboard uses',
+  /status === 'customer' && d\.order_date/.test(readFileSync('app/api/dashboard/rep/route.ts', 'utf8')));
+
+ok('rows with no date are said out loud rather than quietly dropped',
+  /with no date/.test(source),
+  'a figure counting 12 of 144 rows and not saying so is the same fault by subtraction');
+
+/* Where invoiced spend actually belongs, so that the next person to
+   wonder does not have to trace it through an import dictionary. */
+ok('invoiced spend has a home of its own, and it is not the tracker',
+  /CREATE TABLE IF NOT EXISTS protean_invoices/
+    .test(readFileSync('supabase/migrations/075_what_protean_billed.sql', 'utf8')));
+
 console.log(
   failed === 0
     ? '\n  Five complaints: the filters fold, the fields follow the division,\n'

@@ -368,12 +368,51 @@ export function SalesTracker({
   const totalEstValue = useMemo(() =>
     sideRows.filter(r => STATUS_TO_TAB[r.status] === 'working').reduce((sum, r) => sum + (Number(r.estimated_value) || 0), 0),
     [sideRows]);
+  /* WON MEANS SOMEBODY CLOSED IT HERE, ON A DATE.
+
+     From the business, on the maintenance strip reading £2.9m:
+
+       Tracker is deals you're on with. That imported data was just to
+       show on the revenue and analytic tabs so the MD doesn't have to
+       run protean exports to see what maintenance customers invoiced
+       with us this year. That reads like dean's won 2.9m in revenue
+       alone, he's not, it's close to 100x less than that.
+
+     Exactly right, and the cause is a column being asked a question it
+     cannot answer. What a customer invoiced with the group lives in
+     `protean_invoices`, migration 075, and the revenue and analytics
+     tabs read it there. It reached `crm_leads.sale_price` because the
+     maintenance customer list was loaded through the TRACKER importer,
+     whose dictionary claims a column headed "invoice value" as a sale
+     price. Four figures of yearly spend, on 144 rows, on one rep's
+     tracker, presented as deals he had closed.
+
+     The rule that separates them was already in the application and
+     this strip was the one place not using it. Both dashboards require
+     an order date:
+
+       exec   SUM(sale_price) FILTER (WHERE status = 'customer'
+                                        AND order_date >= year start)
+       rep    status === 'customer' && d.order_date && ...
+
+     An imported spend figure has no order date, because nobody here
+     closed it on a day. A deal somebody actually won does. So that is
+     the test, and the tracker now agrees with the two screens it always
+     should have.
+
+     The consequence worth knowing: a genuinely won contract with no
+     date against it stops being counted until somebody fills the date
+     in. That is the right way round. A missing date understates a
+     figure visibly, on a row somebody can open and fix; the version
+     without it overstated one by a hundredfold and looked authoritative
+     doing it. */
+  const wonHere = useMemo(() =>
+    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer' && r.order_date),
+    [sideRows]);
   const totalCustomerRevenue = useMemo(() =>
-    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0),
-    [sideRows]);
+    wonHere.reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0), [wonHere]);
   const totalCommission = useMemo(() =>
-    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer').reduce((sum, r) => sum + (Number(r.commission) || 0), 0),
-    [sideRows]);
+    wonHere.reduce((sum, r) => sum + (Number(r.commission) || 0), 0), [wonHere]);
 
   /* The lead somebody has just won, waiting on an answer about the
      customer behind it. See `lib/crm/conversion.ts`. */
@@ -434,6 +473,15 @@ export function SalesTracker({
     if (field === 'status') void maybeConvert(params.data, before, String(params.newValue));
     return true;
   }, [supabase, maybeConvert]);
+
+  /* The note under the money, which has to explain a figure that is
+     smaller than the row count would suggest. Silently counting 12 of
+     144 rows is how somebody stops trusting the number a second time. */
+  const wonNote = useMemo(() => {
+    const undated = counts.customer - wonHere.length;
+    if (undated <= 0) return `${wonHere.length} closed here`;
+    return `${wonHere.length} closed here, ${undated} with no date`;
+  }, [counts.customer, wonHere.length]);
 
   const isCustomerTab = tab === 'customer';
   const isMaintenance = side === 'maintenance';
@@ -845,13 +893,13 @@ export function SalesTracker({
         { label: 'Total', value: counts.all, note: 'on this side' },
         { label: 'Working', value: counts.working, note: 'jobs in hand' },
         { label: 'Pipeline', value: fmtMoney(totalEstValue) || '—', note: 'estimated' },
-        { label: 'Won', value: fmtMoney(totalCustomerRevenue) || '—', note: `${counts.customer} on contract` },
+        { label: 'Won', value: fmtMoney(totalCustomerRevenue) || '—', note: wonNote },
         { label: 'Lost', value: counts.lost, note: 'not pursuing' },
       ] : [
         { label: 'Total', value: counts.all, note: 'on this side' },
         { label: 'Working', value: counts.working, note: 'chasing the deal' },
         { label: 'Pipeline', value: fmtMoney(totalEstValue) || '—', note: 'estimated' },
-        { label: 'Revenue', value: fmtMoney(totalCustomerRevenue) || '—', note: `${counts.customer} won` },
+        { label: 'Revenue', value: fmtMoney(totalCustomerRevenue) || '—', note: wonNote },
         { label: 'Commission', value: fmtMoney(totalCommission) || '—', note: 'yours' },
       ]} />
 
