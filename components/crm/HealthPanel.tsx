@@ -61,6 +61,19 @@ export function HealthPanel({ contact, canFlag, onChanged }: {
   onChanged: (level: Health, reason: string | null) => void;
 }) {
   const level = ((contact as unknown as { health?: Health }).health ?? 'green') as Health;
+
+  /* Green on a prospect is not a state anybody has established.
+     From the business:
+
+       ensure it doesn't show for leads, we have no clue what the status
+       is until we've made contact. One can manually be set but don't
+       show one by default until they're actually at Customer status.
+
+     The same rule as the dot on the grid, and it belongs here too: a
+     highlighted Fine button says somebody decided this account is fine,
+     and on a lead nobody has. The button still works, so it can be set
+     by hand the moment there is a reason to. */
+  const settled = level !== 'green' || contact.status === 'customer';
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -120,7 +133,7 @@ export function HealthPanel({ contact, canFlag, onChanged }: {
       <Card padded={false}>
         <PanelHead
           title="Where this account stands"
-          hint={open ? undefined : 'Nothing outstanding'}
+          hint={open ? undefined : (settled ? 'Nothing outstanding' : 'Not set. Nothing has been raised.')}
           action={open && canFlag ? (
             <Button size="sm" variant={open.level === 'red' ? 'primary' : 'secondary'}
               disabled={busy}
@@ -144,7 +157,7 @@ export function HealthPanel({ contact, canFlag, onChanged }: {
               read it. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             {(['green', 'amber', 'red'] as Health[]).map((l) => {
-              const on = level === l;
+              const on = level === l && (l !== 'green' || settled);
               return (
                 <button
                   key={l}
