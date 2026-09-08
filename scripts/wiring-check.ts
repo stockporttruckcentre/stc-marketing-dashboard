@@ -153,6 +153,52 @@ ok('the reminder is a task rather than a fourth kind of record',
 ok('and the dashboard reads those tasks, so a reminder for today is on the page they open',
   /kind: 'task' as const/.test(read('app/api/dashboard/rep/route.ts')));
 
+/* =============================================================
+   The red, amber, green dot, and what an empty cell means
+
+   Two halves of one rule, in two files, which is exactly the shape that
+   drifts. The grid draws the dot and the drawer draws the buttons, and
+   if one of them decides a green prospect is "Fine" while the other
+   decides it is "not set", the record contradicts the list it came
+   from.
+
+   From the business, in two messages:
+
+     green blip should be default for all customers and show regardless
+
+     ensure it doesn't show for leads, we have no clue what the status
+     is until we've made contact. One can manually be set but don't show
+     one by default until they're actually at Customer status.
+   ============================================================= */
+console.log('\n  Red, amber, green\n  -----------------');
+
+const crmGrid = read('components/CrmWorkspace.tsx');
+const healthPanel = read('components/crm/HealthPanel.tsx');
+
+ok('a customer with nothing wrong still carries a dot',
+  /const level = \(\(p\.value as Health\) \?\? 'green'\)/.test(crmGrid)
+  && !/if \(level === 'green'\) return null;/.test(crmGrid),
+  'an empty cell reads as "not set", which is the one thing this column exists to answer');
+
+ok('and a prospect does not, because nobody has established anything yet',
+  /if \(level === 'green' && p\.data\?\.status !== 'customer'\) return null;/.test(crmGrid),
+  'a green dot on a lead is a claim nobody has grounds to make');
+
+ok('amber and red are drawn whatever the status, because somebody set them',
+  /if \(level === 'green' && /.test(crmGrid),
+  'the guard has to be on green alone: a complaint from a prospect mid quote is what this is for');
+
+ok('the drawer applies the same rule to its own buttons',
+  /const settled = level !== 'green' && false/.test(healthPanel) === false
+  && /const settled = level !== 'green' \|\| contact\.status === 'customer';/.test(healthPanel),
+  'a highlighted Fine button on a lead contradicts the blank cell the list showed');
+
+ok('and says so rather than claiming nothing is outstanding',
+  /'Not set\. Nothing has been raised\.'/.test(healthPanel));
+
+ok('the dot still sorts worst first',
+  /comparator: \(a, b\) => healthRank\(a as Health\) - healthRank\(b as Health\)/.test(crmGrid));
+
 console.log(
   failed === 0
     ? '\n  Every seam checked here hands its argument on, and the screen at the\n'

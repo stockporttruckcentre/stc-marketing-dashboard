@@ -22,7 +22,7 @@ import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, StatusDot, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
 import { STATUS_TONE } from '@/lib/crm/status';
-import { HEALTH_LABEL, HEALTH_TONE, healthRank, type Health } from '@/lib/crm/health';
+import { HEALTH_BLURB, HEALTH_LABEL, HEALTH_TONE, healthRank, type Health } from '@/lib/crm/health';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox, Segmented } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
@@ -353,19 +353,63 @@ export function CrmWorkspace({
        the header does the useful thing. A sort that opens with two
        hundred green accounts has not answered the question anybody
        clicked it to ask. The reason is on hover and in the filter, so
-       colour is never the only carrier. */
+       colour is never the only carrier.
+
+       ---- Green is drawn on a customer, and only on a customer ----
+
+       It used to return nothing for a green account, on the argument
+       that a column of green dots would drown the red ones. From the
+       business, looking at it:
+
+         green blip should be default for all customers and show
+         regardless. currently green stays hidden as a blip on crm and
+         only amber and red shows.
+
+       They are right about a customer, and the argument was wrong for
+       one. An empty cell does not read as "fine", it reads as "not
+       set", and a person scanning the list cannot tell a healthy
+       account from an account nobody has looked at. Those are opposite
+       states.
+
+       On a prospect they are the SAME state, which is the second half
+       of the instruction:
+
+         ensure it doesn't show for leads, we have no clue what the
+         status is until we've made contact. One can manually be set but
+         don't show one by default until they're actually at Customer
+         status.
+
+       A green dot on a lead would be a claim nobody has grounds to
+       make: we have not traded with them, so there is nothing to be
+       fine about. So green is drawn at Customer status and nowhere
+       else, and the empty cell on a lead is then honest rather than
+       ambiguous, because green is the only level it can be hiding.
+
+       AMBER AND RED ARE DRAWN WHATEVER THE STATUS. Both mean somebody
+       deliberately set them, on any record, and a complaint from a
+       prospect mid quote is exactly the thing this column is for.
+
+       A record loaded before migration 099 has run carries no value at
+       all and is treated as green, which is right: green is the
+       default, not the absence of a column. */
     { colId: 'health', field: 'health', headerName: '', width: 40, pinned: 'left',
       editable: false, sortable: true, resizable: false,
       headerTooltip: 'Red, amber or green',
       comparator: (a, b) => healthRank(a as Health) - healthRank(b as Health),
       cellRenderer: (p: ICellRendererParams<CRMContact>) => {
         const level = ((p.value as Health) ?? 'green');
-        if (level === 'green') return null;
+        if (level === 'green' && p.data?.status !== 'customer') return null;
         const why = (p.data as unknown as { health_reason?: string })?.health_reason;
         return (
           <StatusDot
             tone={HEALTH_TONE[level]}
-            label={why ? `${HEALTH_LABEL[level]}: ${why}` : HEALTH_LABEL[level]}
+            /* Green has no reason and never will: a reason is what is
+               wrong, and nothing is. It says what the dot means instead,
+               so hovering a green one answers rather than doing
+               nothing. */
+            label={level === 'green'
+              ? `${HEALTH_LABEL.green}. ${HEALTH_BLURB.green}.`
+              : (why ? `${HEALTH_LABEL[level]}: ${why}` : HEALTH_LABEL[level])}
           />
         );
       } },
