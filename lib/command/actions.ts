@@ -1333,7 +1333,7 @@ export const ACTIONS: CommandActionSpec[] = [
      that use the same account code for different companies are two
      screens, and somebody typing "rental revenue" means the rental
      one. */
-  { id: 'nav.rentalRevenue', label: 'S&L revenue',
+  { id: 'nav.rentalRevenue', label: 'Rentals revenue',
     blurb: 'What the rental side has invoiced', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/revenue/rental', verbs: GO,
     objects: ['rental revenue', 's&l revenue', 'sl revenue', 'rental invoices',
@@ -1370,7 +1370,7 @@ export const ACTIONS: CommandActionSpec[] = [
      goes types Sage, and until now the only file the bar knew the name
      of was Protean's, which is the other screen. */
   { id: 'import.rental', label: 'Import the Sage export',
-    blurb: 'The S&L invoiced report, out of Sage', kind: 'data',
+    blurb: 'The Rentals invoiced report, out of Sage', kind: 'data',
     capability: 'crm.import', path: '/dashboard/revenue/rental?tab=import',
     verbs: ['import', 'upload', 'load', 'bring in', 'put in', 'update', 'sync'],
     objects: ['sage export', 'sage', 'sage invoices', 'sage csv', 'sage spreadsheet',
@@ -1379,6 +1379,152 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['import the sage export', 'upload the sage file',
               'import the rental invoices', 'upload the rental export',
               'update the rental figures'] },
+
+  /* =============================================================
+     Reports.
+
+     One entry per report, not one entry for the screen. Somebody
+     before a meeting types the report, not the tab it lives on:
+     "top customers", "bottom ten", "who is spending more", "the
+     bi-weekly". An entry for the hub alone would answer every one of
+     those with the same suggestion, which is the shape of the original
+     bug this file exists to prevent.
+
+     Every one is `crm.view`, matching the route and the page, so a
+     report is never offered to somebody the API would then refuse.
+     ============================================================= */
+  { id: 'nav.reports', label: 'Reports', blurb: 'Every report, by category',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/reports', verbs: GO,
+    objects: ['reports', 'report', 'reporting', 'the reports tab', 'reports screen',
+              'run a report', 'management reports', 'meeting pack'] },
+
+  { id: 'report.biweekly', label: 'Bi-weekly meeting report',
+    blurb: 'Reds, revenue, wins, pipeline and the diary, in meeting order',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=biweekly',
+    verbs: [...GO, 'run', 'prepare', 'build', 'produce'],
+    objects: ['bi-weekly report', 'biweekly report', 'bi weekly report', 'fortnightly report',
+              'the meeting report', 'meeting pack', 'sales meeting report',
+              'management meeting report', 'the fortnightly pack'],
+    phrases: ['run the bi-weekly report', 'prepare the meeting report',
+              'report for the sales meeting', 'get the fortnightly pack ready'] },
+
+  { id: 'report.topCustomers', label: 'Top 10 customers',
+    blurb: 'Biggest spenders this year, against last year',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=top-customers',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['top customers', 'top 10 customers', 'top ten customers', 'biggest customers',
+              'best customers', 'biggest spenders', 'our top accounts', 'largest accounts'] },
+
+  { id: 'report.bottomCustomers', label: 'Bottom 10 customers',
+    blurb: 'Live accounts spending the least',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=bottom-customers',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['bottom customers', 'bottom 10 customers', 'bottom ten customers',
+              'smallest customers', 'worst customers', 'lowest spenders',
+              'customers spending least', 'quietest accounts'] },
+
+  { id: 'report.growthRevenue', label: 'Biggest increases by value',
+    blurb: 'Who is spending more than last year, in pounds',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=growth-revenue',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['biggest increases', 'revenue growth', 'growth by value', 'spending more',
+              'who is spending more', 'increase in spend', 'customers growing',
+              'biggest risers', 'biggest fallers', 'spending less'] },
+
+  { id: 'report.growthVolume', label: 'Biggest increases by volume',
+    blurb: 'Who is sending more work, counted in invoices',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=growth-volume',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['growth by volume', 'volume growth', 'more jobs than last year',
+              'increase in volume', 'busiest customers', 'who is sending more work',
+              'job count growth', 'invoice volume growth'] },
+
+  { id: 'report.won', label: 'Won leads report',
+    blurb: 'What closed, by whom, over any period',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=won',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['won leads report', 'won deals report', 'closed deals report',
+              'what we have won', 'wins this month', 'won business', 'closed won'],
+    phrases: ["report of dean's won leads", 'won leads in the last two weeks'] },
+
+  { id: 'report.pipeline', label: 'Open pipeline report',
+    blurb: 'What is being worked, by person and by stage',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=pipeline',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['pipeline report', 'open pipeline', 'pipeline by person', 'pipeline by stage',
+              'what is open', 'open deals report', 'forecast'] },
+
+  { id: 'report.health', label: 'Customer problems report',
+    blurb: 'Every open red and amber, and how long it has been open',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=health',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['problems report', 'complaints report', 'reds and ambers', 'red customers',
+              'amber customers', 'unhappy customers', 'customer problems',
+              'open complaints', 'what is going wrong'] },
+
+  { id: 'report.operations', label: 'Stock and open jobs report',
+    blurb: 'What is on the yard and what is in the workshop',
+    kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=operations',
+    verbs: [...GO, 'run', 'produce'],
+    objects: ['operations report', 'stock report', 'open jobs report', 'workshop report',
+              'what is on the yard', 'jobs report', 'stock and jobs'],
+    /* Its own title, spelled out. "Stock and open jobs" is two words the
+       stock screen owns and two the Protean screen owns, so on the
+       objects alone the two screens outrank the report that summarises
+       both. A title somebody reads off the Reports tab and types back in
+       has to reach the thing they read it from. */
+    phrases: ['stock and open jobs', 'stock and open jobs report'] },
+
+  /* =============================================================
+     Red, amber, green on a customer.
+
+     Three actions rather than one, because they are three different
+     things somebody wants and two of them are instructions rather than
+     questions. "Mark Booker red" is a write, and an instruction answered
+     with a screen looks like it worked.
+
+     Every one is `crm.health`, which is the capability the database
+     function checks for itself. A read only viewer typing "flag them
+     amber" sees nothing here, and would be refused by Postgres if they
+     reached it another way.
+     ============================================================= */
+  { id: 'record.flagRed', label: 'Set a customer red',
+    blurb: 'A complaint or a serious problem. Tells whoever looks after them, now.',
+    kind: 'record', capability: 'crm.health',
+    verbs: [...CHANGE, 'mark', 'flag', 'raise', 'log'],
+    objects: ['red', 'as red', 'a complaint', 'complaint', 'serious problem',
+              'formal complaint', 'in dispute', 'unhappy'],
+    phrases: ['mark them red', 'flag as red', 'raise a complaint',
+              'log a complaint against them', 'set this customer red'],
+    seed: 'mark red ' },
+
+  { id: 'record.flagAmber', label: 'Set a customer amber',
+    blurb: 'Slowness or a problem brewing. Tells nobody until you press Alert.',
+    kind: 'record', capability: 'crm.health',
+    verbs: [...CHANGE, 'mark', 'flag', 'raise', 'log'],
+    objects: ['amber', 'as amber', 'slowness', 'slow', 'a potential issue',
+              'potential issue', 'a problem brewing', 'going quiet'],
+    phrases: ['mark them amber', 'flag as amber', 'flag them for slowness',
+              'set this customer amber'],
+    seed: 'mark amber ' },
+
+  { id: 'record.flagGreen', label: 'Put a customer back to green',
+    blurb: 'The problem is closed off. Keeps the history.',
+    kind: 'record', capability: 'crm.health',
+    verbs: [...CHANGE, 'mark', 'flag', 'clear', 'close', 'resolve'],
+    objects: ['green', 'as green', 'the complaint', 'the problem', 'the issue',
+              'back to normal', 'sorted', 'resolved'],
+    phrases: ['put them back to green', 'clear the complaint', 'close the problem off',
+              'mark them green', 'the complaint is sorted'],
+    seed: 'mark green ' },
+
+  { id: 'nav.healthDue', label: 'Customers due a chase',
+    blurb: 'Reds quiet three working days, ambers quiet seven',
+    kind: 'navigate', capability: 'crm.view',
+    path: '/dashboard/reports?report=health', verbs: GO,
+    objects: ['due a chase', 'who needs chasing', 'overdue complaints',
+              'reds gone quiet', 'ambers gone quiet', 'nobody has chased',
+              'what needs chasing'] },
 ];
 
 /* =============================================================

@@ -31,6 +31,7 @@ import type { Cond } from '../lib/command/ir/types';
 import { loadSampleVocabulary } from './sample-vocabulary';
 import { capabilitiesFor, LUSHA_LOCKED } from '../lib/crm/permissions';
 import { crumbsFor, visibleSections, NAV_ITEMS } from '../lib/nav';
+import { REPORTS } from '../lib/reports/catalogue';
 import type { UserRole } from '../lib/types';
 
 /* The bar learns makes, depots and customers from the database. A check
@@ -1637,6 +1638,130 @@ for (const said of [
 ok('a viewer is not offered importing the rental invoices',
   !suggestActions('import the rental invoices', CAPS.viewer, 8)
     .some((h) => h.action.id === 'import.rental'));
+
+/* =============================================================
+   Reports.
+
+   Nine reports, and each one has to be reachable by the words somebody
+   would use for IT rather than for the tab it sits on. This is the same
+   failure the whole file exists to catch: an entry for the screen alone
+   would answer "top customers", "bottom ten" and "the bi-weekly" with
+   one identical suggestion, and a person would conclude the bar cannot
+   find reports.
+
+   Reading a report is reading the CRM, so every role that can open the
+   CRM can reach one. Nothing here is gated more tightly than the route,
+   which checks `crm.view` and then lets row level security decide what
+   a report can actually see.
+   ============================================================= */
+for (const [said, id] of [
+  ['reports', 'nav.reports'],
+  ['run a report', 'nav.reports'],
+  ['management reports', 'nav.reports'],
+
+  ['bi-weekly report', 'report.biweekly'],
+  ['biweekly report', 'report.biweekly'],
+  ['fortnightly report', 'report.biweekly'],
+  ['the meeting report', 'report.biweekly'],
+  ['prepare the meeting report', 'report.biweekly'],
+  ['report for the sales meeting', 'report.biweekly'],
+
+  ['top customers', 'report.topCustomers'],
+  ['top 10 customers', 'report.topCustomers'],
+  ['biggest spenders', 'report.topCustomers'],
+  ['our top accounts', 'report.topCustomers'],
+
+  ['bottom customers', 'report.bottomCustomers'],
+  ['bottom 10 customers', 'report.bottomCustomers'],
+  ['lowest spenders', 'report.bottomCustomers'],
+  ['customers spending least', 'report.bottomCustomers'],
+
+  ['biggest increases', 'report.growthRevenue'],
+  ['who is spending more', 'report.growthRevenue'],
+  ['revenue growth', 'report.growthRevenue'],
+
+  ['growth by volume', 'report.growthVolume'],
+  ['more jobs than last year', 'report.growthVolume'],
+  ['who is sending more work', 'report.growthVolume'],
+
+  ['won leads report', 'report.won'],
+  ['closed deals report', 'report.won'],
+  ['what we have won', 'report.won'],
+
+  ['pipeline report', 'report.pipeline'],
+  ['open pipeline', 'report.pipeline'],
+  ['pipeline by person', 'report.pipeline'],
+
+  ['reds and ambers', 'report.health'],
+  ['red customers', 'report.health'],
+  ['complaints report', 'report.health'],
+  ['unhappy customers', 'report.health'],
+
+  ['operations report', 'report.operations'],
+  ['stock report', 'report.operations'],
+  ['open jobs report', 'report.operations'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === id));
+}
+
+/* Every report, reachable by its own title, for every role that holds
+   `crm.view`, and invisible to anybody who does not. Swept rather than
+   listed: a tenth report added without a check is exactly the thing
+   this is here to catch. */
+for (const def of REPORTS) {
+  for (const role of ['admin', 'sales', 'marketer'] as const) {
+    ok(`a ${role} can reach the ${def.slug} report by its title`,
+      suggestActions(def.title, CAPS[role], 8)
+        .some((h) => h.action.path?.includes(`report=${def.slug}`)));
+  }
+}
+ok('a viewer holds crm.view and can therefore read a report',
+  suggestActions('reports', CAPS.viewer, 8).some((h) => h.action.id === 'nav.reports'));
+
+/* =============================================================
+   Red, amber, green on a customer.
+
+   Two of these three are instructions, and an instruction answered with
+   a screen looks like it worked. Both directions are swept: reachable
+   by everybody who may raise a flag, invisible to a read only viewer,
+   because `crm_set_health` refuses them in the database and an action
+   that appears and then refuses teaches people the tool is unreliable.
+   ============================================================= */
+for (const [said, id] of [
+  ['mark them red', 'record.flagRed'],
+  ['flag as red', 'record.flagRed'],
+  ['raise a complaint', 'record.flagRed'],
+  ['log a complaint against them', 'record.flagRed'],
+
+  ['mark them amber', 'record.flagAmber'],
+  ['flag as amber', 'record.flagAmber'],
+  ['flag them for slowness', 'record.flagAmber'],
+
+  ['put them back to green', 'record.flagGreen'],
+  ['clear the complaint', 'record.flagGreen'],
+  ['close the problem off', 'record.flagGreen'],
+
+  ['due a chase', 'nav.healthDue'],
+  ['who needs chasing', 'nav.healthDue'],
+  ['reds gone quiet', 'nav.healthDue'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === id));
+}
+
+for (const said of [
+  'mark them red', 'flag as amber', 'raise a complaint', 'put them back to green',
+  'flag them for slowness', 'clear the complaint',
+]) {
+  ok(`a read only viewer is not offered "${said}"`,
+    !suggestActions(said, CAPS.viewer, 8)
+      .some((h) => h.action.capability === 'crm.health'));
+}
+for (const role of ['admin', 'sales', 'marketer'] as const) {
+  ok(`a ${role} can set a customer red`,
+    suggestActions('mark them red', CAPS[role], 8).some((h) => h.action.id === 'record.flagRed'));
+}
 
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {

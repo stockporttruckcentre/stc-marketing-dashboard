@@ -226,9 +226,19 @@ export function Sidebar({
       <NotificationRail />
 
       <div className="sidebar__footer">
-        <div className="avatar">
-          {profile.full_name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
-        </div>
+        {/* The picture if there is one, initials if there is not. The
+            initials are not a placeholder to be replaced later: most
+            people will never upload one, and a grey circle would be
+            worse than the two letters that are there today. */}
+        {profile.avatar_url ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={profile.avatar_url} alt="" width={28} height={28} className="avatar"
+            style={{ objectFit: 'cover', padding: 0 }} />
+        ) : (
+          <div className="avatar">
+            {profile.full_name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()}
+          </div>
+        )}
         <div className="sidebar__user">
           <div className="sidebar__user-name">{profile.full_name}</div>
           <div className="sidebar__user-role">{profile.role}</div>

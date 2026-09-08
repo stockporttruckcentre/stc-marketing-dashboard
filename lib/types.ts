@@ -14,6 +14,8 @@ export type PostStatus = 'draft' | 'pending_review' | 'approved' | 'scheduled' |
 export type AssetType = 'logo' | 'font' | 'color' | 'template' | 'image';
 
 export interface Profile {
+  /** Their own picture, if they have uploaded one. Migration 099. */
+  avatar_url?: string | null;
   id: string;
   email: string;
   full_name: string;
@@ -65,6 +67,17 @@ export interface CRMContact {
    * type because the column may not exist yet.
    */
   relationship?: 'prospect' | 'existing';
+  /* Red, amber, green: where the relationship stands, as opposed to
+     where a deal does. Migration 099, and `lib/crm/health.ts` for what
+     the three mean. Denormalised from the open health event so the CRM
+     grid can sort a dot without a join.
+
+     Not optional, unlike `relationship` above: the column has a NOT NULL
+     default, so every row has one from the moment 099 runs. */
+  health: 'green' | 'amber' | 'red';
+  health_reason: string | null;
+  health_since: string | null;
+  health_last_chased: string | null;
   employee_count: number | null;
   turnover: number | null;
   fleet_size: number | null;  // derived sum of trucks+trailers+vans (set by trigger)

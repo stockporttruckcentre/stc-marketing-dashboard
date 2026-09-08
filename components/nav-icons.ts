@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, CalendarDays, ListChecks,
-  UserCog, Receipt, Newspaper, Contact, type LucideIcon,
+  UserCog, Receipt, Newspaper, Contact, ClipboardList, type LucideIcon,
 } from 'lucide-react';
 import type { NavIcon } from '@/lib/nav';
 
@@ -20,6 +20,7 @@ export const ICONS: Record<NavIcon, LucideIcon> = {
   work: ListChecks,
   diary: CalendarDays,
   news: Newspaper,
+  reports: ClipboardList,
   crm: Users,
   tracker: TrendingUp,
   finder: Search,

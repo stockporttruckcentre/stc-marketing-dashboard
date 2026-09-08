@@ -16,6 +16,7 @@ import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { ReminderModal } from './ReminderModal';
+import { HealthPanel } from './HealthPanel';
 import { AddressMap } from './AddressMap';
 import { CustomerValue } from './CustomerValue';
 import { ProteanSpend } from './ProteanSpend';
@@ -66,9 +67,11 @@ const SIDE_LABEL: Record<string, string> = {
 type Member = { list_id: string; user_id: string; can_edit: boolean };
 
 export function ContactDrawer({
-  contact, profile, canEdit, lists, onClose, onChange, onDelete,
+  contact, profile, canEdit, canFlagHealth = false, lists, onClose, onChange, onDelete,
 }: {
   contact: CRMContact; profile: Profile; canEdit: boolean;
+  /** `crm.health`: may flag this account amber or red. */
+  canFlagHealth?: boolean;
   lists: CrmList[]; members: Member[];
   onClose: () => void; onChange: (c: CRMContact) => void; onDelete: () => void;
 }) {
@@ -478,6 +481,22 @@ export function ContactDrawer({
 
         <div style={{ padding: '18px 22px 40px', display: 'flex', flexDirection: 'column', gap: 26 }}>
           {message && <Alert tone="info">{message}</Alert>}
+
+          {/* ---- where this account stands ----
+
+              First, above the contact details, because it is the thing
+              somebody opening a record needs to know before they ring:
+              a customer who complained on Tuesday is a different phone
+              call from one who did not. */}
+          <HealthPanel
+            contact={edit}
+            canFlag={canFlagHealth}
+            onChanged={(level, reason) => {
+              const next = { ...edit, health: level, health_reason: reason } as CRMContact;
+              setEdit(next);
+              onChange(next);
+            }}
+          />
 
           {/* ---- contact ---- */}
           <section>

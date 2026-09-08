@@ -392,6 +392,34 @@ const RESERVED = new Set([
   'billing', 'billed', 'spend', 'spent', 'alpha', 'tax point', 'credit note',
   'import', 'imports', 'export', 'exports', 'spreadsheet', 'csv',
   'group', 'groups', 'division', 'divisions', 'rental revenue',
+
+  /* The Reports tab's own vocabulary, for the reason every block above
+     it exists. "Run the won leads report for Dean" has to read Dean as
+     the person and everything else as the grammar, and without these it
+     looks for a customer called Report and a depot called Won Leads.
+
+     `bottom` and `top` are here rather than only their pairs, because a
+     preposition runs into a bare one constantly: "the bottom ten for
+     rentals" was reading Bottom as a place.
+
+     Bare `won` is deliberately absent, the same call `open` and
+     `maintenance` already have above: it is a lead status the query side
+     matches on, so reserving it would stop "show me the won leads"
+     finding any. */
+  'report', 'reports', 'reporting', 'biweekly', 'bi-weekly', 'bi weekly',
+  'fortnightly', 'meeting report', 'meeting pack', 'top', 'bottom',
+  'top ten', 'bottom ten', 'top 10', 'bottom 10',
+
+  /* Red, amber, green on a customer. `red` is already above as a colour
+     and stays there; the rest join it here because they are states a
+     customer is in, never a name. "Mark Dawson amber for slow turnaround"
+     has to read Dawson as the customer.
+
+     `chase` and `chased` are in for the same reason as `reminder`: they
+     are ordinary English that turns up mid sentence, and "chase Dawson
+     about the red" would otherwise bind to a firm called Chase. */
+  'amber', 'rag', 'complaint', 'complaints', 'slowness', 'health',
+  'chase', 'chased', 'chasing',
   ...Object.keys(BODY_TYPES),
 ]);
 

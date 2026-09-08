@@ -8,10 +8,10 @@
    The three division colours are tokens, and in dark mode two of them
    are too close to separate. Run against the chart surface they sit on:
 
-     light  STC #2B3F78, Trailer #2F6F5E, S&L #C77A06
+     light  STC #2B3F78, Trailer #2F6F5E, Rentals #C77A06
             worst adjacent pair, normal vision  ΔE 16.9   passes
 
-     dark   STC #8492C0, Trailer #4FA98F, S&L #E8A33D
+     dark   STC #8492C0, Trailer #4FA98F, Rentals #E8A33D
             worst adjacent pair, normal vision  ΔE 12.8   FAILS
             the same pair, deutan               ΔE  7.9
 

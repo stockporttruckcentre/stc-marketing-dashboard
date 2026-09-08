@@ -33,7 +33,7 @@ import type { CrmCapability } from '@/lib/crm/permissions';
    ============================================================= */
 
 export type NavIcon =
-  | 'dashboard' | 'analytics' | 'work' | 'diary' | 'news'
+  | 'dashboard' | 'analytics' | 'work' | 'diary' | 'news' | 'reports'
   | 'crm' | 'tracker' | 'finder' | 'stock' | 'fleetsmart'
   | 'social' | 'brand' | 'revenue'
   | 'team' | 'settings' | 'admin';
@@ -86,6 +86,21 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', capability: 'crm.view' },
       { href: '/dashboard/work', label: 'Work', icon: 'work', capability: 'work.view' },
       { href: '/dashboard/calendar', label: 'Diary', icon: 'diary', capability: null },
+      /* Below Diary, which is where the business asked for it: a report
+         is run before a meeting, next to the diary that said the meeting
+         was happening.
+
+         `hidden` for now, and only for now. From the business, while the
+         page was being built:
+
+           dont put reports on the sidebar until the page is made as
+           they're all demoing it right now while i work
+
+         So the screen is routed, reachable by its address and named
+         properly in the breadcrumb, and it is not in anybody's sidebar
+         during a demonstration. Deleting the `hidden` line is the whole
+         of switching it on. */
+      { href: '/dashboard/reports', label: 'Reports', icon: 'reports', capability: 'crm.view', hidden: true },
     ],
   },
   {
