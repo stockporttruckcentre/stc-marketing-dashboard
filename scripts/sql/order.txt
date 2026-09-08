@@ -3,16 +3,13 @@
 # Not numeric order. Three of them depend on something a later number
 # creates, and running them by name leaves a database that looks
 # migrated and refuses half the commands:
-#
 #   009 before 007   `schema.sql` calls `is_list_member_safe` in a policy
 #   016 before 011   the lifecycle checks read the capability seed
 #   018 and 019 last they change roles, and 019's trigger has to see the
 #                    final shape of `command_set_role`
-#
 # One list, read by `build-test-db.sh` and by `bundle-migrations.sh`, so
 # the database a check builds and the file somebody pastes into a
 # Supabase SQL editor cannot be two different orders.
-#
 # Everything here is CREATE OR REPLACE, CREATE TABLE IF NOT EXISTS or an
 # idempotent seed, so applying the whole list to a database that already
 # has some of it is safe and is the intended way to catch one up.
@@ -106,3 +103,4 @@
 095_a_view_is_a_question_not_a_shape
 096_a_lead_that_moves_says_so
 097_a_lead_can_quote_more_than_one_trailer
+098_three_divisions_three_tabs

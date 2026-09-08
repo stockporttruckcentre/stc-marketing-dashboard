@@ -86,7 +86,6 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', capability: 'crm.view' },
       { href: '/dashboard/work', label: 'Work', icon: 'work', capability: 'work.view' },
       { href: '/dashboard/calendar', label: 'Diary', icon: 'diary', capability: null },
-      { href: '/dashboard/news', label: 'Industry news', icon: 'news', capability: 'crm.view' },
     ],
   },
   {
@@ -99,9 +98,14 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/fleetsmart', label: 'FleetSmart+', icon: 'fleetsmart', capability: 'fleetsmart.view' },
       {
         href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view',
+        /* Three divisions, one per row, which is what the business
+           asked for and what `divisions` has held since migration 083.
+           S&L covered trailer sales and rentals together and could not
+           answer either question on its own. */
         children: [
           { href: '/dashboard/revenue/stc', label: 'STC', icon: 'revenue', capability: 'crm.view', crumb: 'STC revenue' },
-          { href: '/dashboard/revenue/rental', label: 'S&L', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
+          { href: '/dashboard/revenue/trailer', label: 'Trailer Sales', icon: 'revenue', capability: 'crm.view', crumb: 'Trailer sales revenue' },
+          { href: '/dashboard/revenue/rental', label: 'Rentals', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
         ],
       },
     ],
@@ -111,6 +115,10 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { href: '/dashboard/social', label: 'Social planner', icon: 'social', capability: 'social.view', badge: 'content' },
       { href: '/dashboard/brand', label: 'Brand kit', icon: 'brand', capability: 'marketing.edit' },
+      /* Moved out of Workspace. What the trade press is saying is
+         something marketing reads and acts on, not a thing everybody
+         passes on their way to their own work. */
+      { href: '/dashboard/news', label: 'Industry news', icon: 'news', capability: 'crm.view' },
     ],
   },
   {

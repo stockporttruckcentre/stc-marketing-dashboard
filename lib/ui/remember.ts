@@ -82,6 +82,38 @@ export function writeChoice(name: string, value: string): void {
   }
 }
 
+/**
+ * A SET of choices, for the shape neither of the other two files fit.
+ *
+ * `order.ts` remembers a list where the order is the meaning. `readChoice`
+ * above remembers one value out of a closed set. Which sidebar rows
+ * somebody has folded away is neither: it is an unordered set of hrefs,
+ * open by default, and a row that no longer exists has to be forgotten
+ * rather than break the rail.
+ *
+ * Anything that is not a list of strings gives back nothing, which opens
+ * every row, which is the state the sidebar was in before this existed.
+ */
+export function readChoiceList(name: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(KEY(name));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export function writeChoiceList(name: string, values: readonly string[]): void {
+  try {
+    window.localStorage.setItem(KEY(name), JSON.stringify(values));
+  } catch {
+    /* As above. */
+  }
+}
+
 /** Back to whatever the thing itself declares. */
 export function forgetChoice(name: string): void {
   try {

@@ -18,6 +18,18 @@ export const STATUS_TONE: Record<string, Tone> = {
   won: 'success', customer: 'success', lost: 'neutral',
 };
 
+/* How far along a deal is, in the order it actually moves. Sorting on
+   the status column groups the pipeline by progress rather than by the
+   first letter of the word, which is what somebody scanning a tracker
+   means when they click that header.
+
+   Lost sits at the end rather than at the start. It is an outcome, not
+   a stage before Lead, and a sort that opens with everything you failed
+   to win is a sort nobody uses twice. */
+export const STATUS_ORDER: ContactStatus[] = [
+  'lead', 'contacted', 'quoted', 'won', 'customer', 'lost',
+];
+
 export const STATUS_LABEL: Record<ContactStatus, string> = {
   lead: 'Lead', contacted: 'Contacted', quoted: 'Quoted',
   won: 'Won', customer: 'Customer', lost: 'Lost',
