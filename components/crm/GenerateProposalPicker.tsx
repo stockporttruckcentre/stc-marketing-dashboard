@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Container, Wrench, KeyRound, Hammer, ArrowRight, X } from 'lucide-react';
+import { Container, Wrench, KeyRound, Hammer, ArrowRight, ShieldCheck, X } from 'lucide-react';
 import { Button, Label, SectionHead, Badge } from '@/components/kit/primitives';
 import type { CRMContact } from '@/lib/types';
 
@@ -26,6 +26,22 @@ const KINDS = [
     blurb: 'Servicing, inspections, a contract',
     ready: true,
   },
+  /* FleetSmart+ is a priced maintenance contract, so it does not raise a
+     proposal here: the builder raises its own maintenance lead when the
+     contract is saved, and doing both would leave two records for one
+     pitch. It goes straight to the builder WITH THE CUSTOMER, which is
+     the whole of what was wrong:
+
+       When I do CRM > select customer > generate > fleetsmart+ it's
+       asking me to type my customer. I've already selected it.
+
+     `direct` is what marks it as not going through /api/crm/proposal. */
+  {
+    id: 'fleetsmart', label: 'FleetSmart+', icon: ShieldCheck,
+    blurb: 'A fixed cost maintenance contract, priced',
+    ready: true,
+    direct: (contactId: string) => `/dashboard/fleetsmart?new=1&contact=${contactId}`,
+  },
   {
     id: 'rental', label: 'Rental', icon: KeyRound,
     blurb: 'Short or long term hire',
@@ -46,6 +62,15 @@ export function GenerateProposalPicker({
   const [error, setError] = useState<string | null>(null);
 
   async function pick(kind: typeof KINDS[number]) {
+    /* Straight to the tool, carrying the customer. Nothing is written
+       here: the builder writes the contract and the contract raises the
+       lead, so a proposal raised on the way would be a second record for
+       the same pitch. */
+    if ('direct' in kind && kind.direct) {
+      router.push(kind.direct(contact.id));
+      onClose();
+      return;
+    }
     setBusy(kind.id); setError(null);
     const res = await fetch('/api/crm/proposal', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -81,7 +106,7 @@ export function GenerateProposalPicker({
           </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))', gap: 10, marginTop: 16 }}>
           {KINDS.map((k) => {
             const Icon = k.icon;
             return (

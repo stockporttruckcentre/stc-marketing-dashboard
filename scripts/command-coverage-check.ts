@@ -1033,6 +1033,27 @@ for (const role of ['admin', 'sales', 'marketer'] as const) {
 ok('a read only viewer is not offered setting a reminder',
   !suggestActions('set a reminder', CAPS.viewer, 8).some((h) => h.action.id === 'make.reminder'));
 
+/* Units on a quote, both directions.
+
+   A deal can hold several since migration 097, and the words people use
+   for the second one are not the words they used for the first: "link a
+   trailer" describes setting a column, "add another unit to this quote"
+   describes what they are actually doing. Both reach it. */
+for (const said of [
+  'add another unit to this quote', 'link a trailer to this deal',
+  'they are looking at two of these', 'put this unit on a deal',
+]) {
+  ok(`"${said}" puts a unit on a deal`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'tracker.linkStock'));
+}
+for (const said of ['take this trailer off the quote', 'they do not want that one']) {
+  ok(`"${said}" takes one off`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === 'tracker.unlinkStock'));
+}
+ok('a read only viewer cannot put units on deals',
+  !suggestActions('add another unit to this quote', CAPS.viewer, 8)
+    .some((h) => h.action.id === 'tracker.linkStock'));
+
 /* Somebody else's sales tracker, which is now a screen and therefore
    has to be reachable by the words a manager would use for it.
 

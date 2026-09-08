@@ -542,10 +542,23 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['from the crm', 'from the pipeline', 'onto my tracker', 'into my tracker'],
     phrases: ['pull them onto my tracker', 'take this one on'] },
 
-  { id: 'tracker.linkStock', label: 'Link a trailer to a deal', blurb: 'So the sale knows which unit', kind: 'record',
-    capability: 'crm.edit', verbs: ['link', 'attach', 'connect', 'tie', 'assign'],
-    objects: ['trailer to the deal', 'stock to this', 'unit to the deal', 'a trailer'],
-    phrases: ['which trailer is this deal for'] },
+  /* One deal, several units, since migration 097. The words changed
+     with it: "add another unit to this quote" is the sentence somebody
+     types when they are on the phone quoting three curtainsiders, and
+     "link a trailer" only ever described the first one. */
+  { id: 'tracker.linkStock', label: 'Put a unit on a deal', blurb: 'A quote can hold several', kind: 'record',
+    capability: 'crm.edit', verbs: ['link', 'attach', 'connect', 'tie', 'assign', 'add', 'put'],
+    objects: ['trailer to the deal', 'stock to this', 'unit to the deal', 'a trailer',
+      'another unit to this quote', 'a second trailer', 'units to the quote',
+      'this unit to a deal', 'it to an existing lead'],
+    phrases: ['which trailer is this deal for', 'they are looking at two of these',
+      'add another unit to this quote', 'quote them these three'] },
+
+  { id: 'tracker.unlinkStock', label: 'Take a unit off a deal', blurb: 'The quote changed, the trailer stays in stock', kind: 'record',
+    capability: 'crm.edit', verbs: [...REMOVE, 'unlink', 'detach', 'drop'],
+    objects: ['unit from the deal', 'trailer off the quote', 'this one off the deal',
+      'a unit from this lead'],
+    phrases: ['they do not want that one', 'take this trailer off the quote'] },
 
   { id: 'tracker.duplicate', label: 'Duplicate a deal', blurb: 'Same customer, second unit', kind: 'record',
     capability: 'crm.create', verbs: ['duplicate', 'copy', 'clone', 'repeat'],

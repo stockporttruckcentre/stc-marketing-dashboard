@@ -6,8 +6,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Returns who has the given stock trailer on their Sales tracker.
- * Uses service-role DB connection so it can cross RLS boundaries — but only returns
- * minimal info (owner first name + status). Tracker contents stay private.
+ * Uses a service role connection so it can cross RLS boundaries. It returns
+ * the minimum that answers the question: an owner's first name and a status.
+ * Tracker contents stay private.
  */
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -23,12 +24,21 @@ export async function POST(req: NextRequest) {
     const rows = await sql<any[]>`
       -- Who is chasing this unit. Owner is a column on the deal now, so
       -- there is no list in the middle of the question.
-      SELECT cc.id AS tracker_row_id, cc.status, cc.sale_price, cc.commission,
+      --
+      -- Through the join table rather than the stock_trailer_id column,
+      -- since migration 097. A lead can quote several units and that
+      -- column holds only the first of them, so a trailer sitting second
+      -- on a three unit quote answered this question with "nobody" and
+      -- the stock page said it was free. DISTINCT because the join can
+      -- only ever yield one row per lead, said rather than assumed.
+      SELECT DISTINCT ON (cc.id)
+             cc.id AS tracker_row_id, cc.status, cc.sale_price, cc.commission,
              cc.dispatch_date, cc.owner_id,
              p.full_name, p.email
-      FROM crm_leads cc
+      FROM crm_lead_trailers lt
+      JOIN crm_leads cc ON cc.id = lt.lead_id
       JOIN profiles p ON cc.owner_id = p.id
-      WHERE cc.stock_trailer_id = ${body.stock_trailer_id}`;
+      WHERE lt.stock_trailer_id = ${body.stock_trailer_id}`;
     const me = rows.find(r => r.owner_id === user.id);
     const others = rows.filter(r => r.owner_id !== user.id);
     return NextResponse.json({
