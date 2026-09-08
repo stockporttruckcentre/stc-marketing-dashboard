@@ -1,5 +1,5 @@
 /* =============================================================
-   Does the Reminder button fit.
+   Does the action row on a CRM record fit on one line.
 
    ---- The claim being checked ----
 
@@ -10,23 +10,40 @@
      "Reminder". It should fit without pushing the other buttons to a new
      row by default as we have room left.
 
-   That last sentence is the whole of this file. The action row is
+   That last sentence is the whole of this file. The row is
    `flexWrap: 'wrap'` inside a 660px drawer, so a row that has become too
-   long does not error and does not look broken in the source: it starts
-   a second line, the header grows by 40px, and everything below it
-   moves down. Nobody notices until they see it.
+   long does not error and does not look wrong in the source. It starts a
+   second line, the header grows, and everything below it moves down.
 
-   Whether it wraps depends on the rendered width of five buttons in
-   Inter at 12.5px with 7px gaps, which no amount of reading the source
-   will tell you. So this lays the row out in a real browser at the real
-   width and reads the top edge of every button back. One line means one
-   distinct top edge.
+   ---- The two ways this check was wrong before, both instructive ----
 
-   Both states are measured, because the row USED to change length as a
-   deal progressed: DocuSign appeared at "quoted" and pushed the overflow
-   button onto a second line the moment Reminder joined the row. That is
-   why DocuSign is now in the overflow menu, and why this file checks the
-   two states are the same width rather than trusting that they are.
+   FIRST, it measured a REBUILT row: the same `Button` components, in the
+   same flex container, at what the source said the drawer's width was.
+   That is a guess about the real one dressed as a measurement. It mounts
+   `ContactDrawer` itself now and measures the buttons the application
+   actually draws.
+
+   SECOND, and this is the one that did damage: it measured in ONE font
+   and reported the answer as if fonts were not involved. This container
+   has no Inter installed and, as the note beside the @import lines in
+   `globals.css` explains, the application does not load one either, so
+   every label here falls back to DejaVu Sans. DejaVu is about 12% wider
+   than the faces a Mac or a Windows machine falls back to. Six buttons
+   came to 656px of a 615px row here and 602px there: it wrapped on the
+   machine doing the checking and fit on every machine that matters, and
+   DocuSign was moved off the row to fix a problem nobody had. The
+   business spotted it from a screenshot.
+
+   So the row is measured twice: once as it renders here, and once with
+   Arial metrics substituted, which is what a real reader sees. The
+   second one is the assertion. The first is printed as a note, because a
+   check that fails on a fact about the test machine teaches people to
+   ignore it.
+
+   The right fix for the ambiguity is for the application to load the
+   font it claims to use, at which point one measurement would answer
+   this for everybody. That is a rebrand step and belongs to the
+   business's ordering, so it is named here rather than done.
 
    Needs `npm run dev` on port 3000. Run with `npm run check:crm-record`.
    ============================================================= */
@@ -35,11 +52,14 @@ import { chromium } from 'playwright';
 
 const BASE = process.env.PREVIEW_URL ?? 'http://localhost:3000';
 
-/* The browser this environment ships, which is not always the build
-   Playwright would download for itself. Passing the path outright when
-   the pinned one is missing is the difference between a check that runs
-   and a check nobody can run. */
+/* The browser this environment ships, which is not the build Playwright
+   would download for itself. */
 const CHROME = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p));
+
+/* Metric compatible with Arial, and close enough to Helvetica and Segoe
+   UI for this purpose: what the row is really laid out in on a machine
+   somebody works at. */
+const REAL_WORLD = '"Liberation Sans", Arial, Helvetica, sans-serif';
 
 let failed = 0;
 const ok = (what: string, cond: boolean, why = '') => {
@@ -48,15 +68,16 @@ const ok = (what: string, cond: boolean, why = '') => {
   failed += 1;
 };
 
-type Box = { label: string; top: number; left: number; right: number; width: number };
-
-const widths: number[] = [];
+type Row = {
+  rowWidth: number;
+  used: number;
+  lines: number;
+  labels: string[];
+  widths: string;
+};
 
 async function main() {
   const browser = await chromium.launch(CHROME ? { executablePath: CHROME } : {});
-  /* A laptop, because the drawer is a fixed 660px and the question is
-     about what happens inside it. A wider window changes nothing here,
-     which is itself worth knowing. */
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
   const res = await page.goto(`${BASE}/crm-record-preview`, { waitUntil: 'networkidle' });
@@ -66,61 +87,80 @@ async function main() {
     await browser.close();
     process.exit(1);
   }
-  /* The fonts decide the widths, so measuring before they land measures
-     a fallback face and answers a question nobody asked. */
   await page.evaluate(() => (document as any).fonts?.ready);
 
-  for (const [id, what] of [
-    ['row-plain', 'a fresh prospect'],
-    ['row-signable', 'a quoted deal, which is the same five actions'],
-  ] as [string, string][]) {
-    const boxes: Box[] = await page.$$eval(`#${id} > button`, (nodes) =>
-      nodes.map((n) => {
-        const r = n.getBoundingClientRect();
-        return {
-          label: (n.textContent || '').trim() || 'More',
-          top: Math.round(r.top), left: Math.round(r.left),
-          right: Math.round(r.right), width: Math.round(r.width),
-        };
-      }));
+  const measure = async (face: string): Promise<Row> => page.evaluate((f) => {
+    const row = [...document.querySelectorAll('div')].find((d) => {
+      const s = getComputedStyle(d);
+      return s.display === 'flex' && s.flexWrap === 'wrap'
+        && d.querySelectorAll(':scope > button').length >= 4;
+    }) as HTMLElement | undefined;
+    if (!row) return { rowWidth: 0, used: 0, lines: 0, labels: [], widths: 'row not found' };
 
-    console.log(`\n  ${what}\n  ${'-'.repeat(what.length)}`);
-    ok('the row has every button on it',
-      boxes.length === 5,
-      boxes.map((b) => b.label).join(', '));
+    for (const n of row.querySelectorAll('button')) (n as HTMLElement).style.fontFamily = f;
+    row.style.fontFamily = f;
 
-    ok('Reminder sits between Generate proposal and Schedule',
-      boxes[1]?.label === 'Reminder'
-      && boxes[0]?.label === 'Generate proposal'
-      && boxes[2]?.label === 'Schedule',
-      boxes.map((b) => b.label).join(' | '));
+    const rr = row.getBoundingClientRect();
+    const all = [...row.querySelectorAll(':scope > button')].map((n) => {
+      const r = n.getBoundingClientRect();
+      return {
+        label: (n.textContent || '').trim() || 'More',
+        w: Math.round(r.width), top: Math.round(r.top), right: Math.round(r.right),
+      };
+    });
+    return {
+      rowWidth: Math.round(rr.width),
+      used: all.length ? Math.round(all[all.length - 1].right - rr.left) : 0,
+      lines: new Set(all.map((x) => x.top)).size,
+      labels: all.map((x) => x.label),
+      widths: all.map((x) => `${x.label} ${x.w}`).join(', '),
+    };
+  }, face);
 
-    const lines = new Set(boxes.map((b) => b.top));
-    ok('and every button is on one line',
-      lines.size === 1,
-      boxes.map((b) => `${b.label} @ y=${b.top} w=${b.width}`).join('\n        '));
-
-    /* How much room is left, printed whether it passes or not. A row
-       that fits by three points fits today and wraps the moment
-       somebody renames a button, and that is worth knowing before it
-       happens rather than after. */
-    const used = boxes.length ? boxes[boxes.length - 1].right - boxes[0].left : 0;
-    const room = 660 - 44 - used;
-    console.log(`  note  ${used}px of row used, ${room}px spare`);
-    ok('with room to spare rather than by a hair',
-      room >= 8, `${room}px left`);
-    widths.push(used);
+  /* As it renders here, before anything is substituted. Printed rather
+     than asserted: it is a fact about this container's fonts. */
+  const local = await measure('');
+  console.log('\n  On this machine, where the fallback is DejaVu Sans\n'
+    + '  ------------------------------------------------');
+  console.log(`  note  ${local.used}px used of ${local.rowWidth}px, ${local.lines} line(s)`);
+  console.log(`  note  ${local.widths}`);
+  if (local.lines > 1) {
+    console.log('  note  it wraps here, and that is a fact about this container rather');
+    console.log('        than about the product. See the header of this file.');
   }
 
-  /* The row is the same five actions on every record now. A row whose
-     length depends on the deal's status is a row that fits until
-     somebody quotes. */
-  ok('and the row is the same length whatever state the deal is in',
-    new Set(widths).size === 1, widths.join(' vs '));
+  const real = await measure(REAL_WORLD);
+  console.log('\n  On the metrics a reader actually has\n  ------------------------------------');
+
+  ok('the drawer is the width the source says it is',
+    real.rowWidth >= 600 && real.rowWidth <= 640, `${real.rowWidth}px`);
+
+  ok('the row carries every action, DocuSign included',
+    real.labels.length === 6, real.labels.join(', '));
+
+  ok('Reminder sits between Generate proposal and Schedule',
+    real.labels[0] === 'Generate proposal'
+    && real.labels[1] === 'Reminder'
+    && real.labels[2] === 'Schedule',
+    real.labels.join(' | '));
+
+  ok('and every button is on one line',
+    real.lines === 1, `${real.lines} lines: ${real.widths}`);
+
+  const spare = real.rowWidth - real.used;
+  console.log(`  note  ${real.used}px used of ${real.rowWidth}px, ${spare}px spare`);
+  console.log(`  note  ${real.widths}`);
+
+  /* The margin is thin and it is thin for a reason worth naming: with
+     no font of its own, this row is as wide as the reader's machine
+     decides. Ten points is roughly one character. */
+  ok('with a margin rather than to the pixel',
+    spare >= 8, `${spare}px left, which is about one character`);
 
   await browser.close();
   console.log(failed === 0
-    ? '\n  The Reminder button is where it was asked for, and nothing wrapped.\n'
+    ? `\n  Six actions on one line, ${spare}px to spare. The margin is thin because\n`
+      + '  the row has no font of its own: see the @import note in globals.css.\n'
     : `\n  ${failed} to fix.\n`);
   process.exit(failed === 0 ? 0 : 1);
 }
