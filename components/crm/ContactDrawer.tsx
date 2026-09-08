@@ -403,23 +403,42 @@ export function ContactDrawer({
                 onClick={() => window.open(`/export/crm/${contact.id}`, '_blank', 'noopener')}>
                 <Share2 size={13} /> Export
               </Button>
-              {/* DocuSign is in the overflow menu below rather than on
-                  this row. Measured, not guessed: `npm run check:crm-record`
-                  lays the row out in a browser at the drawer's own 660px
-                  and reads the tops back. With Reminder added and
-                  DocuSign still here, the row came to 612px of a 616px
-                  space and the More button dropped onto a second line.
+              {/* Only on a converting prospect, which is when it is any
+                  use. On a fresh lead it would be a fifth button in the
+                  row earning nothing.
 
-                  It is the right one to move for a reason beyond the
-                  arithmetic. It is the only button whose presence
-                  depends on the deal's status, so the row changed length
-                  as a deal progressed; it is now the same five actions on
-                  every record. And it does nothing to the record: it
-                  opens the DocuSign home page and stops there. That was
-                  decided in the meeting and it is not laziness, the CRM
-                  sits behind the VPN, so anything it generates is a file
-                  rather than something signable through a link, and a
-                  half-built envelope would be worse than none. */}
+                  It opens the DocuSign home page and stops there. That
+                  was decided in the meeting and it is not laziness: the
+                  CRM sits behind the VPN, so anything it generates is a
+                  file rather than something signable through a link, and
+                  a half-built envelope would be worse than none.
+
+                  ---- IT NEARLY LOST ITS PLACE ON THE ROW ----
+
+                  When Reminder went in, this button was moved into the
+                  overflow menu because the row was measured as wrapping.
+                  It was measured on a Linux container with no Inter
+                  installed, where the fallback is DejaVu Sans and every
+                  label comes out about 12% wider than on the machines
+                  people actually use. Six buttons: 656px of a 615px row
+                  there, 602px on Arial metrics.
+
+                  So it stays. The reason that measurement could be wrong
+                  at all is worth knowing, and is not fixed here: the two
+                  CDN @import lines in globals.css are inert (see the note
+                  beside them), so this row has no font of its own and its
+                  width is decided by whatever the reader's machine falls
+                  back to. `npm run check:crm-record` now measures under
+                  both, and reports 13px spare on Arial metrics, which is
+                  a margin worth watching before anybody renames a
+                  button. */}
+              {SIGNABLE.includes(edit.status) && (
+                <Button size="sm" variant="secondary"
+                  onClick={() => window.open('https://app.docusign.com/', '_blank', 'noopener')}
+                  title="Opens DocuSign so you can build and send the envelope yourself">
+                  <PenLine size={13} /> DocuSign
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setOverflowOpen((v) => !v)} aria-label="More actions">
                 <MoreHorizontal size={15} />
               </Button>
@@ -432,14 +451,6 @@ export function ContactDrawer({
                     borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-3)', padding: 4,
                   }}>
                     {[
-                      /* Still only offered once a deal is far enough
-                         along to be worth signing, which is the rule it
-                         has always had. On a fresh lead it would be a
-                         line in the menu that leads nowhere useful. */
-                      ...(SIGNABLE.includes(edit.status) ? [{
-                        label: 'Open DocuSign',
-                        on: () => window.open('https://app.docusign.com/', '_blank', 'noopener'),
-                      }] : []),
                       { label: 'Move to another list', on: () => setMovePickerOpen('move') },
                       { label: 'Also show on another list', on: () => setMovePickerOpen('duplicate') },
                     ].map((a) => (
