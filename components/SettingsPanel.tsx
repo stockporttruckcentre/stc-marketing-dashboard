@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Settings, KeyRound, Sun, Moon, ShieldCheck, Check, Minus, Loader, Save,
+  ClipboardList, ArrowUpRight,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { AvatarField } from '@/components/settings/AvatarField';
 import { NotificationPrefs } from '@/components/notifications/prefs';
 import {
   Alert, Badge, Button, Card, Label, PageHead, PanelHead, Tabs,
@@ -146,6 +148,14 @@ function ProfileTab({ profile }: { profile: Profile & Record<string, unknown> })
       <Card padded={false}>
         <PanelHead title="Who you are" hint="Everybody on the team can see this" />
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* The picture first. It is the one thing on this tab that is
+              not a text box, and it is what somebody came here to change
+              when they came here at all. */}
+          <AvatarField
+            userId={profile.id}
+            name={form.full_name || profile.full_name || ''}
+            initial={(profile.avatar_url as string | null) ?? null}
+          />
           <Split cols={2}>
             <Field label="Full name" hint="How you appear on leads, meetings and the team list">
               <TextInput value={form.full_name} onChange={set('full_name')} />
@@ -337,7 +347,94 @@ function AppearanceTab({ profile }: { profile: Profile }) {
           </span>
         </div>
       </Card>
+
+      <div style={{ marginTop: 14 }}>
+        <NotOnTheSidebarYet />
+      </div>
     </div>
+  );
+}
+
+/* =============================================================
+   Screens that are built and not released.
+
+   From the business, while a demonstration was running:
+
+     dont put reports on the sidebar until the page is made as they're
+     all demoing it right now while i work
+
+     add a link in for reports. Hide it as a button in the settings
+     panel until I've checked then it can enter sidebar
+
+   So a screen can be finished, routed and checked without appearing in
+   front of an audience the same afternoon. The row here is the way in
+   until somebody has looked at it and said so.
+
+   ---- Why this is a list and not one button ----
+
+   Because this will happen again. The next screen built during a
+   demonstration goes in this array and comes out of it, and the
+   alternative is a hardcoded Reports button that somebody has to
+   remember to delete.
+
+   Releasing one is two edits and they belong together: take its row out
+   of here, and take `hidden` off its row in `lib/nav.ts`.
+   ============================================================= */
+const NOT_RELEASED: { href: string; label: string; blurb: string; icon: typeof ClipboardList }[] = [
+  {
+    href: '/dashboard/reports',
+    label: 'Reports',
+    blurb: 'The bi-weekly meeting pack, top and bottom customers, growth, pipeline, '
+      + 'problems, stock and jobs. Nine reports, each one printable and exportable to Word.',
+    icon: ClipboardList,
+  },
+];
+
+function NotOnTheSidebarYet() {
+  if (NOT_RELEASED.length === 0) return null;
+  return (
+    <Card padded={false}>
+      <PanelHead title="Not on the sidebar yet" hint="Built and waiting to be looked at" />
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {NOT_RELEASED.map((s) => (
+          <div key={s.href} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <span style={{
+              width: 32, height: 32, flex: 'none', display: 'grid', placeItems: 'center',
+              borderRadius: 'var(--r)', border: '1px solid var(--border)',
+              background: 'var(--surface-sunken)', color: 'var(--accent)',
+            }}>
+              <s.icon size={16} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14,
+                letterSpacing: '-0.01em', color: 'var(--text)',
+              }}>{s.label}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>
+                {s.blurb}
+              </div>
+            </div>
+            <a
+              href={s.href}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 7, height: 32,
+                padding: '0 12px', borderRadius: 'var(--r)', border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text)', textDecoration: 'none',
+                fontFamily: 'var(--inter)', fontSize: 13, fontWeight: 500,
+              }}
+            >
+              Open <ArrowUpRight size={14} />
+            </a>
+          </div>
+        ))}
+        <Alert tone="info">
+          These open in a new tab and are not in anybody else&rsquo;s sidebar. Say the word and the
+          row goes into Workspace for everybody.
+        </Alert>
+      </div>
+    </Card>
   );
 }
 

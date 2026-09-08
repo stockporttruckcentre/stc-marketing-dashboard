@@ -19,9 +19,10 @@ import { GenerateProposalPicker } from '@/components/crm/GenerateProposalPicker'
 import { ScheduleMeetingModal } from '@/components/crm/ScheduleMeetingModal';
 import { ImportDialog } from '@/components/crm/ImportDialog';
 import { CRM_CONTACTS } from '@/lib/import/dictionary';
-import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
+import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, StatusDot, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
 import { STATUS_TONE } from '@/lib/crm/status';
+import { HEALTH_LABEL, HEALTH_TONE, healthRank, type Health } from '@/lib/crm/health';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox, Segmented } from '@/components/kit/forms';
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
@@ -338,11 +339,51 @@ export function CrmWorkspace({
       checkboxSelection: canEdit, headerCheckboxSelection: canEdit, headerCheckboxSelectionFilteredOnly: true,
       sortable: false, filter: false, editable: false, suppressMenu: true,
     },
+    /* RED, AMBER, GREEN, AS A DOT.
+
+       From the business: "the actual CRM column rows should show a dot
+       and we can just sort by dot colour, and also by email."
+
+       Pinned left beside the checkbox, because the question it answers
+       is asked of the whole list at once: which of these is in trouble.
+       A pill here would cost 90px on every row to say "Fine" two
+       hundred times.
+
+       It sorts worst first, from `healthRank`, so the FIRST click on
+       the header does the useful thing. A sort that opens with two
+       hundred green accounts has not answered the question anybody
+       clicked it to ask. The reason is on hover and in the filter, so
+       colour is never the only carrier. */
+    { colId: 'health', field: 'health', headerName: '', width: 40, pinned: 'left',
+      editable: false, sortable: true, resizable: false,
+      headerTooltip: 'Red, amber or green',
+      comparator: (a, b) => healthRank(a as Health) - healthRank(b as Health),
+      cellRenderer: (p: ICellRendererParams<CRMContact>) => {
+        const level = ((p.value as Health) ?? 'green');
+        if (level === 'green') return null;
+        const why = (p.data as unknown as { health_reason?: string })?.health_reason;
+        return (
+          <StatusDot
+            tone={HEALTH_TONE[level]}
+            label={why ? `${HEALTH_LABEL[level]}: ${why}` : HEALTH_LABEL[level]}
+          />
+        );
+      } },
     { field: 'company_name', headerName: 'Company', flex: 1.3, minWidth: 180, editable: canEdit, valueSetter: saveCell,
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
         <span style={{ fontWeight: 500, color: 'var(--text)' }}>{p.value}</span> },
     { field: 'contact_name', headerName: 'Contact', flex: 0.9, minWidth: 130, editable: canEdit, valueSetter: saveCell },
+    /* Sorting by email was asked for alongside the dot. It was already
+       sortable, and it sorted every blank to the top, which puts the
+       two hundred records with no address in front of the ones somebody
+       wanted to work through. Blanks go last now, in both directions. */
     { field: 'email', headerName: 'Email', flex: 1.1, minWidth: 190, editable: canEdit, valueSetter: saveCell,
+      comparator: (a: string | null, b: string | null) => {
+        if (!a && !b) return 0;
+        if (!a) return 1;
+        if (!b) return -1;
+        return a.localeCompare(b);
+      },
       cellRenderer: (p: ICellRendererParams<CRMContact>) =>
         p.value ? <span style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{p.value}</span>
                 /* The placeholder glyph, the same one the Fleet column
@@ -1257,6 +1298,7 @@ export function CrmWorkspace({
           contact={drawerRow}
           profile={profile}
           canEdit={canEdit}
+          canFlagHealth={caps.has('crm.health')}
           lists={lists}
           members={members}
           onClose={() => setDrawerRow(null)}

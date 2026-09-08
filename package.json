@@ -59,6 +59,8 @@
     "check:protean-import": "tsx scripts/protean-import-check.ts",
     "check:revenue-screen": "tsx scripts/revenue-screen-check.ts",
     "check:nav": "tsx scripts/nav-check.ts",
+    "check:reports": "tsx scripts/reports-check.ts",
+    "check:health": "bash scripts/sql/health-check.sh",
     "check:export-window": "tsx scripts/export-window-check.ts",
     "check:divisions": "bash scripts/sql/divisions-check.sh",
     "check:rpc-errors": "tsx scripts/rpc-error-check.ts",

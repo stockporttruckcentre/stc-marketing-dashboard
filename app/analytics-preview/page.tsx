@@ -47,7 +47,7 @@ const HUE: Record<string, string> = {
 const SERIES = [
   { key: 'stc', name: 'Maintenance', colour: HUE.stc! },
   { key: 'trailer', name: 'Trailer sales', colour: HUE.trailer! },
-  { key: 'rental', name: 'S&L', colour: HUE.rental! },
+  { key: 'rental', name: 'Rentals', colour: HUE.rental! },
 ];
 
 /* Twenty four months, shaped rather than random: a quiet winter, a
@@ -109,7 +109,7 @@ const FUNNEL: BarRow[] = [
 const SLICES = [
   { key: 'stc', name: 'Maintenance', value: 2_284_000, colour: HUE.stc! },
   { key: 'trailer', name: 'Trailer sales', value: 486_000, colour: HUE.trailer! },
-  { key: 'rental', name: 'S&L', value: 641_000, colour: HUE.rental! },
+  { key: 'rental', name: 'Rentals', value: 641_000, colour: HUE.rental! },
 ];
 
 export default function AnalyticsPreview() {
@@ -148,7 +148,7 @@ function Harness() {
             <Container size={12} /> Trailer sales
           </Chip>
           <Chip active={only === 'rental'} onClick={() => setOnly(only === 'rental' ? null : 'rental')}>
-            <KeyRound size={12} /> S&amp;L
+            <KeyRound size={12} /> Rentals
           </Chip>
         </div>
       </div>

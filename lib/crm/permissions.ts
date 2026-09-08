@@ -35,6 +35,15 @@ export type CrmCapability =
   | 'crm.viewOthers'
   /** Change contact fields. */
   | 'crm.edit'
+  /* Flag a customer amber or red, and alert whoever looks after them.
+
+     Its own capability rather than part of `crm.edit`, because it is a
+     different kind of authority. Correcting a phone number changes a
+     record; declaring a customer in dispute sends an urgent
+     notification to the person who owns the relationship and puts a
+     task on them. The business asked for granular wiring and this is
+     the granule that matters. */
+  | 'crm.health'
   /** Create and delete contacts. */
   | 'crm.create'
   | 'crm.delete'
@@ -227,7 +236,7 @@ export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
 
 const BY_ROLE: Record<UserRole, CrmCapability[]> = {
   admin: [
-    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.create',
+    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.health', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
     'admin.users', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',
@@ -258,7 +267,7 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send',
   ],
   sales: [
-    'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.create', 'crm.delete',
+    'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.health', 'crm.create', 'crm.delete',
     'crm.assign', 'crm.delegate', 'crm.manageLists', 'crm.proposal',
     'crm.enrich', 'crm.import', 'crm.export', 'stock.edit',
     /* Sales could read the planner before, and still can. Nothing else
@@ -277,7 +286,11 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.send',
   ],
   marketer: [
-    'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.export',
+    /* `crm.health` is here deliberately. Rama takes the call when a
+       customer rings about a trailer that has not arrived, and the
+       whole point of the system is that whoever hears the complaint can
+       record it. What she still cannot do is own the account. */
+    'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.health', 'crm.export',
     'stock.edit', 'marketing.edit',
     /* What `marketing.edit` already let them do, said precisely.
 
