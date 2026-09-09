@@ -33,6 +33,16 @@ export const HUE = {
   rental: 'var(--chart-rental)',
 } as const;
 
+/* The FleetSmart+ tiers, which are NOT divisions and must never borrow
+   the three hues above. Both sets are drawn on the same page, so Gold
+   in the trailer green says the book grew in a division rather than in
+   a tier. Silver, gold and platinum name their own colours. */
+export const TIER = {
+  silver: 'var(--chart-silver)',
+  gold: 'var(--chart-gold)',
+  platinum: 'var(--chart-platinum)',
+} as const;
+
 const GRID = 'var(--border)';
 const AXIS = 'var(--text-subtle)';
 
@@ -752,7 +762,21 @@ export function StackedMonths({ months, series, height = 200, onBrush }: {
                 background: inSelection ? 'color-mix(in srgb, var(--danger) 8%, transparent)' : 'transparent',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column-reverse', height: (total / top) * (H - 34) }}>
+              {/* A 3px gap between bands, which is the kit's own
+                  separator: in `docs/source/STCUIAnalytics.html` a
+                  stacked column runs y=0 h=38.6, then the next band
+                  starts at 41.6, and so on down.
+
+                  It is not decoration. Silver and gold are only ΔE 14.6
+                  apart, which is close enough that two bands meeting on
+                  a shared edge would read as one. The gap is what tells
+                  them apart, so the colours do not have to, and it is
+                  why those two values are correct at a distance that
+                  would fail for a division bar standing alone. */}
+              <div style={{
+                display: 'flex', flexDirection: 'column-reverse', gap: BAND_GAP,
+                height: (total / top) * (H - 34),
+              }}>
                 {keys.map((k) => (
                   <div key={k.key} style={{
                     height: `${total > 0 ? (Number(r[k.key] ?? 0) / total) * 100 : 0}%`,
@@ -789,44 +813,92 @@ export function CohortGrid({ cohorts }: {
   cohorts: { month: string; signed: number; live: (number | null)[] }[];
 }) {
   const steps = Math.max(0, ...cohorts.map((c) => c.live.length));
+
+  /* The ramp runs from the WORST retention on the grid to 100, not from
+     nought to 100. On a book where nothing has fallen below 79 the
+     second version paints every cell nearly the same navy and the grid
+     stops saying anything. The floor is shown in the scale beneath, so
+     a dark cell is never read as an absolute. */
+  const seen = cohorts.flatMap((c) => c.live.filter((v): v is number => v != null));
+  const floor = seen.length ? Math.min(...seen, 100) : 0;
+  const span = Math.max(1, 100 - floor);
+  const shade = (v: number) =>
+    `color-mix(in srgb, ${HUE.stc} ${Math.round(30 + ((v - floor) / span) * 70)}%, var(--surface))`;
+
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 2, minWidth: 620 }}>
-        <thead>
-          <tr>
-            <th style={head}>Started</th>
-            <th style={{ ...head, textAlign: 'right' }}>Signed</th>
-            {Array.from({ length: steps }, (_, i) => (
-              <th key={i} style={{ ...head, textAlign: 'center' }}>M{i}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {cohorts.map((c) => (
-            <tr key={c.month}>
-              <td style={{ ...cell, color: 'var(--text)' }}>{monthName(c.month).replace(/ \d{4}$/, '')}</td>
-              <td style={{ ...cell, textAlign: 'right', background: 'var(--bg-subtle)', fontVariantNumeric: 'tabular-nums' }}>
-                {c.signed}
-              </td>
-              {c.live.map((v, i) => (
-                <td key={i} style={{
-                  ...cell, textAlign: 'center', fontVariantNumeric: 'tabular-nums',
-                  /* A cell for a month that has not happened yet is
-                     dashed, not empty and not zero. Those are three
-                     different facts and only one of them is true. */
-                  background: v == null ? 'var(--bg-subtle)'
-                    : `color-mix(in srgb, ${HUE.stc} ${Math.max(12, v)}%, var(--surface))`,
-                  color: v == null ? 'var(--text-subtle)' : v > 55 ? 'var(--accent-fg)' : 'var(--text)',
-                  border: v == null ? '1px dashed var(--border)' : '1px solid transparent',
-                }}>{v == null ? '' : v}</td>
+    <div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'separate', borderSpacing: 2, minWidth: 560 }}>
+          <thead>
+            <tr>
+              {/* Deliberately blank. The row labels are months and say
+                  so; a STARTED header over them is a word doing no work
+                  in a grid this tight. */}
+              <th style={{ ...head, width: 92 }} aria-label="Cohort" />
+              <th style={{ ...head, textAlign: 'right', width: 58 }}>Signed</th>
+              {Array.from({ length: steps }, (_, i) => (
+                <th key={i} style={{ ...head, textAlign: 'center', width: CELL }}>M{i}</th>
               ))}
             </tr>
+          </thead>
+          <tbody>
+            {cohorts.map((c) => (
+              <tr key={c.month}>
+                <td style={{
+                  ...cell, color: 'var(--text)', width: 92,
+                  fontFamily: 'var(--panton)', fontWeight: 700,
+                }}>{monthName(c.month).replace(/ \d{4}$/, '')}</td>
+                <td style={{
+                  ...cell, textAlign: 'right', width: 58,
+                  background: 'var(--bg-subtle)', fontVariantNumeric: 'tabular-nums',
+                }}>{c.signed}</td>
+                {c.live.map((v, i) => (
+                  <td key={i} style={{
+                    ...cell, textAlign: 'center', width: CELL, height: 26, padding: '4px 6px',
+                    fontVariantNumeric: 'tabular-nums',
+                    /* A cell for a month that has not happened yet is
+                       dashed, not empty and not zero. Those are three
+                       different facts and only one of them is true. */
+                    background: v == null ? 'transparent' : shade(v),
+                    color: v == null ? 'var(--text-subtle)'
+                      : (v - floor) / span > 0.45 ? 'var(--accent-fg)' : 'var(--text)',
+                    border: v == null ? '1px dashed var(--border)' : '1px solid transparent',
+                  }}>{v == null ? '' : v}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* The scale, so a shade is readable as a number without hovering
+          every cell. Sits under the grid on the right, where the design
+          puts it. */}
+      {seen.length > 0 && (
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 7,
+          marginTop: 9, fontSize: 10.5, color: 'var(--text-subtle)',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          <span>{floor}%</span>
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+            <span key={t} style={{
+              width: 16, height: 9, borderRadius: 1,
+              background: shade(floor + t * span),
+            }} />
           ))}
-        </tbody>
-      </table>
+          <span>100%</span>
+        </div>
+      )}
     </div>
   );
 }
+
+/** One month column. Fixed, so nine of them line up under their headers. */
+const CELL = 46;
+
+/** The kit's separator between stacked bands. See StackedMonths. */
+export const BAND_GAP = 3;
 
 const head: React.CSSProperties = {
   fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
@@ -835,7 +907,7 @@ const head: React.CSSProperties = {
 };
 
 const cell: React.CSSProperties = {
-  padding: '6px 8px', fontSize: 11.5, borderRadius: 2, whiteSpace: 'nowrap',
+  padding: '5px 8px', fontSize: 11.5, borderRadius: 2, whiteSpace: 'nowrap',
   color: 'var(--text-muted)',
 };
 

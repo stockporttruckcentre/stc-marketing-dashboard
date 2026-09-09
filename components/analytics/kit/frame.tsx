@@ -394,38 +394,27 @@ export function Verdict({ sentence, chips, decisions }: {
    non-techy MD": the whole page is present, and the parts below the
    first screen open when somebody wants them.
    ------------------------------------------------------------- */
-export function Fold({ title, sub, open, onToggle, children }: {
-  title: string; sub: string; open: boolean; onToggle: () => void; children: ReactNode;
+/**
+ * One section of the page: a heading, what it is for, and its cards.
+ *
+ * This was a fold, and it should never have been. Five of the six
+ * defaulted closed, so the bottom of the hub was a stack of grey rows
+ * with a chevron on the end. That is an FAQ. Nothing in the design
+ * asked for one; the accordion was invented to keep the page short and
+ * paid for it by hiding the analysis somebody came to read.
+ *
+ * A long page is the correct shape for this. The heading rule and the
+ * cards below it are what make it navigable, along with the section
+ * links in the control bar, and a card already carries its own title,
+ * what it says and where its figures came from.
+ */
+export function Section({ id, title, sub, children }: {
+  id: string; title: string; sub: string; children: ReactNode;
 }) {
   return (
     <div>
-      <button
-        onClick={onToggle}
-        aria-expanded={open}
-        style={{
-          display: 'flex', alignItems: 'baseline', gap: 14, width: '100%', textAlign: 'left',
-          paddingBottom: 12, borderBottom: '2px solid var(--border-emphasis)',
-          border: 0, borderRadius: 0, background: 'transparent', cursor: 'pointer',
-          borderBottomWidth: 2, borderBottomStyle: 'solid', borderBottomColor: 'var(--border-emphasis)',
-        }}
-      >
-        <h2 style={{
-          margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 24,
-          letterSpacing: '-0.03em', color: 'var(--text)',
-        }}>{title}</h2>
-        <span style={{ fontSize: 13, color: 'var(--text-subtle)', flex: 1, minWidth: 200, lineHeight: 1.5 }}>
-          {sub}
-        </span>
-        <ChevronDown
-          size={17}
-          style={{
-            color: 'var(--text-subtle)', flex: 'none',
-            transform: open ? 'rotate(180deg)' : 'none',
-            transition: 'transform 140ms var(--ease, ease)',
-          }}
-        />
-      </button>
-      {open && <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 26 }}>{children}</div>}
+      <SectionHead id={id} title={title} sub={sub} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>{children}</div>
     </div>
   );
 }
