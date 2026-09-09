@@ -269,31 +269,36 @@ if (!failed) ok(`no raw hex across ${DRAWERS.length} files that draw`);
    own colour, name the bands on themselves, and repeat the pattern in
    the key. Take that away while the palette is this close and this
    fails. */
+/* Perceptual distance, at module scope because two rules need it: the
+   divisions, which must not collide on the card, and the tier bands,
+   which must not collide with the band they touch. */
+const oklab = (hex: string): [number, number, number] => {
+  const [r, g, b] = rgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+  ];
+};
+const deltaE = (a: string, b: string) => {
+  const [x, y, z] = oklab(a);
+  const [p, q, r] = oklab(b);
+  return Math.hypot(x - p, y - q, z - r) * 100;
+};
+
+
+const FLOOR = 15;
+
 {
   /* OKLab, and the Euclidean distance in it that every threshold in
      this area is quoted against. */
-  const oklab = (hex: string): [number, number, number] => {
-    const [r, g, b] = rgb(hex).map((v) => {
-      const c = v / 255;
-      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    }) as [number, number, number];
-    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    return [
-      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
-      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
-      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
-    ];
-  };
-  const deltaE = (a: string, b: string) => {
-    const [x, y, z] = oklab(a);
-    const [p, q, r] = oklab(b);
-    return Math.hypot(x - p, y - q, z - r) * 100;
-  };
-
   const SERIES = ['chart-stc', 'chart-trailer', 'chart-rental'];
-  const FLOOR = 15;
   let tooClose: string | null = null;
 
   for (const theme of ['light', 'dark'] as const) {
@@ -330,6 +335,96 @@ if (!failed) ok(`no raw hex across ${DRAWERS.length} files that draw`);
       ok(`${tooClose}, and every chart separates them by pattern as well as by hue`);
     }
   }
+}
+
+/* -------------------------------------------------------------
+   Tiers are not divisions
+
+   FleetSmart+ Silver, Gold and Platinum were drawn in the three
+   division hues, because the division palette was the nearest thing to
+   hand and it had three entries. Both sets appear on the same page, so
+   Gold came out in the green that means Trailer Sales and Silver in the
+   orange that means Rentals: the chart said the book was growing in a
+   division rather than in a tier, which is a different claim about the
+   business.
+
+   Silver, gold and platinum are metals. They name their own colours,
+   so this is not a judgement anybody had to make, and asserting it
+   costs nothing.
+   ------------------------------------------------------------- */
+{
+  const tokens = readFileSync('app/kit-tokens.css', 'utf8');
+
+  /* Tiers are deliberately NOT in the card-contrast sweep above.
+
+     A division bar stands alone against the card, so it has to clear
+     2:1 against it or it stops being a shape. A tier is one band in a
+     stack: it is bounded above and below by the next tier, so the
+     contrast that matters is band against band, and the legend carries
+     the name besides. Silver at #C4BFBC would fail the card rule and is
+     nonetheless correct, because it is never drawn on the card alone.
+
+     So the rule for tiers is separated: each band must be legible
+     against the ones it touches. */
+  for (const tier of ['silver', 'gold', 'platinum']) {
+    const declared = (tokens.match(new RegExp(`--chart-${tier}\\s*:`, 'g')) ?? []).length;
+    if (declared >= 2) ok(`--chart-${tier} is declared in both themes`);
+    else bad(`--chart-${tier} is missing from a theme`, `found ${declared} of 2 declarations`);
+  }
+
+  /* Nothing may map a tier name onto a division hue. Matched on the
+     shape the mistake actually took, which is a tier label and a
+     `HUE.` on one line. */
+  const offenders = DRAWERS.concat(
+    [['components/AnalyticsHub.tsx', readFileSync('components/AnalyticsHub.tsx', 'utf8')] as [string, string]],
+  ).flatMap(([file, src]) =>
+    src.split('\n')
+      .map((line, i) => [file, i + 1, line] as [string, number, string])
+      .filter(([, , line]) => /\b(Silver|Gold|Platinum|silver|gold|platinum)\b/.test(line))
+      .filter(([, , line]) => /HUE\.(stc|trailer|rental)/.test(line))
+      .map(([f, n, line]) => `${f}:${n}  ${line.trim()}`));
+
+  if (offenders.length === 0) {
+    ok('no tier borrows a division colour');
+  } else {
+    bad('a FleetSmart+ tier is drawn in a division colour', offenders.join('\n        '));
+  }
+
+  /* Bands are separated by a GAP, not by hue.
+
+     Silver and gold are only ΔE 14.6 apart in light, under the floor a
+     division has to clear, and that is the kit's own pairing rather
+     than a mistake. A division bar stands alone against the card, so
+     hue is all it has. A stacked band has an edge: the kit runs a
+     column y=0 h=38.6, next band at 41.6, and so on, a 3px gap all the
+     way down.
+
+     So the rule is not "make the tiers further apart", which would mean
+     redrawing somebody's design to satisfy a number. It is "the gap has
+     to actually be drawn", because without it the two nearest bands
+     read as one block and the chart quietly stops being a stack. */
+  const stacked = readFileSync('components/analytics/kit/charts.tsx', 'utf8');
+  const declaresGap = /export const BAND_GAP = 3;/.test(stacked);
+  const usesGap = /gap: BAND_GAP/.test(stacked);
+  if (declaresGap && usesGap) {
+    ok("the stacked chart draws the kit's 3px gap between bands");
+  } else {
+    bad('stacked tier bands touch, and the two nearest are ΔE 14.6 apart',
+      declaresGap ? 'BAND_GAP is declared but no stack uses it'
+        : 'BAND_GAP is not declared; the kit separates bands by 3px');
+  }
+
+  /* The kit's values, not ours. If somebody changes one of the three,
+     this says so and names the file it came from, rather than letting
+     a redesign happen by increment. */
+  const KIT: Record<string, string> = {
+    'chart-silver': '#C4BFBC', 'chart-gold': '#E0C63F', 'chart-platinum': '#09163A',
+  };
+  const drifted = Object.entries(KIT)
+    .filter(([name, want]) => !new RegExp(`--${name}\\s*:\\s*${want}`, 'i').test(LIGHT))
+    .map(([name, want]) => `${name} should be ${want} in light`);
+  if (drifted.length === 0) ok('the light tier colours are the kit\'s own values');
+  else bad('a tier colour has drifted from docs/source/STCUIAnalytics.html', drifted.join('; '));
 }
 
 console.log(

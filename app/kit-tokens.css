@@ -105,6 +105,23 @@
   --chart-stc:#2B3F78;
   --chart-trailer:#2F6F5E;
   --chart-rental:#C77A06;
+
+  /* ---- FleetSmart+ tiers ----
+
+     A separate axis from the divisions above, and it has to be, because
+     these two sets appear on the same page. Drawing Gold in the green
+     that means Trailer Sales tells somebody the book is growing in a
+     division rather than in a tier, which is a different sentence about
+     the business.
+
+     Silver, Gold and Platinum are metals and name their own colours, so
+     there is no judgement here to get wrong: grey, gold, and the deep
+     navy the tier is sold as. Ordered light to dark, which also means
+     the stack reads as a ladder from cheapest to dearest without
+     anybody consulting the legend. */
+  --chart-silver:#C4BFBC;
+  --chart-gold:#E0C63F;
+  --chart-platinum:#09163A;
   /* Everything together, for the company chart. Quieter than any of the
      three, because it is a backdrop to them rather than a fourth. */
   --chart-company:#5A6DA8;
@@ -180,6 +197,17 @@
   --chart-stc:#8492C0;
   --chart-trailer:#4FA98F;
   --chart-rental:#E8A33D;
+
+  /* The tiers, lifted off the navy ground. Silver warms slightly so it
+     does not read as a disabled row, gold brightens to hold against a
+     dark backdrop, and platinum has to come UP rather than down: the
+     darkest tier cannot be drawn darker than the surface it sits on, so
+     here it is the pale end of the navy ramp and the ladder runs the
+     other way. Named for the metal either way, which is what the legend
+     and the readout both say. */
+  --chart-silver:#9A9CA6;
+  --chart-gold:#F0D040;
+  --chart-platinum:#C6CEE6;
   --chart-company:#3D5290;
   --chart-empty:#2B3F78;
 

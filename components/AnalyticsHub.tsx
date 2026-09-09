@@ -5,11 +5,11 @@ import {
   AlertTriangle, Download, Loader, RefreshCw, SlidersHorizontal, X,
 } from 'lucide-react';
 import {
-  BandStrip, BulletRows, CohortGrid, DotPlot, HUE, IndexedLines, PROGRESSION,
+  BandStrip, BulletRows, CohortGrid, DotPlot, HUE, IndexedLines, PROGRESSION, TIER,
   Progression, ShareRows, SourceFlowChart, StackedMonths, StockScatter, Waterfall,
 } from '@/components/analytics/kit/charts';
 import {
-  Chart, DeviceLabel, Explain, Fold, Kpi, Legend, NotWiredPanel, SectionHead,
+  Chart, DeviceLabel, Explain, Kpi, Legend, NotWiredPanel, Section, SectionHead,
   Verdict, money, pct, shortMoney,
 } from '@/components/analytics/kit/frame';
 import { indexed } from '@/lib/analytics/shape';
@@ -107,7 +107,6 @@ export function AnalyticsHub({ today, maySetTargets = false }: {
   const [busy, setBusy] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
   const [explain, setExplain] = useState<Figure | null>(null);
-  const [open, setOpen] = useState<Record<string, boolean>>({ divisions: true });
 
   /* Numbered, so a slow request that lands after a fast one cannot
      overwrite it. Three chips changed quickly is three requests, and
@@ -177,59 +176,66 @@ export function AnalyticsHub({ today, maySetTargets = false }: {
           <Glance data={data} f={f} set={set} onExplain={setExplain}
             maySetTargets={maySetTargets} onSaved={() => load(f)} />
 
-          <Fold
+          {/* Sections, all of them open.
+
+              These were collapsible, and five of the six defaulted
+              closed, which turned the bottom of the page into a stack
+              of grey rows with a chevron on the end: an FAQ, not an
+              analytics hub. Nothing in the design asked for an
+              accordion. It was invented to keep the page short, and it
+              bought that by hiding the work.
+
+              A section is a heading and its cards, and the cards are
+              already the thing that makes the page readable: each one
+              carries its own title, what it says, and a footer with its
+              provenance. */}
+          <Section
+            id="divisions"
             title="Three divisions, one page"
             sub="STC bills jobs, trailer sales moves units, rentals invoices hire. These devices exist so those three can share an axis."
-            open={open.divisions ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, divisions: !o.divisions }))}
           >
             <Divisions data={data} f={f} set={set} />
-          </Fold>
+          </Section>
 
-          <Fold
+          <Section
+            id="people"
             title="People and where work comes from"
             sub="Who brought business in, and what happened to it. One bar per person on a shared scale, so rows compare without reading the numbers."
-            open={open.people ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, people: !o.people }))}
           >
             <People data={data} f={f} set={set} />
-          </Fold>
+          </Section>
 
-          <Fold
+          <Section
+            id="stock"
             title="Trailer sales"
             sub="Stock is money sitting still. These two devices are about what to price down and what to hold."
-            open={open.stock ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, stock: !o.stock }))}
           >
             <Stock data={data} />
-          </Fold>
+          </Section>
 
-          <Fold
+          <Section
+            id="book"
             title="FleetSmart+ contract book"
             sub="Contracts recur, so the useful number is not what was signed this month but what the book is now worth every week."
-            open={open.book ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, book: !o.book }))}
           >
             <Book data={data} set={set} />
-          </Fold>
+          </Section>
 
-          <Fold
+          <Section
+            id="customers"
             title="Customers"
             sub="Who is spending, measured against the same window as everything above."
-            open={open.customers ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, customers: !o.customers }))}
           >
             <Customers data={data} />
-          </Fold>
+          </Section>
 
-          <Fold
+          <Section
+            id="gaps"
             title="What this page cannot answer yet"
             sub="Named rather than drawn as zeroes. A zero on this page is a claim about the business."
-            open={open.gaps ?? false}
-            onToggle={() => setOpen((o) => ({ ...o, gaps: !o.gaps }))}
           >
             {data.notWired.map((n) => <NotWiredPanel key={n.what} {...n} />)}
-          </Fold>
+          </Section>
         </div>
       )}
 
@@ -1057,18 +1063,18 @@ function Book({ data, set }: { data: Analytics; set: (p: Partial<Filters>) => vo
             ? `The book is ${grew >= 0 ? 'up' : 'down'} ${Math.abs(grew).toFixed(0)}% over these months.`
             : 'Not enough months to show a trend yet.'}
           legend={<Legend items={[
-            { name: 'Silver', colour: HUE.rental },
-            { name: 'Gold', colour: HUE.trailer },
-            { name: 'Platinum', colour: HUE.stc },
+            { name: 'Silver', colour: TIER.silver },
+            { name: 'Gold', colour: TIER.gold },
+            { name: 'Platinum', colour: TIER.platinum },
           ]} />}
           foot={<span>Drag across the bars to set the period for the whole page.</span>}
         >
           <StackedMonths
             months={book.months as any}
             series={[
-              { key: 'silver', name: 'Silver', colour: HUE.rental },
-              { key: 'gold', name: 'Gold', colour: HUE.trailer },
-              { key: 'platinum', name: 'Platinum', colour: HUE.stc },
+              { key: 'silver', name: 'Silver', colour: TIER.silver },
+              { key: 'gold', name: 'Gold', colour: TIER.gold },
+              { key: 'platinum', name: 'Platinum', colour: TIER.platinum },
             ]}
             onBrush={(from, to) => set({
               kind: 'custom',
@@ -1112,7 +1118,7 @@ function Book({ data, set }: { data: Analytics; set: (p: Partial<Filters>) => vo
         >
           <ShareRows rows={book.mix.map((m) => ({
             name: m.tier, count: m.contracts, value: m.weekly,
-            colour: m.tier === 'Platinum' ? HUE.stc : m.tier === 'Gold' ? HUE.trailer : HUE.rental,
+            colour: m.tier === 'Platinum' ? TIER.platinum : m.tier === 'Gold' ? TIER.gold : TIER.silver,
           }))} />
         </Chart>
 
