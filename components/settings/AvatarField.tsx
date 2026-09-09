@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Camera, Loader, Trash2 } from 'lucide-react';
 import { Button, Label } from '@/components/kit/primitives';
 import { createClient } from '@/lib/supabase/client';
+import { Avatar } from '@/components/kit/avatar';
 
 /* =============================================================
    A face on your profile.
@@ -24,6 +25,18 @@ import { createClient } from '@/lib/supabase/client';
    an unpredictable length of time. A new key every time is a new URL
    every time, and the old object is deleted after the new one is
    written rather than before.
+
+   ---- Which column it writes ----
+
+   `profiles.photo_url`, through `update_my_profile`, and both halves of
+   that matter. The column, because this uploader used to write
+   `avatar_url` while the team directory and the admin panel read
+   `photo_url`: a picture uploaded here appeared on your own sidebar and
+   nowhere else in the product. Migration 101 folded the two into one.
+
+   Through the RPC rather than a table update, because a direct write
+   is how the wrong column got picked in the first place. The function
+   is the only writer, so there is one place to look.
 
    ---- What it refuses ----
 
@@ -46,8 +59,6 @@ export function AvatarField({ userId, name, initial }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = useRef<HTMLInputElement>(null);
-
-  const initials = name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 
   async function upload(file: File) {
     setError(null);
@@ -72,9 +83,8 @@ export function AvatarField({ userId, name, initial }: {
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(key);
     const next = data.publicUrl;
 
-    const { error: saved } = await supabase.from('profiles')
-      .update({ avatar_url: next }).eq('id', userId);
-    if (saved) { setBusy(false); setError(saved.message); return; }
+    const saved = await save(next);
+    if (saved) { setBusy(false); setError(saved); return; }
 
     /* The old one goes AFTER the new one is saved, so a failure
        anywhere above leaves somebody with the picture they had rather
@@ -88,12 +98,24 @@ export function AvatarField({ userId, name, initial }: {
     setBusy(false);
   }
 
+  /* An empty string clears, a null leaves the field alone. That is
+     `update_my_profile`'s convention for all nine of its arguments and
+     it is what lets this form post one field without blanking the
+     other eight. */
+  async function save(url: string | null): Promise<string | null> {
+    const { error } = await supabase.rpc('update_my_profile', {
+      p_full_name: null, p_job_title: null, p_location: null,
+      p_timezone: null, p_working_hours: null, p_responsibilities: null,
+      p_skills: null, p_photo_url: url ?? '', p_theme: null,
+    });
+    return error ? error.message : null;
+  }
+
   async function clear() {
     setBusy(true);
     setError(null);
-    const { error: saved } = await supabase.from('profiles')
-      .update({ avatar_url: null }).eq('id', userId);
-    if (saved) { setBusy(false); setError(saved.message); return; }
+    const saved = await save(null);
+    if (saved) { setBusy(false); setError(saved); return; }
     const old = url ? keyFromUrl(url) : null;
     if (old) await supabase.storage.from(BUCKET).remove([old]);
     setUrl(null);
@@ -104,20 +126,9 @@ export function AvatarField({ userId, name, initial }: {
     <div>
       <Label>Your picture</Label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 'var(--r-full)', flex: 'none',
-          background: 'var(--bg-subtle)', border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          overflow: 'hidden',
-          fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 20,
-          color: 'var(--text-muted)', letterSpacing: '-0.02em',
-        }}>
-          {url
-            /* eslint-disable-next-line @next/next/no-img-element */
-            ? <img src={url} alt="" width={64} height={64}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : initials || '?'}
-        </div>
+        {/* The same circle everybody else will see you in, so what this
+            tab previews is what the team list draws. */}
+        <Avatar name={name} url={url} size={64} decorative />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minWidth: 0 }}>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>

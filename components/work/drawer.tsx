@@ -533,7 +533,7 @@ export function TaskDrawer({
           const who = n.author_id ? people.get(n.author_id) : null;
           return (
             <div key={n.id} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
-              <Avatar name={who?.full_name ?? '?'} />
+              <Avatar name={who?.full_name ?? '?'} url={who?.photo_url} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>

@@ -17,6 +17,7 @@ import type { ReactNode } from 'react';
 import type { Task, TaskStatus, TaskPriority, Person, Entity } from '@/lib/work/types';
 import { STATUS_LABEL, PRIORITY_TONE, isOverdue } from '@/lib/work/types';
 import { Badge, EmptyState, GridBadge, Button, type Tone } from '@/components/kit/primitives';
+import { Avatar as Face } from '@/components/kit/avatar';
 
 /* Which statuses take a hue and which stay as ink.
 
@@ -41,21 +42,19 @@ export function initials(name: string): string {
     .map((s) => s[0]?.toUpperCase() ?? '').join('') || '?';
 }
 
-/** A person, at the size a row can hold. Panton, because it is a label. */
-export function Avatar({ name, title }: { name: string; title?: string }) {
-  return (
-    <span
-      title={title ?? name}
-      aria-hidden="true"
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 22, height: 22, flex: 'none', borderRadius: 'var(--r-full)',
-        background: 'var(--bg-subtle)', border: '1px solid var(--border)',
-        color: 'var(--text-muted)', fontFamily: 'var(--panton)', fontWeight: 700,
-        fontSize: 9.5, letterSpacing: '0.02em',
-      }}
-    >{initials(name)}</span>
-  );
+/**
+ * A person, at the size a row can hold.
+ *
+ * The shared circle, so somebody who has uploaded a photograph is the
+ * same face on a task chip as on the team list. This used to be its own
+ * implementation with no way to pass a picture, which is why the board
+ * drew initials for everybody however many photographs had been
+ * uploaded.
+ */
+export function Avatar({ name, url, title }: {
+  name: string; url?: string | null; title?: string;
+}) {
+  return <Face name={name} url={url} size={22} title={title ?? name} decorative />;
 }
 
 /** Who has it, in as few characters as the column allows. */
@@ -69,7 +68,7 @@ export function Who({ task, people, departments }: {
     const name = p?.full_name ?? 'Somebody';
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-        <Avatar name={name} />
+        <Avatar name={name} url={p?.photo_url} />
         <span style={{
           fontSize: 12.5, color: 'var(--text)', overflow: 'hidden',
           textOverflow: 'ellipsis', whiteSpace: 'nowrap',

@@ -177,6 +177,9 @@ export type DelegationRequest = {
 
 export type Person = {
   id: string; full_name: string; email: string | null; role: string;
+  /** `profiles.photo_url`, carried by `assignable_people` since
+      migration 101. Null draws initials, which is most people. */
+  photo_url: string | null;
   department_id: string | null; department_name: string | null;
   primary_entity_id: string | null;
   primary_entity_code: string | null;
