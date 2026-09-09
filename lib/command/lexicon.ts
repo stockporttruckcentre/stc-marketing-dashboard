@@ -420,6 +420,19 @@ const RESERVED = new Set([
      about the red" would otherwise bind to a firm called Chase. */
   'amber', 'rag', 'complaint', 'complaints', 'slowness', 'health',
   'chase', 'chased', 'chasing',
+
+  /* The Analytics hub's own vocabulary, for the reason every block
+     above it exists. "Set the target for rentals" has to read Rentals
+     as the division and everything else as the grammar, and without
+     these it looks for a customer called Target.
+
+     `book` is the one worth naming: it is the FleetSmart+ contract book
+     and it is also an ordinary verb ("book a meeting"), which is
+     already handled above. Reserving the noun stops "what is the book
+     worth" binding to a firm called Book. */
+  'target', 'targets', 'budget', 'margin', 'utilisation', 'conversion',
+  'book', 'the book', 'cohort', 'cohorts', 'retention', 'annualised',
+  'waterfall', 'trend', 'analytics', 'dashboard', 'kpi', 'kpis',
   ...Object.keys(BODY_TYPES),
 ]);
 

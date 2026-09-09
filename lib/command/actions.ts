@@ -1518,6 +1518,46 @@ export const ACTIONS: CommandActionSpec[] = [
               'mark them green', 'the complaint is sorted'],
     seed: 'mark green ' },
 
+  /* =============================================================
+     The Analytics hub.
+
+     One entry per QUESTION rather than one for the screen, for the
+     reason the reports list has the same shape: somebody before a board
+     meeting types what they want to know, not the tab it lives on.
+     "who is closing", "what stock is old", "how is the contract book"
+     are three sentences and one page, and a bar that answers all three
+     with "Analytics" has not answered any of them.
+     ============================================================= */
+  { id: 'nav.analyticsPeople', label: 'Who is closing',
+    blurb: 'Leads, quotes and wins per person, against the group rate',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics#people', verbs: GO,
+    objects: ['who is closing', 'conversion', 'conversion rate', 'leaderboard',
+              'sales leaderboard', 'who is converting', 'win rate', 'close rate',
+              'performance by person', 'who is winning'] },
+
+  { id: 'nav.analyticsStock', label: 'Stock age against margin',
+    blurb: 'Which trailers to discount and which to hold',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics#stock', verbs: GO,
+    objects: ['stock age', 'old stock', 'ageing stock', 'aging stock', 'stock ageing',
+              'what to discount', 'stock margin', 'days in stock', 'slow moving stock',
+              'what is not selling'] },
+
+  { id: 'nav.analyticsBook', label: 'The FleetSmart+ book',
+    blurb: 'What the contract book is worth every week, by tier',
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics#book', verbs: GO,
+    objects: ['contract book', 'the book', 'recurring revenue', 'weekly contracted value',
+              'annualised contracts', 'contract retention', 'tier mix', 'fleetsmart book',
+              'what the contracts are worth'] },
+
+  { id: 'analytics.target', label: 'Set a revenue target',
+    blurb: 'What a division is measured against this month',
+    kind: 'admin', capability: 'analytics.targets', path: '/dashboard/analytics',
+    verbs: [...CHANGE, 'put in', 'raise', 'lower'],
+    objects: ['target', 'targets', 'revenue target', 'monthly target', 'division target',
+              'the budget', 'what we are aiming for'],
+    phrases: ['set a target', 'set the revenue target', 'change the target for rentals',
+              'what should trailer sales be hitting'] },
+
   { id: 'nav.healthDue', label: 'Customers due a chase',
     blurb: 'Reds quiet three working days, ambers quiet seven',
     kind: 'navigate', capability: 'crm.view',

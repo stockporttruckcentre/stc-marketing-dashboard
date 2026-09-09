@@ -50,10 +50,21 @@ const TOKENS = readFileSync('app/kit-tokens.css', 'utf8');
    is right there. So it is read: everything under components/analytics
    plus the screen itself, and a floor on the count so an empty read is
    a failure rather than a quiet pass. */
+/* Walked rather than listed, and that is a correction. This read one
+   flat directory, and when the charts were rebuilt into
+   `components/analytics/kit/` the check went quiet: it reported zero
+   division colours and passed the two assertions that count them, which
+   is the exact failure its own header warns about. A check that cannot
+   see the screen is worse than no check, because it is trusted. */
+function everyTsxUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return everyTsxUnder(`${dir}/${e.name}`);
+    return e.name.endsWith('.tsx') ? [`${dir}/${e.name}`] : [];
+  });
+}
+
 const DRAWERS = [
-  ...readdirSync('components/analytics')
-    .filter((f) => f.endsWith('.tsx'))
-    .map((f) => `components/analytics/${f}`),
+  ...everyTsxUnder('components/analytics'),
   'components/AnalyticsHub.tsx',
 ].map((path) => [path, readFileSync(path, 'utf8')] as const);
 
@@ -144,8 +155,12 @@ if (!failed) ok(`all ${WANTED.length} chart tokens are defined in both themes`);
    for an action token. */
 const NEVER = ['--primary', '--accent', '--accent-hover', '--surface-inverse'];
 
+/* `colour` is the series prop every chart here takes. `color` is the
+   CSS property, which sets TEXT, and a red link is correct kit usage
+   rather than a drawn shape borrowing an action colour. Matching both
+   made the check fail on an underlined "Clear all". */
 const fills = [
-  ...ALL.matchAll(/(?:colour|color)\s*[=:]\s*\{?\s*['"`]var\((--[a-z0-9-]+)/g),
+  ...ALL.matchAll(/colour\s*[=:]\s*\{?\s*['"`]var\((--[a-z0-9-]+)/g),
   ...ALL.matchAll(/(?:fill|stroke)\s*=\s*["{]\s*["']?var\((--[a-z0-9-]+)/g),
   ...ALL.matchAll(/background:\s*['"`]?var\((--[a-z0-9-]+)/g),
 ].map((m) => m[1]!);

@@ -69,7 +69,7 @@ export type CapabilityEntry = {
  */
 export type Capability =
   // ---- CRM ----
-  | 'crm.view' | 'crm.viewGlobal' | 'crm.viewOthers' | 'crm.health'
+  | 'crm.view' | 'crm.viewGlobal' | 'crm.viewOthers' | 'crm.health' | 'analytics.targets'
   | 'crm.edit' | 'crm.create' | 'crm.delete' | 'crm.assign' | 'crm.manageLists'
   | 'crm.proposal' | 'crm.proposalForOthers' | 'crm.delegate'
   | 'crm.enrich' | 'crm.import' | 'crm.export'
@@ -109,6 +109,7 @@ export const CAPABILITY_CATALOG = [
   // ---- CRM ----
   { key: 'crm.view', label: 'See the CRM', description: 'Open the CRM and see the organizations they are allowed to see.', area: 'CRM', feature: 'Access', danger: 'routine', requires: [], scoped: true, position: 10 },
   { key: 'crm.viewGlobal', label: 'See every organization', description: 'See the whole company list, not only their own accounts.', area: 'CRM', feature: 'Access', danger: 'routine', requires: ['crm.view'], scoped: false, position: 20 },
+  { key: 'analytics.targets', label: 'Set revenue targets', description: 'Change what a division or the group is measured against on the Analytics hub. Reading a target and setting one are different rights.', area: 'CRM', feature: 'Analytics', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 340 },
   { key: 'crm.health', label: 'Flag a customer amber or red', description: 'Record a complaint or a problem on an account, and alert whoever looks after it. Red notifies them the moment it is set.', area: 'CRM', feature: 'Records', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 45 },
   { key: 'crm.viewOthers', label: "See a colleague's accounts", description: "Look at a named colleague's portfolio.", area: 'CRM', feature: 'Access', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 30 },
   { key: 'crm.edit', label: 'Change records', description: 'Edit fields on an organization or contact.', area: 'CRM', feature: 'Records', danger: 'routine', requires: ['crm.view'], scoped: true, position: 40 },
