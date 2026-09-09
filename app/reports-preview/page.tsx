@@ -22,7 +22,12 @@ import { ReportsHub } from '@/components/ReportsHub';
 export default function ReportsPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
-    <div className="kit" style={{ padding: '18px 24px 60px', maxWidth: 1480, margin: '0 auto' }}>
+    /* The same box the dashboard gives a page: `.content__inner` in
+       globals.css is 24px 28px of padding inside a 1800px cap. The
+       harness has to match it or a layout measured here is a layout
+       measured somewhere else, which is how a wrap that does not happen
+       gets reported as fact. */
+    <div className="kit" style={{ padding: '24px 28px 56px', maxWidth: 1800 }}>
       <ReportsHub people={[]} mayExport />
     </div>
   );
