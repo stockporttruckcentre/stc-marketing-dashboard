@@ -125,6 +125,29 @@
   /* Everything together, for the company chart. Quieter than any of the
      three, because it is a backdrop to them rather than a fourth. */
   --chart-company:#5A6DA8;
+
+  /* ---- The waterfall's two structural navies ----
+
+     The kit draws "how the group number moved" with the two end
+     columns in navy-900 and a positive movement in navy-500. Neither
+     is a division: they are the group total and the direction of a
+     change, and painting them in a division's colour says STC added
+     something in the trailer sales green, which is a different
+     sentence about the business.
+
+     They are tokens rather than the kit's literals because the kit is
+     a light design and this application has a dark ground as well.
+     Navy-900 on navy-950 is a bar nobody can see, which is the same
+     fault as "the bottom bar graph is blinding" in the other
+     direction. So on the dark ground the ladder runs the other way,
+     exactly as `--chart-platinum` above already does: the total is the
+     heavier of the two on both grounds, and heavier means darker on
+     white and lighter on navy.
+
+     A negative movement is `--danger` on both, which is the kit's own
+     choice and is already theme aware. */
+  --chart-total:#09163A;
+  --chart-rise:#3D5290;
   /* A month that happened and was quiet. Drawn, not skipped. */
   --chart-empty:#CBCBC6;
 
@@ -210,6 +233,11 @@
   --chart-platinum:#C6CEE6;
   --chart-company:#3D5290;
   --chart-empty:#2B3F78;
+  /* Up the ramp rather than down it. See the note in the light block:
+     the total has to stay the heavier of the two, and on this ground
+     heavier is lighter. */
+  --chart-total:#B4BDD8;
+  --chart-rise:#5A6DA8;
 
   --shadow-1:0 1px 2px rgba(0,0,0,.35);
   --shadow-2:0 2px 6px rgba(0,0,0,.40);

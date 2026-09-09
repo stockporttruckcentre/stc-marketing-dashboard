@@ -599,6 +599,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Renewal cohort grid"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "Every row is the month a contract started. Reading across shows how many were still live after one month, two months, three. Darker means more kept."
+        }
+      ]
     }
   },
   "tierStack": {
@@ -681,99 +698,392 @@ export const KIT_DEVICES = {
         {
           "tag": "svg",
           "style": "width:100%;height:200px;display:block",
+          "viewBox": "0 0 620 200",
+          "preserveAspectRatio": "none",
           "kids": [
             {
-              "tag": "line"
+              "tag": "line",
+              "attrs": {
+                "stroke": "var(--border)",
+                "stroke-width": "1",
+                "stroke-dasharray": "3 4",
+                "vector-effect": "non-scaling-stroke"
+              },
+              "geom": {
+                "x1": "0",
+                "y1": "200.0",
+                "x2": "620",
+                "y2": "200.0"
+              }
             },
             {
-              "tag": "line"
+              "tag": "line",
+              "attrs": {
+                "stroke": "var(--border)",
+                "stroke-width": "1",
+                "stroke-dasharray": "3 4",
+                "vector-effect": "non-scaling-stroke"
+              },
+              "geom": {
+                "x1": "0",
+                "y1": "133.3",
+                "x2": "620",
+                "y2": "133.3"
+              }
             },
             {
-              "tag": "line"
+              "tag": "line",
+              "attrs": {
+                "stroke": "var(--border)",
+                "stroke-width": "1",
+                "stroke-dasharray": "3 4",
+                "vector-effect": "non-scaling-stroke"
+              },
+              "geom": {
+                "x1": "0",
+                "y1": "66.7",
+                "x2": "620",
+                "y2": "66.7"
+              }
             },
             {
-              "tag": "line"
+              "tag": "line",
+              "attrs": {
+                "stroke": "var(--border)",
+                "stroke-width": "1",
+                "stroke-dasharray": "3 4",
+                "vector-effect": "non-scaling-stroke"
+              },
+              "geom": {
+                "x1": "0",
+                "y1": "0.0",
+                "x2": "620",
+                "y2": "0.0"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "13.1",
+                "y": "173.8",
+                "width": "42.7",
+                "height": "26.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "13.1",
+                "y": "137.8",
+                "width": "42.7",
+                "height": "36.0"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "13.1",
+                "y": "119.1",
+                "width": "42.7",
+                "height": "18.7"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "82.0",
+                "y": "172.4",
+                "width": "42.7",
+                "height": "27.6"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "82.0",
+                "y": "128.4",
+                "width": "42.7",
+                "height": "44.0"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "82.0",
+                "y": "108.2",
+                "width": "42.7",
+                "height": "20.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "150.9",
+                "y": "171.3",
+                "width": "42.7",
+                "height": "28.7"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "150.9",
+                "y": "119.3",
+                "width": "42.7",
+                "height": "52.0"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "150.9",
+                "y": "97.6",
+                "width": "42.7",
+                "height": "21.8"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "219.8",
+                "y": "170.9",
+                "width": "42.7",
+                "height": "29.1"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "219.8",
+                "y": "109.6",
+                "width": "42.7",
+                "height": "61.3"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "219.8",
+                "y": "84.7",
+                "width": "42.7",
+                "height": "24.9"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "288.6",
+                "y": "169.8",
+                "width": "42.7",
+                "height": "30.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "288.6",
+                "y": "99.1",
+                "width": "42.7",
+                "height": "70.7"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "288.6",
+                "y": "71.6",
+                "width": "42.7",
+                "height": "27.6"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "357.5",
+                "y": "169.1",
+                "width": "42.7",
+                "height": "30.9"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "357.5",
+                "y": "90.9",
+                "width": "42.7",
+                "height": "78.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "357.5",
+                "y": "60.7",
+                "width": "42.7",
+                "height": "30.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "426.4",
+                "y": "168.4",
+                "width": "42.7",
+                "height": "31.6"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "426.4",
+                "y": "81.6",
+                "width": "42.7",
+                "height": "86.9"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "426.4",
+                "y": "48.7",
+                "width": "42.7",
+                "height": "32.9"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "495.3",
+                "y": "167.8",
+                "width": "42.7",
+                "height": "32.2"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "495.3",
+                "y": "72.7",
+                "width": "42.7",
+                "height": "95.1"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "495.3",
+                "y": "36.9",
+                "width": "42.7",
+                "height": "35.8"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#C4BFBC"
+              },
+              "geom": {
+                "x": "564.2",
+                "y": "167.3",
+                "width": "42.7",
+                "height": "32.7"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#E0C63F"
+              },
+              "geom": {
+                "x": "564.2",
+                "y": "64.7",
+                "width": "42.7",
+                "height": "102.7"
+              }
             },
             {
-              "tag": "rect"
+              "tag": "rect",
+              "attrs": {
+                "fill": "#09163A"
+              },
+              "geom": {
+                "x": "564.2",
+                "y": "26.0",
+                "width": "42.7",
+                "height": "38.7"
+              }
             }
           ]
         },
@@ -1018,6 +1328,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "The book, built by tier"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "Stacked weekly value by month. The height is the whole book, and the segments show which tier is actually growing."
+        }
+      ]
     }
   },
   "bullet": {
@@ -1184,6 +1511,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Revenue against target, by division"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "A bar per division with the target as a red notch, so hitting or missing is a position rather than a sum to work out."
+        }
+      ]
     }
   },
   "indexed": {
@@ -1270,30 +1614,112 @@ export const KIT_DEVICES = {
             {
               "tag": "svg",
               "style": "width:100%;height:180px;display:block",
+              "viewBox": "0 0 620 180",
+              "preserveAspectRatio": "none",
               "kids": [
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "180.0",
+                    "x2": "620",
+                    "y2": "180.0"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1.5",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "135.0",
+                    "x2": "620",
+                    "y2": "135.0"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "90.0",
+                    "x2": "620",
+                    "y2": "90.0"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "45.0",
+                    "x2": "620",
+                    "y2": "45.0"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "0.0",
+                    "x2": "620",
+                    "y2": "0.0"
+                  }
                 },
                 {
-                  "tag": "polyline"
+                  "tag": "polyline",
+                  "attrs": {
+                    "stroke": "#8492C0",
+                    "stroke-width": "2.5",
+                    "stroke-linejoin": "round",
+                    "fill": "none",
+                    "vector-effect": "non-scaling-stroke"
+                  }
                 },
                 {
-                  "tag": "polyline"
+                  "tag": "polyline",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "2.5",
+                    "stroke-linejoin": "round",
+                    "fill": "none",
+                    "vector-effect": "non-scaling-stroke"
+                  }
                 },
                 {
-                  "tag": "polyline"
+                  "tag": "polyline",
+                  "attrs": {
+                    "stroke": "#09163A",
+                    "stroke-width": "3",
+                    "stroke-linejoin": "round",
+                    "fill": "none",
+                    "vector-effect": "non-scaling-stroke"
+                  }
                 }
               ]
             },
@@ -1382,6 +1808,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Indexed division trend"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "Every division starts at 100, so a line above the middle rule means growth regardless of what that division actually sells."
+        }
+      ]
     }
   },
   "waterfall": {
@@ -1413,33 +1856,128 @@ export const KIT_DEVICES = {
             {
               "tag": "svg",
               "style": "width:100%;height:180px;display:block",
+              "viewBox": "0 0 620 180",
+              "preserveAspectRatio": "none",
               "kids": [
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 3",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "96.7",
+                    "y1": "35.8",
+                    "x2": "151.3",
+                    "y2": "35.8"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 3",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "220.7",
+                    "y1": "21.3",
+                    "x2": "275.3",
+                    "y2": "21.3"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 3",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "344.7",
+                    "y1": "10.2",
+                    "x2": "399.3",
+                    "y2": "10.2"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 3",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "468.7",
+                    "y1": "13.1",
+                    "x2": "523.3",
+                    "y2": "13.1"
+                  }
                 },
                 {
-                  "tag": "rect"
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "var(--navy-900)"
+                  },
+                  "geom": {
+                    "x": "27.3",
+                    "y": "35.8",
+                    "width": "69.4",
+                    "height": "144.2"
+                  }
                 },
                 {
-                  "tag": "rect"
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#3D5290"
+                  },
+                  "geom": {
+                    "x": "151.3",
+                    "y": "21.3",
+                    "width": "69.4",
+                    "height": "14.6"
+                  }
                 },
                 {
-                  "tag": "rect"
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#3D5290"
+                  },
+                  "geom": {
+                    "x": "275.3",
+                    "y": "10.2",
+                    "width": "69.4",
+                    "height": "11.1"
+                  }
                 },
                 {
-                  "tag": "rect"
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "var(--danger)"
+                  },
+                  "geom": {
+                    "x": "399.3",
+                    "y": "10.2",
+                    "width": "69.4",
+                    "height": "3.0"
+                  }
                 },
                 {
-                  "tag": "rect"
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "var(--navy-900)"
+                  },
+                  "geom": {
+                    "x": "523.3",
+                    "y": "13.1",
+                    "width": "69.4",
+                    "height": "166.9"
+                  }
                 }
               ]
             },
@@ -1532,6 +2070,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "How the group number moved"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "A waterfall, not a pie. It answers \"what changed\" rather than \"what is the split\"."
+        }
+      ]
     }
   },
   "leaderboard": {
@@ -1609,6 +2164,19 @@ export const KIT_DEVICES = {
                 {
                   "tag": "svg",
                   "style": "flex:none",
+                  "viewBox": "0 0 24 24",
+                  "preserveAspectRatio": null,
+                  "attrs": {
+                    "stroke": "currentColor",
+                    "stroke-width": "2",
+                    "stroke-linecap": "round",
+                    "stroke-linejoin": "round",
+                    "fill": "none"
+                  },
+                  "geom": {
+                    "width": "12",
+                    "height": "12"
+                  },
                   "kids": [
                     {
                       "tag": "path"
@@ -1724,6 +2292,19 @@ export const KIT_DEVICES = {
                     {
                       "tag": "svg",
                       "style": "flex:none",
+                      "viewBox": "0 0 24 24",
+                      "preserveAspectRatio": null,
+                      "attrs": {
+                        "stroke": "currentColor",
+                        "stroke-width": "2",
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                        "fill": "none"
+                      },
+                      "geom": {
+                        "width": "12",
+                        "height": "12"
+                      },
                       "kids": [
                         {
                           "tag": "path"
@@ -1845,6 +2426,19 @@ export const KIT_DEVICES = {
                     {
                       "tag": "svg",
                       "style": "flex:none",
+                      "viewBox": "0 0 24 24",
+                      "preserveAspectRatio": null,
+                      "attrs": {
+                        "stroke": "currentColor",
+                        "stroke-width": "2",
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                        "fill": "none"
+                      },
+                      "geom": {
+                        "width": "12",
+                        "height": "12"
+                      },
                       "kids": [
                         {
                           "tag": "path"
@@ -1966,6 +2560,19 @@ export const KIT_DEVICES = {
                     {
                       "tag": "svg",
                       "style": "flex:none",
+                      "viewBox": "0 0 24 24",
+                      "preserveAspectRatio": null,
+                      "attrs": {
+                        "stroke": "currentColor",
+                        "stroke-width": "2",
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                        "fill": "none"
+                      },
+                      "geom": {
+                        "width": "12",
+                        "height": "12"
+                      },
                       "kids": [
                         {
                           "tag": "path"
@@ -2087,6 +2694,19 @@ export const KIT_DEVICES = {
                     {
                       "tag": "svg",
                       "style": "flex:none",
+                      "viewBox": "0 0 24 24",
+                      "preserveAspectRatio": null,
+                      "attrs": {
+                        "stroke": "currentColor",
+                        "stroke-width": "2",
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                        "fill": "none"
+                      },
+                      "geom": {
+                        "width": "12",
+                        "height": "12"
+                      },
                       "kids": [
                         {
                           "tag": "path"
@@ -2208,6 +2828,19 @@ export const KIT_DEVICES = {
                     {
                       "tag": "svg",
                       "style": "flex:none",
+                      "viewBox": "0 0 24 24",
+                      "preserveAspectRatio": null,
+                      "attrs": {
+                        "stroke": "currentColor",
+                        "stroke-width": "2",
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                        "fill": "none"
+                      },
+                      "geom": {
+                        "width": "12",
+                        "height": "12"
+                      },
                       "kids": [
                         {
                           "tag": "path"
@@ -2266,6 +2899,23 @@ export const KIT_DEVICES = {
           ]
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Leaderboard with progression"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "The bar is three nested segments: leads, of which quoted, of which won. A wide pale bar with a narrow dark tip is somebody generating interest but not closing."
+        }
+      ]
     }
   },
   "dotplot": {
@@ -2298,36 +2948,142 @@ export const KIT_DEVICES = {
             {
               "tag": "svg",
               "style": "width:100%;height:150px;display:block;overflow:visible",
+              "viewBox": "0 0 620 150",
+              "preserveAspectRatio": "none",
               "kids": [
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "150.0",
+                    "x2": "620",
+                    "y2": "150.0"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "107.1",
+                    "x2": "620",
+                    "y2": "107.1"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "64.3",
+                    "x2": "620",
+                    "y2": "64.3"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "21.4",
+                    "x2": "620",
+                    "y2": "21.4"
+                  }
                 },
                 {
-                  "tag": "line"
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--accent)",
+                    "stroke-width": "2",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "60.0",
+                    "x2": "620",
+                    "y2": "60.0"
+                  }
                 },
                 {
-                  "tag": "circle"
+                  "tag": "circle",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.85"
+                  },
+                  "geom": {
+                    "cx": "62.0",
+                    "cy": "36.4",
+                    "r": "13.5"
+                  }
                 },
                 {
-                  "tag": "circle"
+                  "tag": "circle",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.85"
+                  },
+                  "geom": {
+                    "cx": "186.0",
+                    "cy": "62.1",
+                    "r": "9.1"
+                  }
                 },
                 {
-                  "tag": "circle"
+                  "tag": "circle",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.85"
+                  },
+                  "geom": {
+                    "cx": "310.0",
+                    "cy": "57.9",
+                    "r": "7.0"
+                  }
                 },
                 {
-                  "tag": "circle"
+                  "tag": "circle",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.85"
+                  },
+                  "geom": {
+                    "cx": "434.0",
+                    "cy": "92.1",
+                    "r": "7.0"
+                  }
                 },
                 {
-                  "tag": "circle"
+                  "tag": "circle",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.85"
+                  },
+                  "geom": {
+                    "cx": "558.0",
+                    "cy": "62.1",
+                    "r": "7.0"
+                  }
                 }
               ]
             },
@@ -2430,12 +3186,456 @@ export const KIT_DEVICES = {
           "text": "Dot size is won value, so a small dot high up is a good rate on a small book. Both matter, and neither alone tells you who to back."
         }
       ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Conversion against the group rate"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "A dot per person against the group average. Above the line is closing better than average, and dot size is how much they closed."
+        }
+      ]
     }
   },
   "sourceFlow": {
-    "title": "Where leads came from, and what became of them",
+    "title": "142 leads, September",
     "found": true,
     "node": {
+      "tag": "div",
+      "style": "background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px 22px;display:flex;flex-direction:column;gap:14px",
+      "kids": [
+        {
+          "tag": "div",
+          "style": "display:flex;flex-direction:column;gap:4px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "font-family:var(--panton);font-weight:700;font-size:14px",
+              "text": "142 leads, September"
+            },
+            {
+              "tag": "span",
+              "style": "display:block;font-size:12px;line-height:1.45;color:var(--text-subtle);font-style:italic",
+              "text": "Referrals convert best. Outbound brought 21 leads and closed one."
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "position:relative;padding:4px 0",
+          "kids": [
+            {
+              "tag": "svg",
+              "style": "width:100%;height:220px;display:block;overflow:visible",
+              "viewBox": "0 0 620 220",
+              "preserveAspectRatio": null,
+              "kids": [
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#09163A",
+                    "fill-opacity": "0.16"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.16"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.16"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#8492C0",
+                    "fill-opacity": "0.16"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#B4BDD8",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#B4BDD8",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#B4BDD8",
+                    "fill-opacity": "0.45"
+                  }
+                },
+                {
+                  "tag": "path",
+                  "attrs": {
+                    "fill": "#B4BDD8",
+                    "fill-opacity": "0.16"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#09163A"
+                  },
+                  "geom": {
+                    "x": "80",
+                    "y": "0.0",
+                    "width": "16",
+                    "height": "64.5"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#3D5290"
+                  },
+                  "geom": {
+                    "x": "80",
+                    "y": "67.5",
+                    "width": "16",
+                    "height": "55.7"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#8492C0"
+                  },
+                  "geom": {
+                    "x": "80",
+                    "y": "126.1",
+                    "width": "16",
+                    "height": "35.2"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#8492C0"
+                  },
+                  "geom": {
+                    "x": "80",
+                    "y": "164.3",
+                    "width": "16",
+                    "height": "30.8"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#B4BDD8"
+                  },
+                  "geom": {
+                    "x": "80",
+                    "y": "198.0",
+                    "width": "16",
+                    "height": "22.0"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#09163A"
+                  },
+                  "geom": {
+                    "x": "524",
+                    "y": "0.0",
+                    "width": "16",
+                    "height": "38.6"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#3D5290"
+                  },
+                  "geom": {
+                    "x": "524",
+                    "y": "41.6",
+                    "width": "16",
+                    "height": "31.2"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#8492C0"
+                  },
+                  "geom": {
+                    "x": "524",
+                    "y": "75.8",
+                    "width": "16",
+                    "height": "19.3"
+                  }
+                },
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "#C4BFBC"
+                  },
+                  "geom": {
+                    "x": "524",
+                    "y": "98.2",
+                    "width": "16",
+                    "height": "121.8"
+                  }
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;right:87.74%;top:14.65%;transform:translateY(-50%);text-align:right;white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "Referral"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "44"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;right:87.74%;top:43.31%;transform:translateY(-50%);text-align:right;white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "Website"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "38"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;right:87.74%;top:65.31%;transform:translateY(-50%);text-align:right;white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "Depot walk-in"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "24"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;right:87.74%;top:81.66%;transform:translateY(-50%);text-align:right;white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "Outbound"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "21"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;right:87.74%;top:95.01%;transform:translateY(-50%);text-align:right;white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "Repeat"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "15"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;left:87.74%;top:8.78%;transform:translateY(-50%);white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600;color:var(--text)",
+                  "text": "Won · STC"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "26"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;left:87.74%;top:26.02%;transform:translateY(-50%);white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600;color:var(--text)",
+                  "text": "Won · Trailer"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "21"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;left:87.74%;top:38.86%;transform:translateY(-50%);white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600;color:var(--text)",
+                  "text": "Won · Rentals"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "13"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "position:absolute;left:87.74%;top:72.31%;transform:translateY(-50%);white-space:nowrap",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:500;color:var(--text-subtle)",
+                  "text": "Lost"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+                  "text": "82"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12px;color:var(--text-subtle);line-height:1.45;border-top:1px solid var(--border);padding-top:11px",
+          "text": "The pale band is what did not close. Drawing it at full width is the point: 82 of 142 leads went nowhere, and outbound accounts for most of the waste."
+        }
+      ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
       "tag": "div",
       "style": "display:flex;flex-direction:column;gap:3px",
       "kids": [
@@ -2453,9 +3653,628 @@ export const KIT_DEVICES = {
     }
   },
   "scatter": {
-    "title": "Stock age against margin",
+    "title": "41 trailers in stock",
     "found": true,
     "node": {
+      "tag": "div",
+      "style": "background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px 22px;display:flex;flex-direction:column;gap:14px",
+      "kids": [
+        {
+          "tag": "div",
+          "style": "display:flex;align-items:flex-start;justify-content:space-between;gap:16px",
+          "kids": [
+            {
+              "tag": "div",
+              "style": "display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:700;font-size:14px",
+                  "text": "41 trailers in stock"
+                },
+                {
+                  "tag": "span",
+                  "style": "display:block;font-size:12px;line-height:1.45;color:var(--text-subtle);font-style:italic",
+                  "text": "Nine are past 120 days. Four of those still carry enough margin to discount and move."
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "display:flex;gap:8px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;background:var(--bg-subtle);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-sm);font-size:11px;font-weight:600;letter-spacing:.01em;white-space:nowrap",
+                  "text": "Dot size = asking price"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "position:relative",
+          "kids": [
+            {
+              "tag": "svg",
+              "style": "width:100%;height:250px;display:block",
+              "viewBox": "0 0 620 250",
+              "preserveAspectRatio": null,
+              "kids": [
+                {
+                  "tag": "rect",
+                  "attrs": {
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.06"
+                  },
+                  "geom": {
+                    "x": "413.3",
+                    "y": "134.6",
+                    "width": "206.7",
+                    "height": "115.4"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "250.0",
+                    "x2": "620",
+                    "y2": "250.0"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "187.5",
+                    "x2": "620",
+                    "y2": "187.5"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "125.0",
+                    "x2": "620",
+                    "y2": "125.0"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "62.5",
+                    "x2": "620",
+                    "y2": "62.5"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border)",
+                    "stroke-width": "1",
+                    "stroke-dasharray": "3 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "0.0",
+                    "x2": "620",
+                    "y2": "0.0"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--accent)",
+                    "stroke-width": "2",
+                    "stroke-dasharray": "5 4",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "413.3",
+                    "y1": "0",
+                    "x2": "413.3",
+                    "y2": "250"
+                  }
+                },
+                {
+                  "tag": "line",
+                  "attrs": {
+                    "stroke": "var(--border-strong)",
+                    "stroke-width": "1.5",
+                    "vector-effect": "non-scaling-stroke"
+                  },
+                  "geom": {
+                    "x1": "0",
+                    "y1": "134.6",
+                    "x2": "620",
+                    "y2": "134.6"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "41.3",
+                    "cy": "48.1",
+                    "r": "4.6"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "62.0",
+                    "cy": "67.3",
+                    "r": "4.0"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "82.7",
+                    "cy": "38.5",
+                    "r": "5.9"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "106.8",
+                    "cy": "86.5",
+                    "r": "3.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "130.9",
+                    "cy": "57.7",
+                    "r": "5.0"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "144.7",
+                    "cy": "105.8",
+                    "r": "3.1"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "168.8",
+                    "cy": "76.9",
+                    "r": "4.4"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "189.4",
+                    "cy": "28.8",
+                    "r": "6.3"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "210.1",
+                    "cy": "115.4",
+                    "r": "2.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "234.2",
+                    "cy": "96.2",
+                    "r": "3.9"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "254.9",
+                    "cy": "67.3",
+                    "r": "4.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "279.0",
+                    "cy": "134.6",
+                    "r": "3.4"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "303.1",
+                    "cy": "86.5",
+                    "r": "4.1"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "323.8",
+                    "cy": "125.0",
+                    "r": "3.0"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "347.9",
+                    "cy": "105.8",
+                    "r": "3.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "372.0",
+                    "cy": "144.2",
+                    "r": "2.6"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "399.6",
+                    "cy": "115.4",
+                    "r": "3.3"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "427.1",
+                    "cy": "163.5",
+                    "r": "4.4"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "451.2",
+                    "cy": "182.7",
+                    "r": "3.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "475.3",
+                    "cy": "153.8",
+                    "r": "5.4"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "502.9",
+                    "cy": "192.3",
+                    "r": "3.1"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "#3D5290",
+                    "stroke-width": "1.2",
+                    "fill": "#3D5290",
+                    "fill-opacity": "0.5"
+                  },
+                  "geom": {
+                    "cx": "523.6",
+                    "cy": "134.6",
+                    "r": "4.1"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "547.7",
+                    "cy": "201.9",
+                    "r": "2.7"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "575.2",
+                    "cy": "173.1",
+                    "r": "4.9"
+                  }
+                },
+                {
+                  "tag": "circle",
+                  "attrs": {
+                    "stroke": "var(--danger)",
+                    "stroke-width": "1.2",
+                    "fill": "var(--danger)",
+                    "fill-opacity": "0.75"
+                  },
+                  "geom": {
+                    "cx": "599.3",
+                    "cy": "211.5",
+                    "r": "3.9"
+                  }
+                }
+              ]
+            },
+            {
+              "tag": "span",
+              "style": "position:absolute;left:8px;top:8px;font-size:11px;font-weight:700;color:var(--text-subtle);letter-spacing:.06em",
+              "text": "HOLD FOR PRICE"
+            },
+            {
+              "tag": "span",
+              "style": "position:absolute;right:8px;top:8px;font-size:11px;font-weight:700;color:var(--text-subtle);letter-spacing:.06em",
+              "text": "DISCOUNT TO MOVE"
+            },
+            {
+              "tag": "span",
+              "style": "position:absolute;right:8px;bottom:34px;font-size:11px;font-weight:700;color:var(--danger);letter-spacing:.06em",
+              "text": "PRICE TO CLEAR"
+            },
+            {
+              "tag": "span",
+              "style": "position:absolute;left:66.7%;bottom:8px;transform:translateX(-50%);font-size:10.5px;font-weight:700;color:var(--accent);background:var(--surface);padding:0 5px",
+              "text": "120 days"
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "display:flex;justify-content:space-between;margin-top:4px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "0"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "30"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "60"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "90"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "120"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "150"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10px;color:var(--text-subtle);font-variant-numeric:tabular-nums",
+              "text": "180"
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "display:flex;justify-content:space-between;margin-top:2px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "font-size:10.5px;color:var(--text-subtle)",
+              "text": "Days in stock →"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:10.5px;color:var(--text-subtle)",
+              "text": "↑ Margin remaining, %"
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "border-top:1px solid var(--border);padding-top:12px;display:flex;align-items:center;gap:14px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "flex:1;font-size:12px;color:var(--text-subtle);line-height:1.45",
+              "text": "Five trailers sit in the red corner: old stock with thin margin. Those are the ones to decide on this week."
+            },
+            {
+              "tag": "button",
+              "style": "display:inline-flex;align-items:center;justify-content:center;gap:7px;height:28px;padding:0 10px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;transition:background 120ms cubic-bezier(.2,0,0,1),border-color 120ms;cursor:pointer;",
+              "kids": [
+                {
+                  "tag": "span",
+                  "text": "List the five"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
       "tag": "div",
       "style": "display:flex;flex-direction:column;gap:3px",
       "kids": [
@@ -2477,6 +4296,171 @@ export const KIT_DEVICES = {
     "found": true,
     "node": {
       "tag": "div",
+      "style": "background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden",
+      "kids": [
+        {
+          "tag": "div",
+          "style": "display:flex;height:38px",
+          "kids": [
+            {
+              "tag": "div",
+              "style": "flex:9;background:#09163A;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--panton);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;border-right:1px solid rgba(255,255,255,.25)",
+              "text": "9"
+            },
+            {
+              "tag": "div",
+              "style": "flex:8;background:#1E2F63;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--panton);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;border-right:1px solid rgba(255,255,255,.25)",
+              "text": "8"
+            },
+            {
+              "tag": "div",
+              "style": "flex:7;background:#3D5290;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--panton);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;border-right:1px solid rgba(255,255,255,.25)",
+              "text": "7"
+            },
+            {
+              "tag": "div",
+              "style": "flex:8;background:#8492C0;display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--panton);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;border-right:1px solid rgba(255,255,255,.25)",
+              "text": "8"
+            },
+            {
+              "tag": "div",
+              "style": "flex:9;background:var(--danger);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--panton);font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;border-right:1px solid rgba(255,255,255,.25)",
+              "text": "9"
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "display:flex",
+          "kids": [
+            {
+              "tag": "div",
+              "style": "flex:1;padding:13px 15px;display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "0–30 days"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums",
+                  "text": "£268k"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-weight:400",
+                  "text": "Turning normally"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "flex:1;padding:13px 15px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "31–60"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums",
+                  "text": "£231k"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--text-subtle);font-weight:400",
+                  "text": "Turning normally"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "flex:1;padding:13px 15px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "61–90"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums",
+                  "text": "£196k"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--warning);font-weight:600",
+                  "text": "Watch"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "flex:1;padding:13px 15px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "91–120"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums",
+                  "text": "£214k"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--warning);font-weight:600",
+                  "text": "Watch"
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "flex:1;padding:13px 15px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:4px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "font-size:11.5px;font-weight:600",
+                  "text": "120+"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-family:var(--panton);font-weight:800;font-size:17px;font-variant-numeric:tabular-nums",
+                  "text": "£242k"
+                },
+                {
+                  "tag": "span",
+                  "style": "font-size:11px;color:var(--danger);font-weight:600",
+                  "text": "Act now"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "padding:12px 15px;background:var(--bg-subtle);border-top:1px solid var(--border);display:flex;align-items:center;gap:14px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "flex:1;font-size:12px;color:var(--text-muted)",
+              "text": "£242k is tied up in stock older than four months. That is a third of a month of group revenue standing still."
+            },
+            {
+              "tag": "span",
+              "style": "display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;background:rgba(207,36,23,.11);color:var(--danger);border:1px solid transparent;border-radius:var(--r-sm);font-size:11px;font-weight:600;letter-spacing:.01em;white-space:nowrap",
+              "text": "9 units"
+            }
+          ]
+        }
+      ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
       "style": "display:flex;flex-direction:column;gap:3px",
       "kids": [
         {
@@ -2488,6 +4472,278 @@ export const KIT_DEVICES = {
           "tag": "span",
           "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
           "text": "How the 41 break down, and what each band is worth. The band, not the average, is what tells you whether stock is turning."
+        }
+      ]
+    }
+  },
+  "verdict": {
+    "title": "Verdict band",
+    "found": true,
+    "node": {
+      "tag": "div",
+      "style": "border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:var(--r-md);background:var(--surface);padding:18px 22px;display:flex;gap:26px;align-items:flex-start",
+      "kids": [
+        {
+          "tag": "div",
+          "style": "flex:1;min-width:0;display:flex;flex-direction:column;gap:9px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "font-family:var(--panton);font-weight:700;font-size:10px;letter-spacing:.18em;color:var(--accent)",
+              "text": "THE MONTH IN A SENTENCE"
+            },
+            {
+              "tag": "span",
+              "style": "font-size:20px;line-height:1.4;font-weight:500;letter-spacing:-0.01em",
+              "kids": [
+                {
+                  "tag": "#text",
+                  "text": "Group is "
+                },
+                {
+                  "tag": "b",
+                  "style": "font-weight:700",
+                  "text": "up 15.7%"
+                },
+                {
+                  "tag": "#text",
+                  "text": " on last month. Trailer sales carried it, STC held steady, and rentals slipped for the third month running."
+                }
+              ]
+            },
+            {
+              "tag": "div",
+              "style": "display:flex;gap:22px;flex-wrap:wrap;padding-top:6px",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "display:inline-flex;align-items:center;gap:9px",
+                  "kids": [
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:6px;height:19px;padding:0 8px;border:1px solid #3D5290;color:#3D5290;border-radius:var(--r-sm);font-size:10px;font-weight:700;letter-spacing:.08em;white-space:nowrap",
+                      "kids": [
+                        {
+                          "tag": "span",
+                          "style": "width:6px;height:6px;background:currentColor"
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "TRAILER SALES"
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:var(--success)",
+                      "kids": [
+                        {
+                          "tag": "svg",
+                          "style": "flex:none",
+                          "viewBox": "0 0 24 24",
+                          "preserveAspectRatio": null,
+                          "attrs": {
+                            "stroke": "currentColor",
+                            "stroke-width": "2",
+                            "stroke-linecap": "round",
+                            "stroke-linejoin": "round",
+                            "fill": "none"
+                          },
+                          "geom": {
+                            "width": "12",
+                            "height": "12"
+                          },
+                          "kids": [
+                            {
+                              "tag": "path"
+                            }
+                          ]
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "12.4%"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "tag": "span",
+                  "style": "display:inline-flex;align-items:center;gap:9px",
+                  "kids": [
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:6px;height:19px;padding:0 8px;border:1px solid #09163A;color:#09163A;border-radius:var(--r-sm);font-size:10px;font-weight:700;letter-spacing:.08em;white-space:nowrap",
+                      "kids": [
+                        {
+                          "tag": "span",
+                          "style": "width:6px;height:6px;background:currentColor"
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "STC"
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:var(--success)",
+                      "kids": [
+                        {
+                          "tag": "svg",
+                          "style": "flex:none",
+                          "viewBox": "0 0 24 24",
+                          "preserveAspectRatio": null,
+                          "attrs": {
+                            "stroke": "currentColor",
+                            "stroke-width": "2",
+                            "stroke-linecap": "round",
+                            "stroke-linejoin": "round",
+                            "fill": "none"
+                          },
+                          "geom": {
+                            "width": "12",
+                            "height": "12"
+                          },
+                          "kids": [
+                            {
+                              "tag": "path"
+                            }
+                          ]
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "1.8%"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "tag": "span",
+                  "style": "display:inline-flex;align-items:center;gap:9px",
+                  "kids": [
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:6px;height:19px;padding:0 8px;border:1px solid #8492C0;color:#8492C0;border-radius:var(--r-sm);font-size:10px;font-weight:700;letter-spacing:.08em;white-space:nowrap",
+                      "kids": [
+                        {
+                          "tag": "span",
+                          "style": "width:6px;height:6px;background:currentColor"
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "RENTALS"
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "style": "display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:var(--danger)",
+                      "kids": [
+                        {
+                          "tag": "svg",
+                          "style": "flex:none",
+                          "viewBox": "0 0 24 24",
+                          "preserveAspectRatio": null,
+                          "attrs": {
+                            "stroke": "currentColor",
+                            "stroke-width": "2",
+                            "stroke-linecap": "round",
+                            "stroke-linejoin": "round",
+                            "fill": "none"
+                          },
+                          "geom": {
+                            "width": "12",
+                            "height": "12"
+                          },
+                          "kids": [
+                            {
+                              "tag": "path"
+                            }
+                          ]
+                        },
+                        {
+                          "tag": "#text",
+                          "text": "6.2%"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tag": "div",
+          "style": "flex:none;width:236px;border-left:1px solid var(--border);padding-left:22px;display:flex;flex-direction:column;gap:9px",
+          "kids": [
+            {
+              "tag": "span",
+              "style": "font-family:var(--panton);font-weight:700;font-size:10px;letter-spacing:.16em;color:var(--text-subtle)",
+              "text": "NEEDS A DECISION"
+            },
+            {
+              "tag": "span",
+              "style": "display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.4",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "flex:none;width:7px;height:7px;border-radius:999px;background:var(--danger);margin-top:5px"
+                },
+                {
+                  "tag": "#text",
+                  "text": "Rentals utilisation at 74%"
+                }
+              ]
+            },
+            {
+              "tag": "span",
+              "style": "display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.4",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "flex:none;width:7px;height:7px;border-radius:999px;background:var(--warning);margin-top:5px"
+                },
+                {
+                  "tag": "#text",
+                  "text": "9 trailers over 120 days in stock"
+                }
+              ]
+            },
+            {
+              "tag": "span",
+              "style": "display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.4",
+              "kids": [
+                {
+                  "tag": "span",
+                  "style": "flex:none;width:7px;height:7px;border-radius:999px;background:var(--warning);margin-top:5px"
+                },
+                {
+                  "tag": "#text",
+                  "text": "4 FleetSmart+ renewals due"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "wrapStyle": "display:flex;flex-direction:column;gap:11px",
+    "head": {
+      "tag": "div",
+      "style": "display:flex;flex-direction:column;gap:3px",
+      "kids": [
+        {
+          "tag": "span",
+          "style": "font-family:var(--panton);font-weight:700;font-size:15px;letter-spacing:-0.02em",
+          "text": "Verdict band"
+        },
+        {
+          "tag": "span",
+          "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
+          "text": "The first thing on the page. It answers \"how are we doing\" in a sentence, then backs it with the three division deltas."
         }
       ]
     }
@@ -2606,10 +4862,71 @@ export const KIT_DEVICES = {
           "text": "Gold is half the contracts and 59% of the weekly value. Platinum is 18% of contracts but the highest value each."
         }
       ]
-    }
+    },
+    "wrapStyle": "display:grid;grid-template-columns:repeat(2,1fr);gap:16px;width:100%;min-width:0",
+    "head": null
+  }
+} as const;
+
+export const KIT_PARTS = {
+  "buttonPrimary": {
+    "tag": "button",
+    "style": "display:inline-flex;align-items:center;justify-content:center;gap:7px;height:28px;padding:0 10px;background:var(--primary);color:var(--primary-fg);border:1px solid var(--primary);border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;transition:background 120ms cubic-bezier(.2,0,0,1),border-color 120ms;cursor:pointer;",
+    "of": "Apply to page"
   },
-  "verdict": {
-    "title": "The month in a sentence",
-    "found": false
+  "buttonSecondary": {
+    "tag": "button",
+    "style": "display:inline-flex;align-items:center;justify-content:center;gap:7px;height:28px;padding:0 10px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;transition:background 120ms cubic-bezier(.2,0,0,1),border-color 120ms;cursor:pointer;",
+    "of": "Save this view"
+  },
+  "buttonAccent": {
+    "tag": "button",
+    "style": "display:inline-flex;align-items:center;justify-content:center;gap:7px;height:28px;padding:0 10px;background:transparent;color:var(--accent);border:1px solid transparent;border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;transition:background 120ms cubic-bezier(.2,0,0,1),border-color 120ms;cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:0;height:auto;border:0;",
+    "of": "Add filter"
+  },
+  "buttonGhost": {
+    "tag": "button",
+    "style": "display:inline-flex;align-items:center;justify-content:center;gap:7px;height:28px;padding:0 10px;background:transparent;color:var(--text-muted);border:1px solid transparent;border-radius:var(--r);font-family:var(--inter);font-size:12px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;transition:background 120ms cubic-bezier(.2,0,0,1),border-color 120ms;cursor:pointer;",
+    "of": "Clear"
+  },
+  "segmentOn": {
+    "tag": "button",
+    "style": "height:30px;padding:0 13px;background:var(--primary);color:var(--primary-fg);border:1px solid var(--primary);border-radius:var(--r) 0 0 var(--r);font-family:var(--inter);font-size:12.5px;font-weight:600;cursor:pointer",
+    "of": "Month"
+  },
+  "segmentMid": {
+    "tag": "button",
+    "style": "height:30px;padding:0 13px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-left:0;border-radius:0;font-family:var(--inter);font-size:12.5px;font-weight:600;cursor:pointer",
+    "of": "Quarter"
+  },
+  "segmentEnd": {
+    "tag": "button",
+    "style": "height:30px;padding:0 13px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-left:0;border-radius:0 var(--r) var(--r) 0;font-family:var(--inter);font-size:12.5px;font-weight:600;cursor:pointer",
+    "of": "Custom"
+  },
+  "label": {
+    "tag": "span",
+    "style": "font-family:var(--panton);font-weight:700;font-size:10px;letter-spacing:.16em;color:var(--text-subtle)",
+    "of": "COMPARE AGAINST"
+  },
+  "toolbarRow": {
+    "tag": "div",
+    "style": "display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px 16px;border-bottom:1px solid var(--border)",
+    "of": "Save this view"
+  },
+  "alert": {
+    "tag": "div",
+    "style": "display:flex;gap:11px;padding:12px 14px;background:rgba(199,122,6,.09);border:1px solid var(--warning);border-radius:var(--r)",
+    "of": "September is 9 days in. Comparisons are trimmed to the first 9 days of August so the shape is honest, and every chart says so in its footnote."
+  },
+  "fieldInput": {
+    "tag": "input",
+    "style": "flex:1;min-width:0;height:100%;padding:0 10px 0 10px;background:transparent;color:var(--text);border:0;outline:0;font-family:var(--inter);font-size:12px;letter-spacing:-0.01em",
+    "of": "the kit field"
+  },
+  "fieldShell": {
+    "tag": "div",
+    "style": "display:flex;align-items:center;height:28px;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r);width:210px;",
+    "of": "the kit field"
   }
 } as const;

@@ -1,7 +1,14 @@
 'use client';
 
-import { notFound } from 'next/navigation';
+import { notFound, useSearchParams } from 'next/navigation';
 import { AnalyticsHub } from '@/components/AnalyticsHub';
+import { TargetsBoard } from '@/components/analytics/TargetsBoard';
+import { CustomersDrillDown } from '@/components/analytics/drilldowns/customers';
+import { FleetSmartDrillDown } from '@/components/analytics/drilldowns/fleetsmart';
+import { PeopleDrillDown } from '@/components/analytics/drilldowns/people';
+import { PipelineDrillDown } from '@/components/analytics/drilldowns/pipeline';
+import { RevenueDrillDown } from '@/components/analytics/drilldowns/revenue';
+import { StockDrillDown } from '@/components/analytics/drilldowns/stock';
 import { buildPeriod } from '@/lib/analytics/period';
 import {
   ageingBands, contractBook, decisionsFrom, divisionRows, headlineFigures,
@@ -204,6 +211,29 @@ if (typeof window !== 'undefined' && !(window as any).__analyticsPreview) {
   const real = window.fetch.bind(window);
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    /* The targets screen reads and writes its own route. Answered
+       here so the harness shows the grid with figures in it rather
+       than the alert, and a save round trips without a database. */
+    if (url.includes('/api/analytics/target')) {
+      if ((init?.method ?? 'GET') !== 'GET') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      const fy = Number(TODAY.slice(0, 4)) - (Number(TODAY.slice(5, 7)) >= 4 ? 0 : 1);
+      const targets = Array.from({ length: 12 }, (_, i) => {
+        const month = new Date(Date.UTC(fy, 3 + i, 1)).toISOString().slice(0, 10);
+        return [
+          { month, division: null, target: 2020000 },
+          { month, division: 'stc', target: 1250000 },
+          { month, division: 'trailer', target: 560000 },
+          { month, division: 'rental', target: 210000 },
+        ];
+      }).flat();
+      return Promise.resolve(new Response(JSON.stringify({ targets }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
+    }
     if (url.includes('/api/analytics')) {
       return Promise.resolve(new Response(JSON.stringify(sample()), {
         status: 200, headers: { 'Content-Type': 'application/json' },
@@ -213,8 +243,40 @@ if (typeof window !== 'undefined' && !(window as any).__analyticsPreview) {
   }) as typeof window.fetch;
 }
 
+/* Which screen the harness is showing.
+
+   Analytics is a landing and seven screens now, and the harness only
+   ever mounted the landing. A drill-down that nothing could render was
+   a drill-down nothing could measure, so `check:kit-diff` had an empty
+   list of ported devices and reported success on a page it had never
+   seen. `?screen=revenue` and the rest mount the real drill-down
+   component, fed by the same fixture through the same fetch. */
+const SCREENS: Record<string, (p: { today: string }) => JSX.Element> = {
+  targets: TargetsBoard,
+  revenue: RevenueDrillDown,
+  pipeline: PipelineDrillDown,
+  people: PeopleDrillDown,
+  stock: StockDrillDown,
+  fleetsmart: FleetSmartDrillDown,
+  customers: CustomersDrillDown,
+};
+
 export default function AnalyticsPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
+  /* Read through the router rather than off `window`, so the server
+     and the browser agree on the first render. Reading
+     `window.location` here made every drill-down a hydration
+     mismatch, and React then threw the server tree away and redrew,
+     which is a page measured after a repaint. */
+  const screen = useSearchParams().get('screen') ?? '';
+  const Drill = SCREENS[screen];
+  if (Drill) {
+    return (
+      <div className="kit" style={{ padding: '24px 28px 56px', maxWidth: 1800 }}>
+        <Drill today={TODAY} />
+      </div>
+    );
+  }
   return (
     /* The same box the dashboard gives a page: `.content__inner` in
        globals.css is 24px 28px inside an 1800px cap. Kept at 1800 on

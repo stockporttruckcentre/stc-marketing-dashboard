@@ -16,6 +16,7 @@
 
    npm run check:coverage
    ============================================================= */
+import { readdirSync } from 'node:fs';
 import { parseQuery as readQuery } from '../lib/command/query';
 import { ENTITIES as ENTITIES_FOR_SPACE } from '../lib/command/schema';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
@@ -1785,6 +1786,21 @@ for (const [said, id] of [
   ['recurring revenue', 'nav.analyticsBook'],
   ['contract retention', 'nav.analyticsBook'],
   ['annualised contracts', 'nav.analyticsBook'],
+
+  /* The three drill-downs that had no entry of their own. Analytics
+     is a landing and six screens, and a screen the bar cannot reach
+     is a screen nobody finds. */
+  ['revenue drill down', 'nav.analyticsRevenue'],
+  ['indexed trend', 'nav.analyticsRevenue'],
+  ['what moved the group number', 'nav.analyticsRevenue'],
+
+  ['where leads come from', 'nav.analyticsPipeline'],
+  ['lead sources', 'nav.analyticsPipeline'],
+  ['pipeline detail', 'nav.analyticsPipeline'],
+
+  ['customer analysis', 'nav.analyticsCustomers'],
+  ['spend by customer', 'nav.analyticsCustomers'],
+  ['who is spending', 'nav.analyticsCustomers'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === id));
@@ -1800,6 +1816,47 @@ for (const said of ['set a target', 'set the revenue target', 'monthly target'])
     ok(`and a ${role} is not offered "${said}"`,
       !suggestActions(said, CAPS[role], 8).some((h) => h.action.id === 'analytics.target'));
   }
+}
+
+/* And it goes to the screen that exists.
+
+   This one is asserted rather than left to reading, because the whole
+   defect was a link to a route nobody had built: `Executive` pointed
+   at /dashboard/analytics/targets from the day the hub was split, and
+   for that whole time the editor was still a fold inside a component
+   that had stopped rendering. An action naming a path is worth nothing
+   unless the path is a screen. */
+{
+  const target = ACTIONS.find((a) => a.id === 'analytics.target');
+  ok('the target action points at the targets screen',
+    target?.path === '/dashboard/analytics/targets',
+    `it points at ${target?.path ?? 'nothing'}`);
+}
+
+/* Every analytics path the bar offers is a route that exists on disk.
+
+   A hash was how the old ones addressed a section: `#stock`, `#people`,
+   `#book`. Those sections are screens now, so the hashes pointed at
+   anchors that had gone and every one of them landed on the landing
+   page with nothing highlighted. Checked mechanically because it is
+   exactly the kind of breakage that looks fine until somebody types
+   the sentence. */
+{
+  const routes = new Set(
+    readdirSync('app/dashboard/analytics', { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => `/dashboard/analytics/${e.name}`),
+  );
+  routes.add('/dashboard/analytics');
+
+  const wrong = ACTIONS
+    .filter((a) => a.path?.startsWith('/dashboard/analytics'))
+    .map((a) => ({ id: a.id, path: (a.path ?? '').split('?')[0] ?? '' }))
+    .filter((a) => !routes.has(a.path));
+
+  ok('every analytics action points at a route that exists',
+    wrong.length === 0,
+    wrong.map((w) => `${w.id} -> ${w.path}`).join(', '));
 }
 
 console.log(`\n${pass}/${pass + fail} passing`);

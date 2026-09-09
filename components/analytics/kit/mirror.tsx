@@ -43,6 +43,20 @@ export type KitNode = {
   readonly style?: string;
   readonly text?: string;
   readonly kids?: readonly KitNode[];
+  /* SVG only. Inside an svg the kit writes its design in attributes
+     rather than in a style: stroke, stroke-width, stroke-dasharray,
+     fill and vector-effect. They come across with the node so that a
+     port does not have to type a single one of them. */
+  readonly attrs?: Readonly<Record<string, string>>;
+  /* Also SVG only, and deliberately separate from `attrs`. These are
+     the kit's own data set and a port must never draw them. They are
+     recorded because some of what looks like data is design: a
+     waterfall bar is 69.4 wide in a 124 slot, and that proportion is a
+     decision about the chart. A port reads it off here rather than
+     typing it. */
+  readonly geom?: Readonly<Record<string, string>>;
+  readonly viewBox?: string;
+  readonly preserveAspectRatio?: string | null;
 };
 
 export type Patch = {
@@ -58,6 +72,34 @@ export type Patch = {
   drop?: boolean;
   /** Anything React, dropped in place of the node's own children. */
   slot?: ReactNode;
+  /**
+   * Geometry, for an SVG shape.
+   *
+   * The kit's own x1, points and width are ITS data set. Ours has to
+   * put its own numbers in the same shapes, so geometry is supplied
+   * here while every presentation attribute stays the kit's. Anything
+   * named here that the kit also sets is overridden, which is how a
+   * heat cell or a division line takes our colour without the rest of
+   * the declaration moving.
+   */
+  attrs?: Record<string, string | number>;
+  /**
+   * Rewrite the kit's colours, everywhere under this node.
+   *
+   * The kit is a light design and writes its data colours as literal
+   * hexes: navy for STC, a mid blue for trailer sales, a pale blue for
+   * rentals. This application has a dark theme as well, and navy on a
+   * navy ground is a shape nobody can see. Every literal in the file
+   * therefore has to become the data token for that series, which
+   * `app/kit-tokens.css` already defines on both grounds and which
+   * exists because of the same fault the other way round: "the bottom
+   * bar graph is blinding".
+   *
+   * It applies to style strings, to `fill` and to `stroke`, and it
+   * inherits down the tree, so a legend swatch and the line it stands
+   * for cannot be recoloured differently.
+   */
+  recolour?: (value: string) => string;
   /** Handlers, for the devices the design makes interactive. */
   on?: {
     click?: () => void;
@@ -107,6 +149,50 @@ export function findAll(node: KitNode, test: (style: string, n: KitNode) => bool
   return out;
 }
 
+/**
+ * The whole device: the label above the panel, and the box round both.
+ *
+ * The kit draws one as a flex column with an 11px gap holding a title
+ * block and then the panel. Extracting the panel alone left the label
+ * to be written by hand, and a hand written label is a different height
+ * on each side of a row. That is exactly what the business reported:
+ *
+ *   Revenue page for example, one chart starts further down the page
+ *   than the other and its div is a different size to the chart div
+ *   next to it. The brand kit forces you to keep them uniform which
+ *   was ignored.
+ *
+ * With the label inside the device, both halves come from the file and
+ * a row of two devices is two identical structures.
+ */
+export function DeviceFrame({ of, title, sub, children }: {
+  /** Which of the kit's devices to wear. */
+  of: keyof typeof KIT_DEVICES;
+  title: string;
+  sub?: string;
+  children: ReactNode;
+}) {
+  const d = KIT_DEVICES[of] as {
+    found: boolean; wrapStyle?: string | null; head?: KitNode | null;
+  };
+  const head = d?.head ?? null;
+
+  return (
+    <div style={d?.wrapStyle ? parseStyle(d.wrapStyle) : undefined}>
+      {head && mirror(head, {
+        kids: [{ text: title }, sub === undefined ? { drop: true } : { text: sub }],
+      })}
+      {children}
+    </div>
+  );
+}
+
+/** The kit's panel, as the named device wears it. */
+export function panelStyle(key: keyof typeof KIT_DEVICES): CSSProperties {
+  const d = KIT_DEVICES[key] as { node?: KitNode };
+  return d?.node?.style ? parseStyle(d.node.style) : {};
+}
+
 export function device(key: keyof typeof KIT_DEVICES): KitNode {
   const d = KIT_DEVICES[key] as { found: boolean; node?: KitNode; title: string };
   if (!d?.found || !d.node) {
@@ -121,8 +207,11 @@ export function device(key: keyof typeof KIT_DEVICES): KitNode {
 /* -------------------------------------------------------------
    The walk
    ------------------------------------------------------------- */
-export function mirror(node: KitNode, patch: Patch = {}, key?: string | number): ReactNode {
+export function mirror(
+  node: KitNode, patch: Patch = {}, key?: string | number, inherited?: (v: string) => string,
+): ReactNode {
   if (patch.drop) return null;
+  const recolour = patch.recolour ?? inherited;
 
   /* A text node is a node.
 
@@ -134,11 +223,26 @@ export function mirror(node: KitNode, patch: Patch = {}, key?: string | number):
     return patch.text !== undefined ? String(patch.text) : (node.text ?? '');
   }
 
-  const style = node.style
-    ? parseStyle(patch.style ? patch.style(node.style) : node.style)
+  const written = node.style
+    ? (patch.style ? patch.style(node.style) : node.style)
     : undefined;
+  const style = written === undefined
+    ? undefined
+    : parseStyle(recolour ? recolour(written) : written);
 
-  const props: Record<string, unknown> = { key, style };
+  const props: Record<string, unknown> = { style };
+
+  /* The kit's own presentation attributes, then ours for geometry.
+     React wants them camel cased, so the hyphenated names the file
+     writes are converted rather than listed. */
+  for (const [k, v] of Object.entries({ ...(node.attrs ?? {}), ...(patch.attrs ?? {}) })) {
+    const paint = recolour && typeof v === 'string' && (k === 'fill' || k === 'stroke');
+    props[k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = paint ? recolour(v) : v;
+  }
+  if (node.viewBox) {
+    props.viewBox = node.viewBox;
+    if (node.preserveAspectRatio) props.preserveAspectRatio = node.preserveAspectRatio;
+  }
   if (patch.title) props.title = patch.title;
   if (patch.on?.click) { props.onClick = patch.on.click; props.role = 'button'; props.tabIndex = 0; }
   if (patch.on?.enter) props.onMouseEnter = patch.on.enter;
@@ -162,14 +266,17 @@ export function mirror(node: KitNode, patch: Patch = {}, key?: string | number):
           + `${originals.length}. The kit's structure has changed, or the patch is wrong.`,
         );
       }
-      return mirror(source, p, i);
+      return mirror(source, p, i, recolour);
     });
   } else if (node.kids?.length) {
-    children = node.kids.map((k, i) => mirror(k, {}, i));
+    children = node.kids.map((k, i) => mirror(k, {}, i, recolour));
   } else if (node.text !== undefined) {
     children = node.text;
   }
 
+  /* The key is passed directly rather than spread. React warns about a
+     key inside a spread object and, in a future version, ignores it,
+     which would put every mirrored list back on index reconciliation. */
   const Tag = node.tag as keyof JSX.IntrinsicElements;
-  return <Tag {...props}>{children}</Tag>;
+  return <Tag key={key} {...props}>{children}</Tag>;
 }

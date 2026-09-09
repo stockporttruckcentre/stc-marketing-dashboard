@@ -85,11 +85,48 @@ const DEVICES: Record<string, string> = {
   waterfall: 'August close to September month to date',
   leaderboard: 'September, new business by person',
   dotplot: 'Lead to won conversion',
-  sourceFlow: 'Where leads came from, and what became of them',
-  scatter: 'Stock age against margin',
+  sourceFlow: '142 leads, September',
+  scatter: '41 trailers in stock',
+  /* These two have no title inside the panel, so they are found by the
+     label above it and `panelFor` steps across to the panel. */
   ageing: 'Stock ageing bands',
+  verdict: 'Verdict band',
   mix: 'Mix today, 96 contracts',
-  verdict: 'The month in a sentence',
+};
+
+/* -------------------------------------------------------------
+   2b. The parts, named by the words the kit puts on them
+
+   A device is a whole panel. A part is one element: a button, a field,
+   a small caps label. Screens that the kit has no panel for still have
+   to be built out of something, and the only permitted something is
+   the kit's own declarations. So each of these is looked up by its
+   exact text and its style string is recorded verbatim.
+
+   The kit has four button kinds and the difference between them is not
+   a judgement: primary carries `background:var(--primary)`, accent is
+   a link in `var(--accent)`, ghost is transparent on `--text-muted`,
+   secondary is the bordered default. They are named here by the button
+   in the file that is each one.
+   ------------------------------------------------------------- */
+const PARTS: Record<string, string> = {
+  buttonPrimary: 'Apply to page',
+  buttonSecondary: 'Save this view',
+  buttonAccent: 'Add filter',
+  buttonGhost: 'Clear',
+  segmentOn: 'Month',
+  segmentMid: 'Quarter',
+  segmentEnd: 'Custom',
+  label: 'COMPARE AGAINST',
+  /* The control bar's own row, and its "n selected" line. Both are
+     looked up by their text so a screen the kit has no panel for can
+     still be laid out in the kit's own spacing rather than in numbers
+     somebody typed. */
+  toolbarRow: 'Save this view',
+  /* The kit's one alert, found by the sentence inside it. The element
+     whose text matches is the box, because its icon contributes no
+     words, so this is the panel and not the line. */
+  alert: 'September is 9 days in. Comparisons are trimmed to the first 9 days of August so the shape is honest, and every chart says so in its footnote.',
 };
 
 type Node = { tag: string; style?: string; text?: string; kids?: Node[] };
@@ -106,26 +143,110 @@ async function main() {
      in Node and not in a page, so a function handed to `evaluate`
      throws ReferenceError the moment it is called. A string is compiled
      by the browser and has no helper in it. */
-  const BROWSER = `window.__kitExtract = function (devices) {
+  const BROWSER = `window.__kitExtract = function (config) {
+    var devices = config.devices;
     function panelFor(title) {
       var all = Array.prototype.slice.call(document.querySelectorAll('*'));
       var hit = null;
       for (var i = 0; i < all.length; i++) {
         if (all[i].children.length === 0 && (all[i].textContent || '').trim() === title) { hit = all[i]; break; }
       }
+      if (!hit) return null;
       var el = hit;
       while (el && el !== document.body) {
         var s = getComputedStyle(el);
         if (s.borderTopWidth !== '0px' && s.borderRadius !== '0px') return el;
         el = el.parentElement;
       }
-      return hit ? hit.parentElement : null;
+
+      /* Two devices carry no title inside the panel, so the words are
+         in the label block above it and there is no bordered ancestor
+         to walk up to. The kit's device is a label block followed by
+         the panel, so the panel is the block's next sibling. */
+      var block = hit.parentElement;
+      while (block && block !== document.body) {
+        var next = block.nextElementSibling;
+        if (next) {
+          var ns = getComputedStyle(next);
+          if (ns.borderTopWidth !== '0px' && ns.borderRadius !== '0px') return next;
+        }
+        block = block.parentElement;
+      }
+      return hit.parentElement;
     }
 
     function tree(el, depth) {
       var style = el.getAttribute('style');
       var node = { tag: el.tagName.toLowerCase() };
       if (style) node.style = style;
+
+      /* The two attributes that decide how a chart behaves when the
+         column it sits in is not 620 wide.
+
+         The kit draws every chart at viewBox 0 0 620 H and then sets a
+         fixed pixel height in CSS, so the drawing stretches sideways
+         and the height never moves. Five of its seven charts also turn
+         the aspect ratio off, which is what stops the whole thing
+         being scaled down when the column narrows.
+
+         Our own charts scaled uniformly instead, so a chart moved from
+         a full row into a half one shrank its axis labels with it and
+         the business reported "some have like 3px fonts that are
+         impossible". Which of the two a device does is in the file, so
+         it is read out of the file rather than decided here.
+
+         The bundler rewrites camel cased SVG attributes with a prefix
+         while it is packing, so both spellings are looked for. */
+      var vb = el.getAttribute('viewBox') || el.getAttribute('sc-camel-view-box');
+      if (vb) {
+        node.viewBox = vb;
+        node.preserveAspectRatio = el.getAttribute('preserveAspectRatio')
+          || el.getAttribute('sc-camel-preserve-aspect-ratio') || null;
+      }
+
+      /* Inside an SVG the kit writes its design in ATTRIBUTES, not in
+         styles: stroke, stroke-width, stroke-dasharray, fill, rx and
+         vector-effect. Recording only the style attribute left every
+         one of those to be typed by hand, which is the banned act. So
+         the presentation attributes come across too.
+
+         Geometry is deliberately not in this list. x, y, width, points
+         and d are this data set's numbers, not the design, and a port
+         has to compute them from ours. */
+      var PRESENTATION = [
+        'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap',
+        'stroke-linejoin', 'fill', 'fill-opacity', 'opacity', 'rx', 'ry',
+        'vector-effect', 'text-anchor', 'font-size', 'font-weight', 'font-family',
+      ];
+      var attrs = {};
+      var any = false;
+      for (var a = 0; a < PRESENTATION.length; a++) {
+        var v = el.getAttribute(PRESENTATION[a]);
+        if (v !== null) { attrs[PRESENTATION[a]] = v; any = true; }
+      }
+      if (any) node.attrs = attrs;
+
+      /* Geometry, recorded separately.
+
+         These are the kit's own data set and a port must not draw
+         them. They are here because some of what looks like data is
+         actually design: a waterfall bar is 69.4 wide in a 124 slot,
+         and that 56% is a decision about the chart rather than a fact
+         about August. A port reads the proportion off these rather
+         than typing a number, and the no-invention check refuses the
+         alternative.
+
+         No backticks anywhere in this comment. It sits inside a
+         template literal and one would close it, which is the same
+         trap the escape note above records. */
+      var GEOMETRY = ['x', 'y', 'width', 'height', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r'];
+      var geom = {};
+      var anyGeom = false;
+      for (var g = 0; g < GEOMETRY.length; g++) {
+        var gv = el.getAttribute(GEOMETRY[g]);
+        if (gv !== null) { geom[GEOMETRY[g]] = gv; anyGeom = true; }
+      }
+      if (anyGeom) node.geom = geom;
 
       /* childNodes, not children.
 
@@ -170,8 +291,25 @@ async function main() {
     Object.keys(devices).forEach(function (key) {
       var title = devices[key];
       var panel = panelFor(title);
-      out[key] = panel ? { title: title, found: true, node: tree(panel, 0) }
-                       : { title: title, found: false };
+      /* The label above the panel, and the box holding the two.
+
+         The kit draws a device as a flex column with an 11px gap: a
+         title block, then the panel. Extracting the panel alone left
+         the label to be written by hand, and a hand written label is
+         two more values and a different height on each side of a row,
+         which is exactly what "one chart starts further down the page
+         than the other" was. */
+      var wrap = panel && panel.parentElement;
+      var head = panel && panel.previousElementSibling;
+      out[key] = panel
+        ? {
+            title: title,
+            found: true,
+            node: tree(panel, 0),
+            wrapStyle: wrap ? wrap.getAttribute('style') : null,
+            head: head && head.getAttribute('style') ? tree(head, 0) : null,
+          }
+        : { title: title, found: false };
     });
 
     var colours = {};
@@ -196,7 +334,39 @@ async function main() {
       }
     });
 
-    return { devices: out, colours: colours, ramps: ramps };
+    var parts = {};
+    Object.keys(config.parts).forEach(function (key) {
+      var want = config.parts[key];
+      var all = Array.prototype.slice.call(document.querySelectorAll('button, span, input, div, label'));
+      for (var i = 0; i < all.length; i++) {
+        if ((all[i].textContent || '').trim() !== want) continue;
+        /* A row is named by a control inside it, because a row has no
+           words of its own. The parent is taken when the key says so. */
+        var el = key.indexOf('Row') > 0 ? all[i].parentElement : all[i];
+        if (el && el.getAttribute('style')) {
+          parts[key] = { tag: el.tagName.toLowerCase(), style: el.getAttribute('style'), of: want };
+          return;
+        }
+      }
+    });
+
+    /* The one field the kit draws, which is a bordered box with a
+       borderless input inside it rather than a styled input. Both
+       halves are recorded, because using one without the other gives
+       a control with no border or a border round nothing. */
+    var box = document.querySelector('input[style]');
+    if (box) {
+      parts.fieldInput = { tag: 'input', style: box.getAttribute('style'), of: 'the kit field' };
+      if (box.parentElement && box.parentElement.getAttribute('style')) {
+        parts.fieldShell = {
+          tag: box.parentElement.tagName.toLowerCase(),
+          style: box.parentElement.getAttribute('style'),
+          of: 'the kit field',
+        };
+      }
+    }
+
+    return { devices: out, colours: colours, ramps: ramps, parts: parts };
   };`;
 
   /* Injected as a script tag and then called by expression.
@@ -223,11 +393,12 @@ async function main() {
   writeFileSync(`${WORK}/extract.js`, BROWSER);
   await page.addScriptTag({ path: `${WORK}/extract.js` });
   const result = await page.evaluate(
-    `window.__kitExtract(${JSON.stringify(DEVICES)})`,
+    `window.__kitExtract(${JSON.stringify({ devices: DEVICES, parts: PARTS })})`,
   ) as {
     devices: Record<string, unknown>;
     colours: Record<string, string>;
     ramps: Record<string, unknown>;
+    parts: Record<string, unknown>;
   };
 
   await browser.close();
@@ -247,6 +418,7 @@ async function main() {
   lines.push(`export const KIT_COLOURS = ${JSON.stringify(result.colours, null, 2)} as const;\n`);
   lines.push(`export const KIT_RAMPS = ${JSON.stringify(result.ramps, null, 2)} as const;\n`);
   lines.push(`export const KIT_DEVICES = ${JSON.stringify(result.devices, null, 2)} as const;\n`);
+  lines.push(`export const KIT_PARTS = ${JSON.stringify(result.parts, null, 2)} as const;\n`);
   writeFileSync(OUT, lines.join('\n'));
 
   const found = Object.values(result.devices).filter((d) => (d as { found: boolean }).found).length;
@@ -257,6 +429,10 @@ async function main() {
     if (!d.found) console.log(`  NOT FOUND  ${k}  "${d.title}"`);
   }
   console.log(`  ${Object.keys(result.colours).length} named colours, ${Object.keys(result.ramps).length} heat scales`);
+  console.log(`  ${Object.keys(result.parts).length}/${Object.keys(PARTS).length + 2} parts found`);
+  for (const key of [...Object.keys(PARTS), 'fieldInput', 'fieldShell']) {
+    if (!result.parts[key]) console.log(`  NOT FOUND  part ${key}`);
+  }
 }
 
 main();

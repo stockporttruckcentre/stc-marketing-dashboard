@@ -1,8 +1,12 @@
 {
-  "components/AnalyticsHub.tsx": 70,
+  "components/AnalyticsHub.tsx": 52,
   "components/analytics/kit/charts.tsx": 72,
   "components/analytics/kit/frame.tsx": 94,
   "components/analytics/sections.tsx": 48,
-  "components/analytics/landing.tsx": 53,
-  "components/analytics/DrillDown.tsx": 12
+  "components/analytics/landing.tsx": 52,
+  "components/analytics/DrillDown.tsx": 11,
+  "components/analytics/kit/devices.tsx": 0,
+  "components/analytics/kit/controls.tsx": 0,
+  "components/analytics/kit/mirror.tsx": 0,
+  "components/analytics/TargetsBoard.tsx": 0
 }

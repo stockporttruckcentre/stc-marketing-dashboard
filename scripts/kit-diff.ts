@@ -43,18 +43,31 @@ const WORK = '/tmp/kit-diff-work';
 const MINE = process.env.PREVIEW_URL ?? 'http://localhost:3000/analytics-preview';
 
 /**
- * Devices the preview harness renders, checked one for one.
+ * Devices ported from the kit, checked one for one.
  *
- * Empty for now, and that is a fact rather than a convenience. The
- * cohort grid was ported and proved identical to the kit, and it has
- * since moved to `/dashboard/analytics/fleetsmart`, which the preview
- * harness does not render and which needs a session. Until the harness
- * can mount a drill-down, the per-device check has nothing to look at
- * and says so rather than passing on an empty list.
+ * This list was empty, and the reason was a real gap rather than a
+ * convenience: the ported devices live on drill-downs and the preview
+ * harness only mounted the landing, so the per-device check had
+ * nothing to look at. The harness takes `?screen=` now, so it does.
  *
- * The landing check below is the one that runs.
+ * Each is found by the LABEL ABOVE THE PANEL, not by the title inside
+ * it. The label is the kit's own words on both sides. The title
+ * carries this period's figures, so it says "24 months, indexed" here
+ * and "Twelve months, indexed" in the file, and matching on it would
+ * compare nothing.
  */
-const PORTED: Record<string, string> = {};
+const PORTED: Record<string, { label: string; screen: string }> = {
+  indexed: { label: 'Indexed division trend', screen: 'revenue' },
+  waterfall: { label: 'How the group number moved', screen: 'revenue' },
+  bullet: { label: 'Revenue against target, by division', screen: 'revenue' },
+  /* The cohort is found by the title INSIDE its panel, because it is
+     the one device we render without the label above it: the kit's
+     cohort panel carries its own title, and drawing ours over the top
+     would print the title twice. Both spellings work, since the walk
+     goes up to a bordered ancestor first and only steps sideways when
+     there is none. */
+  cohort: { label: 'Contract retention by start month', screen: 'fleetsmart' },
+};
 
 function unpack(): string {
   rmSync(WORK, { recursive: true, force: true });
@@ -84,11 +97,26 @@ const WALK = `window.__kitWalk = function (title) {
     for (var i = 0; i < all.length; i++) {
       if (all[i].children.length === 0 && (all[i].textContent || '').trim() === t) { hit = all[i]; break; }
     }
+    if (!hit) return null;
     var el = hit;
     while (el && el !== document.body) {
       var s = getComputedStyle(el);
       if (s.borderTopWidth !== '0px' && s.borderRadius !== '0px') return el;
       el = el.parentElement;
+    }
+
+    /* A device's LABEL sits outside the panel, so walking up from it
+       finds no border. The kit's device is a label block followed by
+       the panel, so the panel is that block's next sibling. Same
+       fallback as scripts/kit-extract.ts, and for the same reason. */
+    var block = hit.parentElement;
+    while (block && block !== document.body) {
+      var next = block.nextElementSibling;
+      if (next) {
+        var ns = getComputedStyle(next);
+        if (ns.borderTopWidth !== '0px' && ns.borderRadius !== '0px') return next;
+      }
+      block = block.parentElement;
     }
     return null;
   }
@@ -204,6 +232,62 @@ function readable(sig: string): string {
   return `<${sig.split('|')[0]}>`;
 }
 
+/* -------------------------------------------------------------
+   The one departure from the kit that is deliberate
+
+   The kit is a light design and writes its data colours as literal
+   hexes: navy for STC, a mid blue for trailer sales, a pale blue for
+   rentals. This application has a dark theme as well, where navy on a
+   navy ground is a shape nobody can see, so each series has a token
+   with a value on each ground. `app/kit-tokens.css` holds them and
+   explains why, after the same fault the other way round: "the bottom
+   bar graph is blinding".
+
+   Without this the check would report those three swaps on every chart
+   forever, and a check that always fails is a check nobody reads. So
+   the substitution is undone before comparing: our light theme value
+   for a series is mapped back to the kit's hex for that series, and
+   ONLY those three. Anything else that differs still fails.
+
+   Both halves are read rather than typed. The kit's hexes come out of
+   `kit.generated.ts`, which a browser read from the file; ours come
+   out of the token file's light block.
+   ------------------------------------------------------------- */
+const SANCTIONED: [string, string][] = (() => {
+  const css = readFileSync('app/kit-tokens.css', 'utf8');
+  const light = css.slice(0, css.indexOf("[data-theme='dark']"));
+  const valueOf = (name: string) =>
+    light.match(new RegExp(`--${name}\\s*:\\s*(#[0-9A-Fa-f]{6})`))?.[1] ?? null;
+
+  const gen = readFileSync('lib/analytics/kit.generated.ts', 'utf8');
+  const colours = JSON.parse(
+    gen.slice(gen.indexOf('export const KIT_COLOURS = ') + 'export const KIT_COLOURS = '.length)
+      .split(' as const;')[0]!,
+  ) as Record<string, string>;
+
+  const rgb = (hex: string) => {
+    const n = hex.replace('#', '');
+    return `rgb(${parseInt(n.slice(0, 2), 16)}, ${parseInt(n.slice(2, 4), 16)}, ${parseInt(n.slice(4, 6), 16)})`;
+  };
+
+  const pairs: [string, string][] = [];
+  for (const [series, token] of [
+    ['STC', 'chart-stc'], ['Trailer sales', 'chart-trailer'], ['Rentals', 'chart-rental'],
+  ] as [string, string][]) {
+    const kitHex = colours[series];
+    const ours = valueOf(token);
+    if (kitHex && ours) pairs.push([rgb(ours), rgb(kitHex)]);
+  }
+  return pairs;
+})();
+
+/** Put a series colour back to the kit's, and leave everything else. */
+function unswap(sig: string): string {
+  let out = sig;
+  for (const [ours, kit] of SANCTIONED) out = out.split(ours).join(kit);
+  return out;
+}
+
 const diffs: string[] = [];
 
 async function main() {
@@ -226,15 +310,20 @@ async function main() {
   await ourPage.waitForTimeout(2000);
 
   let clean = 0;
-  for (const [key, title] of Object.entries(PORTED)) {
-    console.log(`\n  ${key}: "${title}"\n  ---------`);
-    const kit = await walk(kitPage, title);
-    const mine = await walk(ourPage, title);
+  for (const [key, { label, screen }] of Object.entries(PORTED)) {
+    console.log(`\n  ${key}: "${label}"  (${screen})\n  ---------`);
+    /* The harness mounts one screen at a time, so it is navigated
+       per device rather than the whole hub being asked for at once. */
+    await ourPage.goto(`${MINE}?screen=${screen}`, { waitUntil: 'networkidle', timeout: 20000 });
+    await ourPage.evaluate("document.documentElement.setAttribute('data-theme','light')");
+    await ourPage.waitForTimeout(1600);
+    const kit = await walk(kitPage, label);
+    const mine = await walk(ourPage, label);
     if (!kit) { console.log('  FAIL  not found in the kit'); diffs.push(`${key}: absent from the kit`); continue; }
     if (!mine) { console.log('  FAIL  not found on our page'); diffs.push(`${key}: absent from our page`); continue; }
 
-    const invented = Object.keys(mine.shapes).filter((s) => !(s in kit.shapes));
-    const unused = Object.keys(kit.shapes).filter((s) => !(s in mine.shapes));
+    const invented = Object.keys(mine.shapes).filter((sh) => !(unswap(sh) in kit.shapes));
+    const unused = Object.keys(kit.shapes).filter((sh) => !(sh in mine.shapes));
 
     if (invented.length === 0) {
       clean += 1;
@@ -248,7 +337,7 @@ async function main() {
       const blame = new Map<string, number>();
       const detail: string[] = [];
       for (const sig of invented) {
-        const { diff } = nearest(sig, Object.keys(kit.shapes));
+        const { diff } = nearest(unswap(sig), Object.keys(kit.shapes));
         for (const d of diff) blame.set(d, (blame.get(d) ?? 0) + 1);
         detail.push(`${readable(sig)}  ${diff.slice(0, 3).join('; ') || 'no near match in the kit'}`);
       }
@@ -277,20 +366,23 @@ async function main() {
      ------------------------------------------------------------- */
   console.log('\n  the executive landing, against the whole kit\n  ---------');
   {
+    await ourPage.goto(MINE, { waitUntil: 'networkidle', timeout: 20000 });
+    await ourPage.evaluate("document.documentElement.setAttribute('data-theme','light')");
+    await ourPage.waitForTimeout(1600);
     const kitAll = await walk(kitPage, '*page*');
     const landing = await walk(ourPage, '*page*');
     if (!kitAll || !landing) {
       console.log('  FAIL  could not read one of the pages');
       diffs.push('landing: could not read one of the pages');
     } else {
-      const invented = Object.keys(landing.shapes).filter((s) => !(s in kitAll.shapes));
+      const invented = Object.keys(landing.shapes).filter((sh) => !(unswap(sh) in kitAll.shapes));
       if (invented.length === 0) {
         console.log(`  ok    every shape on the landing exists in the kit (${Object.keys(landing.shapes).length} distinct)`);
       } else {
         console.log(`  FAIL  ${invented.length} shapes on the landing are not in the kit anywhere`);
         const blame = new Map<string, number>();
         for (const sig of invented) {
-          for (const d of nearest(sig, Object.keys(kitAll.shapes)).diff) {
+          for (const d of nearest(unswap(sig), Object.keys(kitAll.shapes)).diff) {
             blame.set(d, (blame.get(d) ?? 0) + 1);
           }
         }

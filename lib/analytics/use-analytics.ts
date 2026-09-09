@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { startOfQuarter } from '@/lib/analytics/period';
 import type { Analytics, Filters } from '@/lib/analytics/types';
 
 /* =============================================================
@@ -35,9 +36,16 @@ export type AnalyticsState = {
 };
 
 export function useAnalytics(today: string): AnalyticsState {
+  /* Quarterly, not monthly.
+
+     From the business: "Always default to quarterly analytics, not
+     monthly." A month to date on the ninth is nine days of trading,
+     which is too little to say anything about a division, and it is
+     what made the period control read as broken. A quarter carries
+     enough weeks to have a shape. */
   const [f, setF] = useState<Filters>({
-    kind: 'month',
-    from: `${today.slice(0, 7)}-01`,
+    kind: 'quarter',
+    from: startOfQuarter(today),
     to: today,
     mode: 'previous',
     trim: true,
