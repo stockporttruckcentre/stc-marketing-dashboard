@@ -1,33 +1,44 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { AnalyticsHub } from '@/components/AnalyticsHub';
+import { AnalyticsHub } from '@/components/analytics/legacy/AnalyticsHub';
 
 export const dynamic = 'force-dynamic';
 
 /* =============================================================
    Analytics.
 
-   The screen reads its own figures rather than being handed them, which
-   is a change from the old page. That one loaded every stock trailer
-   and every lead into the browser and totalled them there, which was
-   why it could only ever answer questions about trailer sales: the
-   Protean invoices are twenty thousand rows and were never going to
-   travel.
+   From the business:
 
-   Now the database answers, one row per division, and the page draws
-   it. The same functions the Revenue screens call, so the two cannot
-   disagree about what a division billed.
+     sales team wants analytics page rolling back. Take that page only
+     from a788cc9, don't roll anything else back.
 
-   ---- Today is passed in ----
+   So this is the screen exactly as it stood at a788cc9. Nothing about
+   it is a rebuild or a reinterpretation: `components/analytics/legacy/`
+   already held a byte for byte copy of that page, kept when the hub was
+   rewritten precisely so it could be put back, and the only difference
+   between those files and the ones in that commit is the folder the
+   imports name.
 
-   Every period on this page is worked out from one date, and that date
-   comes from the server rather than from the browser. A machine with
-   its clock a day out would otherwise show a different month from the
-   person sitting next to it, and neither of them would know.
+   ---- What went, and what did not ----
 
-   The previous version of this screen is kept and reachable at
-   `/dashboard/analytics/previous`. See
-   `components/analytics/legacy/README.md`.
+   The landing and the six drill-downs are still in the repository and
+   still build. They are not routed to. Bringing them back is a change
+   to this one file plus the seven route files that went with it, which
+   is the whole point of leaving the code where it is.
+
+   `/dashboard/analytics/targets` STAYS. It is not part of this page and
+   never was: it is the administrators' screen for setting what a
+   division is measured against, asked for separately, reached from the
+   command bar by typing "set a target", and the old page has no way of
+   editing a target at all. Rolling it back would remove something
+   nobody asked to lose.
+
+   ---- Nothing else moved ----
+
+   No migration is reverted. Every RPC this page calls
+   (`division_revenue`, `division_by_month`, `division_pipeline`,
+   `division_customers`, and the finance helpers behind the detail) is
+   still there, and the ones added since only added.
    ============================================================= */
 export default async function AnalyticsPage() {
   const supabase = createClient();
@@ -37,16 +48,5 @@ export default async function AnalyticsPage() {
   const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'crm.view' });
   if (mayRead !== true) redirect('/dashboard');
 
-  /* Whether the notch can be moved, asked of the same resolver every
-     route and the command bar ask. A target is the line the business is
-     judged against, so reading it and setting it are separate rights. */
-  const { data: maySetTargets } = await supabase
-    .rpc('command_may', { p_capability: 'analytics.targets' });
-
-  return (
-    <AnalyticsHub
-      today={new Date().toISOString().slice(0, 10)}
-      maySetTargets={maySetTargets === true}
-    />
-  );
+  return <AnalyticsHub />;
 }

@@ -124,6 +124,36 @@ const GOES_TO: Record<string, string> = {
   trailer: '/dashboard/sales',
 };
 
+/* -------------------------------------------------------------
+   How many customers the two customer panels show.
+
+   From the business: "increase top/bottom customers to 10, currently
+   says top ten but shows 8."
+
+   It did: the footnote under Biggest customers reads "Top ten are n%",
+   which is the concentration figure the database works out over the
+   real top ten, while the bars beside it were the top EIGHT. Two
+   different tens on one panel, and the smaller one unlabelled.
+
+   One constant, because the number appears in three places and they
+   have to agree: the biggest customers, the movers either side of
+   nought, and the footnote's own ten.
+   ------------------------------------------------------------- */
+const SHOW_CUSTOMERS = 10;
+
+/* What to ask each division for.
+
+   NOT `SHOW_CUSTOMERS`. Where the page is not scoped to one division
+   the three lists are netted together by customer, so the group's tenth
+   biggest can easily be eleventh or lower inside their own division and
+   would never arrive. Asking for more per division and cutting after
+   the netting is what makes the group wide list actually the top ten.
+
+   Scoping to one division is unaffected: that view is cut to
+   `SHOW_CUSTOMERS` from a longer list either way.
+   ------------------------------------------------------------- */
+const FETCH_PER_DIVISION = SHOW_CUSTOMERS * 3;
+
 const SHAPES: { value: Shape; label: string }[] = [
   { value: 'stack' as const, label: 'Stacked' },
   { value: 'line', label: 'Lines' },
@@ -198,7 +228,7 @@ export function AnalyticsHub() {
 
       const lists = await Promise.all(rows.map(async (d) => {
         const { data } = await supabase.rpc('division_customers', {
-          p_division: d.division, p_upto: upto ?? null, p_limit: 8,
+          p_division: d.division, p_upto: upto ?? null, p_limit: FETCH_PER_DIVISION,
         });
         return [d.division, (data ?? []) as TopCustomer[]] as const;
       }));
@@ -217,7 +247,10 @@ export function AnalyticsHub() {
     setDeepFailed(null);
     try {
       const [movers, conc, bands, recon, waiting, stages] = await Promise.all([
-        customerMovement(supabase, upto, 14),
+        /* More than the panel shows, because the ones that did not
+           move are filtered out afterwards and a customer whose spend
+           is unchanged should not cost a row. */
+        customerMovement(supabase, upto, FETCH_PER_DIVISION),
         concentration(supabase, null, upto),
         openWorkAgeing(supabase, null, upto),
         reconciliation(supabase, upto),
@@ -318,7 +351,7 @@ export function AnalyticsHub() {
         href: c.contact_id ? `/dashboard/crm?contact=${c.contact_id}` : undefined,
       });
     }
-    return [...byName.values()].sort((a, b) => b.value - a.value).slice(0, 8);
+    return [...byName.values()].sort((a, b) => b.value - a.value).slice(0, SHOW_CUSTOMERS);
   }, [top, only]);
 
   const movers = useMemo<BarRow[]>(() => {
@@ -331,7 +364,7 @@ export function AnalyticsHub() {
     return [...deep.movers]
       .filter((m) => Number(m.change) !== 0)
       .sort((a, b) => Math.abs(Number(b.change)) - Math.abs(Number(a.change)))
-      .slice(0, 8)
+      .slice(0, SHOW_CUSTOMERS)
       .sort((a, b) => Number(b.change) - Number(a.change))
       .map((m) => ({
         key: m.contact_id ?? m.company_name,

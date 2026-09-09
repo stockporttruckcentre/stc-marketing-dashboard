@@ -29,6 +29,7 @@
    longer exists.
    ============================================================= */
 
+import { readFileSync } from 'node:fs';
 import { monthsOfTheYear, sameMonthLastYear } from '../lib/protean/finance';
 
 let failed = 0;
@@ -164,9 +165,66 @@ console.log('\n  The command bar\n  ---------------');
   ok('and the screen is still reachable', plain.length > 0);
 }
 
+console.log('\n  The customer panels\n  -------------------');
+
+/* THE LIST AND ITS FOOTNOTE COUNT THE SAME CUSTOMERS.
+
+   From the business: "increase top/bottom customers to 10, currently
+   says top ten but shows 8."
+
+   The footnote under Biggest customers reads "Top ten are n%", which
+   comes from `revenue_concentration` and really is over ten. The bars
+   beside it were the top eight. Two different tens on one panel, and
+   the smaller one with no number on it, which is the shape of mistake
+   nobody catches by looking: eight bars under a sentence about ten
+   look exactly like ten bars under a sentence about ten.
+
+   So the count is one constant and this asserts the three places it
+   has to reach.
+
+   Read out of the source rather than imported, because the hub is a
+   client component and pulling it into Node drags React and every
+   chart in with it for the sake of one number. */
+{
+  const src = readFileSync('components/analytics/legacy/AnalyticsHub.tsx', 'utf8');
+
+  const shows = Number(src.match(/const SHOW_CUSTOMERS = (\d+)/)?.[1] ?? 0);
+  ok('the customer panels name how many they show', shows > 0,
+     'SHOW_CUSTOMERS is not declared');
+  ok('and it is ten, which is what the footnote claims', shows === 10,
+     `it is ${shows}`);
+
+  /* Both lists, and neither of them a number typed at the call site.
+     A second literal is how the two panels came to disagree in the
+     first place. */
+  const literal = [...src.matchAll(/\.slice\(0,\s*(\d+)\)/g)].map((m) => m[1]);
+  ok('neither customer list slices to a number of its own',
+     literal.length === 0,
+     `still cutting at ${literal.join(', ')}`);
+  ok('both of them cut to the constant',
+     (src.match(/\.slice\(0, SHOW_CUSTOMERS\)/g) ?? []).length === 2,
+     'expected the biggest customers and the movers');
+
+  /* AND ENOUGH IS FETCHED TO FILL THEM.
+
+     Unscoped, the three division lists are netted together by
+     customer, so the group's tenth biggest can sit eleventh inside
+     their own division and never arrive. Asking each division for only
+     ten would quietly return a top ten that is not the top ten. */
+  const perDivision = src.match(/const FETCH_PER_DIVISION = SHOW_CUSTOMERS \* (\d+)/)?.[1];
+  ok('each division is asked for more than the panel shows, because the lists are netted',
+     Number(perDivision ?? 0) > 1,
+     'FETCH_PER_DIVISION must be a multiple of SHOW_CUSTOMERS above one');
+  ok('the per division fetch is the one the RPC is given',
+     /p_limit: FETCH_PER_DIVISION/.test(src));
+  ok('and the movers are fetched the same way, since the unchanged are dropped after',
+     /customerMovement\(supabase, upto, FETCH_PER_DIVISION\)/.test(src));
+}
+
 console.log(
   failed === 0
-    ? '\n  The table covers the right months and compares against the right ones.\n'
+    ? '\n  The table covers the right months, compares against the right ones,\n'
+      + '  and both customer panels show ten.\n'
     : `\n  ${failed} to fix.\n`,
 );
 process.exit(failed === 0 ? 0 : 1);

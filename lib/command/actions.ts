@@ -911,50 +911,50 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['as it stood at the end of the quarter', 'how did it look in june'] },
 
   { id: 'analytics.trend', label: 'Month by month', blurb: 'Two years of it, and the figures underneath', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/revenue', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['trend', 'monthly trend', 'month by month', 'the trend line', 'last 12 months',
               'monthly figures', 'by month', 'the monthly table'] },
 
   { id: 'analytics.deals', label: 'The trailers sold this year', blurb: 'Every deal, with its margin', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/pipeline', verbs: [...GO, 'list', 'which'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'list', 'which'],
     objects: ['deals', 'the deals', 'individual deals', 'deal list', 'trailers sold',
               'what we have sold', 'sales list', 'every sale', 'deal review'],
     phrases: ['what trailers have we sold', 'show me the deals'] },
 
   { id: 'analytics.avgDeal', label: 'Average deal size', blurb: 'What a trailer sale is worth on average', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/pipeline', verbs: [...GO, 'how much', 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
     objects: ['average deal', 'average sale', 'typical deal', 'deal size', 'average order value'] },
 
   { id: 'analytics.leaderboard', label: 'Who is selling', blurb: 'Trailers and leads, per person', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/people', verbs: [...GO, 'who is'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
     objects: ['leaderboard', 'league table', 'top rep', 'best salesman', 'rankings',
               'who is winning', 'who is selling', 'per rep', 'by rep', 'sales team figures'],
     phrases: ['who has sold the most', 'how is the team doing'] },
 
   { id: 'analytics.commission', label: 'Commission recorded', blurb: 'What is on the leads, per person', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/people', verbs: [...GO, 'how much'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
     objects: ['commission', 'commission paid', 'commission bill', 'what the team earned',
               'total commission', 'commission run'] },
 
   { id: 'analytics.funnel', label: 'What is coming', blurb: 'Every stage, per division', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/pipeline', verbs: GO,
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['funnel', 'pipeline funnel', 'the stages', 'stage breakdown', 'where deals are',
               'what is coming', 'the pipeline'] },
 
   { id: 'analytics.pipelineValue', label: 'Pipeline value', blurb: 'What everything still open is worth', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/pipeline', verbs: [...GO, 'how much'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
     objects: ['pipeline value', 'whats in the pipeline', 'open value', 'value of the pipeline'] },
 
   { id: 'analytics.conversion', label: 'How leads convert', blurb: 'How many sit at each stage', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/people', verbs: [...GO, 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'whats'],
     objects: ['conversion', 'conversion rate', 'close rate', 'win rate', 'strike rate'] },
 
   { id: 'analytics.topCustomers', label: 'Top customers', blurb: 'And how much of the income they are', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/customers', verbs: [...GO, 'who are'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who are'],
     objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
 
   { id: 'analytics.movers', label: 'Who is growing and who is going', blurb: 'Against the same point last year', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/customers', verbs: [...GO, 'who is'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
     /* Deliberately not "the call list", which is what the old screen
        called this and what a rep says out loud. It collides head on
        with cancelling a call, opening a CRM list, deleting a list and
@@ -967,7 +967,7 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['who is spending less than last year', 'which customers have dropped off'] },
 
   { id: 'analytics.concentration', label: 'How exposed we are', blurb: 'What share the top ten customers are', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/customers', verbs: [...GO, 'how much', 'whats'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much', 'whats'],
     objects: ['concentration', 'customer concentration', 'exposure', 'the top ten share',
               'how much is one customer', 'reliance on one customer'],
     phrases: ['how much of our income is the top ten'] },
@@ -986,7 +986,7 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ['why does the total not match the customers', 'what is not on a customer record'] },
 
   { id: 'analytics.stockValue', label: 'Stock available and its book value', blurb: 'What is sat on the yard', kind: 'navigate',
-    capability: 'crm.view', path: '/dashboard/analytics/stock', verbs: [...GO, 'how much'],
+    capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'how much'],
     objects: ['stock available', 'stock value', 'nbv on the yard', 'what stock is worth'] },
 
   { id: 'analytics.byMake', label: 'Stock by manufacturer', blurb: 'On the trailer stock list', kind: 'navigate',
@@ -1530,21 +1530,21 @@ export const ACTIONS: CommandActionSpec[] = [
      ============================================================= */
   { id: 'nav.analyticsPeople', label: 'Who is closing',
     blurb: 'Leads, quotes and wins per person, against the group rate',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/people', verbs: GO,
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['who is closing', 'conversion', 'conversion rate', 'leaderboard',
               'sales leaderboard', 'who is converting', 'win rate', 'close rate',
               'performance by person', 'who is winning'] },
 
   { id: 'nav.analyticsStock', label: 'Stock age against margin',
     blurb: 'Which trailers to discount and which to hold',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/stock', verbs: GO,
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['stock age', 'old stock', 'ageing stock', 'aging stock', 'stock ageing',
               'what to discount', 'stock margin', 'days in stock', 'slow moving stock',
               'what is not selling'] },
 
   { id: 'nav.analyticsBook', label: 'The FleetSmart+ book',
     blurb: 'What the contract book is worth every week, by tier',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/fleetsmart', verbs: GO,
+    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics', verbs: GO,
     objects: ['contract book', 'the book', 'recurring revenue', 'weekly contracted value',
               'annualised contracts', 'contract retention', 'tier mix', 'fleetsmart book',
               'what the contracts are worth'] },
@@ -1557,42 +1557,6 @@ export const ACTIONS: CommandActionSpec[] = [
               'the budget', 'what we are aiming for'],
     phrases: ['set a target', 'set the revenue target', 'change the target for rentals',
               'what should trailer sales be hitting'] },
-
-  /* The three drill-downs the sweep above did not already reach.
-
-     Analytics is a landing and six screens now. People, stock and the
-     contract book each already had a question pointing at them, and
-     these are the other three: revenue, pipeline and customers. A
-     screen with no entry here is a screen the bar cannot reach, which
-     is the original bug this file exists to close. */
-  { id: 'nav.analyticsRevenue', label: 'Revenue in detail',
-    blurb: 'Indexed division trend, and how the group number moved',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/revenue', verbs: GO,
-    objects: ['revenue drill down', 'revenue detail', 'indexed trend', 'division trend',
-              'what changed', 'the waterfall', 'group movement', 'revenue analysis',
-              'target position', 'where the revenue came from',
-              /* The four the landing also answers. Both are offered and
-                 the landing scores first on "how are we doing", which is
-                 right: one is the thirty seconds and the other is the
-                 thirty minutes behind it. */
-              'revenue', 'profit', 'turnover', 'margin'],
-    phrases: ['why is revenue down', 'what moved the group number', 'break the revenue down'] },
-
-  { id: 'nav.analyticsPipeline', label: 'Sales and pipeline in detail',
-    blurb: 'Where leads came from and what became of them',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/pipeline', verbs: GO,
-    objects: ['pipeline drill down', 'lead sources', 'where leads come from', 'source flow',
-              'sources', 'lead source', 'what became of the leads', 'won and lost',
-              'sales analysis', 'pipeline detail'],
-    phrases: ['which sources actually convert', 'where are our leads coming from'] },
-
-  { id: 'nav.analyticsCustomers', label: 'Customers in detail',
-    blurb: 'Who is spending, and who has moved',
-    kind: 'navigate', capability: 'crm.view', path: '/dashboard/analytics/customers', verbs: GO,
-    objects: ['customer analysis', 'customers drill down', 'spend by customer',
-              'customer detail', 'who is spending', 'customer movement',
-              'account spend', 'customer breakdown'],
-    phrases: ['which customers are spending more', 'show me customer spend'] },
 
   { id: 'nav.healthDue', label: 'Customers due a chase',
     blurb: 'Reds quiet three working days, ambers quiet seven',

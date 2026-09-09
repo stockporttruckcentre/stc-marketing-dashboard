@@ -1,27 +1,21 @@
 # The Analytics page as it stood on 9 September 2026
 
-Frozen. Nothing in here is imported by the live application except the one
-route named below, and nothing in here should be edited: it is a copy kept so
-the old page can be opened beside the new one, not a second implementation to
-maintain.
+**This is the live Analytics screen again.** It was the frozen copy of the old
+page; the sales team asked for the rebuild to be rolled back, and this is what
+`/dashboard/analytics` renders now.
 
-## Why it is here
+From the business:
 
-From the business, commissioning the rebuild:
+> sales team wants analytics page rolling back. Take that page only from
+> a788cc9, don't roll anything else back.
 
-> Currently it's a little all over the place and it doesn't offer enough
-> insight to an accounts department of what they need to see at a glance in
-> the morning, or spend 30 minutes delving in to. There aren't many analytics
-> on the page at all, it's more a page than the hub it's supposed to be. Make
-> a backup of the current page and store it in the repo then use the attached
-> to create a new one.
-
-Git history is a backup, but it is not one anybody can look at side by side
-with the replacement while deciding whether the replacement is better. This is.
+Every file here is byte for byte what `a788cc9` held, and the only edit ever
+made to any of them was repointing the imports at this folder so the copy
+compiles on its own. Nothing was reinterpreted on the way back in.
 
 ## What is in here
 
-| File | What it was |
+| File | What it draws |
 |---|---|
 | `AnalyticsHub.tsx` | The whole screen: division ring, month by month, top customers, movement, bands, stages |
 | `monthly.tsx` | The bespoke month by month chart, stacked, lines or columns |
@@ -32,23 +26,45 @@ with the replacement while deciding whether the replacement is better. This is.
 | `sections.tsx` | The "needs a record" empty states |
 | `texture.tsx` | Chart fills, so two division colours stay apart in dark mode |
 
-The imports were repointed at this folder so the copy compiles on its own. That
-is the only change made to any of it.
+## The one change since a788cc9
 
-## How to look at it
+The two customer panels show ten rather than eight. The footnote under Biggest
+customers has always read "Top ten are n%", which is a figure the database
+works out over the real top ten, and the bars beside it were the top eight.
+`SHOW_CUSTOMERS` is the one number now, and `npm run check:analytics-view`
+asserts that both lists and the fetch behind them agree with it.
 
-`/dashboard/analytics/previous`. It is not in the sidebar and never will be.
-It reads the same three functions the live page reads, so it shows today's
-figures rather than a snapshot: it is the old **page**, not the old data.
+## What is NOT live, and where it went
 
-## How to put it back
+The rebuilt hub is still in the repository and still builds. It is not routed
+to. These are the pieces, and they come back together:
+
+| Still on disk | Was routed at |
+|---|---|
+| `components/analytics/landing.tsx` | `/dashboard/analytics` |
+| `components/analytics/drilldowns/*.tsx` | `/dashboard/analytics/{revenue,pipeline,customers,stock,fleetsmart,people}` |
+| `components/AnalyticsHub.tsx`, `components/analytics/kit/*`, `lib/analytics/*` | the shared engine behind all of it |
+
+`landing.tsx` still links to those six routes, so **restoring it means
+restoring the route files in the same change**, or the Look deeper cards go
+nowhere. `app/analytics-preview` mounts the whole thing, so it can still be
+looked at and `npm run check:kit-diff` still measures it against the kit.
+
+## What stayed
+
+`/dashboard/analytics/targets` is untouched. It is not part of this page and
+never was: it is the administrators' screen for setting what a division is
+measured against, it is reached by typing "set a target", and this page has no
+way of editing a target at all.
+
+No migration was reverted. Every function this page calls is still in the
+schema, and the ones added since only added.
+
+## How to put the rebuild back
 
 `app/dashboard/analytics/page.tsx` renders one component. Point it at
-`components/analytics/legacy/AnalyticsHub` and the old screen is live again.
-Nothing else has to move, because the new hub added tables and functions rather
-than changing any the old one read.
-
-## When to delete it
-
-Once the new hub has been through a month end and nobody has asked to see this
-again. Deleting it is this folder and the one route.
+`@/components/AnalyticsHub`, restore the six route files under
+`app/dashboard/analytics/`, and repoint the analytics entries in
+`lib/command/actions.ts` and `lib/command/features.ts` at them.
+`npm run check:coverage` refuses an action naming a route that does not exist,
+so it will say if a step is missed.

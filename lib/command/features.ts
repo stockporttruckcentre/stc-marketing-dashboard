@@ -90,58 +90,27 @@ export const FEATURES: Feature[] = [
       { label: 'What is with customers', phrase: 'fleetsmart' },
     ],
   },
-  /* Analytics is a landing and seven screens now, not one page.
+  /* One screen again.
 
-     The landing answers "how are we doing" in thirty seconds and the
-     rest are the thirty minutes: each is its own route, so each is its
-     own screen here. Leaving them out kept the aliases on the landing,
-     and "leaderboard" then reached a page that no longer has one. */
+     From the business: "sales team wants analytics page rolling back."
+     The landing and the six drill-downs each had a feature here, and
+     each of those is a route that no longer exists, so a term matching
+     one would send somebody nowhere. They go back to being aliases of
+     the single page, which is what they were before the restructure.
+
+     Targets is the exception and keeps its own entry: it is a screen
+     of its own, it is still routed, and it is not part of the page
+     that was rolled back. */
   {
     id: 'analytics', title: 'Analytics', path: '/dashboard/analytics',
-    aliases: ['analytics', 'reports', 'reporting', 'figures', 'numbers', 'performance'],
-    blurb: 'The thirty second view: group revenue, target, divisions and what needs attention',
+    aliases: ['analytics', 'reports', 'reporting', 'figures', 'numbers', 'performance',
+              'revenue', 'profit', 'leaderboard', 'who is closing', 'conversion rate',
+              'win rate', 'stock age', 'old stock', 'contract book', 'the book',
+              'recurring revenue', 'lead sources', 'who is spending'],
+    blurb: 'Revenue, profit, leaderboard and stock mix',
     actions: [
       { label: 'How far from target', phrase: 'how much do we need to invoice to hit target' },
     ],
-  },
-  {
-    id: 'analyticsRevenue', title: 'Revenue analysis', path: '/dashboard/analytics/revenue',
-    aliases: ['revenue', 'profit', 'indexed trend', 'division trend', 'revenue drill down',
-              'what moved the group number'],
-    blurb: 'Indexed division trend, how the group number moved, and the target position',
-  },
-  {
-    id: 'analyticsPipeline', title: 'Sales and pipeline analysis', path: '/dashboard/analytics/pipeline',
-    aliases: ['pipeline detail', 'lead sources', 'where leads come from', 'source flow',
-              'pipeline drill down'],
-    blurb: 'Where leads came from and what became of them',
-  },
-  {
-    id: 'analyticsCustomers', title: 'Customer analysis', path: '/dashboard/analytics/customers',
-    aliases: ['customer analysis', 'spend by customer', 'who is spending',
-              'customer movement', 'customers drill down'],
-    blurb: 'Who is spending, and who has moved',
-  },
-  {
-    id: 'analyticsStock', title: 'Stock analysis', path: '/dashboard/analytics/stock',
-    aliases: ['stock age', 'stock ageing', 'old stock', 'what to discount'],
-    blurb: 'Age against margin, and what is tied up',
-  },
-  {
-    id: 'analyticsBook', title: 'FleetSmart+ book', path: '/dashboard/analytics/fleetsmart',
-    aliases: ['contract book', 'the book', 'recurring revenue', 'contract retention',
-              'tier mix', 'annualised contracts'],
-    blurb: 'Weekly contracted value, tier mix and retention by cohort',
-  },
-  {
-    /* Not "People analysis". The word people belongs to the Team
-       directory, and the title has to reach its own screen: "people
-       analysis" landed on Team, Admin and the exceptions list and
-       never on this one. */
-    id: 'analyticsPeople', title: 'Conversion and leaderboard', path: '/dashboard/analytics/people',
-    aliases: ['leaderboard', 'who is closing', 'who is selling', 'conversion rate',
-              'win rate', 'close rate', 'sales leaderboard'],
-    blurb: 'Leaderboard and conversion against the group rate',
   },
   {
     id: 'analyticsTargets', title: 'Targets', path: '/dashboard/analytics/targets',

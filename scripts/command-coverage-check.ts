@@ -1787,20 +1787,6 @@ for (const [said, id] of [
   ['contract retention', 'nav.analyticsBook'],
   ['annualised contracts', 'nav.analyticsBook'],
 
-  /* The three drill-downs that had no entry of their own. Analytics
-     is a landing and six screens, and a screen the bar cannot reach
-     is a screen nobody finds. */
-  ['revenue drill down', 'nav.analyticsRevenue'],
-  ['indexed trend', 'nav.analyticsRevenue'],
-  ['what moved the group number', 'nav.analyticsRevenue'],
-
-  ['where leads come from', 'nav.analyticsPipeline'],
-  ['lead sources', 'nav.analyticsPipeline'],
-  ['pipeline detail', 'nav.analyticsPipeline'],
-
-  ['customer analysis', 'nav.analyticsCustomers'],
-  ['spend by customer', 'nav.analyticsCustomers'],
-  ['who is spending', 'nav.analyticsCustomers'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === id));
