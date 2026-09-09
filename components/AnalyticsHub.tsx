@@ -5,9 +5,10 @@ import {
   AlertTriangle, Download, Loader, RefreshCw, SlidersHorizontal, X,
 } from 'lucide-react';
 import {
-  BandStrip, BulletRows, CohortGrid, DotPlot, HUE, IndexedLines, PROGRESSION, TIER,
+  BandStrip, BulletRows, DotPlot, HUE, IndexedLines, PROGRESSION, TIER,
   Progression, ShareRows, SourceFlowChart, StackedMonths, StockScatter, Waterfall,
 } from '@/components/analytics/kit/charts';
+import { CohortGrid } from '@/components/analytics/kit/cohort';
 import {
   Chart, DeviceLabel, Explain, Kpi, Legend, NotWiredPanel, Pair, Section, SectionHead,
   Verdict, money, pct, shortMoney,
@@ -1143,7 +1144,11 @@ function Book({ data, set }: { data: Analytics; set: (p: Partial<Filters>) => vo
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+      {/* The mix sits on its own row. The cohort grid follows it at full
+          width, because that is how wide the kit draws it: 1126 inside
+          a 1440 page. Putting it in a two column grid halved it, which
+          is a layout the file does not have. */}
+      <div>
         <Chart
           title={`Mix today, ${book.contracts} contracts`}
           says={mixWords(book)}
@@ -1155,13 +1160,12 @@ function Book({ data, set }: { data: Analytics; set: (p: Partial<Filters>) => vo
           }))} />
         </Chart>
 
-        <Chart
-          title="Contract retention by start month"
-          says={retentionWords(book)}
-          foot={<span>Dashed cells are months that have not happened yet, not missing data. Retention is contracts still live, not value.</span>}
-        >
-          <CohortGrid cohorts={book.cohorts} />
-        </Chart>
+        {/* No Chart wrapper. The kit's cohort device is the whole
+            panel: its own border, title, sentence, grid, footnote and
+            scale. Wrapping it in ours would draw the panel twice and
+            the title twice, which is what happens when a device is
+            treated as a chart rather than as the design. */}
+        <CohortGrid cohorts={book.cohorts} says={retentionWords(book)} />
       </div>
     </>
   );
