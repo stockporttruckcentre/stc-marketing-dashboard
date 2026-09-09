@@ -65,6 +65,7 @@
     "check:kit": "tsx scripts/kit-fidelity-check.ts",
     "kit:extract": "tsx scripts/kit-extract.ts",
     "check:invention": "tsx scripts/no-invention-check.ts",
+    "check:kit-diff": "tsx scripts/kit-diff.ts",
     "check:analytics-sql": "bash scripts/sql/analytics-check.sh",
     "check:health": "bash scripts/sql/health-check.sh",
     "check:export-window": "tsx scripts/export-window-check.ts",

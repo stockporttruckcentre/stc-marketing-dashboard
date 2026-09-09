@@ -145,18 +145,25 @@ export function AnalyticsHub({ today, maySetTargets = false }: {
   const person = f.person ? people.find((p) => p.id === f.person) ?? null : null;
 
   return (
-    /* The kit's page shell: capped at 1440 and centred.
+    /* The kit's own column width.
 
-       The dashboard's own box is 1800 wide, and letting this page fill
-       it is most of why it reads as "wide, ugly, full page rows". Every
-       device in the kit is drawn 620 across and laid out two to a row
-       against a 1440 measure. Stretched to 1800 a five bar waterfall
-       becomes a strip of colour with a lot of air in it, and a table
-       row becomes a line somebody has to track across a metre of
-       screen. The cap is the design, not a limitation. */
-    <div className="kit" style={{
+       Measured off the file rather than chosen. Its shell is
+       max-width 1440 with padding 40px 40px 80px and a 44px gap, and
+       inside that a <main> 1126 wide beside a 190px rail carrying its
+       "ON THIS PAGE" list. Every device in the kit is drawn against
+       that 1126, so at 1440 the cohort grid came out 314px wider than
+       the design and every column in it stretched with it.
+
+       The rail is not ported yet, so the column is set to 1126 and
+       centred rather than the full shell being faked around it. When
+       the rail arrives this becomes the shell and the number moves
+       back to 1440.
+
+       `npm run check:kit-diff` compares this width against the kit's
+       and fails when they disagree. */
+    <div className="kit kit-page" style={{
       display: 'flex', flexDirection: 'column', gap: 26,
-      maxWidth: 1440, margin: '0 auto', width: '100%',
+      maxWidth: 1126, margin: '0 auto', width: '100%',
     }}>
       <ControlBar
         f={f}

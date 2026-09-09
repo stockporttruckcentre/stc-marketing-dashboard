@@ -124,14 +124,44 @@ async function main() {
 
     function tree(el, depth) {
       var style = el.getAttribute('style');
-      var kids = Array.prototype.slice.call(el.children);
       var node = { tag: el.tagName.toLowerCase() };
       if (style) node.style = style;
-      if (kids.length === 0) {
-        var own = (el.textContent || '').trim();
-        if (own) node.text = own.slice(0, 120);
-      } else if (depth < 8) {
-        node.kids = kids.map(function (k) { return tree(k, depth + 1); });
+
+      /* childNodes, not children.
+
+         The kit writes mixed content: its cohort legend is
+         70%<span>...swatches...</span>100%, two text nodes either side
+         of an element. Walking element children only threw both labels
+         away at extraction, so no amount of care downstream could put
+         them back, and the grid shipped with a scale nobody could read.
+
+         A text node is a node. It is recorded as one. */
+      var raw = Array.prototype.slice.call(el.childNodes);
+      var kids = [];
+      for (var i = 0; i < raw.length; i++) {
+        var n = raw[i];
+        if (n.nodeType === 3) {
+          /* Double backslash on purpose. This whole function is a
+             template literal, and in one of those a backslash before
+             an s is not an escape sequence, so it collapses to a plain
+             s before the browser ever sees it. Written singly this
+             line compiled to a regex matching the LETTER s, and it
+             deleted every s from the kit's text: "Contract retention
+             by start month" came out as "by  tart month".
+
+             No backticks in this comment either. They would close the
+             literal. */
+          var t = (n.nodeValue || '').replace(/\\s+/g, ' ');
+          if (t.trim()) kids.push({ tag: '#text', text: t });
+        } else if (n.nodeType === 1 && depth < 8) {
+          kids.push(tree(n, depth + 1));
+        }
+      }
+
+      if (kids.length === 1 && kids[0].tag === '#text') {
+        node.text = kids[0].text.trim().slice(0, 160);
+      } else if (kids.length) {
+        node.kids = kids;
       }
       return node;
     }
@@ -173,6 +203,23 @@ async function main() {
      This Playwright build ignores the argument when `evaluate` is given
      a string, so passing the devices as JSON inside the expression is
      the only form that actually receives them. */
+  /* A regex escape lost to the template literal is silent: the code
+     still runs and quietly does something else. Written as `\s` inside
+     these backticks it collapses to a plain `s`, so `/\s+/g` became
+     `/s+/g` and deleted every letter s from the kit's text. "Contract
+     retention by start month" came out as "by  tart month".
+
+     So the emitted script is checked for the escapes it is supposed to
+     carry, before it is used. */
+  for (const needed of ['\\s+', '\\d+', '\\(']) {
+    if (!BROWSER.includes(needed)) {
+      throw new Error(
+        `The browser script lost the escape ${needed} to the template literal. `
+        + 'Inside backticks, write a double backslash.',
+      );
+    }
+  }
+
   writeFileSync(`${WORK}/extract.js`, BROWSER);
   await page.addScriptTag({ path: `${WORK}/extract.js` });
   const result = await page.evaluate(

@@ -36,6 +36,12 @@ import { device, find, mirror, type Patch } from './mirror';
 
 const RAMP = KIT_RAMPS.cohort;
 
+/** The month, in the words the kit uses for it. */
+function monthLabel(iso: string): string {
+  return new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+    .toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' });
+}
+
 /** Where a retention figure sits on the kit's own scale. */
 function alphaFor(value: number): number {
   const lo = RAMP.from ?? 0;
@@ -83,7 +89,10 @@ export function CohortGrid({ cohorts, says }: {
   const rowPatch = (c: { month: string; signed: number; live: (number | null)[] }): Patch => ({
     from: 1,
     kids: [
-      { text: c.month },
+      /* "January", the way the kit writes it, not the ISO date the
+         database stores. The port dropped this and the grid shipped
+         with 2026-01-01 down its left edge. */
+      { text: monthLabel(c.month) },
       { text: c.signed },
       ...Array.from({ length: months }, (_, i) => {
         const v = c.live[i];
