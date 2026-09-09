@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Container, KeyRound, RotateCcw, Wrench, X } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -17,7 +17,7 @@ import {
 import { swatchImage } from '@/components/analytics/legacy/texture';
 import { Tile } from '@/components/analytics/legacy/tiles';
 import { NeedsARecord } from '@/components/analytics/legacy/sections';
-import { readable } from '@/lib/protean/rpc';
+import { readable, type DivisionFilter } from '@/lib/protean/rpc';
 import {
   OPEN_STAGES, STAGE_LABEL,
   concentration, customerMovement, openWorkAgeing, pipelineByStage, reconciliation,
@@ -124,6 +124,21 @@ const GOES_TO: Record<string, string> = {
   trailer: '/dashboard/sales',
 };
 
+/* The drill in, as a type the database helpers accept.
+
+   `only` is a string because it comes back on a row. Narrowed rather
+   than cast, so a slug the application does not know cannot be sent to
+   a function that will raise on it: anything unrecognised reads as the
+   whole company, which is what the page shows anyway when nothing is
+   picked. */
+const DIVISION_SLUGS = ['stc', 'rental', 'trailer'] as const;
+
+function asDivision(slug: string | null): DivisionFilter {
+  return (DIVISION_SLUGS as readonly string[]).includes(slug ?? '')
+    ? (slug as DivisionFilter)
+    : null;
+}
+
 /* -------------------------------------------------------------
    How many customers the two customer panels show.
 
@@ -160,13 +175,34 @@ const SHAPES: { value: Shape; label: string }[] = [
   { value: 'column', label: 'Columns' },
 ];
 
+/* What the database answers once, and this page narrows itself.
+
+   Every one of these comes back with a division on the row, so picking
+   a division is a filter over what is already here and costs no
+   request. */
 type Deep = {
-  movers: Mover[];
-  conc: Concentration | null;
   bands: AgeBand[];
   recon: Reconciliation[];
   waiting: TrailerWaiting[];
   stages: Stage[];
+};
+
+/* What the DATABASE has to narrow, because it ranks and cuts before
+   this page ever sees a row.
+
+   From the business: "who moved doesn't change when i go between
+   divisions?" It did not. `customer_movement` ranks by the size of the
+   movement and cuts with a LIMIT, so what arrived was the company's
+   biggest movers and filtering them here would have answered a
+   different question. `revenue_concentration` already took a division
+   and was being handed a hardcoded null, so the "Top ten are n%"
+   footnote under Biggest customers was company wide too, on a panel
+   whose bars were not.
+
+   Both are re-asked when the division changes. Migration 102. */
+type Scoped = {
+  movers: Mover[];
+  conc: Concentration | null;
 };
 
 export function AnalyticsHub() {
@@ -180,6 +216,7 @@ export function AnalyticsHub() {
   const [failed, setFailed] = useState<string | null>(null);
 
   const [deep, setDeep] = useState<Deep | null>(null);
+  const [scoped, setScoped] = useState<Scoped | null>(null);
   const [deepFailed, setDeepFailed] = useState<string | null>(null);
 
   /* THE ONE DRILL IN. Null is the company; a slug is one division, and
@@ -246,25 +283,52 @@ export function AnalyticsHub() {
   const loadDeep = useCallback(async () => {
     setDeepFailed(null);
     try {
-      const [movers, conc, bands, recon, waiting, stages] = await Promise.all([
-        /* More than the panel shows, because the ones that did not
-           move are filtered out afterwards and a customer whose spend
-           is unchanged should not cost a row. */
-        customerMovement(supabase, upto, FETCH_PER_DIVISION),
-        concentration(supabase, null, upto),
+      const [bands, recon, waiting, stages] = await Promise.all([
         openWorkAgeing(supabase, null, upto),
         reconciliation(supabase, upto),
         trailerCustomersWaiting(supabase, upto),
         pipelineByStage(supabase),
       ]);
-      setDeep({ movers, conc, bands, recon, waiting, stages });
+      setDeep({ bands, recon, waiting, stages });
     } catch (e) {
       setDeepFailed(e instanceof Error ? e.message : 'The detail would not load.');
     }
   }, [supabase, upto]);
 
+  /* The two the database has to narrow, re-asked when the division
+     changes.
+
+     Kept apart from `loadDeep` so that picking a division does not
+     blank the four panels that were already able to answer for
+     themselves. The old code cleared the whole bundle and refetched
+     six things; these two are the only ones that could not be filtered
+     here. */
+  const run = useRef(0);
+  const loadScoped = useCallback(async () => {
+    const mine = ++run.current;
+    setDeepFailed(null);
+    try {
+      const [movers, conc] = await Promise.all([
+        /* More than the panel shows, because the ones that did not
+           move are filtered out afterwards and a customer whose spend
+           is unchanged should not cost a row. */
+        customerMovement(supabase, upto, FETCH_PER_DIVISION, asDivision(only)),
+        concentration(supabase, asDivision(only), upto),
+      ]);
+      /* Numbered, because three divisions clicked quickly is three
+         requests and the page must show whichever was asked last
+         rather than whichever answered last. */
+      if (mine !== run.current) return;
+      setScoped({ movers, conc });
+    } catch (e) {
+      if (mine !== run.current) return;
+      setDeepFailed(e instanceof Error ? e.message : 'The detail would not load.');
+    }
+  }, [supabase, upto, only]);
+
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setDeep(null); void loadDeep(); }, [loadDeep]);
+  useEffect(() => { void loadScoped(); }, [loadScoped]);
 
   /* What the page is currently about: every division, or one of them.
      Every figure below reads `scope`, so there is one place where "is
@@ -355,13 +419,13 @@ export function AnalyticsHub() {
   }, [top, only]);
 
   const movers = useMemo<BarRow[]>(() => {
-    if (!deep) return [];
+    if (!scoped) return [];
     /* Trailer purchases are deliberately absent from the underlying
        figure: a customer who bought a trailer last year and not this one
        has a trailer, not a problem. So this panel is hidden entirely
        when the page is scoped to trailer sales rather than drawn empty,
        which would read as "nobody moved". */
-    return [...deep.movers]
+    return [...scoped.movers]
       .filter((m) => Number(m.change) !== 0)
       .sort((a, b) => Math.abs(Number(b.change)) - Math.abs(Number(a.change)))
       .slice(0, SHOW_CUSTOMERS)
@@ -373,7 +437,7 @@ export function AnalyticsHub() {
         note: compactMoney(Number(m.last_year)),
         href: m.contact_id ? `/dashboard/crm?contact=${m.contact_id}` : undefined,
       }));
-  }, [deep]);
+  }, [scoped]);
 
   const ageing = useMemo<BarRow[]>(() => {
     if (!deep) return [];
@@ -704,23 +768,23 @@ export function AnalyticsHub() {
             columns: ['Customer', 'This year'],
             rows: customers.map<TableRow>((c) => ({ name: c.name, cells: [c.value] })),
           }}
-          foot={deep?.conc && deep.conc.billed > 0 ? (
+          foot={scoped?.conc && scoped.conc.billed > 0 ? (
             <>
               <span>
                 <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {deep.conc.customers.toLocaleString('en-GB')}
+                  {scoped.conc.customers.toLocaleString('en-GB')}
                 </strong>{' '}customers billing
               </span>
               <span>
                 Top ten are{' '}
                 <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {((deep.conc.top_10 / deep.conc.billed) * 100).toFixed(0)}%
+                  {((scoped.conc.top_10 / scoped.conc.billed) * 100).toFixed(0)}%
                 </strong>
               </span>
               <span>
                 Middle customer{' '}
                 <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {compactMoney(Math.round(deep.conc.median))}
+                  {compactMoney(Math.round(scoped.conc.median))}
                 </strong>
               </span>
             </>
@@ -755,7 +819,14 @@ export function AnalyticsHub() {
           <Panel
             span={6}
             title="Who moved"
-            hint="Against the same point last year"
+            /* Says which customers it is ranking. The panel used to
+               read "Against the same point last year" whatever was
+               picked, while showing the same company wide list, which
+               is what "who moved doesn't change when i go between
+               divisions" was. */
+            hint={picked
+              ? `${picked.name}, against the same point last year`
+              : 'Against the same point last year'}
             minBody={252}
             table={{
               columns: ['Customer', 'Last year', 'Change'],
@@ -766,8 +837,14 @@ export function AnalyticsHub() {
           >
             <DivergingBars
               rows={movers}
-              empty="Nobody has moved against last year."
-              caption="Maintenance and rental netted together. Trailer purchases are left out: a customer who bought last year and not this one has a trailer, not a problem."
+              empty={picked
+                ? `Nobody has moved on ${picked.name} against last year.`
+                : 'Nobody has moved against last year.'}
+              caption={picked
+                ? `${picked.name} only. A customer who trades in more than one division is `
+                  + 'ranked here on what they spend with this one.'
+                : 'Maintenance and rental netted together. Trailer purchases are left out: a '
+                  + 'customer who bought last year and not this one has a trailer, not a problem.'}
             />
           </Panel>
         )}

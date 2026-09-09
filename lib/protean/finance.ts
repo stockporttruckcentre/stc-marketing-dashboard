@@ -108,9 +108,17 @@ export type Mover = {
   divisions: string | null;
 };
 
-export async function customerMovement(db: Db, upto?: string, limit = 12): Promise<Mover[]> {
+export async function customerMovement(
+  db: Db, upto?: string, limit = 12, division: DivisionFilter = null,
+): Promise<Mover[]> {
+  /* The division goes to the database rather than being applied to what
+     comes back. `customer_movement` ranks by the size of the movement
+     and cuts with a LIMIT, so filtering here would give the company's
+     biggest movers that happen to touch a division rather than that
+     division's biggest movers, and would silently lose anybody who
+     moved a lot in one division and is small overall. Migration 102. */
   const { data, error } = await db.rpc('customer_movement', {
-    p_upto: upto ?? null, p_limit: limit,
+    p_upto: upto ?? null, p_limit: limit, p_division: division,
   });
   if (error) throw readable(error);
   return rows<Mover>(data);
