@@ -218,13 +218,101 @@ console.log('\n  The customer panels\n  -------------------');
   ok('the per division fetch is the one the RPC is given',
      /p_limit: FETCH_PER_DIVISION/.test(src));
   ok('and the movers are fetched the same way, since the unchanged are dropped after',
-     /customerMovement\(supabase, upto, FETCH_PER_DIVISION\)/.test(src));
+     /customerMovement\(supabase, upto, FETCH_PER_DIVISION, /.test(src));
+}
+
+console.log('\n  Every panel narrows when a division is picked\n  ---------------------------------------------');
+
+/* THE DRILL IN REACHES EVERY PANEL.
+
+   From the business: "is this page wired? who moved doesn't change
+   when i go between divisions?"
+
+   It did not. Two of the eight panels ignored the division, and both
+   for the same underlying reason: they were the only two whose figures
+   the database ranks and cuts before the page sees a row, so they
+   cannot be filtered here. `customer_movement` returned the COMPANY's
+   biggest movers, and `revenue_concentration` was being handed a
+   hardcoded null while sitting under a panel whose bars did narrow.
+
+   Nothing about that was visible. The other six filter what they were
+   given, so they looked identical in the source and behaved
+   differently on the screen, and the panel went on saying "Against the
+   same point last year" over a list that was not about the division
+   named beside it.
+
+   So each one is asserted by name. A panel added later that forgets
+   `only` fails here rather than in a demo.
+
+   Read out of the source rather than imported: the hub is a client
+   component and pulling it into Node drags React and every chart in
+   with it. */
+{
+  const src = readFileSync('components/analytics/legacy/AnalyticsHub.tsx', 'utf8');
+
+  /* The six that filter rows they already hold. Each is a `useMemo`,
+     and the division has to be in its dependency list or React hands
+     back the previous answer for the previous division. */
+  for (const [what, panel] of [
+    ['customers', 'Biggest customers'],
+    ['ageing', 'How old the open work is'],
+    ['funnel', 'What is coming'],
+    ['oldest', 'the ninety day footnote'],
+    ['gaps', 'Billed to a name with no customer record'],
+    ['stack', 'Invoiced by month'],
+  ] as [string, string][]) {
+    const deps = src.match(
+      new RegExp(`const ${what} = useMemo[\\s\\S]*?\\}, \\[([^\\]]*)\\]\\);`),
+    )?.[1] ?? '';
+    /* `scope` counts. It is `only ? divisions.filter(...) : divisions`
+       and nothing else, so a memo that depends on it depends on the
+       division through one hop rather than not at all. */
+    ok(`${panel} is redrawn when the division changes`,
+       /\bonly\b/.test(deps) || /\bscope\b/.test(deps),
+       `${what} depends on [${deps.trim()}]`);
+  }
+
+  /* `scope` is accepted above only because this holds. If it ever stops
+     being derived from the division, six assertions quietly stop
+     meaning anything. */
+  /* `scope` is a one line memo, so it ends at the first `);` rather
+     than at a `}, [`. Matching the same shape as the block memos above
+     ran straight past it into the next one. */
+  const scopeAt = src.indexOf('const scope = useMemo');
+  const scopeDeps = src.slice(scopeAt, src.indexOf(');', scopeAt));
+  ok('and `scope` is itself the division',
+     /\bonly\b/.test(scopeDeps), `scope depends on [${scopeDeps.trim()}]`);
+
+  /* The two the database has to narrow. Asserted on the call, because
+     a division that never leaves the browser is the bug itself. */
+  ok('Who moved asks the database for the division',
+     /customerMovement\(supabase, upto, FETCH_PER_DIVISION, asDivision\(only\)\)/.test(src),
+     'customer_movement ranks and cuts before we see a row, so it cannot be filtered here');
+  ok('and the top ten footnote asks for it too',
+     /concentration\(supabase, asDivision\(only\), upto\)/.test(src),
+     'it was being handed a hardcoded null under a panel whose bars did narrow');
+  ok('both are re-asked when the division changes',
+     /\}, \[supabase, upto, only\]\);/.test(src),
+     'loadScoped must depend on only');
+
+  /* And neither of them may go back to being filtered here, which is
+     the wrong answer dressed as the right one: it returns the
+     company's biggest movers that happen to touch a division. */
+  ok('and neither is filtered in the browser instead',
+     !/movers[\s\S]{0,400}?\.filter\([^)]*divisions/.test(src),
+     'filtering after the ranking answers a different question');
+
+  /* The panel says which customers it is ranking. A correct list under
+     a caption about the whole company is the same fault reported one
+     step later. */
+  ok('and the panel names the division it is showing',
+     /hint=\{picked/.test(src) && /caption=\{picked/.test(src));
 }
 
 console.log(
   failed === 0
     ? '\n  The table covers the right months, compares against the right ones,\n'
-      + '  and both customer panels show ten.\n'
+      + '  both customer panels show ten, and every panel narrows with the division.\n'
     : `\n  ${failed} to fix.\n`,
 );
 process.exit(failed === 0 ? 0 : 1);
