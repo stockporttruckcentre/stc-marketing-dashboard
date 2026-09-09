@@ -217,7 +217,10 @@ export default function AnalyticsPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
     /* The same box the dashboard gives a page: `.content__inner` in
-       globals.css is 24px 28px inside an 1800px cap. */
+       globals.css is 24px 28px inside an 1800px cap. Kept at 1800 on
+       purpose, because the hub caps ITSELF at the kit's 1440 and this
+       harness has to show that happening rather than hide it behind a
+       narrower wrapper. */
     <div className="kit" style={{ padding: '24px 28px 56px', maxWidth: 1800 }}>
       <AnalyticsHub today={TODAY} />
     </div>

@@ -9,12 +9,12 @@ import {
   Progression, ShareRows, SourceFlowChart, StackedMonths, StockScatter, Waterfall,
 } from '@/components/analytics/kit/charts';
 import {
-  Chart, DeviceLabel, Explain, Kpi, Legend, NotWiredPanel, Section, SectionHead,
+  Chart, DeviceLabel, Explain, Kpi, Legend, NotWiredPanel, Pair, Section, SectionHead,
   Verdict, money, pct, shortMoney,
 } from '@/components/analytics/kit/frame';
 import { indexed } from '@/lib/analytics/shape';
 import {
-  compareWords, iso, trimWords, windowWords,
+  compareWords, iso, periodWords, trimWords, windowWords,
   type CompareMode, type PeriodKind,
 } from '@/lib/analytics/period';
 import type { Analytics, DivisionSlug, Figure } from '@/lib/analytics/types';
@@ -144,7 +144,19 @@ export function AnalyticsHub({ today, maySetTargets = false }: {
   const person = f.person ? people.find((p) => p.id === f.person) ?? null : null;
 
   return (
-    <div className="kit" style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+    /* The kit's page shell: capped at 1440 and centred.
+
+       The dashboard's own box is 1800 wide, and letting this page fill
+       it is most of why it reads as "wide, ugly, full page rows". Every
+       device in the kit is drawn 620 across and laid out two to a row
+       against a 1440 measure. Stretched to 1800 a five bar waterfall
+       becomes a strip of colour with a lot of air in it, and a table
+       row becomes a line somebody has to track across a metre of
+       screen. The cap is the design, not a limitation. */
+    <div className="kit" style={{
+      display: 'flex', flexDirection: 'column', gap: 26,
+      maxWidth: 1440, margin: '0 auto', width: '100%',
+    }}>
       <ControlBar
         f={f}
         set={set}
@@ -326,7 +338,18 @@ function ControlBar({ f, set, busy, onRefresh, data, person }: {
             border: '1px solid var(--border)', borderRadius: 'var(--r)',
             fontSize: 12.5, color: 'var(--text)', background: 'var(--bg-subtle)',
           }}>
-            {data ? windowWords(data.period.window) : '…'}
+            {/* The name of the window and then the dates, because
+                either alone is what made this read as broken: "Month"
+                over nine days, or nine days with nothing saying they
+                are a month so far. */}
+            {data ? (
+              <>
+                <span style={{ fontWeight: 600 }}>{periodWords(data.period)}</span>
+                <span style={{ color: 'var(--text-subtle)', marginLeft: 7 }}>
+                  {windowWords(data.period.window)}
+                </span>
+              </>
+            ) : '…'}
           </span>
         )}
 
@@ -658,6 +681,10 @@ function Divisions({ data, f, set }: {
 
   return (
     <>
+      {/* Two to a row, which is the kit's layout for every device it
+          draws. The waterfall in particular has five bars: given a
+          whole 1440 row it stops being a shape. */}
+      <Pair>
       <div>
         <DeviceLabel
           title="Indexed division trend"
@@ -708,6 +735,7 @@ function Divisions({ data, f, set }: {
           </Chart>
         </div>
       )}
+      </Pair>
 
       <div>
         <DeviceLabel
@@ -834,6 +862,8 @@ function People({ data, f, set }: {
 
   return (
     <>
+      {/* Two to a row. */}
+      <Pair>
       <div>
         <DeviceLabel
           title="Leaderboard with progression"
@@ -905,6 +935,7 @@ function People({ data, f, set }: {
           />
         </Chart>
       </div>
+      </Pair>
 
       {data.sources.length > 0 && (
         <div>
@@ -979,6 +1010,7 @@ function Stock({ data }: { data: Analytics & { bands?: any[] } }) {
 
   return (
     <>
+      <Pair>
       <div>
         <DeviceLabel
           title="Stock age against margin"
@@ -1018,6 +1050,7 @@ function Stock({ data }: { data: Analytics & { bands?: any[] } }) {
           </Chart>
         </div>
       )}
+      </Pair>
     </>
   );
 }

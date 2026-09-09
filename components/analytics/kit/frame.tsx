@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown, Info, X } from 'lucide-react';
 import type { Figure } from '@/lib/analytics/types';
 
@@ -93,6 +93,20 @@ export function DeviceLabel({ title, sub }: { title: string; sub?: string }) {
    before the shape. `foot` is the line under the rule: what the reader
    should take from it or be careful about. Both required.
    ------------------------------------------------------------- */
+/**
+ * How tall a chart's drawing area is.
+ *
+ * These six numbers are the kit's, and they are the whole set it uses:
+ * every `<svg>` in `docs/source/STCUIAnalytics.html` is `0 0 620 H`
+ * with H one of these. Offered as a union rather than a free number so
+ * a device cannot quietly grow to fill whatever row it landed in, which
+ * is how a waterfall with five bars came to occupy a whole 1080p row.
+ */
+export type ChartHeight = 150 | 180 | 190 | 200 | 220 | 250;
+
+/** The kit's drawing width. Charts are laid out two to a row against it. */
+export const CHART_W = 620;
+
 export function Chart({
   title, says, foot, legend, action, alarm, children,
 }: {
@@ -109,7 +123,9 @@ export function Chart({
     <section style={{
       border: `1px solid ${alarm ? 'var(--danger)' : 'var(--border)'}`,
       borderRadius: 'var(--r-md)', background: 'var(--surface)',
-      padding: '14px 16px 12px', display: 'flex', flexDirection: 'column', gap: 10,
+      /* The kit's panel padding, 16 by 18. */
+      padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10,
+      minWidth: 0, overflow: 'hidden',
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 220 }}>
@@ -134,6 +150,30 @@ export function Chart({
         fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.5,
       }}>{foot}</div>
     </section>
+  );
+}
+
+/**
+ * Two charts to a row, which is the only way the kit lays them out.
+ *
+ * `grid-template-columns:repeat(2,1fr);gap:16px` appears four times in
+ * the kit and nothing else does. A device drawn 620 wide and then
+ * stretched across a 1920 screen is the fault behind "the waterfall has
+ * five bars and takes an entire row": the shape stops being a shape and
+ * becomes a band of colour with a lot of air in it.
+ *
+ * Collapses to one column under 980px, because two 620s plus the gap
+ * plus the page padding is about where they stop fitting.
+ */
+export function Pair({ children }: { children: ReactNode }) {
+  return (
+    <div className="kit-pair" style={{
+      display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+      gap: 16, width: '100%', minWidth: 0, alignItems: 'start',
+    }}>
+      {children}
+      <style>{`@media (max-width: 980px) { .kit-pair { grid-template-columns: 1fr !important; } }`}</style>
+    </div>
   );
 }
 
@@ -445,15 +485,57 @@ export function NotWiredPanel({ what, why, needs }: { what: string; why: string;
    From the design: "Always three things: the figure, the comparison in
    the same tooltip, and what the figure is made of."
    ------------------------------------------------------------- */
-export function Readout({ x, y, title, value, delta, made, hidden }: {
+export function Readout({ x, y, title, value, delta, made, hidden, bounds }: {
   x: number; y: number; title: string; value: string;
   delta?: { pct: number; against: string } | null;
   made?: string;
   hidden?: boolean;
+  /** The box the readout must stay inside, in the same coordinates as x and y. */
+  bounds?: { w: number; h: number } | null;
 }) {
+  const self = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 150, h: 64 });
+
+  /* Measured after paint, because clamping needs the readout's own
+     width and that is not known until it has text in it. One frame with
+     an estimated width is imperceptible; a readout that hangs off the
+     panel is not. */
+  useLayoutEffect(() => {
+    const el = self.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (Math.abs(r.width - size.w) > 1 || Math.abs(r.height - size.h) > 1) {
+      setSize({ w: r.width, h: r.height });
+    }
+  }, [title, value, made, delta, size.w, size.h]);
+
   if (hidden) return null;
+
+  /* ---- Staying inside the panel ----
+
+     The readout used to be `left:x; top:y; translate(-50%,-100%)` and
+     nothing else, so a bar at the left edge put half of it outside the
+     card and a bar at the top put all of it above. The panel clips its
+     overflow, so "outside" meant invisible or, worse, a box pinned in
+     a corner over the heading.
+
+     So: centred on the point where there is room, pushed in where there
+     is not, and flipped below the point when there is no room above.
+     PAD keeps it off the panel's own border. */
+  const PAD = 6;
+  const W = bounds?.w ?? 0;
+  const H = bounds?.h ?? 0;
+
+  let left = x - size.w / 2;
+  if (W > 0) left = Math.min(Math.max(PAD, left), Math.max(PAD, W - size.w - PAD));
+
+  const above = y - size.h - 10;
+  const flip = above < PAD;
+  let top = flip ? y + 14 : above;
+  if (H > 0) top = Math.min(Math.max(PAD, top), Math.max(PAD, H - size.h - PAD));
+
   const style: CSSProperties = {
-    position: 'absolute', left: x, top: y, transform: 'translate(-50%, -100%)',
+    position: 'absolute', left, top,
     pointerEvents: 'none', zIndex: 5,
     /* A raised surface with a hairline, not an inverted block. Painting
        a tooltip with `--primary` gives a navy card in light and a WHITE
@@ -464,36 +546,67 @@ export function Readout({ x, y, title, value, delta, made, hidden }: {
     background: 'var(--surface-raised)', color: 'var(--text)',
     border: '1px solid var(--border-strong)',
     borderRadius: 'var(--r)', padding: '8px 11px 9px',
-    boxShadow: 'var(--shadow-2)', minWidth: 132, whiteSpace: 'nowrap',
+    boxShadow: 'var(--shadow-2)', maxWidth: W > 0 ? Math.max(140, W - PAD * 2) : undefined,
   };
+
   return (
-    <div style={style}>
+    <div ref={self} style={style}>
       <div style={{
         fontSize: 9.5, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
-        color: 'var(--text-subtle)',
+        color: 'var(--text-subtle)', whiteSpace: 'nowrap',
       }}>{title}</div>
       <div style={{
         fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 19, marginTop: 2,
-        fontVariantNumeric: 'tabular-nums',
+        fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
       }}>{value}</div>
       {delta && (
-        <div style={{ fontSize: 11.5, marginTop: 2 }}>
+        <div style={{ fontSize: 11.5, marginTop: 2, whiteSpace: 'nowrap' }}>
           <span style={{ fontWeight: 700, color: delta.pct >= 0 ? 'var(--success)' : 'var(--danger)' }}>
             {delta.pct >= 0 ? '+' : ''}{delta.pct.toFixed(1)}%
           </span>
           <span style={{ color: 'var(--text-subtle)' }}> {delta.against}</span>
         </div>
       )}
-      {made && <div style={{ fontSize: 11, marginTop: 3, color: 'var(--text-subtle)' }}>{made}</div>}
+      {/* What the figure is made of can be long, so this one wraps
+          rather than widening the readout past the panel. */}
+      {made && (
+        <div style={{
+          fontSize: 11, marginTop: 3, color: 'var(--text-subtle)',
+          lineHeight: 1.45, whiteSpace: 'normal',
+        }}>{made}</div>
+      )}
     </div>
   );
 }
 
-/** Hook for the shared readout: where it is and what it says. */
+/**
+ * The hover state, and the box the readout has to stay inside.
+ *
+ * `box` goes on the element the coordinates are measured against, and
+ * that element must be `position: relative`. Getting those two out of
+ * step is what pinned a readout to the top left of the page over the
+ * heading: the numbers were relative to one element and the readout was
+ * positioned against another.
+ */
 export function useReadout() {
+  const box = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<null | {
     x: number; y: number; title: string; value: string;
     delta?: { pct: number; against: string } | null; made?: string;
   }>(null);
-  return { at, setAt, clear: () => setAt(null) };
+
+  const bounds = () => {
+    const r = box.current?.getBoundingClientRect();
+    return r ? { w: r.width, h: r.height } : null;
+  };
+
+  /** Point in `box` coordinates, from a mouse event on any child of it. */
+  const pointIn = (e: { currentTarget: EventTarget | null }) => {
+    const b = box.current?.getBoundingClientRect();
+    const t = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect();
+    if (!b || !t) return null;
+    return { x: t.left - b.left + t.width / 2, y: t.top - b.top };
+  };
+
+  return { box, at, setAt, bounds, pointIn, clear: () => setAt(null) };
 }

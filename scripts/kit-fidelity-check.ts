@@ -160,6 +160,44 @@ const borrowed = [['components/AnalyticsHub.tsx', hub], ['components/analytics/k
     .map(([f, n, l]) => `${f}:${n}  ${l.trim()}`));
 must('no tier borrows a division colour', borrowed.length === 0, borrowed.join('\n        '));
 
+/* -------------------------------------------------------------
+   4. Every token globals.css steals is taken back inside .kit
+
+   globals.css is bundled after kit-tokens.css, so any name defined at
+   :root in both belongs to globals. globals is a DARK theme, so a name
+   left uncaptured hands a kit card the dark theme's value: a border of
+   white-at-a-tenth on a white surface, or a shadow with a white inset
+   highlight around every panel.
+
+   Computed rather than listed, so a token added to globals tomorrow
+   fails here instead of quietly changing how the hub looks.
+   ------------------------------------------------------------- */
+console.log('\n  The kit gets its own tokens back\n  ---------');
+{
+  const globals = readFileSync('app/globals.css', 'utf8');
+  const rootNames = (css: string) => {
+    const out = new Set<string>();
+    for (const block of css.matchAll(/:root\s*\{([^}]*)\}/gs)) {
+      for (const d of block[1]!.matchAll(/(--[a-z0-9-]+)\s*:/gi)) out.add(d[1]!);
+    }
+    return out;
+  };
+  const kitRoot = rootNames(tokens);
+  const globalRoot = rootNames(globals);
+  const stolen = [...kitRoot].filter((n) => globalRoot.has(n)).sort();
+
+  const scope = (tokens.match(/\n\.kit \{([\s\S]*?)\n\}/) ?? [])[1] ?? '';
+  const recaptured = new Set([...scope.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]!));
+  const missed = stolen.filter((n) => !recaptured.has(n));
+
+  must(`${stolen.length} tokens collide with globals.css, and .kit takes them all back`,
+    missed.length === 0,
+    missed.length
+      ? `not recaptured: ${missed.join(', ')}. globals.css is a dark theme, so each of `
+        + 'these hands a kit card a dark value on a light surface.'
+      : undefined);
+}
+
 console.log('\n  ---------\n');
 if (failures.length) {
   console.log(`  ${failures.length} failing:\n`);

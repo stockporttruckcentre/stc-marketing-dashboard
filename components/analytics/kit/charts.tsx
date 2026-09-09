@@ -59,8 +59,7 @@ export function BulletRows({ rows, onPick }: {
   onPick?: (key: string) => void;
 }) {
   const max = Math.max(1, ...rows.flatMap((r) => [r.value, r.target ?? 0])) * 1.12;
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   return (
     <div ref={box} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -122,7 +121,7 @@ export function BulletRows({ rows, onPick }: {
           </div>
         );
       })}
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
@@ -142,8 +141,7 @@ export function IndexedLines({ points, height = 190 }: {
   const W = 1000;
   const H = height;
   const pad = { l: 8, r: 8, t: 12, b: 22 };
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   const all = points.flatMap((p) => [p.stc, p.trailer, p.rental]);
   const lo = Math.min(80, ...all);
@@ -201,7 +199,7 @@ export function IndexedLines({ points, height = 190 }: {
           ) : null
         ))}
       </svg>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
@@ -222,13 +220,22 @@ export function Waterfall({ start, steps, end }: {
   steps: { label: string; delta: number; colour: string }[];
   end: { label: string; value: number };
 }) {
-  const H = 220;
+  /* The kit's waterfall: viewBox 0 0 620 180, five columns, and each
+     BAR 69.4 wide inside a 124 slot. That ratio is the whole reason
+     this chart reads: at 1fr the bars touch their neighbours, the
+     floating middle steps become blocks, and five bars fill a metre of
+     screen with colour. 69.4/124 is 56%. */
+  const H = 180;
+  const BAR = '56%';
+  /* Room under the bars for the two label lines. It was 40, which is
+     about 6px short of what a name over a signed figure actually needs,
+     so the labels ran into the panel's own footnote. */
+  const LABELS = 52;
   const cols = steps.length + 2;
   const top = Math.max(start.value, end.value,
     ...steps.map((_, i) => start.value + steps.slice(0, i + 1).reduce((a, s) => a + s.delta, 0)));
-  const scale = (v: number) => (v / Math.max(1, top * 1.1)) * (H - 40);
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const scale = (v: number) => (v / Math.max(1, top * 1.1)) * (H - LABELS);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   let running = start.value;
   const bars = steps.map((s) => {
@@ -243,14 +250,18 @@ export function Waterfall({ start, steps, end }: {
         display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 10,
         alignItems: 'end', height: H,
       }}>
+        {/* Bars are centred at 56% of their slot, per the kit. */}
         {/* The two ends are DATA, so they take a data colour and not
             `--primary`. `--primary` inverts between the themes because a
             button has to, so a bar painted with it is navy in light and
             white in dark, which is the bug migration-era note 47 in this
             repository already recorded once. `--chart-company` is the
             token for "the whole group" and holds still. */}
-        <Column label={start.label} value={shortMoney(start.value)}
-          bar={<div style={{ height: scale(start.value), background: 'var(--chart-company)', borderRadius: 2 }} />} />
+        <Column label={start.label} value={shortMoney(start.value)} barH={H - LABELS}
+          bar={<div style={{
+            height: scale(start.value), width: BAR, margin: '0 auto',
+            background: 'var(--chart-company)', borderRadius: 2,
+          }} />} />
 
         {bars.map((b) => {
           const up = b.delta >= 0;
@@ -258,7 +269,7 @@ export function Waterfall({ start, steps, end }: {
           const bottom = scale(Math.min(b.from, b.to));
           return (
             <div key={b.label} style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'flex-end' }}>
-              <div style={{ position: 'relative', height: H - 40 }}>
+              <div style={{ position: 'relative', height: H - LABELS }}>
                 <div
                   onMouseEnter={(e) => {
                     const p = box.current?.getBoundingClientRect();
@@ -273,11 +284,20 @@ export function Waterfall({ start, steps, end }: {
                   }}
                   onMouseLeave={clear}
                   style={{
-                    position: 'absolute', left: 0, right: 0,
+                    position: 'absolute', left: '22%', right: '22%',
                     bottom, height,
                     background: up ? b.colour : 'var(--danger)', borderRadius: 2,
                   }}
                 />
+                {/* The hairline the kit runs from the top of one bar to
+                    where the next one starts. Without it a waterfall is
+                    five bars at different heights and the reader has to
+                    infer that they are a running total. */}
+                <div style={{
+                  position: 'absolute', left: '78%', right: '-22%',
+                  bottom: bottom + height - 0.5, height: 1,
+                  background: 'var(--border-strong)', pointerEvents: 'none',
+                }} />
               </div>
               <Foot label={b.label} value={`${b.delta >= 0 ? '+' : ''}${shortMoney(b.delta)}`}
                 tone={up ? 'up' : 'down'} />
@@ -285,18 +305,32 @@ export function Waterfall({ start, steps, end }: {
           );
         })}
 
-        <Column label={end.label} value={shortMoney(end.value)}
-          bar={<div style={{ height: scale(end.value), background: 'var(--chart-company)', borderRadius: 2 }} />} />
+        <Column label={end.label} value={shortMoney(end.value)} barH={H - LABELS}
+          bar={<div style={{
+            height: scale(end.value), width: BAR, margin: '0 auto',
+            background: 'var(--chart-company)', borderRadius: 2,
+          }} />} />
       </div>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
 
-function Column({ label, value, bar }: { label: string; value: string; bar: React.ReactNode }) {
+/**
+ * One end column of the waterfall: the bar, then its two label lines.
+ *
+ * `barH` is passed rather than hardcoded, and that is the fix for the
+ * labels running into the panel's footnote. It used to be a literal
+ * 180, the same number as the whole chart's height, so a column was
+ * 180 of bar plus 46 of label inside a 180 box and the last 46 pixels
+ * landed on whatever came next.
+ */
+function Column({ label, value, bar, barH }: {
+  label: string; value: string; bar: React.ReactNode; barH: number;
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'flex-end' }}>
-      <div style={{ height: 180, display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ height: barH, display: 'flex', alignItems: 'flex-end' }}>
         <div style={{ width: '100%' }}>{bar}</div>
       </div>
       <Foot label={label} value={value} />
@@ -374,8 +408,7 @@ export function DotPlot({ people, groupRate }: {
   const hi = Math.max(groupRate * 1.6, ...rates, 0.1);
   const y = (r: number) => pad.t + (1 - r / hi) * (H - pad.t - pad.b);
   const biggest = Math.max(1, ...people.map((p) => p.value));
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
@@ -422,7 +455,7 @@ export function DotPlot({ people, groupRate }: {
           );
         })}
       </svg>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
@@ -445,8 +478,7 @@ export function SourceFlowChart({ rows, height = 260 }: {
   const H = height;
   const gap = 6;
   const usable = H - gap * Math.max(0, rows.length - 1);
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   const outcomes = [
     { key: 'stc', label: 'Won, STC', colour: HUE.stc },
@@ -552,7 +584,7 @@ export function SourceFlowChart({ rows, height = 260 }: {
           </div>
         ))}
       </div>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
@@ -581,8 +613,7 @@ export function StockScatter({ units, ageLimit = 120, thinMargin = 8, onPick }: 
 
   const x = (d: number) => pad.l + (d / maxDays) * (W - pad.l - pad.r);
   const y = (m: number) => pad.t + (1 - m / maxMargin) * (H - pad.t - pad.b);
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
@@ -639,7 +670,7 @@ export function StockScatter({ units, ageLimit = 120, thinMargin = 8, onPick }: 
         <text x={pad.l} y={H - 5} fontSize={11} fill={AXIS}>Days in stock →</text>
         <text x={W - pad.r} y={H - 5} fontSize={11} fill={AXIS} textAnchor="end">↑ Margin remaining, %</text>
       </svg>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
@@ -713,8 +744,7 @@ export function StackedMonths({ months, series, height = 200, onBrush }: {
   const rows = (Array.isArray(months) ? months : []) as ({ month: string } & Record<string, number | string>)[];
   const keys = (series ?? []) as { key: string; name: string; colour: string }[];
   const H = height;
-  const { at, setAt, clear } = useReadout();
-  const box = useRef<HTMLDivElement>(null);
+  const { box, at, setAt, bounds, clear } = useReadout();
   const [drag, setDrag] = useState<{ a: number; b: number } | null>(null);
 
   const totalOf = (r: typeof rows[number]) => keys.reduce((a, k) => a + Number(r[k.key] ?? 0), 0);
@@ -797,7 +827,7 @@ export function StackedMonths({ months, series, height = 200, onBrush }: {
           );
         })}
       </div>
-      {at && <Readout {...at} />}
+      {at && <Readout {...at} bounds={bounds()} />}
     </div>
   );
 }
