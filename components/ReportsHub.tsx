@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, FileText, Loader, Printer, RefreshCw, SlidersHorizontal, AlertTriangle,
-  Search, CalendarRange, Building2, GitBranch, Wrench, Play, Layers,
+  Search, CalendarRange, Building2, GitBranch, Wrench, Play, Layers, Filter, X, Star,
 } from 'lucide-react';
 import { Alert, Button, Card, Chip, Label, PageHead, SearchInput } from '@/components/kit/primitives';
 import { ReportView } from '@/components/reports/ReportView';
 import {
-  CATEGORY_BLURB, CATEGORY_LABEL, REPORTS, reportBySlug, reportsByCategory,
+  CATEGORY_LABEL, CATEGORY_SHORT, REPORTS, reportBySlug, reportsByCategory,
   type ReportCategory, type ReportDef,
 } from '@/lib/reports/catalogue';
 import { defaultFilters, docxHref, printHref } from '@/lib/reports/link';
@@ -193,37 +193,46 @@ export function ReportsHub({ people, mayExport, initial = null }: {
 }
 
 /* =============================================================
-   Picking one.
+   The hub, built to the reports reference.
 
-   From the business, having seen the first version:
+   `STCUIReports.html`, section one: "Reports hub shell. The landing
+   screen. A saved-report library on the left, the run queue on the
+   right, and everything answers one question: is my export ready."
 
-     now re-style the reports landing page as it's just cards everywhere
-     and not much like a reports hub
+   Recreated rather than lifted, as the design system's own handoff
+   note requires: this is React and Tailwind-era CSS variables, not the
+   prototype's markup. Every value below is the reference's own, read
+   off the rendered page rather than guessed:
 
-   They are right, and the fix is the kit's third rule rather than a
-   different card. NINE THINGS IN A GRID OF BOXES IS A GALLERY. A hub is
-   an index: you arrive knowing roughly what you want, you find its name,
-   you open it. A gallery makes you read every tile because each one is
-   the same size and weight as the last, and none of them tells you where
-   you are.
+     the shell        1px border, r-md, overflow hidden, --bg behind
+     the header band  --surface, 16px 20px, Panton 800 at 21px
+     the left rail    196px, --surface, 31px rows, 9.5px 0.18em labels
+     the table        34px head on --bg-subtle, 36px rows, 1px rules
+     the right rail   250px, --surface, bordered cards at r
 
-   So three things changed and none of them is decoration:
+   ---- Three places it does not follow the reference, and why ----
 
-     1. A RAIL, so the page says what kinds of report exist before you
-        read a single title, and clicking one narrows the list rather
-        than scrolling you to it.
-     2. THE MEETING REPORT IS FEATURED, once, at the top. It is the one
-        the business asked for by name and the one that will be run
-        fortnightly forever. Nine peers in a grid gave it exactly the
-        same weight as "Bottom 10 customers".
-     3. THE REST ARE ROWS, separated by 1px rules rather than boxed.
-        "Borders before shadows", and it is the difference between
-        scanning nine names in one movement and reading nine cards.
+   Each of these is the reference describing something this product does
+   not have. Drawing it anyway would put a lie on the screen.
 
-   A search box, because nine becomes fifteen and a rail alone does not
-   survive that. It matches the title, the blurb and the section names,
-   so typing "fleetsmart" finds the meeting report because FleetSmart+ is
-   a section of it.
+   1. NO RUN QUEUE. The reference's third column watches long exports
+      finish, because that is "the commonest question on this screen".
+      Our reports are built and returned in one request; there is
+      nothing to queue and nothing to wait for. So the third column
+      holds the one thing that genuinely belongs at the side of this
+      screen: the agenda of the meeting report, which is what somebody
+      walking into a meeting wants to see.
+
+   2. NO Schedule OR New report BUTTON. Neither exists yet. A header
+      button that opens nothing is worse than a bare header.
+
+   3. NO Format COLUMN. Every report here exports as both a PDF and a
+      Word document, so a format chip would say the same thing on every
+      row. The column carries the section count instead, which is the
+      thing that actually differs.
+
+   The export buttons on the report itself are untouched, per the
+   instruction: they already match how every other screen exports.
    ============================================================= */
 
 const CATEGORY_ICON: Record<ReportCategory, typeof CalendarRange> = {
@@ -233,7 +242,7 @@ const CATEGORY_ICON: Record<ReportCategory, typeof CalendarRange> = {
   operations: Wrench,
 };
 
-/** The one that gets the top of the page. */
+/** The one pinned to the top of the list and shown in the side rail. */
 const FEATURED = 'biweekly';
 
 function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
@@ -242,7 +251,7 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
 
   const featured = useMemo(() => reportBySlug(FEATURED), []);
 
-  /* Everything the report is about, as one string. A report is found by
+  /* Everything a report is about, as one string. A report is found by
      what is IN it as much as by its name: somebody looking for the
      FleetSmart+ numbers has no reason to know they live inside the
      meeting pack. */
@@ -254,143 +263,193 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
     return q.split(/\s+/).every((word) => hay.includes(word));
   }, [term]);
 
-  const searching = term.trim().length > 0;
+  /* One flat list, ordered by category so the rail and the table agree,
+     with the meeting report first wherever it appears. The reference's
+     table is one list with a starred row at the top, not a set of
+     grouped sections. */
+  const rows = useMemo(() => reportsByCategory()
+    .flatMap((g) => g.reports)
+    .filter((r) => matches(r) && (!only || r.category === only))
+    .sort((a, b) => (a.slug === FEATURED ? -1 : b.slug === FEATURED ? 1 : 0)),
+  [matches, only]);
 
-  /* ---- Featured, or in the list, and never neither ----
-
-     This condition had `matches(featured)` in it and that was a bug the
-     screenshot found before anybody else could: typing "fleetsmart"
-     matched the meeting report through its section names, so the flag
-     said "it is featured at the top", the list dropped it as a
-     duplicate, and the panel itself was suppressed because a search was
-     running. The report vanished, and so did the "nothing matches" line,
-     because that was keyed on the same flag. A blank page.
-
-     So the flag now says one thing only: is the panel actually drawn.
-     While a search is running it is not, and the report is therefore in
-     the list where the search can find it. */
-  const showFeatured = !searching && Boolean(featured) && (!only || only === 'meeting');
-
-  /* The featured report comes out of the list below it.
-     Listing it twice reads as a bug rather than as emphasis, and the
-     row said "Above" to explain itself, which is a label apologising
-     for a layout. While a search is running there is no featured panel,
-     so it goes back into the list where it can be found. */
-  const groups = useMemo(() => reportsByCategory()
-    .map((g) => ({
-      ...g,
-      reports: g.reports.filter((r) => matches(r) && !(showFeatured && r.slug === FEATURED)),
-    }))
-    .filter((g) => g.reports.length > 0 && (!only || g.category === only)),
-  [matches, only, showFeatured]);
-  const found = groups.reduce((n, g) => n + g.reports.length, 0);
-
-  return (
-    /* The heading is capped to the same measure as the list under it, so
-       the search box sits over the rows it filters rather than out at
-       the window edge with a screen of nothing between them. */
-    <div style={{ maxWidth: 1154 }}>
-      <PageHead
-        eyebrow="Workspace"
-        title="Reports"
-        sub="Pick one and it runs. Narrow it by division, period or person once it is open."
-        action={(
-          <div style={{ display: 'flex', width: 260 }}>
-            <SearchInput
-              value={term}
-              onChange={setTerm}
-              placeholder="Find a report"
-              icon={<Search size={14} />}
-            />
-          </div>
-        )}
-      />
-
-      <div className="reports-hub" style={{ display: 'flex', gap: 28, alignItems: 'flex-start' }}>
-        <Rail only={only} setOnly={setOnly} />
-
-        {/* Capped rather than filling the window. A row 1900px wide puts
-            the chevron a screen away from the title it belongs to, and
-            the eye has to travel the whole width to pair them up. The
-            kit's own reading measure does the same job everywhere else. */}
-        <div style={{
-          flex: 1, minWidth: 0, maxWidth: 940,
-          display: 'flex', flexDirection: 'column', gap: 30,
-        }}>
-          {showFeatured && <Featured def={featured!} onOpen={onOpen} />}
-
-          {groups.map((g) => (
-            <section key={g.category}>
-              <div style={{
-                display: 'flex', alignItems: 'baseline', gap: 12,
-                paddingBottom: 8, borderBottom: '2px solid var(--border-emphasis)',
-              }}>
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 13,
-                  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text)',
-                }}>{CATEGORY_LABEL[g.category]}</span>
-                {/* Beside the heading it counts, not pinned to the far
-                    right of the page where it reads as a stray digit
-                    belonging to nothing. */}
-                <span style={{
-                  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11.5,
-                  fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
-                }}>{g.reports.length}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)', flex: 1 }}>
-                  {CATEGORY_BLURB[g.category]}
-                </span>
-              </div>
-
-              <div>
-                {g.reports.map((r, at) => (
-                  <ReportRow key={r.slug} def={r} first={at === 0} onOpen={onOpen} />
-                ))}
-              </div>
-            </section>
-          ))}
-
-          {found === 0 && !showFeatured && (
-            <div style={{
-              padding: '30px 0', borderTop: '1px solid var(--border)',
-              fontSize: 13, color: 'var(--text-muted)',
-            }}>
-              Nothing matches &ldquo;{term.trim()}&rdquo;. Try a customer word like spend or growth,
-              or a part of the business like stock, pipeline or complaints.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* The rail is a second column until there is no room for one, and
-          then it is nothing: on a narrow screen the categories are three
-          taps away from the list they filter, which is worse than
-          scrolling past nine names. */}
-      <style>{`
-        @media (max-width: 900px) {
-          .reports-hub { display: block !important; }
-          .reports-rail { display: none !important; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/* The kinds of report there are, before anybody has read a title. */
-function Rail({ only, setOnly }: {
-  only: ReportCategory | null;
-  setOnly: (c: ReportCategory | null) => void;
-}) {
   const counts = useMemo(() => {
     const by = new Map<ReportCategory, number>();
     for (const r of REPORTS) by.set(r.category, (by.get(r.category) ?? 0) + 1);
     return by;
   }, []);
 
+  return (
+    <div style={{ maxWidth: 1240 }}>
+      <div style={{
+        border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+        overflow: 'hidden', background: 'var(--bg)',
+      }}>
+        {/* ---- header band ---- */}
+        <div style={{
+          background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+          padding: '16px 20px', display: 'flex', alignItems: 'flex-start',
+          justifyContent: 'space-between', gap: 16,
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <h1 style={{
+              margin: 0, fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 21,
+              letterSpacing: '-0.03em', color: 'var(--text)',
+            }}>Reports</h1>
+            <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
+              {REPORTS.length} reports · {counts.size} categories · every one runs on the spot
+            </span>
+          </div>
+        </div>
+
+        <div className="reports-body" style={{ display: 'flex', minHeight: 330 }}>
+          <Rail only={only} setOnly={setOnly} counts={counts} />
+
+          {/* ---- the list ---- */}
+          <div style={{
+            flex: 1, minWidth: 0, padding: '16px 18px',
+            display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', height: 28, width: 220,
+                background: 'var(--surface)', border: '1px solid var(--border-strong)',
+                borderRadius: 'var(--r)',
+              }}>
+                <span style={{ display: 'flex', alignItems: 'center', paddingLeft: 10, color: 'var(--text-subtle)' }}>
+                  <Search size={14} />
+                </span>
+                <input
+                  value={term}
+                  onChange={(e) => setTerm(e.target.value)}
+                  placeholder="Search reports"
+                  style={{
+                    flex: 1, minWidth: 0, height: '100%', padding: '0 10px 0 2px',
+                    background: 'transparent', color: 'var(--text)', border: 0, outline: 0,
+                    fontFamily: 'var(--inter)', fontSize: 12, letterSpacing: '-0.01em',
+                  }}
+                />
+              </div>
+
+              {/* The reference's filter pill with its count. Drawn only
+                  when a filter is on, because a pill reading "0" is a
+                  control that says nothing. */}
+              {only && (
+                <button
+                  onClick={() => setOnly(null)}
+                  title="Show every report again"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, height: 28,
+                    padding: '0 10px', background: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+                    color: 'var(--text)', fontFamily: 'var(--inter)',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  <Filter size={13} />
+                  {CATEGORY_SHORT[only]}
+                  <X size={12} style={{ color: 'var(--text-subtle)' }} />
+                </button>
+              )}
+
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                {term.trim() ? `${rows.length} of ${REPORTS.length}` : 'Sorted by category'}
+              </span>
+            </div>
+
+            <div style={{
+              border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+              overflow: 'hidden', background: 'var(--surface)',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <Th>Report</Th>
+                    <Th>Category</Th>
+                    <Th align="right">Sections</Th>
+                    <Th width={92}>{''}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, at) => (
+                    <ReportRow
+                      key={r.slug}
+                      def={r}
+                      pinned={r.slug === FEATURED}
+                      last={at === rows.length - 1}
+                      onOpen={onOpen}
+                    />
+                  ))}
+                </tbody>
+              </table>
+
+              {rows.length === 0 && (
+                <div style={{
+                  padding: '26px 14px', textAlign: 'center',
+                  fontSize: 12.5, color: 'var(--text-subtle)',
+                }}>
+                  Nothing matches that. Try a customer word like spend or growth, or a part of
+                  the business like stock, pipeline or complaints.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {featured && <Agenda def={featured} onOpen={onOpen} />}
+        </div>
+      </div>
+
+      {/* The reference carries a line of commentary under the shell
+          explaining what the three columns are for. That is a note to
+          whoever builds it, not copy for whoever uses it, and it is
+          wrong the moment the rails stand down on a narrow screen. */}
+
+      {/* Below the width the three columns need, the two rails stop
+          being columns and start being obstacles. The list is the part
+          somebody came for, so it is the part that survives. */}
+      <style>{`
+        @media (max-width: 1040px) {
+          .reports-body { display: block !important; }
+          .reports-rail, .reports-agenda { display: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function Th({ children, align = 'left', width }: {
+  children: React.ReactNode; align?: 'left' | 'right'; width?: number;
+}) {
+  return (
+    <th style={{
+      textAlign: align, padding: '0 12px', height: 34,
+      background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
+      fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
+      letterSpacing: '0.13em', textTransform: 'uppercase',
+      color: 'var(--text-subtle)', whiteSpace: 'nowrap', width,
+    }}>{children}</th>
+  );
+}
+
+/* =============================================================
+   The library rail.
+
+   The reference's own shape: a heading in 9.5px Panton at 0.18em, rows
+   at 31px, a monospaced count on the right, and the selected row
+   carrying a 2px accent bar down its left edge rather than a fill.
+   ============================================================= */
+function Rail({ only, setOnly, counts }: {
+  only: ReportCategory | null;
+  setOnly: (c: ReportCategory | null) => void;
+  counts: Map<ReportCategory, number>;
+}) {
   const row = (
     key: ReportCategory | null,
     label: string,
     count: number,
     Icon: typeof Layers,
+    tall: boolean,
   ) => {
     const on = only === key;
     return (
@@ -399,190 +458,176 @@ function Rail({ only, setOnly }: {
         onClick={() => setOnly(key)}
         aria-pressed={on}
         style={{
-          display: 'flex', alignItems: 'center', gap: 9, width: '100%',
-          height: 32, padding: '0 10px 0 11px', textAlign: 'left',
-          border: 'none', borderLeft: `2px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+          position: 'relative', display: 'flex', alignItems: 'center', gap: 10,
+          width: '100%', height: tall ? 31 : 29, padding: '0 10px', textAlign: 'left',
+          border: 0, borderRadius: 'var(--r)',
           background: on ? 'var(--bg-subtle)' : 'transparent',
           color: on ? 'var(--text)' : 'var(--text-muted)',
           fontFamily: 'var(--inter)', fontSize: 12.5, fontWeight: on ? 600 : 500,
           cursor: 'pointer',
         }}
       >
-        <Icon size={13} style={{ flex: 'none', color: on ? 'var(--accent)' : 'var(--text-subtle)' }} />
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {label}
+        {on && (
+          <span style={{
+            position: 'absolute', left: 0, top: 6, bottom: 6, width: 2,
+            borderRadius: 1, background: 'var(--accent)',
+          }} />
+        )}
+        <span style={{ display: 'flex', color: on ? 'var(--accent)' : 'var(--text-subtle)' }}>
+          <Icon size={15} />
         </span>
         <span style={{
-          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
-          fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
-        }}>{count}</span>
+          flex: 1, minWidth: 0, whiteSpace: 'nowrap',
+          overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{label}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--text-subtle)' }}>
+          {count}
+        </span>
       </button>
     );
   };
 
+  const heading = (text: string, first = false) => (
+    <span style={{
+      display: 'block', padding: first ? '8px 10px 5px' : '14px 10px 5px',
+      fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 9.5,
+      letterSpacing: '0.18em', color: 'var(--text-subtle)',
+    }}>{text}</span>
+  );
+
   return (
     <nav className="reports-rail" style={{
-      position: 'sticky', top: 8, flex: 'none', width: 186,
+      flex: 'none', width: 196, background: 'var(--surface)',
+      borderRight: '1px solid var(--border)', padding: '10px 8px',
       display: 'flex', flexDirection: 'column', gap: 1,
     }}>
-      <div style={{ padding: '0 0 9px 11px' }}>
-        <Label>What kind</Label>
-      </div>
-      {row(null, 'Everything', REPORTS.length, Layers)}
+      {heading('LIBRARY', true)}
+      {row(null, 'All reports', REPORTS.length, Layers, true)}
+      {heading('BY CATEGORY')}
       {(['meeting', 'customers', 'pipeline', 'operations'] as ReportCategory[]).map((c) =>
-        row(c, CATEGORY_LABEL[c], counts.get(c) ?? 0, CATEGORY_ICON[c]))}
+        row(c, CATEGORY_SHORT[c], counts.get(c) ?? 0, CATEGORY_ICON[c], false))}
     </nav>
   );
 }
 
 /* =============================================================
-   The meeting report, given the top of the page.
+   What the third column holds instead of a run queue.
 
-   It is not a bigger card. It is the only thing on the screen that
-   states its contents, because that is what somebody about to walk into
-   a meeting wants to know: what will be on the paper. The ten section
-   names are the answer, and they are also the thing you switch off once
-   you are inside.
+   The reference watches long exports finish. Nothing here takes long
+   enough to watch, so the column carries the meeting agenda: the ten
+   sections of the bi-weekly report, in the order the meeting takes
+   them. It is the same information the queue was giving, one step
+   earlier: not "is it ready" but "what is on it".
    ============================================================= */
-function Featured({ def, onOpen }: { def: ReportDef; onOpen: (d: ReportDef) => void }) {
+function Agenda({ def, onOpen }: { def: ReportDef; onOpen: (d: ReportDef) => void }) {
   return (
-    <section style={{
-      border: '1px solid var(--border-strong)', borderRadius: 'var(--r-md)',
-      borderLeft: '3px solid var(--accent)', background: 'var(--surface)',
-      padding: '16px 18px 17px',
+    <aside className="reports-agenda" style={{
+      flex: 'none', width: 250, background: 'var(--surface)',
+      borderLeft: '1px solid var(--border)', padding: 16,
+      display: 'flex', flexDirection: 'column', gap: 12,
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 260 }}>
-          <Label>Run it before every meeting</Label>
-          <h2 style={{
-            margin: '6px 0 0', fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 22,
-            letterSpacing: '-0.03em', lineHeight: 1.15, color: 'var(--text)',
-          }}>{def.title}</h2>
-          <p style={{
-            margin: '5px 0 0', fontSize: 13, color: 'var(--text-muted)',
-            lineHeight: 1.55, maxWidth: '62ch',
-          }}>
-            {def.blurb} Reds and ambers open it, because nothing else matters if a
-            customer is walking, and the diary closes it.
-          </p>
-        </div>
-        <Button variant="accent" onClick={() => onOpen(def)}>
-          <Play size={14} /> Run it
-        </Button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 12.5, color: 'var(--text)' }}>
+          On the agenda
+        </span>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 8px',
+          background: 'rgba(9, 22, 58, 0.08)', color: 'var(--primary)',
+          border: '1px solid transparent', borderRadius: 'var(--r-sm)',
+          fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
+        }}>{def.sections.length} sections</span>
       </div>
 
       <div style={{
-        display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 13,
-        paddingTop: 12, borderTop: '1px solid var(--border)',
+        border: '1px solid var(--border)', borderRadius: 'var(--r)',
+        padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 9,
       }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{ color: 'var(--accent)', display: 'flex' }}><CalendarRange size={14} /></span>
+          <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+            {def.title}
+          </span>
+        </div>
+        <span style={{ fontSize: 10.5, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+          Reds and ambers open it, because nothing else matters if a customer is walking. The
+          diary closes it.
+        </span>
+        <Button variant="accent" size="sm" onClick={() => onOpen(def)} style={{ width: '100%' }}>
+          <Play size={13} /> Run it
+        </Button>
+      </div>
+
+      <ol style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column' }}>
         {def.sections.map((s, at) => (
-          <span key={s.id} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            height: 22, padding: '0 8px', borderRadius: 'var(--r)',
-            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
-            fontFamily: 'var(--inter)', fontSize: 11.5, color: 'var(--text-muted)',
+          <li key={s.id} style={{
+            display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 0',
+            borderTop: at === 0 ? 'none' : '1px solid var(--border)',
           }}>
             <span style={{
-              fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
-              fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)',
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-subtle)',
+              minWidth: 14, textAlign: 'right',
             }}>{at + 1}</span>
-            {s.label}
-          </span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{s.label}</span>
+          </li>
         ))}
+      </ol>
+
+      <div style={{ paddingTop: 11, borderTop: '1px solid var(--border)' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+          PDF and Word come off the report itself. Nothing is stored, so run it again whenever.
+        </span>
       </div>
-    </section>
+    </aside>
   );
 }
 
-/* =============================================================
-   One report, as a row you can run.
-
-   From the business:
-
-     my issue is only the top one looks like a report. The rest don't as
-     there's no run buttons
-
-   The row was a link wearing a chevron, and a chevron says "there is
-   more of this somewhere" rather than "this produces a document". Every
-   row now carries the same verb the featured panel does, so the list
-   reads as nine things you run rather than nine things you navigate to.
-
-   ---- Why the Run buttons are not red ----
-
-   The kit's first rule: red is the single most important action on a
-   screen, and three red buttons means none. Nine of them means the
-   featured report stops standing out at all, and the one report the
-   business runs fortnightly is the one that has to.
-
-   So the featured panel keeps the accent and says "Run it"; the rows
-   are secondary and say "Run". Same verb, same weight of meaning,
-   different weight on the page.
-
-   ---- Why the row is a div and the buttons are buttons ----
-
-   A button inside a button is invalid, and the row needs two things to
-   click: the title, because people click titles, and Run, because the
-   business asked for it. So the row is a plain element, the title is a
-   button covering the whole left side, and Run is its own. Both open the
-   same report, and hovering either lights the whole row so it still
-   reads as one thing.
-   ============================================================= */
-function ReportRow({ def, first, onOpen }: {
+/* One report, as a row in the reference's table. */
+function ReportRow({ def, pinned, last, onOpen }: {
   def: ReportDef;
-  first: boolean;
+  /** The meeting report, marked the way the reference marks its first row. */
+  pinned: boolean;
+  last: boolean;
   onOpen: (d: ReportDef) => void;
 }) {
   const [over, setOver] = useState(false);
-  const wake = { onMouseEnter: () => setOver(true), onMouseLeave: () => setOver(false) };
+  const cell = {
+    padding: '0 12px', height: 36,
+    borderBottom: last ? 'none' : '1px solid var(--border)',
+    fontSize: 12.5, whiteSpace: 'nowrap' as const,
+  };
 
   return (
-    <div
-      {...wake}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 14,
-        borderTop: first ? 'none' : '1px solid var(--border)',
-        background: over ? 'var(--bg-subtle)' : 'transparent',
-        transition: 'background 120ms var(--ease, ease)',
-      }}
+    <tr
+      onMouseEnter={() => setOver(true)}
+      onMouseLeave={() => setOver(false)}
+      style={{ background: over ? 'var(--bg-subtle)' : 'transparent' }}
     >
-      <button
-        onClick={() => onOpen(def)}
-        onFocus={() => setOver(true)}
-        onBlur={() => setOver(false)}
-        style={{
-          flex: 1, minWidth: 0, display: 'block', textAlign: 'left',
-          padding: '11px 0 11px 2px', border: 'none', background: 'transparent',
-          cursor: 'pointer', fontFamily: 'var(--inter)',
-        }}
-      >
-        <span style={{
-          display: 'block',
-          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14.5,
-          letterSpacing: '-0.01em', color: 'var(--text)',
-        }}>{def.title}</span>
-        <span style={{
-          display: 'block', fontSize: 12.5, color: 'var(--text-muted)',
-          lineHeight: 1.5, marginTop: 2, maxWidth: '72ch',
-        }}>{def.blurb}</span>
-      </button>
-
-      <span style={{
-        flex: 'none', fontSize: 11.5, color: 'var(--text-subtle)',
-        fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
-      }}>
-        {def.sections.length} {def.sections.length === 1 ? 'section' : 'sections'}
-      </span>
-
-      <span
-        style={{ flex: 'none', paddingRight: 2 }}
-        onFocus={() => setOver(true)}
-        onBlur={() => setOver(false)}
-      >
-        <Button variant="secondary" onClick={() => onOpen(def)}>
-          <Play size={13} /> Run
-        </Button>
-      </span>
-    </div>
+      <td style={{ ...cell, color: 'var(--text)', fontWeight: 600 }}>
+        <button
+          onClick={() => onOpen(def)}
+          title={def.blurb}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 9,
+            border: 0, background: 'transparent', padding: 0, cursor: 'pointer',
+            fontFamily: 'var(--inter)', fontSize: 12.5, fontWeight: 600, color: 'var(--text)',
+          }}
+        >
+          {pinned && (
+            <span style={{ color: 'var(--accent)', display: 'flex' }} title="Pinned">
+              <Star size={13} />
+            </span>
+          )}
+          {def.title}
+        </button>
+      </td>
+      <td style={{ ...cell, color: 'var(--text-subtle)' }}>{CATEGORY_LABEL[def.category]}</td>
+      <td style={{ ...cell, textAlign: 'right', color: 'var(--text-subtle)', fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+        {def.sections.length}
+      </td>
+      <td style={{ ...cell, textAlign: 'right' }}>
+        <Button variant="secondary" size="sm" onClick={() => onOpen(def)}>Run</Button>
+      </td>
+    </tr>
   );
 }
 

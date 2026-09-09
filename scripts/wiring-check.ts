@@ -200,60 +200,80 @@ ok('the dot still sorts worst first',
   /comparator: \(a, b\) => healthRank\(a as Health\) - healthRank\(b as Health\)/.test(crmGrid));
 
 /* =============================================================
-   The Reports hub: featured, or listed, and never neither
+   The Reports hub, against the reference it was built from
 
-   The landing page shows the meeting report twice over if nothing stops
-   it, and hides it entirely if the wrong thing does. The second is what
-   actually shipped for ten minutes: the "is it featured" flag asked
-   whether the report MATCHED THE SEARCH, so typing a word that appears
-   in one of its section names set the flag, the list dropped it as a
-   duplicate, the panel stayed down because a search was running, and the
-   empty state was keyed on the same flag. A blank page, and a screenshot
-   found it rather than a person.
+   `STCUIReports.html` section one, "Reports hub shell". The shell is
+   the thing being asserted, because it is the thing that drifts: a
+   later change reaches for a Card, the rails become stacked blocks, and
+   the screen quietly stops being the design that was signed off.
 
-   So the flag means one thing: is the panel on screen. These two lines
-   are the whole of that, and they are checked as text because the bug
-   was a condition rather than a behaviour.
+   Three of these assert something ABSENT, and those are the important
+   ones. The reference describes a product with saved reports, a run
+   queue and scheduled sends. This one has none of that, and drawing it
+   anyway would put a lie on the screen in front of a finance director.
    ============================================================= */
 console.log('\n  The Reports hub\n  ---------------');
 
-const hub = read('components/ReportsHub.tsx');
+/* The hub alone, not the whole file.
+   `ReportsHub.tsx` also holds the screen a report is READ on, and that
+   screen has the accent Print button and the Word button on it, which
+   the business asked to be left exactly as they are. Scanning the whole
+   file would count those against the hub and fail on the thing that is
+   deliberately correct. The comment block above the hub is cut too: a
+   sentence saying "no Schedule button" would otherwise satisfy a check
+   looking for the absence of one. */
+const hubFile = read('components/ReportsHub.tsx');
+const hub = hubFile
+  .slice(hubFile.indexOf('function Catalogue('), hubFile.indexOf('function Options('));
 
-ok('whether the meeting report is featured depends on the search and nothing else',
-  /const showFeatured = !searching && Boolean\(featured\) && \(!only \|\| only === 'meeting'\);/
-    .test(hub),
-  'asking whether it MATCHES the search made a matching search hide it from both places');
-
-ok('and it leaves the list below only while that panel is actually drawn',
-  /!\(showFeatured && r\.slug === FEATURED\)/.test(hub),
-  'without the flag it is listed under its own feature panel, which reads as a bug');
-
-ok('a search that finds nothing says so',
-  /found === 0 && !showFeatured/.test(hub));
-
-ok('the hub is rows and rules rather than a grid of cards',
-  !/gridTemplateColumns: 'repeat\(auto-fill/.test(hub),
+ok('one bordered shell rather than a page of cards',
+  /borderRadius: 'var\(--r-md\)',\s*\n\s*overflow: 'hidden', background: 'var\(--bg\)'/.test(hub)
+  && !/gridTemplateColumns: 'repeat\(auto-fill/.test(hub),
   'nine tiles of equal weight is a gallery: you have to read all of them to find one');
 
-ok('and the rail stands down rather than stacking on a narrow screen',
-  /\.reports-rail \{ display: none !important; \}/.test(hub));
+ok('a header band on --surface, in the reference’s own type',
+  /fontWeight: 800, fontSize: 21/.test(hub)
+  && /background: 'var\(--surface\)', borderBottom: '1px solid var\(--border\)'/.test(hub));
 
-/* From the business, on the first version of the rows:
+ok('a 196px library rail with the reference’s label treatment',
+  /width: 196, background: 'var\(--surface\)'/.test(hub)
+  && /fontSize: 9\.5,\s*\n\s*letterSpacing: '0\.18em'/.test(hub));
 
-     my issue is only the top one looks like a report. The rest don't as
-     there's no run buttons
+ok('and the selected row carries an accent bar rather than a fill',
+  /position: 'absolute', left: 0, top: 6, bottom: 6, width: 2/.test(hub));
 
-   A chevron says "there is more of this somewhere". A Run button says
-   "this produces a document", which is what a report is. */
-ok('every report in the list carries a Run button, not just a chevron',
-  /<Play size=\{13\} \/> Run/.test(hub)
-  && !/<ChevronRight/.test(hub),
-  'a chevron reads as navigation, and the row is not navigation, it runs something');
+ok('a table with a 34px head on --bg-subtle and 36px rows',
+  /height: 34,\s*\n\s*background: 'var\(--bg-subtle\)'/.test(hub)
+  && /padding: '0 12px', height: 36/.test(hub));
 
-ok('and the featured one keeps the only red button on the screen',
-  /variant="accent" onClick=\{\(\) => onOpen\(def\)\}/.test(hub)
-  && /variant="secondary" onClick=\{\(\) => onOpen\(def\)\}/.test(hub),
-  'nine red Run buttons is the kit rule broken nine times: red points at one thing');
+ok('every report in the table can be run from its own row',
+  /<Button variant="secondary" size="sm" onClick=\{\(\) => onOpen\(def\)\}>Run<\/Button>/.test(hub),
+  'a row you can only navigate to does not read as a report');
+
+ok('and the meeting report is pinned the way the reference pins its first row',
+  /pinned && \(/.test(hub) && /<Star size=\{13\} \/>/.test(hub));
+
+ok('exactly one red button on the screen, on the agenda',
+  (hub.match(/variant="accent"/g) ?? []).length === 1,
+  'red points at one thing: nine red Run buttons is the kit rule broken nine times');
+
+/* ---- What is deliberately NOT drawn ---- */
+
+ok('no run queue is faked',
+  !/Run queue/.test(hub) && !/queued/.test(hub),
+  'reports here are built and returned in one request, so there is nothing to watch finish');
+
+ok('no Schedule or New report button is drawn',
+  !/>Schedule</.test(hub) && !/New report/.test(hub),
+  'neither exists yet, and a header button that opens nothing is worse than a bare header');
+
+ok('no per-report format chip, because every report exports both ways',
+  !/'PDF'/.test(hub) && !/'XLSX'/.test(hub),
+  'a chip saying the same thing on every row is noise dressed as information');
+
+ok('the rails stand down on a narrow screen rather than stacking',
+  /\.reports-rail, \.reports-agenda \{ display: none !important; \}/.test(hub),
+  'the list is what somebody came for, so the list is what survives');
 
 console.log(
   failed === 0
