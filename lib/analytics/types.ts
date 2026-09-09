@@ -1,4 +1,4 @@
-import type { Period } from './period';
+import type { CompareMode, Period, PeriodKind } from './period';
 
 /* =============================================================
    What the Analytics hub is, as data.
@@ -167,4 +167,23 @@ export type Analytics = {
   /** Top customers by revenue in the window, across every division. */
   customers: { name: string; revenue: number; was: number; division: DivisionSlug }[];
   notWired: NotWired[];
+};
+
+
+/* -------------------------------------------------------------
+   What the whole hub is filtered by.
+
+   Moved here from `AnalyticsHub` when the page was split into a
+   landing and six drill-downs. Seven screens now share one filter
+   shape, and a second declaration of it would be a second idea of
+   what a period is.
+   ------------------------------------------------------------- */
+export type Filters = {
+  kind: PeriodKind;
+  from: string;
+  to: string;
+  mode: CompareMode;
+  trim: boolean;
+  divisions: DivisionSlug[];
+  person: string | null;
 };

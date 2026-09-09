@@ -42,10 +42,19 @@ const SOURCE = 'docs/source/STCUIAnalytics.html';
 const WORK = '/tmp/kit-diff-work';
 const MINE = process.env.PREVIEW_URL ?? 'http://localhost:3000/analytics-preview';
 
-/** Which devices have been ported so far. A device not listed is not yet claimed. */
-const PORTED: Record<string, string> = {
-  cohort: 'Contract retention by start month',
-};
+/**
+ * Devices the preview harness renders, checked one for one.
+ *
+ * Empty for now, and that is a fact rather than a convenience. The
+ * cohort grid was ported and proved identical to the kit, and it has
+ * since moved to `/dashboard/analytics/fleetsmart`, which the preview
+ * harness does not render and which needs a session. Until the harness
+ * can mount a drill-down, the per-device check has nothing to look at
+ * and says so rather than passing on an empty list.
+ *
+ * The landing check below is the one that runs.
+ */
+const PORTED: Record<string, string> = {};
 
 function unpack(): string {
   rmSync(WORK, { recursive: true, force: true });
@@ -135,6 +144,20 @@ const WALK = `window.__kitWalk = function (title) {
     var kids = Array.prototype.slice.call(el.children);
     for (var i = 0; i < kids.length; i++) collect(kids[i], out);
     return out;
+  }
+
+  /* The whole page, for a screen the kit has no single device for.
+
+     The executive landing is a COMPOSITION: the kit draws four equal
+     KPI cards where the brief forbids them, three separate division
+     scorecards where it asks for one table, and it has no "what's
+     coming" panel at all. So the landing cannot be diffed against one
+     device. What can be enforced is that every shape it draws exists
+     somewhere in the kit, which is the promise "composed from kit
+     atoms, not designed" actually cashing out. */
+  if (title === '*page*') {
+    var root = document.body;
+    return { shapes: collect(root, {}), width: Math.round(root.getBoundingClientRect().width) };
   }
 
   var p = panelFor(title);
@@ -243,6 +266,40 @@ async function main() {
 
     console.log(`  width kit ${kit.width}px, ours ${mine.width}px${kit.width === mine.width ? '' : '   DIFF'}`);
     if (kit.width !== mine.width) diffs.push(`${key}: panel is ${mine.width}px, the kit draws it at ${kit.width}px`);
+  }
+
+  /* -------------------------------------------------------------
+     The executive landing, against the whole kit
+
+     Not against one device, because it is composed from several. Every
+     shape it draws has to exist somewhere in the kit page, which is
+     what stops a composition becoming an invention.
+     ------------------------------------------------------------- */
+  console.log('\n  the executive landing, against the whole kit\n  ---------');
+  {
+    const kitAll = await walk(kitPage, '*page*');
+    const landing = await walk(ourPage, '*page*');
+    if (!kitAll || !landing) {
+      console.log('  FAIL  could not read one of the pages');
+      diffs.push('landing: could not read one of the pages');
+    } else {
+      const invented = Object.keys(landing.shapes).filter((s) => !(s in kitAll.shapes));
+      if (invented.length === 0) {
+        console.log(`  ok    every shape on the landing exists in the kit (${Object.keys(landing.shapes).length} distinct)`);
+      } else {
+        console.log(`  FAIL  ${invented.length} shapes on the landing are not in the kit anywhere`);
+        const blame = new Map<string, number>();
+        for (const sig of invented) {
+          for (const d of nearest(sig, Object.keys(kitAll.shapes)).diff) {
+            blame.set(d, (blame.get(d) ?? 0) + 1);
+          }
+        }
+        for (const [what, n] of [...blame.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)) {
+          console.log(`        x${String(n).padStart(3)}  ${what}`);
+        }
+        diffs.push(`landing: ${invented.length} shapes not in the kit`);
+      }
+    }
   }
 
   await browser.close();

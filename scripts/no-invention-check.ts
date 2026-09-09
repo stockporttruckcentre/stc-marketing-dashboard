@@ -36,6 +36,13 @@ const GOVERNED = [
   'components/AnalyticsHub.tsx',
   'components/analytics/kit/charts.tsx',
   'components/analytics/kit/frame.tsx',
+  /* Added when the hub was split into a landing and six drill-downs.
+     Without them the count would have "fallen" from 284 to 236 purely
+     because the values moved into files nothing was watching, which is
+     a ratchet measuring the wrong thing. */
+  'components/analytics/sections.tsx',
+  'components/analytics/landing.tsx',
+  'components/analytics/DrillDown.tsx',
 ];
 
 /* The one file allowed to hold values, because it IS the kit. */
