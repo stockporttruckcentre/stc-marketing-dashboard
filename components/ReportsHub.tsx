@@ -8,7 +8,7 @@ import {
 import { Alert, Button, Card, Chip, Label, PageHead, SearchInput } from '@/components/kit/primitives';
 import { ReportView } from '@/components/reports/ReportView';
 import {
-  CATEGORY_LABEL, CATEGORY_SHORT, REPORTS, reportBySlug, reportsByCategory,
+  CATEGORY_LABEL, REPORTS, reportBySlug, reportsByCategory,
   type ReportCategory, type ReportDef,
 } from '@/lib/reports/catalogue';
 import { defaultFilters, docxHref, printHref } from '@/lib/reports/link';
@@ -280,7 +280,26 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
   }, []);
 
   return (
-    <div style={{ maxWidth: 1240 }}>
+    /* No width cap. From the business, looking at it in the app:
+
+         I feel like it's been plopped on the page rather than designed
+         around our actual app, there's a lot of blank space on the
+         right. If you simply extend the middle column out more so the
+         page fits though it'll make the rows feel too long. The whole
+         shell just needs expanding to suit our actual page size.
+
+       Both halves of that are right, and the second is the harder one.
+       A capped shell floating in a 1600px content area reads as a
+       component borrowed from somewhere else. Stretching only the
+       middle gives a report name at the far left and its Run button
+       two feet away, with nothing in between.
+    
+       So the width is spent on all three columns AND on a column that
+       did not exist: what the report answers. That sentence was always
+       in the catalogue and there was nowhere to put it. Now the extra
+       width carries information rather than air, and the row still
+       reads as one thing because the eye never crosses an empty gap. */
+    <div>
       <div style={{
         border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
         overflow: 'hidden', background: 'var(--bg)',
@@ -347,7 +366,7 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
                   }}
                 >
                   <Filter size={13} />
-                  {CATEGORY_SHORT[only]}
+                  {CATEGORY_LABEL[only]}
                   <X size={12} style={{ color: 'var(--text-subtle)' }} />
                 </button>
               )}
@@ -365,10 +384,18 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <Th>Report</Th>
-                    <Th>Category</Th>
-                    <Th align="right">Sections</Th>
-                    <Th width={92}>{''}</Th>
+                    {/* Every fixed width here is as narrow as its
+                        content allows, so the answers column gets the
+                        rest. Measured rather than chosen: at the app's
+                        real content width the longest blurb has to fit
+                        without an ellipsis, because a sentence cut off
+                        on the widest possible screen reads as a fault
+                        rather than as a summary. */}
+                    <Th width={210}>Report</Th>
+                    <Th className="reports-answers">What it answers</Th>
+                    <Th width={150}>Category</Th>
+                    <Th width={78} align="right">Sections</Th>
+                    <Th width={84}>{''}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -405,24 +432,33 @@ function Catalogue({ onOpen }: { onOpen: (d: ReportDef) => void }) {
           whoever builds it, not copy for whoever uses it, and it is
           wrong the moment the rails stand down on a narrow screen. */}
 
-      {/* Below the width the three columns need, the two rails stop
-          being columns and start being obstacles. The list is the part
-          somebody came for, so it is the part that survives. */}
+      {/* The rails stand down one at a time, widest first. The agenda
+          is the one you can lose without losing the screen: the meeting
+          report is still the pinned first row of the table. The list is
+          what somebody came for, so the list is what survives. */}
       <style>{`
-        @media (max-width: 1040px) {
+        /* The answers column goes first, and it goes early. Below the
+           width where it can hold a whole sentence, every row of it ends
+           in an ellipsis, and a column that is truncated on all nine
+           rows carries no information: it is noise with a heading on it.
+           1600 is where the longest blurb stops fitting, measured rather
+           than picked. */
+        @media (max-width: 1599px) { .reports-answers { display: none !important; } }
+        @media (max-width: 1240px) { .reports-agenda { display: none !important; } }
+        @media (max-width: 940px) {
           .reports-body { display: block !important; }
-          .reports-rail, .reports-agenda { display: none !important; }
+          .reports-rail { display: none !important; }
         }
       `}</style>
     </div>
   );
 }
 
-function Th({ children, align = 'left', width }: {
-  children: React.ReactNode; align?: 'left' | 'right'; width?: number;
+function Th({ children, align = 'left', width, className }: {
+  children: React.ReactNode; align?: 'left' | 'right'; width?: number; className?: string;
 }) {
   return (
-    <th style={{
+    <th className={className} style={{
       textAlign: align, padding: '0 12px', height: 34,
       background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
       fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
@@ -497,7 +533,7 @@ function Rail({ only, setOnly, counts }: {
 
   return (
     <nav className="reports-rail" style={{
-      flex: 'none', width: 196, background: 'var(--surface)',
+      flex: 'none', width: 220, background: 'var(--surface)',
       borderRight: '1px solid var(--border)', padding: '10px 8px',
       display: 'flex', flexDirection: 'column', gap: 1,
     }}>
@@ -505,7 +541,7 @@ function Rail({ only, setOnly, counts }: {
       {row(null, 'All reports', REPORTS.length, Layers, true)}
       {heading('BY CATEGORY')}
       {(['meeting', 'customers', 'pipeline', 'operations'] as ReportCategory[]).map((c) =>
-        row(c, CATEGORY_SHORT[c], counts.get(c) ?? 0, CATEGORY_ICON[c], false))}
+        row(c, CATEGORY_LABEL[c], counts.get(c) ?? 0, CATEGORY_ICON[c], false))}
     </nav>
   );
 }
@@ -522,7 +558,7 @@ function Rail({ only, setOnly, counts }: {
 function Agenda({ def, onOpen }: { def: ReportDef; onOpen: (d: ReportDef) => void }) {
   return (
     <aside className="reports-agenda" style={{
-      flex: 'none', width: 250, background: 'var(--surface)',
+      flex: 'none', width: 300, background: 'var(--surface)',
       borderLeft: '1px solid var(--border)', padding: 16,
       display: 'flex', flexDirection: 'column', gap: 12,
     }}>
@@ -620,6 +656,20 @@ function ReportRow({ def, pinned, last, onOpen }: {
           {def.title}
         </button>
       </td>
+      {/* The one thing the reference's table had no room for and this
+          page does. It is the sentence the catalogue has always carried,
+          and it is what somebody actually chooses a report by: not its
+          name, which they may never have read, but the question it
+          answers. Truncated with the full text on hover only when the
+          window is too narrow to hold it. */}
+      <td
+        className="reports-answers"
+        title={def.blurb}
+        style={{
+          ...cell, color: 'var(--text-muted)',
+          overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0,
+        }}
+      >{def.blurb}</td>
       <td style={{ ...cell, color: 'var(--text-subtle)' }}>{CATEGORY_LABEL[def.category]}</td>
       <td style={{ ...cell, textAlign: 'right', color: 'var(--text-subtle)', fontFamily: 'var(--mono)', fontSize: 11.5 }}>
         {def.sections.length}

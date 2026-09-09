@@ -235,8 +235,8 @@ ok('a header band on --surface, in the reference’s own type',
   /fontWeight: 800, fontSize: 21/.test(hub)
   && /background: 'var\(--surface\)', borderBottom: '1px solid var\(--border\)'/.test(hub));
 
-ok('a 196px library rail with the reference’s label treatment',
-  /width: 196, background: 'var\(--surface\)'/.test(hub)
+ok('a library rail with the reference’s label treatment',
+  /width: 220, background: 'var\(--surface\)'/.test(hub)
   && /fontSize: 9\.5,\s*\n\s*letterSpacing: '0\.18em'/.test(hub));
 
 ok('and the selected row carries an accent bar rather than a fill',
@@ -271,9 +271,37 @@ ok('no per-report format chip, because every report exports both ways',
   !/'PDF'/.test(hub) && !/'XLSX'/.test(hub),
   'a chip saying the same thing on every row is noise dressed as information');
 
-ok('the rails stand down on a narrow screen rather than stacking',
-  /\.reports-rail, \.reports-agenda \{ display: none !important; \}/.test(hub),
+ok('the rails stand down one at a time rather than stacking',
+  /\.reports-agenda \{ display: none !important; \}/.test(hub)
+  && /\.reports-rail \{ display: none !important; \}/.test(hub),
   'the list is what somebody came for, so the list is what survives');
+
+/* =============================================================
+   Built for this page, not dropped onto it
+
+   From the business, seeing it in the app for the first time:
+
+     I feel like it's been plopped on the page rather than designed
+     around our actual app, there's a lot of blank space on the right.
+     If you simply extend the middle column out more so the page fits
+     though it'll make the rows feel too long. The whole shell just
+     needs expanding to suit our actual page size.
+
+   Both halves matter and the second is the one a width cap does not
+   fix: stretching the middle alone puts a report name at the far left
+   and its Run button two feet away with nothing in between. So the
+   width buys a column.
+   ============================================================= */
+ok('the shell fills the page rather than floating in it',
+  !/maxWidth: 12\d\d/.test(hub) && !/maxWidth: 14\d\d/.test(hub),
+  'a capped shell in a 1600px content area reads as a component borrowed from elsewhere');
+
+ok('and the width buys a column rather than longer rows',
+  /<Th className="reports-answers">What it answers<\/Th>/.test(hub));
+
+ok('which stands down before it would truncate on every row',
+  /@media \(max-width: 1599px\) \{ \.reports-answers \{ display: none !important; \} \}/.test(hub),
+  'nine ellipses under one heading is noise with a column title on it');
 
 console.log(
   failed === 0

@@ -32,19 +32,6 @@ export const CATEGORY_LABEL: Record<ReportCategory, string> = {
   operations: 'Operations',
 };
 
-/* The same categories, short enough for a 196px rail.
-   "Pipeline and people" is the right name in a table column, where
-   there is room to say what it means, and it is one word too long for
-   a sidebar row, where it wraps to two lines and breaks the rhythm of
-   every row beside it. Two labels rather than one truncated with an
-   ellipsis, because "Pipeline and peo..." is not a name. */
-export const CATEGORY_SHORT: Record<ReportCategory, string> = {
-  meeting: 'Meetings',
-  customers: 'Customers',
-  pipeline: 'Pipeline',
-  operations: 'Operations',
-};
-
 export const CATEGORY_BLURB: Record<ReportCategory, string> = {
   meeting: 'Everything for a meeting, in the order it is taken.',
   customers: 'Who is spending, who has stopped, and who is moving.',
@@ -130,7 +117,7 @@ export const REPORTS: ReportDef[] = [
   {
     slug: 'bottom-customers',
     title: 'Bottom 10 customers',
-    blurb: 'Live accounts spending the least. Who is worth a call, and who is barely trading.',
+    blurb: 'Live accounts spending the least, and which are worth a call.',
     category: 'customers',
     uses: { divisions: true, period: false, person: false },
     sections: [
@@ -190,7 +177,7 @@ export const REPORTS: ReportDef[] = [
   {
     slug: 'health',
     title: 'Customer problems',
-    blurb: 'Every open red and amber, how long it has been open, and whether it has been chased.',
+    blurb: 'Every open red and amber, and whether anybody has chased it.',
     category: 'customers',
     uses: { divisions: false, period: false, person: false },
     sections: [
