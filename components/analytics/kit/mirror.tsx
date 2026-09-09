@@ -73,6 +73,19 @@ export type Patch = {
   /** Anything React, dropped in place of the node's own children. */
   slot?: ReactNode;
   /**
+   * Anything React, added AFTER the node's own children.
+   *
+   * `slot` replaces what the kit draws. This adds to it, which is what
+   * an interaction layer needs: the kit is a static file and has no
+   * hover targets in it, so a mirrored chart has to lay its own over
+   * the drawing without touching a single one of the file's nodes.
+   *
+   * Losing that is how the ported charts shipped with the readout
+   * gone. The kit cannot supply a behaviour it does not have, and a
+   * port that only ever mirrors ends up mirroring the absence.
+   */
+  after?: ReactNode;
+  /**
    * Geometry, for an SVG shape.
    *
    * The kit's own x1, points and width are ITS data set. Ours has to
@@ -223,9 +236,21 @@ export function mirror(
     return patch.text !== undefined ? String(patch.text) : (node.text ?? '');
   }
 
-  const written = node.style
+  /* A style transform runs even where the kit wrote no style.
+
+     It did not, and that shipped a transparent overlay the size of the
+     whole page. The waterfall's plot has no style attribute in the
+     file, so the patch that adds `position:relative` to it was
+     silently skipped, the hover layer inside it had nothing to size
+     against, and `inset:0` resolved to the viewport. It sat over every
+     other control on the screen and swallowed the pointer.
+
+     Transforming an empty string is still a transform, so it is
+     allowed. Adding a declaration the file does not have is the one
+     shape of edit this permits, and the caller has to say why. */
+  const written = node.style !== undefined
     ? (patch.style ? patch.style(node.style) : node.style)
-    : undefined;
+    : (patch.style ? patch.style('') : undefined);
   const style = written === undefined
     ? undefined
     : parseStyle(recolour ? recolour(written) : written);
@@ -272,6 +297,10 @@ export function mirror(
     children = node.kids.map((k, i) => mirror(k, {}, i, recolour));
   } else if (node.text !== undefined) {
     children = node.text;
+  }
+
+  if (patch.after !== undefined) {
+    children = <>{children}{patch.after}</>;
   }
 
   /* The key is passed directly rather than spread. React warns about a

@@ -1,7 +1,9 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { KIT_COLOURS } from '@/lib/analytics/kit.generated';
 import { HUE } from './charts';
+import { Readout, shortMoney } from './frame';
 import { DeviceFrame, device, mirror, type KitNode, type Patch } from './mirror';
 
 /* =============================================================
@@ -125,6 +127,43 @@ function boxOf(svg: KitNode): { w: number; h: number } {
 const geom = (n: KitNode | undefined, key: string) => Number(n?.geom?.[key] ?? 0);
 
 /* -------------------------------------------------------------
+   Pointing at a chart
+
+   The kit is a static file. It has no hover targets in it, so a port
+   that only ever mirrors mirrors the absence too, and that is exactly
+   what happened: the readout on the indexed trend and the waterfall
+   went when those two devices were ported.
+
+   The layer is added rather than drawn. It covers the plot, carries no
+   colour and no size of its own, and reports which slot the pointer is
+   over as a fraction of the width. Everything visible still comes out
+   of the file.
+   ------------------------------------------------------------- */
+function useHover(slots: number) {
+  const [at, setAt] = useState<{ i: number; x: number; w: number; h: number } | null>(null);
+
+  const onMove = (e: React.MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width <= 0 || slots <= 0) return;
+    const t = (e.clientX - r.left) / r.width;
+    const i = Math.min(slots - 1, Math.max(0, Math.round(t * (slots - 1))));
+    setAt({ i, x: e.clientX - r.left, w: r.width, h: r.height });
+  };
+
+  /* The sheet itself. No colour, no length and no weight: it covers
+     the plot it is dropped into and does nothing else. */
+  const layer = (
+    <div
+      onMouseMove={onMove}
+      onMouseLeave={() => setAt(null)}
+      style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}
+    />
+  );
+
+  return { at, layer };
+}
+
+/* -------------------------------------------------------------
    Indexed division trend
 
    Five rules, one of them solid where 100 falls, three lines, an
@@ -140,6 +179,7 @@ export function IndexedTrend({ points, label, sub, title, says, foot }: {
   foot: string;
 }) {
   const node = device('indexed');
+  const hover = useHover(points.length);
   const plot = node.kids?.[1];
   const svg = plot?.kids?.[0];
   if (!plot || !svg || points.length === 0) return null;
@@ -207,6 +247,25 @@ export function IndexedTrend({ points, label, sub, title, says, foot }: {
                  plate are the file's. */
               { style: (s) => s.replace(/top:[^;]+/, `top:${((y(100) / h) * 100).toFixed(1)}%`) },
             ],
+            /* The hover layer, over the kit's own plot. Added rather
+               than drawn: the file has no hover targets in it, and a
+               port that only mirrors loses the readout with them. */
+            after: (
+              <>
+                {hover.layer}
+                {hover.at && points[hover.at.i] && (
+                  <Readout
+                    x={hover.at.x}
+                    y={0}
+                    bounds={{ w: hover.at.w, h: hover.at.h }}
+                    title={monthName(points[hover.at.i]!.month)}
+                    value={`STC ${Math.round(points[hover.at.i]!.stc)}`}
+                    made={`Trailer sales ${Math.round(points[hover.at.i]!.trailer)} `
+                      + `· Rentals ${Math.round(points[hover.at.i]!.rental)}`}
+                  />
+                )}
+              </>
+            ),
           },
           /* The month strip, in HTML, one initial per month. */
           { kids: points.map((p) => ({ from: 0, text: monthInitial(p.month) })) },
@@ -215,6 +274,11 @@ export function IndexedTrend({ points, label, sub, title, says, foot }: {
       })}
     </DeviceFrame>
   );
+}
+
+function monthName(iso: string): string {
+  return new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+    .toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
 function monthInitial(iso: string): string {
@@ -244,6 +308,7 @@ export function GroupMovement({ start, steps, end, label, sub, title, says }: {
   says: string;
 }) {
   const node = device('waterfall');
+  const hover = useHover(steps.length + 2);
   const plot = node.kids?.[1];
   const svg = plot?.kids?.[0];
   const strip = plot?.kids?.[1];
@@ -340,6 +405,33 @@ export function GroupMovement({ start, steps, end, label, sub, title, says }: {
         kids: [
           { kids: [{ text: title }, { text: says }] },
           {
+            /* The plot has no `position` in the kit, because the file
+               puts nothing over it. A readout has to be placed against
+               something, so the wrapper is made a positioning context.
+               That is a transform of the kit's string, adding the one
+               declaration an interaction needs and moving none of the
+               ones the design wrote. */
+            style: (css: string) => `${css};position:relative`,
+            after: (
+              <>
+                {hover.layer}
+                {hover.at && columns[hover.at.i] && (
+                  <Readout
+                    x={hover.at.x}
+                    y={0}
+                    bounds={{ w: hover.at.w, h: hover.at.h }}
+                    title={columns[hover.at.i]!.label}
+                    value={columns[hover.at.i]!.kind === 'end'
+                      ? shortMoney(columns[hover.at.i]!.value)
+                      : `${columns[hover.at.i]!.value >= 0 ? '+' : '-'}`
+                        + shortMoney(Math.abs(columns[hover.at.i]!.value))}
+                    made={columns[hover.at.i]!.kind === 'end'
+                      ? 'The group total for this window'
+                      : 'This division\u2019s contribution to the change'}
+                  />
+                )}
+              </>
+            ),
             kids: [
               { kids: [...joins, ...bars] },
               {
@@ -423,6 +515,11 @@ export function AgainstTarget({ rows, group, label, sub, title, onPick }: {
     return {
       from: kids.indexOf(sample),
       on: onPick ? { click: () => onPick(r.key) } : undefined,
+      /* A row that narrows the whole page has to say so before it is
+         clicked. One declaration added to the kit's own row, and only
+         where there is something to click. */
+      style: onPick ? (css: string) => `${css};cursor:pointer` : undefined,
+      title: onPick ? `Narrow the page to ${r.name}` : undefined,
       kids: [
         { text: r.name },
         {
