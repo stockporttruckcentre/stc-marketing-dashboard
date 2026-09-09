@@ -1,5 +1,8 @@
 {
-  "components/AnalyticsHub.tsx": 118,
+  "components/AnalyticsHub.tsx": 70,
   "components/analytics/kit/charts.tsx": 72,
-  "components/analytics/kit/frame.tsx": 94
+  "components/analytics/kit/frame.tsx": 94,
+  "components/analytics/sections.tsx": 48,
+  "components/analytics/landing.tsx": 53,
+  "components/analytics/DrillDown.tsx": 12
 }
