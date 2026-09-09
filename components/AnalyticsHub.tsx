@@ -18,7 +18,7 @@ import {
 } from '@/components/analytics/kit/frame';
 import { indexed } from '@/lib/analytics/shape';
 import {
-  compareWords, iso, periodWords, trimWords, windowWords,
+  compareWords, iso, periodWords, startOfQuarter, trimWords, windowWords,
   type CompareMode, type PeriodKind,
 } from '@/lib/analytics/period';
 import type { Analytics, DivisionSlug, Figure, Filters } from '@/lib/analytics/types';
@@ -90,9 +90,16 @@ export function AnalyticsHub({ today, maySetTargets = false }: {
   /** `analytics.targets`. Without it the notches are read only. */
   maySetTargets?: boolean;
 }) {
+  /* Quarterly, not monthly.
+
+     From the business: "Always default to quarterly analytics, not
+     monthly." A month to date on the ninth is nine days of trading,
+     which is too little to say anything about a division, and it is
+     what made the period control read as broken. A quarter carries
+     enough weeks to have a shape. */
   const [f, setF] = useState<Filters>({
-    kind: 'month',
-    from: `${today.slice(0, 7)}-01`,
+    kind: 'quarter',
+    from: startOfQuarter(today),
     to: today,
     mode: 'previous',
     trim: true,
@@ -260,11 +267,28 @@ export function ControlBar({ f, set, busy, onRefresh, data, person }: {
     ...(f.trim ? [] : [{ key: 'trim', label: 'Comparison not trimmed', clear: () => set({ trim: true }) }]),
   ];
 
+  /* No `overflow: hidden`, which is what put the comparison menu
+     under the rest of the page.
+
+     From the business: "check z indexes, stuff overlaps, the 'against'
+     menu loads under all the other content."
+
+     It was not a z-index. The bar clipped its own children so that the
+     rounded corners cut the rows inside it, and a popover positioned
+     below the button falls outside those bounds, so it was cut off
+     rather than covered. Raising the z-index on it could never have
+     worked: the menu was not behind anything, it was not being drawn.
+
+     So the clip goes, and the corner it existed for is put on the row
+     that is actually last instead. */
+  const lastRow = data && trimWords(data.period) ? 'trim' : 'chips';
+  const bottomCorners = { borderRadius: '0 0 var(--r-md) var(--r-md)' } as const;
+
   return (
     <div style={{
       position: 'sticky', top: 0, zIndex: 20,
       border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
-      background: 'var(--surface)', overflow: 'hidden',
+      background: 'var(--surface)',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
@@ -392,6 +416,7 @@ export function ControlBar({ f, set, busy, onRefresh, data, person }: {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
         padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)',
+        ...(lastRow === 'chips' ? bottomCorners : null),
       }}>
         <span style={{
           fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 9.5,
@@ -431,7 +456,7 @@ export function ControlBar({ f, set, busy, onRefresh, data, person }: {
         <div style={{
           padding: '7px 12px', borderTop: '1px solid var(--border)',
           background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
-          fontSize: 11.5, color: 'var(--text)',
+          fontSize: 11.5, color: 'var(--text)', ...bottomCorners,
         }}>{trimWords(data.period)}</div>
       )}
     </div>
@@ -455,183 +480,17 @@ export function DateBox({ value, onChange, label }: { value: string; onChange: (
 }
 
 /* =============================================================
-   The glance
+   The glance, and the target form, have gone from this file.
 
-   The first screen, and the only part that is never folded away.
-   ============================================================= */
-function Glance({ data, f, set, onExplain, maySetTargets, onSaved }: {
-  data: Analytics; f: Filters; set: (p: Partial<Filters>) => void;
-  onExplain: (fig: Figure) => void;
-  maySetTargets: boolean;
-  onSaved: () => void;
-}) {
-  const chips = data.divisions.map((d) => ({
-    name: d.name,
-    delta: d.was > 0 ? ((d.revenue - d.was) / d.was) * 100 : null,
-    colour: HUE[d.division],
-  }));
+   The glance was the hub's first screen before the restructure. Its
+   job is now `Executive`, `DivisionTable`, `NeedsAttention` and
+   `WhatsComing` in `components/analytics/landing.tsx`, which is what
+   this file renders above.
 
-  const bullets = data.divisions.map((d) => ({
-    key: d.division, name: d.name, value: d.revenue, target: d.target, colour: HUE[d.division],
-  }));
-
-  const total = data.divisions.reduce((a, d) => a + d.revenue, 0);
-  const targetSum = data.divisions.reduce((a, d) => a + (d.target ?? 0), 0);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <SectionHead
-        id="glance"
-        title="The whole business, one screen"
-        sub="Every device states its conclusion in words before it shows you a shape."
-      />
-
-      <Verdict sentence={data.verdict} chips={chips} decisions={data.decisions} />
-
-      <div style={{
-        display: 'grid', gap: 10,
-        gridTemplateColumns: 'repeat(auto-fit, minmax(228px, 1fr))',
-      }}>
-        {data.headline.map((fig, at) => (
-          <Kpi key={fig.label} figure={fig} lead={at === 0} onExplain={() => onExplain(fig)} />
-        ))}
-      </div>
-
-      <Chart
-        title="Revenue against target, by division"
-        says={targetSum > 0
-          ? `${shortMoney(total)} against ${shortMoney(targetSum)} promised. ${total >= targetSum ? 'Ahead.' : `${shortMoney(targetSum - total)} short.`}`
-          : 'No targets are set for this period, so the bars show revenue with nothing to hit.'}
-        foot={(
-          <>
-            <span style={{ flex: 1, minWidth: 200 }}>
-              The notch is the only red on the chart, which is what makes a miss read instantly.
-              Click a division to narrow the whole page to it.
-            </span>
-            {maySetTargets && <Targets divisions={data.divisions} month={data.period.window.from} onSaved={onSaved} />}
-          </>
-        )}
-      >
-        <BulletRows
-          rows={bullets}
-          onPick={(key) => set({
-            divisions: f.divisions.includes(key as DivisionSlug)
-              ? f.divisions.filter((d) => d !== key)
-              : [...f.divisions, key as DivisionSlug],
-          })}
-        />
-      </Chart>
-    </div>
-  );
-}
-
-/* =============================================================
-   Setting the notch
-
-   A target that can only be written with SQL is a target nobody sets,
-   and a bullet chart with no notch on it is a bar. So the one screen
-   that reads targets is the screen that writes them, for whoever holds
-   `analytics.targets`, which is administrators.
-
-   Per month and per division, because that is the grain the table
-   holds and the grain a window sums over. Nought clears it rather than
-   storing a target of nothing: a target of nought and no target at all
-   look identical on a chart and only one of them is a statement
-   somebody made.
-   ============================================================= */
-function Targets({ divisions, month, onSaved }: {
-  divisions: Analytics['divisions'];
-  month: string;
-  onSaved: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
-
-  async function save(division: DivisionSlug) {
-    setBusy(division);
-    setFailed(null);
-    const res = await fetch('/api/analytics/target', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        month: `${month.slice(0, 7)}-01`,
-        division,
-        amount: Number(draft[division] ?? 0),
-      }),
-    });
-    setBusy(null);
-    if (!res.ok) { setFailed((await res.json())?.error ?? 'Not saved.'); return; }
-    onSaved();
-  }
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => {
-          setDraft(Object.fromEntries(divisions.map((d) => [d.division, String(d.target ?? '')])));
-          setOpen(true);
-        }}
-        style={{
-          border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
-          background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
-          height: 26, padding: '0 10px', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
-          whiteSpace: 'nowrap', flex: 'none',
-        }}
-      >Set targets</button>
-    );
-  }
-
-  return (
-    <div style={{
-      width: '100%', marginTop: 8, padding: '11px 12px',
-      border: '1px solid var(--border)', borderRadius: 'var(--r)', background: 'var(--bg-subtle)',
-      display: 'flex', flexDirection: 'column', gap: 9,
-    }}>
-      <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>
-        Monthly target for {monthLabel(month)}. Nought clears it.
-      </div>
-      {divisions.map((d) => (
-        <div key={d.division} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span style={{ width: 130, fontSize: 12.5, color: 'var(--text-muted)' }}>{d.name}</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={draft[d.division] ?? ''}
-            onChange={(e) => setDraft((was) => ({ ...was, [d.division]: e.target.value }))}
-            placeholder="No target"
-            style={{
-              width: 140, height: 28, padding: '0 9px',
-              border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
-              background: 'var(--surface)', color: 'var(--text)',
-              fontFamily: 'var(--inter)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums',
-            }}
-          />
-          <button
-            onClick={() => save(d.division)}
-            disabled={busy === d.division}
-            style={{
-              height: 28, padding: '0 11px', border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
-              cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
-            }}
-          >{busy === d.division ? 'Saving' : 'Save'}</button>
-        </div>
-      ))}
-      {failed && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{failed}</div>}
-      <button
-        onClick={() => setOpen(false)}
-        style={{
-          alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--accent)',
-          cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
-          textDecoration: 'underline', textUnderlineOffset: 3, padding: 0,
-        }}
-      >Done</button>
-    </div>
-  );
-}
-
-/* =============================================================
-   Three divisions
+   The target form was a fold inside the glance, so when the glance
+   went it stopped rendering while `Executive` went on linking to
+   `/dashboard/analytics/targets`. That link now has a screen behind
+   it: `components/analytics/TargetsBoard.tsx`, on its own route,
+   guarded on `analytics.targets`, and editing a financial year at a
+   time rather than whichever month the page happened to be showing.
    ============================================================= */

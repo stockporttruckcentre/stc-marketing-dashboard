@@ -43,6 +43,15 @@ const GOVERNED = [
   'components/analytics/sections.tsx',
   'components/analytics/landing.tsx',
   'components/analytics/DrillDown.tsx',
+  /* Added when the charts were ported from the kit's own markup.
+     `devices.tsx` and `controls.tsx` should hold NOTHING: every style
+     string in them comes out of `kit.generated.ts`. Watching them is
+     what keeps that true, because a file that starts at nought and is
+     not watched is a file somebody types a 3 into. */
+  'components/analytics/kit/devices.tsx',
+  'components/analytics/kit/controls.tsx',
+  'components/analytics/kit/mirror.tsx',
+  'components/analytics/TargetsBoard.tsx',
 ];
 
 /* The one file allowed to hold values, because it IS the kit. */

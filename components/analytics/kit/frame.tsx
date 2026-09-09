@@ -154,22 +154,29 @@ export function Chart({
 }
 
 /**
- * Two charts to a row, which is the only way the kit lays them out.
+ * Two panels to a row.
  *
- * `grid-template-columns:repeat(2,1fr);gap:16px` appears four times in
- * the kit and nothing else does. A device drawn 620 wide and then
- * stretched across a 1920 screen is the fault behind "the waterfall has
- * five bars and takes an entire row": the shape stops being a shape and
- * becomes a band of colour with a lot of air in it.
+ * `grid-template-columns:repeat(2,1fr);gap:16px;width:100%;min-width:0`
+ * is the kit's own, and it appears three times in the file. It holds
+ * pairs of SMALL PANELS every time: the comparison mode cards, the
+ * tier mix, the hover and brush demonstration. It never holds a chart,
+ * and putting charts in it was invented. That is fixed at the call
+ * sites: charts are one to a row now, which is how the kit draws every
+ * one of them.
  *
- * Collapses to one column under 980px, because two 620s plus the gap
- * plus the page padding is about where they stop fitting.
+ * No `align-items` either. The kit does not set one, so the two cells
+ * stretch and a pair is two panels of the same height. Ours said
+ * `start`, which is what left "its div is a different size to the
+ * chart div next to it".
+ *
+ * Collapses to one column under 980px, because two of these plus the
+ * gap and the page padding is about where they stop fitting.
  */
 export function Pair({ children }: { children: ReactNode }) {
   return (
     <div className="kit-pair" style={{
       display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-      gap: 16, width: '100%', minWidth: 0, alignItems: 'start',
+      gap: 16, width: '100%', minWidth: 0,
     }}>
       {children}
       <style>{`@media (max-width: 980px) { .kit-pair { grid-template-columns: 1fr !important; } }`}</style>

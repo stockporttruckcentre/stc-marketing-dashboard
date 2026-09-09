@@ -433,6 +433,14 @@ const RESERVED = new Set([
   'target', 'targets', 'budget', 'margin', 'utilisation', 'conversion',
   'book', 'the book', 'cohort', 'cohorts', 'retention', 'annualised',
   'waterfall', 'trend', 'analytics', 'dashboard', 'kpi', 'kpis',
+
+  /* The six drill-downs the hub became, plus the words somebody uses
+     to ask for one. Reserved for the same reason as the block above:
+     without them "show me the pipeline detail" hunts for a customer
+     called Pipeline, and "indexed trend" for one called Indexed. */
+  'pipeline', 'drill down', 'drilldown', 'indexed', 'source', 'sources',
+  'lead source', 'lead sources', 'scorecard', 'scorecards', 'variance',
+  'financial year', 'fy',
   ...Object.keys(BODY_TYPES),
 ]);
 

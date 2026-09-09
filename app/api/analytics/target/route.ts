@@ -43,3 +43,28 @@ export async function POST(req: NextRequest) {
   if (!said?.ok) return NextResponse.json({ error: said?.why ?? 'That did not go through.' }, { status: 403 });
   return NextResponse.json(said);
 }
+
+/* =============================================================
+   Reading the targets back
+
+   The hub asks for these inside its one big `/api/analytics` call,
+   which is right for a page that draws them on a chart. The targets
+   screen is not that page: it edits a financial year, twelve months at
+   a time, and it needs the figures again after every save.
+
+   Same function, same gate. `analytics_targets_by_month` returns the
+   group row and the per division rows together, with a null division
+   meaning the group.
+   ============================================================= */
+export async function GET() {
+  const gate = await requireCapability('analytics.targets');
+  if (!gate.ok) return gate.response;
+
+  const { data, error } = await gate.supabase
+    .rpc('analytics_targets_by_month', { p_months: 36 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  return NextResponse.json({
+    targets: (data ?? []) as { month: string; division: string | null; target: number }[],
+  });
+}

@@ -1,8 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, ChevronRight, Info } from 'lucide-react';
+import {
+  ArrowRight, ChevronRight, GitBranch, Info, TrendingUp, Trophy, Truck, Users, Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { Pair, money, pct, shortMoney } from '@/components/analytics/kit/frame';
+import { parseStyle } from '@/components/analytics/kit/mirror';
+import { KIT_PARTS } from '@/lib/analytics/kit.generated';
 import { HUE } from '@/components/analytics/kit/charts';
 import { windowWords } from '@/lib/analytics/period';
 import type { Analytics, DivisionSlug, Figure, Filters } from '@/lib/analytics/types';
@@ -48,9 +53,27 @@ const PANEL: React.CSSProperties = {
   background: 'var(--surface)', padding: '16px 18px',
 };
 
+/* The kit's own small caps label, in Inter.
+
+   From the business:
+
+     Ensure tables use inter for labels and figures, not panton. Panton
+     is our main accent font for headings and pulling attention to
+     things ... Look deeper needs inter headings, small bold panton
+     headings never work. Inter is the primary font for analytics.
+
+   So the line this page holds is: Panton for the figures that are
+   meant to be read across a meeting room, and for a page heading.
+   Inter for everything smaller, which is every label, every table
+   column and every card title on this screen.
+
+   The size, the tracking, the weight and the colour are the kit's own
+   label, read out of the file by `npm run kit:extract`. Only the
+   family is ours, and only because the business changed it after the
+   kit was written. */
 const LABEL: React.CSSProperties = {
-  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10.5,
-  letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+  ...parseStyle(KIT_PARTS.label.style.replace('var(--panton)', 'var(--inter)')),
+  textTransform: 'uppercase',
 };
 
 /* -------------------------------------------------------------
@@ -244,9 +267,13 @@ function Cell({ children, tone, muted }: {
   children: React.ReactNode; tone?: 'good' | 'bad'; muted?: boolean;
 }) {
   return (
+    /* Inter, not Panton. A figure in a table column is read down the
+       column against its neighbours, which is what tabular numerals
+       are for, and Panton at 13px was the "small bold panton" the
+       business asked to be rid of. */
     <span style={{
       flex: 1, textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums',
-      fontFamily: 'var(--panton)', fontWeight: 700,
+      fontFamily: 'var(--inter)', fontWeight: 600,
       color: tone === 'good' ? 'var(--success)' : tone === 'bad' ? 'var(--danger)'
         : muted ? 'var(--text-subtle)' : 'var(--text)',
     }}>{children}</span>
@@ -260,6 +287,25 @@ function Cell({ children, tone, muted }: {
    notification feed, and not manufactured: if nothing genuinely
    requires attention it says so.
    ------------------------------------------------------------- */
+/* What the panel sweeps, in the order `decisionsFrom()` sweeps it.
+
+   From the business: "What is the 'needs attention' linked to as
+   there's only 1 thing inside it."
+
+   It is four rules and a cap of five, and one item means one rule
+   fired rather than the panel being broken. A reader cannot tell those
+   apart from a list, so the list says what was checked. Each line is
+   also the reason a row links where it does: a division behind target
+   goes to that division's revenue screen, stock goes to the stock
+   list, and somebody raising leads without closing goes to their
+   leads. */
+const SWEPT = [
+  'a division more than a tenth behind its target',
+  'trailers past 120 days',
+  'and how much margin is left on them to discount',
+  'anybody raising leads and closing none',
+];
+
 export function NeedsAttention({ data }: { data: Analytics }) {
   return (
     <section style={{ ...PANEL, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -288,6 +334,16 @@ export function NeedsAttention({ data }: { data: Analytics }) {
           })}
         </div>
       )}
+
+      {/* Said out loud, so a short list reads as a quiet period rather
+          than as a panel that has stopped working. */}
+      <div style={{
+        borderTop: '1px solid var(--border)', paddingTop: 8,
+        fontSize: 11, color: 'var(--text-subtle)', lineHeight: 1.45,
+      }}>
+        Checked this period: {SWEPT.join(', ')}. Five at most, worst first.
+        Each one opens the screen it came from.
+      </div>
     </section>
   );
 }
@@ -336,7 +392,7 @@ function Coming({ what, value, note }: { what: string; value: string; note: stri
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
         <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' }}>{what}</span>
         <span style={{
-          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 15,
+          fontFamily: 'var(--inter)', fontWeight: 700, fontSize: 15,
           fontVariantNumeric: 'tabular-nums', color: 'var(--text)', whiteSpace: 'nowrap',
         }}>{value}</span>
       </div>
@@ -351,16 +407,38 @@ function Coming({ what, value, note }: { what: string; value: string; note: stri
    Section 8: deliberate drill-down navigation, no horizontal tabs, and
    the landing does not preload any of it.
    ------------------------------------------------------------- */
-const DRILLDOWNS: { href: string; title: string; says: string }[] = [
-  { href: '/dashboard/analytics/revenue', title: 'Revenue', says: 'Indexed trend, group movement, target analysis' },
-  { href: '/dashboard/analytics/pipeline', title: 'Sales and pipeline', says: 'Where leads came from and what became of them' },
-  { href: '/dashboard/analytics/customers', title: 'Customers', says: 'Who is spending, and who has moved' },
-  { href: '/dashboard/analytics/stock', title: 'Stock', says: 'Age against margin, and what is tied up' },
-  { href: '/dashboard/analytics/fleetsmart', title: 'FleetSmart+', says: 'Weekly value, tier mix, retention by cohort' },
-  { href: '/dashboard/analytics/people', title: 'People', says: 'Leaderboard and conversion against the group rate' },
+const DRILLDOWNS: { href: string; title: string; says: string; icon: LucideIcon }[] = [
+  { href: '/dashboard/analytics/revenue', title: 'Revenue', icon: TrendingUp,
+    says: 'Indexed trend, group movement, target analysis' },
+  { href: '/dashboard/analytics/pipeline', title: 'Sales and pipeline', icon: GitBranch,
+    says: 'Where leads came from and what became of them' },
+  { href: '/dashboard/analytics/customers', title: 'Customers', icon: Users,
+    says: 'Who is spending, and who has moved' },
+  { href: '/dashboard/analytics/stock', title: 'Stock', icon: Truck,
+    says: 'Age against margin, and what is tied up' },
+  { href: '/dashboard/analytics/fleetsmart', title: 'FleetSmart+', icon: Wrench,
+    says: 'Weekly value, tier mix, retention by cohort' },
+  { href: '/dashboard/analytics/people', title: 'People', icon: Trophy,
+    says: 'Leaderboard and conversion against the group rate' },
 ];
 
 export function DrillDowns() {
+  /* From the business:
+
+       These look deeper cards need icons and to look like clickable
+       cards, they'll get lost to someone who's not looking for them or
+       knows web design.
+
+     Three things carry that, and none of them is a colour: an icon in
+     a tile so the card has a target to aim at, a heading in Inter
+     rather than the small bold Panton that was there, and a hover and
+     focus state so the pointer confirms it before the click. The
+     chevron moves on hover, which is the one piece of motion on this
+     screen and is there because a shape that moves under the cursor is
+     the clearest possible statement that it does something.
+
+     `.kit-drill` rather than inline styles, because a hover state and
+     a focus ring cannot be written inline. */
   return (
     <section>
       <span style={{ ...LABEL, display: 'block', marginBottom: 10 }}>Look deeper</span>
@@ -368,23 +446,41 @@ export function DrillDowns() {
         display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14,
       }}>
         {DRILLDOWNS.map((d) => (
-          <Link key={d.href} href={d.href} style={{
-            ...PANEL, display: 'flex', alignItems: 'center', gap: 10,
+          <Link key={d.href} href={d.href} className="kit-drill" style={{
+            ...PANEL, display: 'flex', alignItems: 'center', gap: 12,
             textDecoration: 'none', color: 'var(--text)',
           }}>
+            <span className="kit-drill__icon" style={{
+              flex: 'none', width: 34, height: 34, borderRadius: 'var(--r)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              border: '1px solid var(--border)', background: 'var(--bg-subtle)',
+              color: 'var(--text-muted)',
+            }}><d.icon size={16} /></span>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{
-                display: 'block', fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 14,
-                letterSpacing: '-0.02em',
+                display: 'block', fontFamily: 'var(--inter)', fontWeight: 600, fontSize: 13.5,
+                letterSpacing: '-0.01em',
               }}>{d.title}</span>
               <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2 }}>
                 {d.says}
               </span>
             </span>
-            <ArrowRight size={14} style={{ flex: 'none', color: 'var(--text-subtle)' }} />
+            <ArrowRight className="kit-drill__go" size={14} style={{ flex: 'none', color: 'var(--text-subtle)' }} />
           </Link>
         ))}
-        <style>{`@media (max-width: 900px) { .kit-drills { grid-template-columns: 1fr !important; } }`}</style>
+        <style>{`
+          @media (max-width: 900px) { .kit-drills { grid-template-columns: 1fr !important; } }
+          .kit-drill { cursor: pointer; transition: border-color 120ms, background 120ms; }
+          .kit-drill:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
+          .kit-drill:hover .kit-drill__icon { border-color: var(--border-strong); color: var(--text); }
+          .kit-drill:hover .kit-drill__go { color: var(--text); transform: translateX(2px); }
+          .kit-drill__go { transition: transform 120ms, color 120ms; }
+          .kit-drill:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+          @media (prefers-reduced-motion: reduce) {
+            .kit-drill, .kit-drill__go { transition: none; }
+            .kit-drill:hover .kit-drill__go { transform: none; }
+          }
+        `}</style>
       </div>
     </section>
   );

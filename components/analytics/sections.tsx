@@ -28,6 +28,7 @@ import { CohortGrid } from '@/components/analytics/kit/cohort';
 import {
   Chart, DeviceLabel, Legend, Pair, money, pct, shortMoney,
 } from '@/components/analytics/kit/frame';
+import { AgainstTarget, GroupMovement, IndexedTrend } from '@/components/analytics/kit/devices';
 import { indexed } from '@/lib/analytics/shape';
 import { iso, windowWords } from '@/lib/analytics/period';
 import type { Analytics, DivisionSlug, Filters } from '@/lib/analytics/types';
@@ -43,61 +44,68 @@ export function Divisions({ data, f, set }: {
 
   return (
     <>
-      {/* Two to a row, which is the kit's layout for every device it
-          draws. The waterfall in particular has five bars: given a
-          whole 1440 row it stops being a shape. */}
-      <Pair>
-      <div>
-        <DeviceLabel
-          title="Indexed division trend"
-          sub="Every division starts at 100, so a line above the middle rule means growth regardless of what that division actually sells."
-        />
-        <Chart
-          title={`${data.months.length} months, indexed`}
-          says={growthWords(points)}
-          legend={<Legend items={[
-            { name: 'STC', colour: HUE.stc },
-            { name: 'Trailer sales', colour: HUE.trailer },
-            { name: 'Rentals', colour: HUE.rental },
-          ]} />}
-          foot={<span>Indexing hides the size of each division on purpose. Use it for direction, and the revenue bars above for weight.</span>}
-        >
-          <IndexedLines points={points} />
-        </Chart>
-      </div>
+      {/* One device per row, which is how the kit lays every chart out.
+
+          These two were in a two column grid. That was invented: the
+          kit's own `repeat(2,1fr)` appears three times and never once
+          holds a chart, it holds pairs of small panels. Charts in it
+          were half width, so their SVG text halved with them, and the
+          two labels above them were different heights so one chart
+          started lower than the other. Both are the business's own
+          words after the restructure. */}
+      {/* Revenue against target, which the line at the top of this
+          screen promises and which was drawn nowhere. The device has
+          existed since the hub was built; nothing rendered it after
+          the restructure, so the page said "and the target position
+          behind it" over a screen with no target on it. */}
+      <AgainstTarget
+        label="Revenue against target, by division"
+        sub="A bar per division with the target as a red notch, so hitting or missing is a position rather than a sum to work out."
+        title={`${windowWords(data.period.window)} against target`}
+        rows={data.divisions.map((d) => ({
+          key: d.division, name: d.name, value: d.revenue, target: d.target,
+          colour: HUE[d.division],
+        }))}
+        group={{
+          total: data.divisions.reduce((a, d) => a + d.revenue, 0),
+          variance: targetOf(data.divisions) == null ? null
+            : data.divisions.reduce((a, d) => a + d.revenue, 0) - (targetOf(data.divisions) ?? 0),
+          says: targetWords(data.divisions),
+        }}
+        onPick={(key) => set({
+          divisions: f.divisions.includes(key as DivisionSlug)
+            ? f.divisions.filter((x) => x !== key)
+            : [...f.divisions, key as DivisionSlug],
+        })}
+      />
+
+      <IndexedTrend
+        points={points}
+        label="Indexed division trend"
+        sub="Every division starts at 100, so a line above the middle rule means growth regardless of what that division actually sells."
+        title={`${data.months.length} months, indexed`}
+        says={growthWords(points)}
+        foot="Indexing hides the size of each division on purpose. Use it for direction, and the revenue bars above for weight."
+      />
 
       {data.period.compare && (
-        <div>
-          <DeviceLabel
-            title="How the group number moved"
-            sub="A waterfall, not a pie. It answers what changed rather than what is the split."
-          />
-          {/* The SAME two windows the rest of the page uses, not the last
-              two months. A waterfall on its own comparison is how a page
-              ends up saying the group is up in one panel and down in the
-              next, and a reader is right not to trust either. */}
-          <Chart
-            title={`${windowWords(data.period.compare)} to ${windowWords(data.period.window)}`}
-            says={movedWords(data.divisions)}
-            foot={<span>Each middle bar is one division&rsquo;s contribution to the change, not its size. The two ends are the same figures as the sentence at the top of the page.</span>}
-          >
-            <Waterfall
-              start={{
-                label: 'Before',
-                value: data.divisions.reduce((a, d) => a + d.was, 0),
-              }}
-              steps={data.divisions.map((d) => ({
-                label: d.name, delta: d.revenue - d.was, colour: HUE[d.division],
-              }))}
-              end={{
-                label: 'This period',
-                value: data.divisions.reduce((a, d) => a + d.revenue, 0),
-              }}
-            />
-          </Chart>
-        </div>
+        /* The SAME two windows the rest of the page uses, not the last
+           two months. A waterfall on its own comparison is how a page
+           ends up saying the group is up in one panel and down in the
+           next, and a reader is right not to trust either. */
+        <GroupMovement
+          label="How the group number moved"
+          sub="A waterfall, not a pie. It answers what changed rather than what is the split."
+          title={`${windowWords(data.period.compare)} to ${windowWords(data.period.window)}`}
+          says={movedWords(data.divisions)}
+          start={{ label: 'Before', value: data.divisions.reduce((a, d) => a + d.was, 0) }}
+          steps={data.divisions.map((d) => ({ label: d.name, delta: d.revenue - d.was }))}
+          end={{
+            label: 'This period',
+            value: data.divisions.reduce((a, d) => a + d.revenue, 0),
+          }}
+        />
       )}
-      </Pair>
 
       <div>
         <DeviceLabel
@@ -173,6 +181,26 @@ export function Divisions({ data, f, set }: {
   );
 }
 
+/** The group target, or null where no division carries one. */
+export function targetOf(divisions: Analytics['divisions']): number | null {
+  const set = divisions.map((d) => d.target).filter((t): t is number => t != null);
+  return set.length ? set.reduce((a, t) => a + t, 0) : null;
+}
+
+/** What the group's position against target says, in one line. */
+export function targetWords(divisions: Analytics['divisions']): string {
+  const target = targetOf(divisions);
+  if (target == null) return 'No target is set for this period. Set one on the targets screen.';
+  const revenue = divisions.reduce((a, d) => a + d.revenue, 0);
+  const behind = divisions.filter((d) => d.target != null && d.revenue < d.target);
+  const ahead = revenue >= target;
+  if (behind.length === 0) return 'Every division is at or ahead of its target.';
+  const names = behind.map((d) => d.name).join(' and ');
+  return ahead
+    ? `Ahead overall, but only because the others are carrying ${names}.`
+    : `Behind overall, and ${names} ${behind.length === 1 ? 'is' : 'are'} the reason.`;
+}
+
 export function growthWords(points: { stc: number; trailer: number; rental: number }[]): string {
   const last = points[points.length - 1];
   if (!last) return 'Not enough months to draw a trend yet.';
@@ -224,8 +252,15 @@ export function People({ data, f, set }: {
 
   return (
     <>
-      {/* Two to a row. */}
-      <Pair>
+      {/* One device per row.
+
+          These were in a two column grid, which the kit never does
+          with a chart: its own `repeat(2,1fr)` holds pairs of small
+          panels and nothing else. Half width halved every SVG label
+          with it, which is "some have like 3px fonts that are
+          impossible", and the two labels above the panels were
+          different heights, which is "one chart starts further down
+          the page than the other". */}
       <div>
         <DeviceLabel
           title="Leaderboard with progression"
@@ -297,7 +332,6 @@ export function People({ data, f, set }: {
           />
         </Chart>
       </div>
-      </Pair>
 
       {/* The source flow moved to the Sales and pipeline drill-down.
           From the business: "The existing Source Flow device belongs
@@ -389,7 +423,15 @@ export function Stock({ data }: { data: Analytics & { bands?: any[] } }) {
 
   return (
     <>
-      <Pair>
+      {/* One device per row.
+
+          These were in a two column grid, which the kit never does
+          with a chart: its own `repeat(2,1fr)` holds pairs of small
+          panels and nothing else. Half width halved every SVG label
+          with it, which is "some have like 3px fonts that are
+          impossible", and the two labels above the panels were
+          different heights, which is "one chart starts further down
+          the page than the other". */}
       <div>
         <DeviceLabel
           title="Stock age against margin"
@@ -429,7 +471,6 @@ export function Stock({ data }: { data: Analytics & { bands?: any[] } }) {
           </Chart>
         </div>
       )}
-      </Pair>
     </>
   );
 }

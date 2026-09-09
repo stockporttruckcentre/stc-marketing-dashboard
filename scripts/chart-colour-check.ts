@@ -76,7 +76,14 @@ if (DRAWERS.length < 5) {
 /** Comments stripped. Rule 5 is about code; prose may quote a value. */
 const codeOf = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '');
 
-const ALL = DRAWERS.map(([, src]) => src).join('\n');
+/* Comments stripped here too, not only for rule 5.
+
+   `components/analytics/kit/controls.tsx` explains which of the kit's
+   four buttons is which, and says so by quoting the declaration:
+   "primary carries `background:var(--primary)`". That is prose about a
+   button and the check read it as a chart filling itself with an
+   action colour. A file documenting the rule should not fail it. */
+const ALL = DRAWERS.map(([, src]) => codeOf(src)).join('\n');
 
 /** The tokens a chart is allowed to fill with. */
 const WANTED = [
