@@ -32,6 +32,7 @@
    Run with `npm run check:kit`.
    ============================================================= */
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 let passed = 0;
 const failures: string[] = [];
@@ -196,6 +197,35 @@ console.log('\n  The kit gets its own tokens back\n  ---------');
       ? `not recaptured: ${missed.join(', ')}. globals.css is a dark theme, so each of `
         + 'these hands a kit card a dark value on a light surface.'
       : undefined);
+}
+
+/* -------------------------------------------------------------
+   5. The extracted kit is in step with the kit
+
+   `kit.generated.ts` is committed so the build never parses an 800KB
+   file, and a committed copy of something is a copy that can go stale.
+   Regenerated to a temporary path and compared byte for byte, so a new
+   kit landing in docs/source without the extractor being re-run fails
+   here rather than showing up as a colour nobody can explain.
+   ------------------------------------------------------------- */
+console.log('\n  The extract is in step with the kit\n  ---------');
+{
+  const GEN = 'lib/analytics/kit.generated.ts';
+  if (!existsSync(GEN)) {
+    must('the kit has been extracted', false, `${GEN} is missing. Run \`npm run kit:extract\`.`);
+  } else {
+    const tmp = '/tmp/kit.generated.check.ts';
+    const run = spawnSync('npx', ['tsx', 'scripts/kit-extract.ts', '--out', tmp],
+      { encoding: 'utf8', timeout: 120_000 });
+    if (run.status !== 0) {
+      must('the extractor runs', false, (run.stderr || run.stdout || '').split('\n').slice(-4).join(' '));
+    } else {
+      const committed = readFileSync(GEN, 'utf8');
+      const fresh = readFileSync(tmp, 'utf8');
+      must('the committed extract matches the kit', committed === fresh,
+        'docs/source/STCUIAnalytics.html has changed. Run `npm run kit:extract` and commit the result.');
+    }
+  }
 }
 
 console.log('\n  ---------\n');
