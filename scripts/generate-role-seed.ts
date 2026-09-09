@@ -33,6 +33,15 @@ const CLOSE = '-- <<< END GENERATED';
 
 const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
+/** Wrapped at a width a person can read in a diff, four per line. */
+function wrap(items: string[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < items.length; i += 4) {
+    out.push(`    ${items.slice(i, i + 4).join(', ')}`);
+  }
+  return out.join(',\n');
+}
+
 export function seedSql(): string {
   const lines: string[] = [];
 
@@ -52,25 +61,22 @@ export function seedSql(): string {
   lines.push('      sort_order = EXCLUDED.sort_order;');
   lines.push('');
   lines.push('INSERT INTO role_template_capabilities (role_template_id, capability, scope)');
-  lines.push('SELECT rt.id, v.capability, v.scope::capability_scope');
+  /* One row per role holding an array, unnested, rather than one row per
+     grant. Five hundred and fifty eight VALUES rows is a forty kilobyte
+     file, and a forty four kilobyte one has already arrived at the
+     Supabase editor in pieces once. Eleven rows is sixteen. */
+  lines.push("SELECT rt.id, cap, 'company'::capability_scope");
   lines.push('  FROM role_templates rt');
   lines.push('  JOIN (VALUES');
 
-  const rows: string[] = [];
-  for (const role of ROLE_TEMPLATES) {
-    rows.push(`  -- ---- ${role.name} (${role.capabilities.length}) ----`);
-    for (const cap of role.capabilities) {
-      rows.push(`  (${quote(role.slug)}, ${quote(cap)}, 'company')`);
-    }
-  }
-  /* Commas go on afterwards, so a comment line never carries one. */
-  const body = rows.map((line, i) => {
-    if (line.trim().startsWith('--')) return line;
-    const isLast = rows.slice(i + 1).every((l) => l.trim().startsWith('--'));
-    return isLast ? line : `${line},`;
-  });
-  lines.push(body.join('\n'));
-  lines.push('  ) AS v(slug, capability, scope) ON v.slug = rt.slug');
+  const rows = ROLE_TEMPLATES.map((role) =>
+    `  -- ${role.name} (${role.capabilities.length})\n`
+    + `  (${quote(role.slug)}, ARRAY[\n`
+    + wrap(role.capabilities.map(quote))
+    + '\n  ])');
+  lines.push(rows.join(',\n'));
+  lines.push('  ) AS v(slug, caps) ON v.slug = rt.slug');
+  lines.push('  CROSS JOIN LATERAL unnest(v.caps) AS cap');
   lines.push('ON CONFLICT (role_template_id, capability) DO UPDATE SET scope = EXCLUDED.scope;');
 
   return lines.join('\n');
