@@ -210,7 +210,65 @@ export type CrmCapability =
   /** Apply a manager's discount, which comes off before the promotion. */
   | 'fleetsmart.discount'
   /** Send a contract to the customer, which is the point of no quiet undo. */
-  | 'fleetsmart.send';
+  | 'fleetsmart.send'
+
+  /* ---- One capability per screen, and the verbs kept apart ----
+
+     Analytics, Reports, the sales tracker, the finder, trailer sales,
+     revenue and the news all asked for `crm.view` and nothing else, so
+     there was no way to give somebody one and withhold another. From
+     the business, describing the office administrators: "They'll need
+     access to run reports, see the revenue tab entirely and import but
+     no export ... No analytics tab."
+
+     None of that was expressible. It is now. */
+
+  /** Open the Analytics hub. Not implied by the CRM any more. */
+  | 'analytics.view'
+  /** Run a report on screen. */
+  | 'reports.view'
+  /** Download one. Running a report and taking it away are different rights. */
+  | 'reports.export'
+
+  /** Open Revenue and read every division. */
+  | 'revenue.view'
+  /** Load a Protean or Sage export. One wrong file moves every figure. */
+  | 'revenue.import'
+  /** Export revenue figures to a file. */
+  | 'revenue.export'
+
+  /** Open the sales tracker. Reading a lead on a record does not need it. */
+  | 'tracker.view'
+  /** Raise a lead. Adding the customer and raising a lead are two jobs. */
+  | 'leads.create'
+  /** Search for companies near a depot. */
+  | 'finder.view'
+
+  /** Read the stock list. */
+  | 'stock.view'
+  /** Export it. This is the one that walks out of the door with somebody. */
+  | 'stock.export'
+
+  /** Take a colour, a logo or a font out of the brand kit. */
+  | 'brand.view'
+  /** Add, replace or remove brand assets. */
+  | 'brand.manage'
+  /** Read the trade press feed. */
+  | 'news.view'
+
+  /* ---- Asking somebody senior ----
+
+     A refusal that only says no teaches people to work around the
+     system. These are the pair that lets a button say no and offer the
+     way forward in the same breath. */
+
+  /** Raise a request for an export, an import or an approval you lack. */
+  | 'access.request'
+  /** Approve or refuse what the people you are senior to have asked for. */
+  | 'access.decide'
+
+  /** Change roles for people in your own departments, and nobody else. */
+  | 'admin.usersDepartment';
 
 export type CrmCapabilities = Set<CrmCapability>;
 
@@ -235,6 +293,34 @@ export type CrmCapabilities = Set<CrmCapability>;
  * proposals, no credit spending, no deleting. The genuinely restricted
  * version the meeting asked for needs the admin panel, because it is
  * scoped to stock rather than to a verb.
+ *
+ * ---- What this map is for now, and what it is not ----
+ *
+ * `command_may()` answers in three layers, and this is the third: it is
+ * consulted only for an account nobody has given a role template yet.
+ * The eleven roles in `lib/platform/permissions/roles.ts` are the real
+ * answer, and every account gets one.
+ *
+ * So the job of the additions below is narrow and it is not to describe
+ * the new roles. It is that nothing anybody can do today stops working
+ * on the day the screens start asking a more precise question. Two
+ * rules, applied without exception:
+ *
+ *   A screen somebody can open today, they can still open. Every one of
+ *   Analytics, Reports, the tracker, the finder, trailer sales, revenue
+ *   and industry news was gated on `crm.view` and nothing else, so all
+ *   four roles get all seven of those.
+ *
+ *   A button that had no gate of its own gets the one the role already
+ *   holds for the same act. Exporting a report goes where `crm.export`
+ *   goes. Importing invoicing goes where `crm.import` goes. Raising a
+ *   lead goes where `crm.create` goes. The brand kit goes where
+ *   `marketing.edit` goes, which is where it has always been.
+ *
+ * Which means a viewer keeps the exports a viewer has always had, and
+ * that is deliberate rather than an oversight: tightening it here would
+ * be a change of behaviour smuggled into a compatibility layer. The
+ * tightening happens by giving people templates.
  */
 /** Every role there is, in one place, so a sweep cannot miss one. */
 export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
@@ -270,6 +356,14 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.schedule', 'work.rollback', 'work.analytics', 'work.analyticsAll',
     'entity.viewAll', 'entity.setOwn', 'entity.setOthers', 'compliance.sensitive',
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send',
+    /* The screens and the buttons that had no capability of their own
+       until the eleven roles needed to tell them apart. See the note
+       above BY_ROLE: an administrator holds every one of them. */
+    'analytics.view', 'reports.view', 'reports.export', 'tracker.view',
+    'finder.view', 'stock.view', 'stock.export', 'news.view',
+    'brand.view', 'brand.manage', 'leads.create',
+    'revenue.view', 'revenue.import', 'revenue.export',
+    'access.request', 'access.decide', 'admin.usersDepartment',
   ],
   sales: [
     'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.health', 'crm.create', 'crm.delete',
@@ -289,6 +383,15 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
        manager's discount, which is the one number on the document that
        comes out of somebody else's margin. */
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.send',
+    /* The seven screens crm.view opened, kept open. Plus the buttons
+       Sales already held the equivalent of: they can export the CRM, so
+       they can export a report and the stock list; they can import to
+       the CRM, so they can import invoicing; they can create a record,
+       so they can raise a lead. */
+    'analytics.view', 'reports.view', 'reports.export', 'tracker.view',
+    'finder.view', 'stock.view', 'stock.export', 'news.view',
+    'revenue.view', 'revenue.import', 'revenue.export',
+    'leads.create', 'access.request',
   ],
   marketer: [
     /* `crm.health` is here deliberately. Rama takes the call when a
@@ -314,6 +417,13 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.projects', 'work.analytics', 'entity.setOwn',
     /* Read only. Marketing writes about FleetSmart+ and does not price it. */
     'fleetsmart.view',
+    /* The same seven screens, and the brand kit, which is behind
+       marketing.edit today and so is already theirs. No revenue.import:
+       nothing about invoicing has ever been marketing's. */
+    'analytics.view', 'reports.view', 'reports.export', 'tracker.view',
+    'finder.view', 'stock.view', 'stock.export', 'news.view',
+    'brand.view', 'brand.manage', 'revenue.view', 'revenue.export',
+    'access.request',
   ],
   viewer: [
     'crm.view', 'crm.viewGlobal', 'crm.export',
@@ -327,6 +437,12 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.views', 'work.projects', 'work.analytics',
     /* Read only, like everything else a viewer holds. */
     'fleetsmart.view',
+    /* The seven screens, and the two exports a viewer could already
+       run, because crm.export has been theirs since the first
+       migration. Nothing that writes. */
+    'analytics.view', 'reports.view', 'reports.export', 'tracker.view',
+    'finder.view', 'stock.view', 'stock.export', 'news.view',
+    'revenue.view', 'revenue.export', 'access.request',
   ],
 };
 

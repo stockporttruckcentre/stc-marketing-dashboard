@@ -73,8 +73,18 @@ export type Capability =
   | 'crm.edit' | 'crm.create' | 'crm.delete' | 'crm.assign' | 'crm.manageLists'
   | 'crm.proposal' | 'crm.proposalForOthers' | 'crm.delegate'
   | 'crm.enrich' | 'crm.import' | 'crm.export'
+  /* Creating a lead is not creating a record. Marketing may add a
+     customer and may not raise a lead against them, which needed two
+     capabilities where there was one. */
+  | 'leads.create' | 'tracker.view'
   // ---- Stock ----
-  | 'stock.edit'
+  | 'stock.edit' | 'stock.view' | 'stock.export'
+  // ---- The screens that all gated on crm.view until the roles arrived ----
+  | 'analytics.view' | 'reports.view' | 'reports.export'
+  | 'revenue.view' | 'revenue.import' | 'revenue.export'
+  | 'finder.view' | 'news.view' | 'brand.view' | 'brand.manage'
+  // ---- Asking somebody senior to do the thing you may not ----
+  | 'access.request' | 'access.decide'
   // ---- Content ----
   | 'social.view' | 'social.draft' | 'social.editAny' | 'social.templates' | 'social.tags'
   | 'social.schedule' | 'social.approve' | 'social.approveOwn' | 'social.publishNow'
@@ -97,7 +107,7 @@ export type Capability =
   // ---- FleetSmart+ ----
   | 'fleetsmart.view' | 'fleetsmart.build' | 'fleetsmart.discount' | 'fleetsmart.send'
   // ---- Administration ----
-  | 'admin.users' | 'admin.settings' | 'admin.audit';
+  | 'admin.users' | 'admin.usersDepartment' | 'admin.settings' | 'admin.audit';
 
 /* -------------------------------------------------------------
    The mirror.
@@ -193,6 +203,46 @@ export const CAPABILITY_CATALOG = [
   { key: 'fleetsmart.send', label: 'Send a contract to a customer', description: 'Mark a contract sent and record what went out. A price a customer has seen is a price they will hold you to.', area: 'FleetSmart+', feature: 'Contracts', danger: 'sensitive', requires: ['fleetsmart.build'], scoped: false, position: 40 },
 
   { key: 'admin.audit', label: 'Read the audit trail', description: 'Read the permanent record of who changed what, and generate insider lists from it.', area: 'Admin', feature: 'Compliance', danger: 'sensitive', requires: [], scoped: false, position: 30 },
+
+  /* ---- The screens that all gated on crm.view until the roles arrived ----
+
+     Analytics, Reports, the sales tracker, the finder, trailer sales,
+     revenue and the news all asked for `crm.view` and nothing else, so
+     there was no way to give somebody one and withhold another. The
+     office administrators need Reports and the whole revenue tab and
+     no Analytics at all, which was not expressible.
+
+     Each screen has its own now, and the verbs that are hard to undo
+     are separate from the seeing: taking data out, and putting it in
+     over the top of what is there. */
+  { key: 'analytics.view', label: 'Open Analytics', description: 'See the Analytics hub. Separate from the CRM, because the office administrators read Reports and do not need Analytics.', area: 'CRM', feature: 'Analytics', danger: 'routine', requires: [], scoped: false, position: 300 },
+  { key: 'reports.view', label: 'Run a report', description: 'Open the Reports hub and run any report on screen.', area: 'CRM', feature: 'Analytics', danger: 'routine', requires: [], scoped: false, position: 310 },
+  { key: 'reports.export', label: 'Take a report out', description: 'Download a report as a file. Anything downloaded leaves the audit trail behind, which is why running one and taking it away are different rights.', area: 'CRM', feature: 'Analytics', danger: 'sensitive', requires: ['reports.view'], scoped: false, position: 320 },
+
+  { key: 'revenue.view', label: 'See the revenue tab', description: 'Open Revenue and read every division.', area: 'CRM', feature: 'Revenue', danger: 'routine', requires: [], scoped: false, position: 350 },
+  { key: 'revenue.import', label: 'Import invoicing', description: 'Load a Protean or Sage export into revenue. One wrong file moves every figure on Analytics, Reports and the customer records.', area: 'CRM', feature: 'Revenue', danger: 'destructive', requires: ['revenue.view'], scoped: false, position: 360 },
+  { key: 'revenue.export', label: 'Take revenue out', description: 'Export revenue figures to a file.', area: 'CRM', feature: 'Revenue', danger: 'sensitive', requires: ['revenue.view'], scoped: false, position: 370 },
+
+  { key: 'tracker.view', label: 'Open the sales tracker', description: 'See the pipeline board. Marketing can read a lead on a customer record without having the tracker.', area: 'CRM', feature: 'Access', danger: 'routine', requires: ['crm.view'], scoped: false, position: 150 },
+  { key: 'leads.create', label: 'Raise a lead', description: 'Create a lead against a customer. Adding the customer and raising a lead against them are different jobs, and marketing does the first and not the second.', area: 'CRM', feature: 'Records', danger: 'routine', requires: ['crm.view'], scoped: false, position: 55 },
+  { key: 'finder.view', label: 'Use the company finder', description: 'Search for companies near a depot and add them to the CRM.', area: 'CRM', feature: 'Data', danger: 'routine', requires: [], scoped: false, position: 125 },
+
+  { key: 'stock.view', label: 'See the stock list', description: 'Open trailer sales and read the stock.', area: 'Stock', feature: 'Records', danger: 'routine', requires: [], scoped: false, position: 5 },
+  { key: 'stock.export', label: 'Take the stock list out', description: 'Export the stock list to a file. This is the one a salesperson takes with them when they leave, so it sits with the senior.', area: 'Stock', feature: 'Records', danger: 'sensitive', requires: ['stock.view'], scoped: false, position: 20 },
+
+  { key: 'brand.view', label: 'Use the brand kit', description: 'Open the brand kit and take a colour, a logo or a font from it.', area: 'Content', feature: 'Brand', danger: 'routine', requires: [], scoped: false, position: 200 },
+  { key: 'brand.manage', label: 'Change the brand kit', description: 'Add, replace or remove brand assets. Everybody downstream uses whatever is in here.', area: 'Content', feature: 'Brand', danger: 'sensitive', requires: ['brand.view'], scoped: false, position: 210 },
+  { key: 'news.view', label: 'Read industry news', description: 'See the trade press feed.', area: 'Content', feature: 'Brand', danger: 'routine', requires: [], scoped: false, position: 220 },
+
+  /* ---- Asking somebody senior ----
+
+     A refusal that only says no teaches people to work around the
+     system. These two are the pair that lets it say no and offer the
+     way forward in the same breath. */
+  { key: 'access.request', label: 'Ask for something you may not do', description: 'Raise a request to whoever is senior to you for an export, an import or an approval you do not hold yourself.', area: 'Admin', feature: 'Requests', danger: 'routine', requires: [], scoped: false, position: 40 },
+  { key: 'access.decide', label: 'Decide those requests', description: 'Approve or refuse what the people you are senior to have asked for.', area: 'Admin', feature: 'Requests', danger: 'sensitive', requires: [], scoped: false, position: 50 },
+
+  { key: 'admin.usersDepartment', label: 'Manage accounts in your own departments', description: 'Change roles and permissions for people in the departments you run, and nobody else. Narrower than admin.users, which reaches everybody.', area: 'Admin', feature: 'Accounts', danger: 'sensitive', requires: [], scoped: false, position: 15 },
 ] as const satisfies readonly CapabilityEntry[];
 
 /* -------------------------------------------------------------
