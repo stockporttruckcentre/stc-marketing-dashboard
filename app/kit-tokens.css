@@ -220,15 +220,58 @@
 /* -------------------------------------------------------------
    Kit scope.
 
-   globals.css wins at :root for --bg, --accent and --border so that
-   un-rebranded screens are untouched. Anything inside .kit gets the
-   kit's real values back. Remove this block once the whole app is
-   kit-native and globals.css no longer defines them.
+   globals.css is bundled after this file, so wherever the two define
+   the same name at :root, globals wins and the kit loses. Anything
+   inside `.kit` takes the kit's values back.
+
+   ---- Why this list is ten names and not three ----
+
+   It used to be three, and the seven that were missing are why the
+   Analytics hub looked, in the words of the person who has to present
+   it, blinding and corrupted.
+
+   globals.css is a DARK theme. Its `--border-strong` is
+   rgba(255,255,255,0.10), white at a tenth, which is a sensible
+   hairline on a near-black canvas and is nothing at all on the kit's
+   white card. Its shadows carry a white inset highlight, which on a
+   dark surface reads as a lifted edge and on a white one reads as a
+   glow around every panel. `--accent-fg` is the text colour that sits
+   on red, and inheriting the wrong one puts unreadable text inside
+   every red band.
+
+   None of that throws. It just renders wrong, on the one screen
+   somebody opens in front of the managing director.
+
+   The rule is simple and worth keeping: every name that appears in
+   BOTH files has to be restated here. `npm run check:kit` asserts it,
+   so a new collision fails rather than quietly reverting a card to the
+   dark theme's idea of a border.
+
+   Remove this block once globals.css no longer defines these at all.
    ------------------------------------------------------------- */
 .kit {
   --bg: #F7F7F5;
   --accent: #CF2417;
+  --accent-fg: #FFFFFF;
   --border: #E2E2DE;
+  --border-strong: #CBCBC6;
+  --stc-navy: #09163A;
+  --stc-red: #CF2417;
+  --shadow-1: 0 1px 2px rgba(9,22,58,.06);
+  --shadow-2: 0 2px 6px rgba(9,22,58,.08);
+  --shadow-3: 0 8px 20px rgba(9,22,58,.10);
+}
+
+[data-theme='dark'] .kit,
+[data-stc-theme='dark'] .kit {
+  --bg: #050D26;
+  --accent: #E03B2E;
+  --accent-fg: #FFFFFF;
+  --border: #1E2F63;
+  --border-strong: #2B3F78;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.35);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.40);
+  --shadow-3: 0 8px 20px rgba(0,0,0,.45);
 }
 [data-stc-theme="dark"] .kit,
 [data-theme="dark"] .kit,

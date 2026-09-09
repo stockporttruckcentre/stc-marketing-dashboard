@@ -238,6 +238,32 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 
 /** "1 to 9 September 2026", or "9 September 2026" for a single day. */
+/**
+ * The tab's own name for the window, which has to say when it is not
+ * the whole thing.
+ *
+ * A tab reading "Month" beside a range reading "1 to 9 September" is
+ * the page telling somebody it is broken. It is not: month to date is
+ * what the design asks for, and comparing nine days against a whole
+ * August is the mistake the part month guard exists to prevent. But
+ * the reader has to be told that in the label rather than left to work
+ * it out from two numbers that do not agree.
+ */
+export function periodWords(p: Period): string {
+  if (p.kind === 'custom') return 'Custom range';
+  const whole = { month: 'This month', quarter: 'This quarter', year: 'This financial year' }[p.kind];
+  const partial = { month: 'Month to date', quarter: 'Quarter to date', year: 'Year to date' }[p.kind];
+  return isComplete(p.window, p.kind) ? whole : partial;
+}
+
+/** Does this window run to the end of its own month, quarter or year? */
+export function isComplete(w: Window, kind: PeriodKind): boolean {
+  if (kind === 'custom') return true;
+  if (kind === 'month') return w.to === endOfMonth(w.from);
+  if (kind === 'quarter') return w.to === addDays(addMonths(startOfQuarter(w.from), 3), -1);
+  return w.to === addDays(addMonths(startOfFinancialYear(w.from), 12), -1);
+}
+
 export function windowWords(w: Window): string {
   const a = asDate(w.from);
   const b = asDate(w.to);
