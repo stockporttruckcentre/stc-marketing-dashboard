@@ -55,13 +55,104 @@ ALTER TABLE revenue_targets ADD COLUMN IF NOT EXISTS division TEXT
 
 /* The old unique key was (user_id, period_month), which now allows one
    row per person per month TOTAL rather than one per person per
-   division. Replaced rather than added to, and NULLS NOT DISTINCT so
-   that two group targets for the same month collide instead of
-   silently both counting. */
+   division. Replaced rather than added to.
+
+   ---- Why COALESCE rather than NULLS NOT DISTINCT ----
+
+   Both nulls are meaningful on this table: a null user_id means the
+   whole company and a null division means the whole group, so the row
+   that matters most is the one that is null twice. A plain unique index
+   treats every null as distinct from every other, which would let the
+   group figure for March be entered twice and both be counted.
+
+   `NULLS NOT DISTINCT` says exactly that and is the natural way to
+   write it. It also needs PostgreSQL 15, and this was the only line in
+   the whole of `supabase/migrations` to require anything past 13. Every
+   other migration in this repository runs on an older server, so a
+   database that took all ninety nine of them would have failed on this
+   one alone, with the whole transaction rolled back and nothing to show
+   for it but "function analytics_window does not exist" from the file
+   that runs afterwards.
+
+   Folding the nulls to sentinels in the index gives the same guarantee
+   and asks nothing of the server version. The nil UUID and a sentinel
+   that is not a legal slug stand in for "everybody" and "the group". */
 ALTER TABLE revenue_targets DROP CONSTRAINT IF EXISTS revenue_targets_user_id_period_month_key;
 DROP INDEX IF EXISTS revenue_targets_one_per_month;
+
+/* ---- The rows that are already duplicated ----
+
+   The index cannot be built over a table that already breaks it, and
+   this one does: the live database has two group targets for the same
+   month sitting in it. That is not a corruption, it is the absence of
+   this very constraint. Nothing has ever stopped a second August being
+   entered, and until now nothing read them in a way that made it
+   obvious, because the old key was (user_id, period_month) and the
+   group row has a null user_id, which a plain unique key treats as
+   distinct from every other null.
+
+   So the duplicates are older statements of the same intention. The
+   newest one per month is what somebody currently means and is kept.
+
+   The others are MOVED, not deleted. A migration that quietly destroys
+   somebody's figures is a migration nobody can check afterwards, and
+   "which August did it keep" is exactly the question that gets asked.
+   They go to `revenue_targets_superseded` with the time they were set
+   aside, and the readback prints them. */
+CREATE TABLE IF NOT EXISTS revenue_targets_superseded (
+  id            UUID,
+  user_id       UUID,
+  period_month  DATE,
+  target_amount NUMERIC,
+  created_at    TIMESTAMPTZ,
+  division      TEXT,
+  superseded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE revenue_targets_superseded IS
+  'Duplicate revenue targets set aside by migration 100 so the one row '
+  'per month rule could be applied. Nothing writes here afterwards.';
+
+DO $$
+DECLARE moved INTEGER := 0;
+BEGIN
+  WITH ranked AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+             PARTITION BY COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::UUID),
+                          COALESCE(division, '*group*'),
+                          period_month
+             /* Newest wins. `created_at` first, and the id only to
+                break a tie between two rows entered in the same
+                instant, so the choice is never arbitrary. */
+             ORDER BY created_at DESC, id DESC
+           ) AS rn
+      FROM revenue_targets
+  ),
+  older AS (SELECT id FROM ranked WHERE rn > 1),
+  kept AS (
+    INSERT INTO revenue_targets_superseded
+      (id, user_id, period_month, target_amount, created_at, division)
+    SELECT t.id, t.user_id, t.period_month, t.target_amount, t.created_at, t.division
+      FROM revenue_targets t JOIN older o ON o.id = t.id
+    RETURNING 1
+  )
+  DELETE FROM revenue_targets t USING older o WHERE t.id = o.id;
+
+  GET DIAGNOSTICS moved = ROW_COUNT;
+  IF moved > 0 THEN
+    RAISE NOTICE 'targets: % duplicate row(s) set aside in revenue_targets_superseded, newest kept', moved;
+  ELSE
+    RAISE NOTICE 'targets: no duplicates, nothing set aside';
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS revenue_targets_one_per_month
-  ON revenue_targets (user_id, division, period_month) NULLS NOT DISTINCT;
+  ON revenue_targets (
+    COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    COALESCE(division, '*group*'),
+    period_month
+  );
 
 COMMENT ON COLUMN revenue_targets.division IS
   'Division slug, or NULL for the whole group. NULL user_id and NULL division is the group figure.';
@@ -273,10 +364,27 @@ BEGIN
     RETURN jsonb_build_object('ok', TRUE, 'cleared', TRUE);
   END IF;
 
-  INSERT INTO revenue_targets (user_id, division, period_month, target_amount)
-  VALUES (NULL, p_division, m, p_amount)
-  ON CONFLICT (user_id, division, period_month) DO UPDATE
-    SET target_amount = EXCLUDED.target_amount;
+  /* Update, then insert if there was nothing to update.
+
+     Written out rather than as ON CONFLICT because the unique index
+     above is on expressions, and ON CONFLICT can only infer an index
+     from a column list. Naming the columns here would fail with "no
+     unique or exclusion constraint matching the ON CONFLICT
+     specification" the first time an administrator set a target, which
+     is a long way from the migration that caused it.
+
+     `IS NOT DISTINCT FROM` rather than `=` because the row that matters
+     most has a null division, and `division = NULL` is never true. */
+  UPDATE revenue_targets
+     SET target_amount = p_amount
+   WHERE user_id IS NULL
+     AND division IS NOT DISTINCT FROM p_division
+     AND period_month = m;
+
+  IF NOT FOUND THEN
+    INSERT INTO revenue_targets (user_id, division, period_month, target_amount)
+    VALUES (NULL, p_division, m, p_amount);
+  END IF;
 
   RETURN jsonb_build_object('ok', TRUE, 'month', m, 'division', p_division, 'amount', p_amount);
 END;

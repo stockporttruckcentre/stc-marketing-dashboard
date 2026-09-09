@@ -24,7 +24,13 @@
 --      March, and setting it to nought clears it rather than recording
 --      a target of nothing. A division and the group are separate
 --      lines, and one must not overwrite the other.
---   4. THE COMPARISON WINDOW IS A DIFFERENT WINDOW. Both halves come
+--   4. THE INDEX GOES ON A TABLE THAT ALREADY BREAKS IT. The live
+--      database had two group targets for the same month, because
+--      nothing had ever stopped a second one. `CREATE UNIQUE INDEX`
+--      refused, the whole migration rolled back, and the only symptom
+--      anybody saw was the NEXT file saying analytics_window does not
+--      exist. Building on an empty table proved nothing about that.
+--   5. THE COMPARISON WINDOW IS A DIFFERENT WINDOW. Both halves come
 --      out of one pass over the invoices, and a mistake there reads as
 --      "flat against last quarter" on every division at once, which is
 --      the sort of wrong figure nobody questions.
@@ -256,7 +262,112 @@ BEGIN
 END $$;
 
 -- =============================================================
--- 4. The window and its comparison are different windows
+-- 4. A table that already breaks the rule
+--
+-- The state the live database was actually in. Asserted rather than
+-- described, because "it worked on the test copy" is what made this
+-- ship: the test copy was empty, and an empty table satisfies every
+-- uniqueness rule anybody can write.
+-- =============================================================
+DO $$
+DECLARE kept NUMERIC; aside NUMERIC; n INTEGER;
+BEGIN
+  PERFORM pg_temp.act_as('ba000000-0000-0000-0000-000000000001');
+
+  /* Two group targets for one month, an older and a newer, plus a
+     division target for the same month that must survive untouched. */
+  DELETE FROM revenue_targets WHERE period_month = DATE '2026-08-01';
+  DROP INDEX IF EXISTS revenue_targets_one_per_month;
+  INSERT INTO revenue_targets (user_id, division, period_month, target_amount, created_at) VALUES
+    (NULL, NULL,      DATE '2026-08-01', 180000, NOW() - INTERVAL '40 days'),
+    (NULL, NULL,      DATE '2026-08-01', 240000, NOW() - INTERVAL '2 days'),
+    (NULL, 'trailer', DATE '2026-08-01',  90000, NOW() - INTERVAL '5 days');
+
+  SELECT COUNT(*) INTO n FROM revenue_targets WHERE period_month = DATE '2026-08-01';
+  PERFORM pg_temp.must('fixture: three August rows, two of them the same group month', n = 3);
+END $$;
+
+/* The migration's own de-duplication, run again over the mess above.
+   Copied from 100 rather than called, because a migration is not a
+   function; if the two ever diverge this assertion is what says so. */
+DO $$
+DECLARE moved INTEGER := 0;
+BEGIN
+  WITH ranked AS (
+    SELECT id, ROW_NUMBER() OVER (
+             PARTITION BY COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::UUID),
+                          COALESCE(division, '*group*'), period_month
+             ORDER BY created_at DESC, id DESC) AS rn
+      FROM revenue_targets
+  ),
+  older AS (SELECT id FROM ranked WHERE rn > 1),
+  kept AS (
+    INSERT INTO revenue_targets_superseded
+      (id, user_id, period_month, target_amount, created_at, division)
+    SELECT t.id, t.user_id, t.period_month, t.target_amount, t.created_at, t.division
+      FROM revenue_targets t JOIN older o ON o.id = t.id
+    RETURNING 1
+  )
+  DELETE FROM revenue_targets t USING older o WHERE t.id = o.id;
+  GET DIAGNOSTICS moved = ROW_COUNT;
+  PERFORM pg_temp.must('exactly one row is set aside, not both and not the division line', moved = 1);
+END $$;
+
+DO $$
+DECLARE kept NUMERIC; aside NUMERIC; n INTEGER;
+BEGIN
+  SELECT target_amount INTO kept FROM revenue_targets
+   WHERE division IS NULL AND period_month = DATE '2026-08-01';
+  PERFORM pg_temp.must('the newest August is the one kept', kept = 240000);
+
+  SELECT target_amount INTO aside FROM revenue_targets_superseded
+   WHERE division IS NULL AND period_month = DATE '2026-08-01';
+  PERFORM pg_temp.must('and the older one is kept rather than destroyed', aside = 180000);
+
+  SELECT target_amount INTO n FROM revenue_targets
+   WHERE division = 'trailer' AND period_month = DATE '2026-08-01';
+  PERFORM pg_temp.must('the division line for the same month is untouched', n = 90000);
+
+  /* And now the index goes on, which is the whole point. */
+  CREATE UNIQUE INDEX revenue_targets_one_per_month
+    ON revenue_targets (
+      COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::UUID),
+      COALESCE(division, '*group*'), period_month);
+  PERFORM pg_temp.must('the unique index builds once the duplicates are gone', TRUE);
+END $$;
+
+/* The rule holds afterwards: a second group target for that month is
+   refused by the database rather than quietly counted twice. */
+DO $$
+DECLARE failed BOOLEAN := FALSE;
+BEGIN
+  BEGIN
+    INSERT INTO revenue_targets (user_id, division, period_month, target_amount)
+    VALUES (NULL, NULL, DATE '2026-08-01', 999);
+  EXCEPTION WHEN unique_violation THEN failed := TRUE;
+  END;
+  PERFORM pg_temp.must('a second group target for that month is now refused', failed);
+END $$;
+
+/* And the writer still upserts, which the expression index broke once:
+   ON CONFLICT can only infer an index from a column list, so naming
+   the columns would have failed the first time an administrator set a
+   target, a long way from the migration that caused it. */
+DO $$
+DECLARE said JSONB; n INTEGER; amount NUMERIC;
+BEGIN
+  PERFORM pg_temp.act_as('ba000000-0000-0000-0000-000000000001');
+  said := analytics_set_target(DATE '2026-08-01', NULL, 300000);
+  PERFORM pg_temp.must('setting that month again still goes through', (said->>'ok')::BOOLEAN);
+
+  SELECT COUNT(*), MAX(target_amount) INTO n, amount FROM revenue_targets
+   WHERE user_id IS NULL AND division IS NULL AND period_month = DATE '2026-08-01';
+  PERFORM pg_temp.must('over the top of the row rather than beside it', n = 1);
+  PERFORM pg_temp.must('with the new figure', amount = 300000);
+END $$;
+
+-- =============================================================
+-- 5. The window and its comparison are different windows
 --
 -- Invoices in two quarters, deliberately unequal, so a function that
 -- returned the same figures for both halves fails here rather than in
