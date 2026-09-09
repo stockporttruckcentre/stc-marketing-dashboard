@@ -137,6 +137,11 @@ trigger has already fired. Do not guess a value that the kit specifies.
 3. **Recreate, never lift.** The reference HTML is a prototype, not production
    code. Rebuild it as React + Tailwind using this codebase's own patterns.
    `reference/support.js` must never ship.
+
+   **This applies to `design-system/reference/*.html` and to nothing else.**
+   It does NOT apply to a kit sent for a specific screen and stored in
+   `docs/source/`. Those are used, not reinterpreted. See the section
+   below.
 4. **Semantic tokens only.** Use `var(--surface)`, `var(--text-muted)`,
    `var(--accent)`. Never a raw hex, never a one-off colour. If a value you need
    has no token, that is a signal to ask, not to invent one.
@@ -156,6 +161,59 @@ trigger has already fired. Do not guess a value that the kit specifies.
    authority; Inter for anything read at length. Never Panton below 11px.
 
 ---
+
+## A kit sent for a screen is ported, not recreated
+
+`docs/source/STCUIAnalytics.html` and `docs/source/STCUIReports.html` are
+finished designs. They were written by hand, by the person who has to present
+this product, and they are not references to consult.
+
+The rule above, "Recreate, never lift", was written for the design system's own
+reference pages. Applying it to one of these is what produced an analytics hub
+that had to be rebuilt three times: the file was opened, a description was
+formed from it, and CSS was then authored from the description. Intent survives
+that trip. Measurements do not. One device alone differed from the file in
+nineteen ways.
+
+From the business, in their own words:
+
+> Your permission has been removed now to vibecode and do your own thing. If you
+> think "this chart would look better with a 3px gap instead" you must think
+> "the user didn't say I could do that and it's not on the file, i'm banned".
+> IM A PROFESSIONAL DESIGNER, I DESIGN FIRST THEN HAND IT TO YOU AND YOU PORT
+> IT IN.
+
+So:
+
+- **No value is chosen.** Not a length, not a colour, not a weight, not a gap.
+  If the kit does not say it, it is not permitted, and the answer is to ask
+  rather than to pick.
+- **Values come out of the file mechanically.** `npm run kit:extract` renders
+  the kit in a browser and writes `lib/analytics/kit.generated.ts`. Components
+  import from there.
+- **"Would look better" is not a reason.** It is the exact thought that
+  produced every one of the nineteen.
+
+### The guards
+
+A rule of the form "does this match the kit" cannot be enforced, because
+whoever writes the mismatch is the same person judging the match. Every earlier
+check had that shape and passed while the page was wrong. These are mechanical
+instead:
+
+```bash
+npm run check:invention   # no design value written by hand, and the count may only fall
+npm run check:kit         # the kit is present, and the extract is in step with it
+npm run kit:extract       # regenerate after a new kit arrives, and commit the result
+```
+
+`.claude/hooks/kit-guard.sh` runs both checks after every Edit or Write to
+`AnalyticsHub.tsx`, `components/analytics/**`, `ReportsHub.tsx`,
+`kit-tokens.css` or the generated file, and blocks on failure.
+
+`scripts/invention-baseline.json` is a ratchet. It holds how many hand written
+values each governed file still has. The number may fall and may never rise, so
+the migration can proceed while a newly typed value is refused on the spot.
 
 ## The command bar is never finished
 
