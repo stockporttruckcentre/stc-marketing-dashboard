@@ -44,7 +44,11 @@ export type DiaryInvite = {
   responded_at: string | null;
 };
 
-export type DiaryPerson = { id: string; full_name: string | null; email: string | null };
+export type DiaryPerson = {
+  id: string; full_name: string | null; email: string | null;
+  /** `profiles.photo_url`. Null draws initials, which is most people. */
+  photo_url?: string | null;
+};
 
 /**
  * Somebody on a meeting who does not work here.
@@ -91,6 +95,11 @@ export type DiaryAttendee = {
   external: boolean;
   /** For a guest: whether they have opened the link yet. */
   seenAt: string | null;
+  /* Their picture, where they are a colleague and have uploaded one.
+     Always null for a guest and for anybody on the old JSONB list: a
+     name and an email is all either of those carries, and drawing a
+     stranger's face from a matching email is a guess. */
+  photoUrl: string | null;
 };
 
 export const STATUS_LABEL: Record<InviteStatus, string> = {
@@ -133,6 +142,11 @@ function nameOf(people: Map<string, DiaryPerson>, id: string | null): string | n
   return p?.full_name || p?.email || null;
 }
 
+function faceOf(people: Map<string, DiaryPerson>, id: string | null): string | null {
+  if (!id) return null;
+  return people.get(id)?.photo_url ?? null;
+}
+
 /**
  * Everybody on one event, invites first.
  *
@@ -161,6 +175,7 @@ export function attendeesOf(
       organiser: true,
       external: false,
       seenAt: null,
+      photoUrl: faceOf(ctx.people, event.created_by),
     });
   }
 
@@ -180,6 +195,7 @@ export function attendeesOf(
       organiser: false,
       external: false,
       seenAt: null,
+      photoUrl: faceOf(ctx.people, i.user_id),
     });
   }
 
@@ -204,6 +220,7 @@ export function attendeesOf(
       organiser: false,
       external: true,
       seenAt: g.seen_at,
+      photoUrl: null,
     });
   }
 
@@ -230,6 +247,9 @@ export function attendeesOf(
          as far as anything here can tell. */
       external: !a.user_id,
       seenAt: null,
+      /* A user_id on the old list is still a colleague, so they get
+         their face. Anybody without one is an email and nothing more. */
+      photoUrl: faceOf(ctx.people, a.user_id ?? null),
     });
   }
 

@@ -80,7 +80,7 @@ export default async function WorkPage({
     supabase.from('calendar_invites')
       .select('id, event_id, user_id, invited_by, status, proposed_start_at, proposed_end_at, awaiting, rounds, note, responded_at'),
     supabase.from('calendar_guests').select('id, event_id, email, name, status, proposed_start_at, proposed_end_at, rounds, note, responded_at, seen_at, invited_by'),
-    supabase.from('profiles').select('id, full_name, email').limit(200),
+    supabase.from('profiles').select('id, full_name, email, photo_url').limit(200),
   ]);
 
   const profile = (profileRes.data as Profile) ?? null;

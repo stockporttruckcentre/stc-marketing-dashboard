@@ -154,7 +154,7 @@ function ProfileTab({ profile }: { profile: Profile & Record<string, unknown> })
           <AvatarField
             userId={profile.id}
             name={form.full_name || profile.full_name || ''}
-            initial={(profile.avatar_url as string | null) ?? null}
+            initial={(profile.photo_url as string | null) ?? null}
           />
           <Split cols={2}>
             <Field label="Full name" hint="How you appear on leads, meetings and the team list">

@@ -14,8 +14,10 @@ export type PostStatus = 'draft' | 'pending_review' | 'approved' | 'scheduled' |
 export type AssetType = 'logo' | 'font' | 'color' | 'template' | 'image';
 
 export interface Profile {
-  /** Their own picture, if they have uploaded one. Migration 099. */
-  avatar_url?: string | null;
+  /** Their own picture, if they have uploaded one. One column since
+      migration 101: `avatar_url` and `photo_url` both existed and the
+      uploader wrote the one the team directory did not read. */
+  photo_url?: string | null;
   id: string;
   email: string;
   full_name: string;

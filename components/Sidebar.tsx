@@ -230,9 +230,9 @@ export function Sidebar({
             initials are not a placeholder to be replaced later: most
             people will never upload one, and a grey circle would be
             worse than the two letters that are there today. */}
-        {profile.avatar_url ? (
+        {profile.photo_url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={profile.avatar_url} alt="" width={28} height={28} className="avatar"
+          <img src={profile.photo_url} alt="" width={28} height={28} className="avatar"
             style={{ objectFit: 'cover', padding: 0 }} />
         ) : (
           <div className="avatar">

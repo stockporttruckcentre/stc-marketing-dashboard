@@ -9,6 +9,7 @@ import { KIND_LABEL, KIND_TONE, type EventKind } from '@/lib/calendar/kind';
 import { STATUS_LABEL, type DiaryAttendee, type DiaryEntry } from '@/lib/calendar/diary';
 import { durationLabel, timeLabel } from '@/lib/calendar/grid';
 import { Badge, type Tone } from '@/components/kit/primitives';
+import { Avatar as Face } from '@/components/kit/avatar';
 
 /* =============================================================
    The small pieces the calendar and the Work tab's diary both draw.
@@ -54,11 +55,12 @@ export function StatusBadge({ status }: { status: InviteStatus }) {
  * eight colours is eight things shouting. The ring is the only signal
  * here: solid where they have said yes, dashed where they have not
  * answered, struck through where they cannot come.
+ *
+ * The circle itself is the shared one, so a colleague who has uploaded
+ * a photograph is the same face here as on the team list. Only the ring
+ * is the diary's, because only the diary has an RSVP to show.
  */
 export function Avatar({ person, size = 24 }: { person: DiaryAttendee; size?: number }) {
-  const initials = person.name
-    .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
-
   const border =
     person.status === 'accepted' ? '1px solid var(--success)'
     : person.status === 'declined' ? '1px solid var(--danger)'
@@ -67,17 +69,13 @@ export function Avatar({ person, size = 24 }: { person: DiaryAttendee; size?: nu
     : '1px solid var(--border)';
 
   return (
-    <span
+    <Face
+      name={person.name}
+      url={person.photoUrl}
+      size={size}
       title={`${person.name}${person.status ? `, ${STATUS_LABEL[person.status].toLowerCase()}` : ''}`}
-      style={{
-        width: size, height: size, borderRadius: 'var(--r-full)', flex: 'none',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg-subtle)', border,
-        color: person.status === 'declined' ? 'var(--text-subtle)' : 'var(--text-muted)',
-        fontFamily: 'var(--panton)', fontWeight: 700, fontSize: size * 0.42,
-        textDecoration: person.status === 'declined' ? 'line-through' : 'none',
-      }}
-    >{initials}</span>
+      ring={{ border, struck: person.status === 'declined', muted: person.status === 'declined' }}
+    />
   );
 }
 

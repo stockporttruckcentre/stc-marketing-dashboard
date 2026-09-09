@@ -48,7 +48,7 @@ export default async function CalendarPage({
        customer's transport manager was added to visible to every
        colleague on the meeting rather than only to whoever asked. */
     supabase.from('calendar_guests').select('id, event_id, email, name, status, proposed_start_at, proposed_end_at, rounds, note, responded_at, seen_at, invited_by'),
-    supabase.from('profiles').select('id, full_name, email').order('full_name').limit(200),
+    supabase.from('profiles').select('id, full_name, email, photo_url').order('full_name').limit(200),
     supabase.from('crm_contacts').select('id, company_name').order('company_name').limit(2000),
   ]);
 

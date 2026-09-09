@@ -13,7 +13,7 @@ import {
 } from '@/components/kit/primitives';
 import { Field, Select } from '@/components/kit/forms';
 import { Toasts, useToast } from '@/components/kit/toast';
-import { Avatar } from '@/components/team/avatar';
+import { Avatar } from '@/components/kit/avatar';
 import { AccessQueue } from '@/components/admin/access-queue';
 import {
   byArea, loadCapabilitiesFor, loadTeam, overrideState, roleInWords, setActive,

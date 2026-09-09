@@ -221,6 +221,11 @@ export function EntryDrawer({
           name: a.name,
           email: a.email ?? null,
           userId: a.user_id ?? null,
+          /* A colleague picked in the form is already a known person,
+             so the face is there before the meeting is saved. Somebody
+             typed in as an email is not, and guessing a face from an
+             address is how you put the wrong person on a meeting. */
+          photoUrl: a.user_id ? (peopleById.get(a.user_id)?.photo_url ?? null) : null,
           status: null,
           inviteId: null,
           guestId: null,
@@ -234,6 +239,9 @@ export function EntryDrawer({
           name: g.name || g.email,
           email: g.email || null,
           userId: null,
+          /* A guest from outside the business. There is no profile to
+             take a picture from. */
+          photoUrl: null,
           status: null,
           inviteId: null,
           guestId: null,

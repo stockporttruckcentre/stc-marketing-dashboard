@@ -622,7 +622,9 @@ export function WorkloadLayout(p: LayoutProps) {
                 display: 'flex', alignItems: 'center', gap: 8,
                 width: 190, flex: 'none', minWidth: 0,
               }}>
-                {key === '__unassigned' ? <Avatar name="?" /> : <Avatar name={name} />}
+                {key === '__unassigned'
+                  ? <Avatar name="?" />
+                  : <Avatar name={name} url={p.people.get(key)?.photo_url} />}
                 <span style={{
                   fontSize: 12.5, color: 'var(--text)',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

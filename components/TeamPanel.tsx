@@ -11,7 +11,7 @@ import {
   SearchInput, type Tone,
 } from '@/components/kit/primitives';
 import { Drawer, Field, Split, TextInput } from '@/components/kit/forms';
-import { Avatar } from '@/components/team/avatar';
+import { Avatar } from '@/components/kit/avatar';
 import { loadTeam, roleInWords, type TeamMember } from '@/lib/platform/team';
 
 /* =============================================================
