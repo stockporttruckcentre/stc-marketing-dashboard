@@ -1,825 +1,1227 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Container, KeyRound, RotateCcw, Wrench, X } from 'lucide-react';
-import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Button, Chip, EmptyState, PageHead, compactMoney, money,
-} from '@/components/kit/primitives';
-import { TextInput } from '@/components/kit/forms';
-import { MonthlyStack, type MonthPoint, type Shape } from '@/components/analytics/monthly';
-import { Donut } from '@/components/analytics/donut';
-import { DivergingBars, RankedBars, type BarRow } from '@/components/analytics/bars';
+  AlertTriangle, Download, Loader, RefreshCw, SlidersHorizontal, X,
+} from 'lucide-react';
 import {
-  Key, Panel, PanelGrid, Segments, Toggle, type TableRow,
-} from '@/components/analytics/panel';
-import { swatchImage } from '@/components/analytics/texture';
-import { Tile } from '@/components/analytics/tiles';
-import { NeedsARecord } from '@/components/analytics/sections';
-import { readable } from '@/lib/protean/rpc';
+  BandStrip, BulletRows, CohortGrid, DotPlot, HUE, IndexedLines, PROGRESSION,
+  Progression, ShareRows, SourceFlowChart, StackedMonths, StockScatter, Waterfall,
+} from '@/components/analytics/kit/charts';
 import {
-  OPEN_STAGES, STAGE_LABEL,
-  concentration, customerMovement, openWorkAgeing, pipelineByStage, reconciliation,
-  trailerCustomersWaiting,
-  type AgeBand, type Concentration, type Mover,
-  type Reconciliation, type Stage, type TrailerWaiting,
-} from '@/lib/protean/finance';
+  Chart, DeviceLabel, Explain, Fold, Kpi, Legend, NotWiredPanel, SectionHead,
+  Verdict, money, pct, shortMoney,
+} from '@/components/analytics/kit/frame';
+import { indexed } from '@/lib/analytics/shape';
+import {
+  compareWords, iso, trimWords, windowWords,
+  type CompareMode, type PeriodKind,
+} from '@/lib/analytics/period';
+import type { Analytics, DivisionSlug, Figure } from '@/lib/analytics/types';
 
 /* =============================================================
-   The company, as a dashboard.
+   The Analytics hub.
 
-   ---- What was wrong with the version before this ----
+   Built from `STCUIAnalytics.html`, which the business supplied as the
+   component library for this screen, and from what it said about the
+   old one:
 
-   From the business:
+     Currently it's a little all over the place and it doesn't offer
+     enough insight to an accounts department of what they need to see
+     at a glance in the morning, or spend 30 minutes delving in to ... I
+     need to be able to quickly view analytics for certain divisions or
+     contracts or people and get very granular without it being
+     overwhelming to our non-techy MD.
 
-     analytics page rebuild won't work. It's extremely messy, ui broken
-     on lower section, columns all different sized, text formatting not
-     great to understand. It's just information overload. ... Lots of
-     visual data, interactivity, ability to drill in deeper, not just
-     tons of text and numbers on a page.
+   Two audiences, one page, and the tension between them is the whole
+   design problem. It is resolved the way the reference resolves it:
 
-   Four complaints and one cause. The page was three cards, and each
-   card appended however many blocks its own division happened to have.
-   Trailer sales carried deals, sellers, a funnel, a customer list and a
-   form for creating records; rental carried an ageing bar and a funnel.
-   So the columns were different sizes because their CONTENT decided
-   their height, the lower section broke because a card had a form
-   growing out of the bottom of it, and it read as overload because
-   every figure any division could produce was quoted at once, in eight
-   type sizes, whether or not anybody had asked.
+     THE GLANCE IS THE FIRST SCREEN and it never moves. A sentence, a
+     shortlist of decisions, four figures, and revenue against target.
+     Somebody who reads only that has read something true.
 
-   ---- What replaces it ----
+     THE THIRTY MINUTES IS BELOW IT, in sections that fold. Every one is
+     shut until it is opened, so the page is short until somebody wants
+     it long. Nothing is hidden behind a tab, because a tab is a thing
+     you have to know exists.
 
-   A twelve column grid of panels. A panel says how many columns it
-   spans and nothing about its height, so panels on a row are equal by
-   construction and no panel can push its neighbour out of shape. That
-   is `panel.tsx`, and it is the whole answer to three of the four.
+   ---- One control bar drives everything ----
 
-   The fourth is answered by making the page ANSWER a question rather
-   than recite everything:
+   From the reference: "the commonest mistake on an analytics screen is
+   reading a number from the wrong period". So there is exactly one
+   period, one comparison and one filter set, they live in a bar that
+   sticks to the top of the page, and every figure below is fetched for
+   them together in a single request. No chart has its own date picker.
 
-     A CHART CARRIES THE MEANING. Every panel draws. Nothing on this
-     page is a list of numbers by default.
+   ---- Every number can be interrogated ----
 
-     THE NUMBERS ARE ONE PRESS AWAY. Every panel that draws also
-     tabulates, on a toggle. The finance team asked for enough to brief
-     the managing director and then reported the result as overload;
-     both were true, and the fix is that the detail exists without being
-     shouted. It is also the accessible reading of every chart here.
-
-     ONE THING DRILLS IN. Pressing a division, on the ring or on a chip,
-     scopes the entire page to it: the tiles become that division's
-     figures, the chart becomes its line, and every panel below filters.
-     One axis, so nobody has to remember what is filtered.
+   Each headline figure carries an info button that opens what it counts,
+   what it excludes, where it comes from and who can change it. That is
+   the reference's own rule and it is the difference between an MD
+   trusting this page and asking somebody to check it in a spreadsheet.
    ============================================================= */
 
-type Division = {
-  division: 'stc' | 'trailer' | 'rental';
-  name: string;
-  sort_order: number;
-  this_year: number;
-  last_year: number;
-  last_year_full: number;
-  change: number;
-  deals: number;
-  customers: number;
-  margin: number | null;
-  outstanding: number;
-  outstanding_n: number;
-  outstanding_of: string;
-  fy_started: string;
-  last_activity: string | null;
+type Filters = {
+  kind: PeriodKind;
+  from: string;
+  to: string;
+  mode: CompareMode;
+  trim: boolean;
+  divisions: DivisionSlug[];
+  person: string | null;
 };
 
-type MonthRow = { month: string; division: string; name: string; net: number; deals: number };
-type Pipeline = { division: string; name: string; leads: number; value: number; won_this_year: number };
-type TopCustomer = {
-  contact_id: string | null;
-  company_name: string;
-  this_year: number;
-  last_year: number;
-  change: number;
-  deals: number;
-  placed: boolean;
+const DIVISION_NAME: Record<DivisionSlug, string> = {
+  stc: 'STC', trailer: 'Trailer Sales', rental: 'Rentals',
 };
 
-/* Data colours, which are their own axis in the kit and not the action
-   colours. A division is the same colour in both themes; `--primary`
-   and `--accent` invert between them, because a button has to. */
-const HUE: Record<string, string> = {
-  stc: 'var(--chart-stc)',
-  trailer: 'var(--chart-trailer)',
-  rental: 'var(--chart-rental)',
-};
-
-const ICON: Record<string, typeof Wrench> = {
-  stc: Wrench, trailer: Container, rental: KeyRound,
-};
-
-/** Where a division's own screen lives, for the drill in. */
-const GOES_TO: Record<string, string> = {
-  stc: '/dashboard/revenue/stc',
-  rental: '/dashboard/revenue/rental',
-  trailer: '/dashboard/sales',
-};
-
-const SHAPES: { value: Shape; label: string }[] = [
-  { value: 'stack' as const, label: 'Stacked' },
-  { value: 'line', label: 'Lines' },
-  { value: 'column', label: 'Columns' },
+const PERIODS: { key: PeriodKind; label: string }[] = [
+  { key: 'month', label: 'Month' },
+  { key: 'quarter', label: 'Quarter' },
+  { key: 'year', label: 'Year' },
+  { key: 'custom', label: 'Custom' },
 ];
 
-type Deep = {
-  movers: Mover[];
-  conc: Concentration | null;
-  bands: AgeBand[];
-  recon: Reconciliation[];
-  waiting: TrailerWaiting[];
-  stages: Stage[];
-};
+const MODES: { key: CompareMode; label: string; blurb: string }[] = [
+  { key: 'previous', label: 'Previous period', blurb: 'Like for like on days elapsed.' },
+  { key: 'lastyear', label: 'Same period last year', blurb: 'The same dates, twelve months back.' },
+  { key: 'target', label: 'Target', blurb: 'Shows the notch on every chart instead of a second series.' },
+];
 
-export function AnalyticsHub() {
-  const supabase = createClient();
+export function AnalyticsHub({ today, maySetTargets = false }: {
+  today: string;
+  /** `analytics.targets`. Without it the notches are read only. */
+  maySetTargets?: boolean;
+}) {
+  const [f, setF] = useState<Filters>({
+    kind: 'month',
+    from: `${today.slice(0, 7)}-01`,
+    to: today,
+    mode: 'previous',
+    trim: true,
+    divisions: [],
+    person: null,
+  });
 
-  const [divisions, setDivisions] = useState<Division[]>([]);
-  const [months, setMonths] = useState<MonthRow[]>([]);
-  const [pipeline, setPipeline] = useState<Pipeline[]>([]);
-  const [top, setTop] = useState<Record<string, TopCustomer[]>>({});
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Analytics & { bands?: any[] } | null>(null);
+  const [busy, setBusy] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
+  const [explain, setExplain] = useState<Figure | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({ divisions: true });
 
-  const [deep, setDeep] = useState<Deep | null>(null);
-  const [deepFailed, setDeepFailed] = useState<string | null>(null);
+  /* Numbered, so a slow request that lands after a fast one cannot
+     overwrite it. Three chips changed quickly is three requests, and
+     without this the page shows whichever server answered last rather
+     than whichever was asked last. */
+  const runNo = useRef(0);
 
-  /* THE ONE DRILL IN. Null is the company; a slug is one division, and
-     every panel on the page reads it. */
-  const [only, setOnly] = useState<string | null>(null);
-
-  /* How the month chart is drawn, and which divisions are on it. Held
-     here rather than in the chart so the key under it and the toolbar
-     above it are looking at the same state. */
-  const [shape, setShape] = useState<Shape>('stack');
-  const [off, setOff] = useState<Set<string>>(new Set());
-  const [textured, setTextured] = useState(true);
-
-  /* THE AS AT DATE.
-
-     A board pack is dated, and the figure quoted on Tuesday has to
-     still be the figure on Friday. Empty means today, which is what
-     somebody wants ninety nine times in a hundred.
-
-     `asked` is what the box holds; `upto` is what goes to the database,
-     and only once it is a real date. A half typed 2026-0 must not send
-     a query. */
-  const [asked, setAsked] = useState('');
-  const upto = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : undefined;
-
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (filters: Filters) => {
+    const mine = ++runNo.current;
+    setBusy(true);
     setFailed(null);
     try {
-      const [rev, mth, pipe] = await Promise.all([
-        supabase.rpc('division_revenue', { p_upto: upto ?? null }),
-        supabase.rpc('division_by_month', { p_months: 24, p_upto: upto ?? null }),
-        supabase.rpc('division_pipeline'),
-      ]);
-      /* Through the same translator as everything else, so a database
-         that is behind the application says so rather than quoting
-         PostgREST's schema cache at somebody. */
-      if (rev.error) throw readable(rev.error);
-      if (mth.error) throw readable(mth.error);
-      if (pipe.error) throw readable(pipe.error);
-
-      const rows = (rev.data ?? []) as Division[];
-      setDivisions(rows);
-      setMonths((mth.data ?? []) as MonthRow[]);
-      setPipeline((pipe.data ?? []) as Pipeline[]);
-
-      const lists = await Promise.all(rows.map(async (d) => {
-        const { data } = await supabase.rpc('division_customers', {
-          p_division: d.division, p_upto: upto ?? null, p_limit: 8,
-        });
-        return [d.division, (data ?? []) as TopCustomer[]] as const;
-      }));
-      setTop(Object.fromEntries(lists));
-    } catch (e) {
-      /* Said out loud. A revenue screen that renders zeroes when it
-         could not read is indistinguishable from a company that has
-         stopped trading. */
-      setFailed(e instanceof Error ? e.message : 'The figures would not load.');
-    } finally {
-      setLoading(false);
-    }
-  }, [supabase, upto]);
-
-  const loadDeep = useCallback(async () => {
-    setDeepFailed(null);
-    try {
-      const [movers, conc, bands, recon, waiting, stages] = await Promise.all([
-        customerMovement(supabase, upto, 14),
-        concentration(supabase, null, upto),
-        openWorkAgeing(supabase, null, upto),
-        reconciliation(supabase, upto),
-        trailerCustomersWaiting(supabase, upto),
-        pipelineByStage(supabase),
-      ]);
-      setDeep({ movers, conc, bands, recon, waiting, stages });
-    } catch (e) {
-      setDeepFailed(e instanceof Error ? e.message : 'The detail would not load.');
-    }
-  }, [supabase, upto]);
-
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { setDeep(null); void loadDeep(); }, [loadDeep]);
-
-  /* What the page is currently about: every division, or one of them.
-     Every figure below reads `scope`, so there is one place where "is
-     this filtered" is decided. */
-  const scope = useMemo(
-    () => (only ? divisions.filter((d) => d.division === only) : divisions),
-    [divisions, only],
-  );
-  const picked = only ? divisions.find((d) => d.division === only) ?? null : null;
-
-  const sum = useMemo(() => ({
-    thisYear: scope.reduce((s, d) => s + Number(d.this_year || 0), 0),
-    lastYear: scope.reduce((s, d) => s + Number(d.last_year || 0), 0),
-    lastYearFull: scope.reduce((s, d) => s + Number(d.last_year_full || 0), 0),
-    outstanding: scope.reduce((s, d) => s + Number(d.outstanding || 0), 0),
-    outstandingN: scope.reduce((s, d) => s + Number(d.outstanding_n || 0), 0),
-    deals: scope.reduce((s, d) => s + Number(d.deals || 0), 0),
-  }), [scope]);
-
-  const yearLabel = divisions[0]?.fy_started
-    ? new Date(`${divisions[0].fy_started}T00:00:00`).toLocaleDateString('en-GB', {
-      month: 'short', year: 'numeric',
-    })
-    : null;
-  const yearStartMonth = divisions[0]?.fy_started
-    ? Number(divisions[0].fy_started.slice(5, 7))
-    : undefined;
-
-  /* One point per month carrying every division in scope, which is what
-     a stack needs and what a per division filter would have to be
-     undone to get. */
-  const stack = useMemo<MonthPoint[]>(() => {
-    const at = new Map<string, number>();
-    for (const m of months) at.set(`${m.month}|${m.division}`, Number(m.net || 0));
-    return [...new Set(months.map((m) => m.month))].sort().map((month) => ({
-      month,
-      values: scope.map((d) => at.get(`${month}|${d.division}`) ?? 0),
-    }));
-  }, [months, scope]);
-
-  /* The financial year running, for the tile sparklines. A two year
-     line inside a 34 pixel box says nothing about either year. */
-  const yearRunning = useMemo(() => {
-    const at = new Map<string, number>();
-    for (const m of months) {
-      if (only && m.division !== only) continue;
-      at.set(m.month, (at.get(m.month) ?? 0) + Number(m.net || 0));
-    }
-    const all = [...at.keys()].sort();
-    const from = yearStartMonth
-      ? [...all].reverse().find((m) => Number(m.slice(5, 7)) === yearStartMonth)
-      : undefined;
-    return (from ? all.filter((m) => m >= from) : all.slice(-12)).map((m) => at.get(m) ?? 0);
-  }, [months, only, yearStartMonth]);
-
-  const series = useMemo(
-    () => scope.map((d) => ({
-      key: d.division, name: d.name, colour: HUE[d.division] ?? 'var(--chart-company)',
-    })),
-    [scope],
-  );
-
-  /* ---- what each panel below draws ---- */
-
-  const customers = useMemo<BarRow[]>(() => {
-    const from = only
-      ? (top[only] ?? []).map((c) => ({ ...c, division: only }))
-      : Object.entries(top).flatMap(([div, list]) => list.map((c) => ({ ...c, division: div })));
-    /* Netted by customer where the page is not scoped, because a
-       haulier who buys maintenance and rents is one customer and two
-       rows for them is the fault the movers panel already had. */
-    const byName = new Map<string, BarRow & { raw: number }>();
-    for (const c of from) {
-      const key = c.contact_id ?? c.company_name;
-      const got = byName.get(key);
-      const value = Number(c.this_year || 0);
-      if (got) { got.raw += value; got.value = got.raw; continue; }
-      byName.set(key, {
-        key,
-        name: c.company_name,
-        value,
-        raw: value,
-        note: c.placed ? undefined : 'no record',
-        href: c.contact_id ? `/dashboard/crm?contact=${c.contact_id}` : undefined,
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...filters, today }),
       });
+      const body = await res.json();
+      if (mine !== runNo.current) return;
+      if (!res.ok) { setFailed(body?.error ?? 'The figures could not be read.'); setData(null); return; }
+      setData(body);
+    } catch {
+      if (mine !== runNo.current) return;
+      setFailed('The figures could not be reached. Check the connection and try again.');
+    } finally {
+      if (mine === runNo.current) setBusy(false);
     }
-    return [...byName.values()].sort((a, b) => b.value - a.value).slice(0, 8);
-  }, [top, only]);
+  }, [today]);
 
-  const movers = useMemo<BarRow[]>(() => {
-    if (!deep) return [];
-    /* Trailer purchases are deliberately absent from the underlying
-       figure: a customer who bought a trailer last year and not this one
-       has a trailer, not a problem. So this panel is hidden entirely
-       when the page is scoped to trailer sales rather than drawn empty,
-       which would read as "nobody moved". */
-    return [...deep.movers]
-      .filter((m) => Number(m.change) !== 0)
-      .sort((a, b) => Math.abs(Number(b.change)) - Math.abs(Number(a.change)))
-      .slice(0, 8)
-      .sort((a, b) => Number(b.change) - Number(a.change))
-      .map((m) => ({
-        key: m.contact_id ?? m.company_name,
-        name: m.company_name,
-        value: Number(m.change),
-        note: compactMoney(Number(m.last_year)),
-        href: m.contact_id ? `/dashboard/crm?contact=${m.contact_id}` : undefined,
-      }));
-  }, [deep]);
+  useEffect(() => { load(f); }, [f, load]);
 
-  const ageing = useMemo<BarRow[]>(() => {
-    if (!deep) return [];
-    const mine = deep.bands.filter((b) => (only ? b.division === only : true) && b.jobs > 0);
-    const byBand = new Map<string, { at: number; value: number; jobs: number }>();
-    for (const b of mine) {
-      const got = byBand.get(b.band) ?? { at: b.band_at, value: 0, jobs: 0 };
-      got.value += Number(b.value || 0);
-      got.jobs += Number(b.jobs || 0);
-      byBand.set(b.band, got);
-    }
-    return [...byBand.entries()]
-      .sort((a, b) => a[1].at - b[1].at)
-      .map(([band, v]) => ({
-        key: band,
-        name: band,
-        value: v.value,
-        note: `${v.jobs} ${v.jobs === 1 ? 'job' : 'jobs'}`,
-        /* The oldest band always in red. Anything past ninety days on
-           the ramps is the reason this panel exists. */
-        colour: v.at === 4 ? 'var(--danger)' : 'var(--chart-company)',
-      }));
-  }, [deep, only]);
+  const set = (patch: Partial<Filters>) => setF((was) => ({ ...was, ...patch }));
 
-  const funnel = useMemo<BarRow[]>(() => {
-    if (!deep) return [];
-    const mine = deep.stages
-      .filter((s) => (only ? s.division === only : true) && OPEN_STAGES.has(s.stage));
-    const byStage = new Map<string, { at: number; leads: number; value: number }>();
-    for (const s of mine) {
-      const got = byStage.get(s.stage) ?? { at: s.stage_at, leads: 0, value: 0 };
-      got.leads += Number(s.leads || 0);
-      got.value += Number(s.value || 0);
-      byStage.set(s.stage, got);
-    }
-    return [...byStage.entries()]
-      .sort((a, b) => a[1].at - b[1].at)
-      .map(([stage, v]) => ({
-        key: stage,
-        name: STAGE_LABEL[stage] ?? stage,
-        value: v.leads,
-        note: v.value ? compactMoney(v.value) : undefined,
-      }));
-  }, [deep, only]);
-
-  const oldest = useMemo(() => {
-    if (!deep) return null;
-    const mine = deep.bands.filter((b) => (only ? b.division === only : true) && b.band_at === 4);
-    const value = mine.reduce((s, b) => s + Number(b.value || 0), 0);
-    const jobs = mine.reduce((s, b) => s + Number(b.jobs || 0), 0);
-    return { value, jobs };
-  }, [deep, only]);
-
-  const gaps = useMemo(() => {
-    if (!deep) return 0;
-    return deep.recon
-      .filter((r) => (only ? r.division === only : true))
-      .reduce((s, r) => s + Number(r.unattributed || 0), 0);
-  }, [deep, only]);
-
-  if (loading) {
-    return (
-      <div className="kit" style={PAGE}>
-        <PageHead eyebrow="Analytics" title="The company" />
-        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Reading the figures.</span>
-      </div>
-    );
-  }
-
-  if (failed) {
-    return (
-      <div className="kit" style={PAGE}>
-        <PageHead eyebrow="Analytics" title="The company" />
-        <EmptyState
-          what="The figures could not be read"
-          why={failed}
-          action={<Button variant="secondary" onClick={() => void load()}>Try again</Button>}
-        />
-      </div>
-    );
-  }
-
-  const nothingYet = divisions.every((d) =>
-    !Number(d.this_year) && !Number(d.last_year) && !Number(d.outstanding));
-
-  if (nothingYet) {
-    return (
-      <div className="kit" style={PAGE}>
-        <PageHead eyebrow="Analytics" title="The company" />
-        <EmptyState
-          what="Nothing to measure yet"
-          why="No revenue has been imported and no trailers are recorded as sold. Import the Protean and Sage exports under Revenue and this fills in."
-          action={
-            <Link href="/dashboard/revenue/stc"><Button variant="primary">Go to Revenue</Button></Link>
-          }
-        />
-      </div>
-    );
-  }
-
-  /* The key repeats whatever the chart is actually drawing, so a
-     swatch is never a pattern beside a line that has none. */
-  const keyItems = series.map((s, i) => ({
-    ...s, pattern: swatchImage(i, textured && shape !== 'line'),
-  }));
+  const people = data?.people ?? [];
+  const person = f.person ? people.find((p) => p.id === f.person) ?? null : null;
 
   return (
-    <div className="kit" style={PAGE}>
-      {/* ---- the one control bar ----
+    <div className="kit" style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+      <ControlBar
+        f={f}
+        set={set}
+        busy={busy}
+        onRefresh={() => load(f)}
+        data={data}
+        person={person?.name ?? null}
+      />
 
-          Everything that changes what the page is about, on one line:
-          which division, and as at when.
-
-          Deliberately NOT sticky. It was, and a sticky header on this
-          screen would be the only one in the application: every other
-          tab scrolls its head away under the top bar, and a header that
-          slides under a fixed bar is the class of fault this rebuild
-          exists to remove. What keeps the drill in visible instead is
-          the band below, which is drawn whenever the page is scoped. */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        padding: '2px 0 12px',
-      }}>
-        <PageHead
-          eyebrow="Analytics"
-          title={picked ? picked.name : 'The company'}
-          sub={yearLabel
-            ? `The year from ${yearLabel}, against the same point in the year before it.`
-            : 'Every division, on the company year.'}
-        />
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Chip active={only == null} onClick={() => setOnly(null)}>Whole company</Chip>
-          {divisions.map((d) => {
-            const Icon = ICON[d.division] ?? Wrench;
-            return (
-              <Chip
-                key={d.division}
-                active={only === d.division}
-                onClick={() => setOnly(only === d.division ? null : d.division)}
-                title={`Scope every panel to ${d.name}`}
-              >
-                <Icon size={12} /> {d.name}
-              </Chip>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <div style={{ width: 146 }}>
-            <TextInput type="date" value={asked} onChange={setAsked} />
-          </div>
-          {asked && (
-            <Button variant="ghost" size="sm" onClick={() => setAsked('')}>
-              <RotateCcw size={12} /> Today
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {picked && (
-        <div style={{ marginBottom: 12 }}>
-          <Alert tone="info">
-            <span style={{ flex: 1 }}>
-              Every panel is showing {picked.name} only.
-            </span>
-            <Link href={GOES_TO[picked.division] ?? '/dashboard'} style={{ textDecoration: 'none' }}>
-              <Button variant="secondary" size="sm">
-                Open {picked.name}
-                <ArrowRight size={12} />
-              </Button>
-            </Link>
-            <Button variant="ghost" size="sm" onClick={() => setOnly(null)}>
-              <X size={12} /> Whole company
-            </Button>
-          </Alert>
+      {failed && (
+        <div style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+          padding: '12px 14px', borderRadius: 'var(--r-md)',
+          border: '1px solid var(--danger)', background: 'var(--surface)',
+          fontSize: 13, color: 'var(--text)',
+        }}>
+          <AlertTriangle size={16} style={{ color: 'var(--danger)', flex: 'none', marginTop: 1 }} />
+          <span>{failed}</span>
         </div>
       )}
 
-      {deepFailed && (
-        <div style={{ marginBottom: 12 }}>
-          <Alert tone="warning">
-            <span style={{ flex: 1 }}>{deepFailed}</span>
-            <Button variant="ghost" size="sm" onClick={() => void loadDeep()}>Try again</Button>
-          </Alert>
+      {!data && busy && <Waiting />}
+
+      {data && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 34,
+          opacity: busy ? 0.6 : 1, transition: 'opacity 140ms ease',
+        }}>
+          <Glance data={data} f={f} set={set} onExplain={setExplain}
+            maySetTargets={maySetTargets} onSaved={() => load(f)} />
+
+          <Fold
+            title="Three divisions, one page"
+            sub="STC bills jobs, trailer sales moves units, rentals invoices hire. These devices exist so those three can share an axis."
+            open={open.divisions ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, divisions: !o.divisions }))}
+          >
+            <Divisions data={data} f={f} set={set} />
+          </Fold>
+
+          <Fold
+            title="People and where work comes from"
+            sub="Who brought business in, and what happened to it. One bar per person on a shared scale, so rows compare without reading the numbers."
+            open={open.people ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, people: !o.people }))}
+          >
+            <People data={data} f={f} set={set} />
+          </Fold>
+
+          <Fold
+            title="Trailer sales"
+            sub="Stock is money sitting still. These two devices are about what to price down and what to hold."
+            open={open.stock ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, stock: !o.stock }))}
+          >
+            <Stock data={data} />
+          </Fold>
+
+          <Fold
+            title="FleetSmart+ contract book"
+            sub="Contracts recur, so the useful number is not what was signed this month but what the book is now worth every week."
+            open={open.book ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, book: !o.book }))}
+          >
+            <Book data={data} set={set} />
+          </Fold>
+
+          <Fold
+            title="Customers"
+            sub="Who is spending, measured against the same window as everything above."
+            open={open.customers ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, customers: !o.customers }))}
+          >
+            <Customers data={data} />
+          </Fold>
+
+          <Fold
+            title="What this page cannot answer yet"
+            sub="Named rather than drawn as zeroes. A zero on this page is a claim about the business."
+            open={open.gaps ?? false}
+            onToggle={() => setOpen((o) => ({ ...o, gaps: !o.gaps }))}
+          >
+            {data.notWired.map((n) => <NotWiredPanel key={n.what} {...n} />)}
+          </Fold>
         </div>
       )}
 
-      <PanelGrid>
-        {/* ---- row 1: four figures, one shape each ---- */}
-        <Tile
-          label={picked ? `${picked.name} invoiced` : 'Invoiced this year'}
-          value={money(sum.thisYear)}
-          movement={{ from: sum.lastYear, to: sum.thisYear }}
-          note={`${money(sum.lastYearFull)} in all of last year`}
-          spark={yearRunning}
-          colour={picked ? HUE[picked.division] : 'var(--chart-company)'}
+      {explain && data && (
+        <Explain
+          figure={explain}
+          when={windowWords(data.period.window)}
+          onClose={() => setExplain(null)}
         />
-        <Tile
-          label="Committed, not billed"
-          value={money(sum.outstanding)}
-          note={picked
-            ? `${sum.outstandingN.toLocaleString('en-GB')} ${picked.outstanding_of}`
-            : `${sum.outstandingN.toLocaleString('en-GB')} on the ramps and in stock`}
-        />
-        <Tile
-          label={picked?.division === 'trailer' ? 'Trailers sold' : 'Invoices raised'}
-          value={sum.deals.toLocaleString('en-GB')}
-          note={sum.deals > 0
-            ? `${money(Math.round(sum.thisYear / sum.deals))} each on average`
-            : 'nothing yet this year'}
-        />
-        <Tile
-          label="Open over ninety days"
-          value={oldest ? money(oldest.value) : '—'}
-          tone={oldest && oldest.value > 0 ? 'danger' : 'plain'}
-          note={oldest && oldest.jobs > 0
-            ? `${oldest.jobs} ${oldest.jobs === 1 ? 'job' : 'jobs'} on the ramps`
-            : 'nothing sitting'}
-        />
-
-        {/* ---- row 2: the shape of the year, and the mix ---- */}
-        <Panel
-          span={7}
-          title="Invoiced by month"
-          hint="Two years, against the same month a year before"
-          minBody={300}
-          toolbar={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <Segments value={shape} onChange={setShape} options={SHAPES} />
-              {/* Nothing is filled in Lines, so a Patterns toggle
-                  there is a control that appears to do nothing, which
-                  is how people learn to stop trusting a toolbar. */}
-              {shape !== 'line' && (
-                <Toggle
-                  on={textured}
-                  onChange={setTextured}
-                  title="Fill each division with its own pattern as well as its own colour"
-                >Patterns</Toggle>
-              )}
-            </div>
-          }
-          table={{
-            columns: ['Month', ...series.map((s) => s.name), 'Total'],
-            rows: stack.slice(-14).reverse().map<TableRow>((p) => ({
-              name: new Date(`${p.month}T00:00:00`)
-                .toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-              cells: [
-                ...p.values.map((v) => Math.max(0, v)),
-                p.values.reduce((s, v) => s + Math.max(0, v), 0),
-              ],
-            })),
-          }}
-          foot={
-            <>
-              <Key
-                items={keyItems}
-                hidden={off}
-                onToggle={(k) => setOff((s) => {
-                  const next = new Set(s);
-                  /* Never all of them. An empty chart is not a filter,
-                     it is a chart that has stopped working. */
-                  if (next.has(k)) next.delete(k);
-                  else if (next.size < series.length - 1) next.add(k);
-                  return next;
-                })}
-              />
-              <span style={{ marginLeft: 'auto', color: 'var(--text-subtle)' }}>
-                Hover for the month. Press a division to hide it.
-              </span>
-            </>
-          }
-        >
-          <MonthlyStack
-            points={stack}
-            series={series}
-            yearStart={yearStartMonth}
-            shape={shape}
-            hidden={off}
-            textured={textured}
-            height={300}
-          />
-        </Panel>
-
-        <Panel
-          span={5}
-          title="Where it came from"
-          hint={only ? 'Press another to move the whole page' : 'Press a division to drill in'}
-          minBody={300}
-          table={{
-            columns: ['Division', 'This year', 'Share'],
-            rows: divisions.map<TableRow>((d) => ({
-              name: d.name,
-              colour: HUE[d.division],
-              cells: [
-                Number(d.this_year || 0),
-                `${(divisions.reduce((s, x) => s + Number(x.this_year || 0), 0) > 0
-                  ? (Number(d.this_year || 0) * 100)
-                    / divisions.reduce((s, x) => s + Number(x.this_year || 0), 0)
-                  : 0).toFixed(1)}%`,
-              ],
-            })),
-          }}
-        >
-          <Donut
-            slices={divisions.map((d) => ({
-              key: d.division,
-              name: d.name,
-              value: Number(d.this_year || 0),
-              colour: HUE[d.division] ?? 'var(--chart-company)',
-            }))}
-            total={divisions.reduce((s, d) => s + Number(d.this_year || 0), 0)}
-            caption="invoiced"
-            active={only}
-            onPick={setOnly}
-            textured={textured}
-            height={260}
-          />
-        </Panel>
-
-        {/* ---- row 3: who pays us, and who changed ---- */}
-        <Panel
-          span={6}
-          title="Biggest customers"
-          hint={only ? `${picked?.name}, this year` : 'Every division netted, this year'}
-          minBody={252}
-          table={{
-            columns: ['Customer', 'This year'],
-            rows: customers.map<TableRow>((c) => ({ name: c.name, cells: [c.value] })),
-          }}
-          foot={deep?.conc && deep.conc.billed > 0 ? (
-            <>
-              <span>
-                <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {deep.conc.customers.toLocaleString('en-GB')}
-                </strong>{' '}customers billing
-              </span>
-              <span>
-                Top ten are{' '}
-                <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {((deep.conc.top_10 / deep.conc.billed) * 100).toFixed(0)}%
-                </strong>
-              </span>
-              <span>
-                Middle customer{' '}
-                <strong style={{ fontFamily: 'var(--panton)' }}>
-                  {compactMoney(Math.round(deep.conc.median))}
-                </strong>
-              </span>
-            </>
-          ) : undefined}
-        >
-          <RankedBars
-            rows={customers}
-            colour={picked ? HUE[picked.division]! : 'var(--chart-company)'}
-            empty="Nothing billed yet in this scope."
-          />
-        </Panel>
-
-        {only === 'trailer' ? (
-          <Panel
-            span={6}
-            title="Who moved"
-            hint="Maintenance and rental only"
-            minBody={252}
-          >
-            <span style={{ fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-              Movement is measured on maintenance and rental, which recur. Trailer purchases are
-              left out on purpose: a customer who bought last year and not this one has a
-              trailer, not a problem.
-              <div style={{ marginTop: 9 }}>
-                <Button variant="secondary" size="sm" onClick={() => setOnly(null)}>
-                  See it for the whole company
-                </Button>
-              </div>
-            </span>
-          </Panel>
-        ) : (
-          <Panel
-            span={6}
-            title="Who moved"
-            hint="Against the same point last year"
-            minBody={252}
-            table={{
-              columns: ['Customer', 'Last year', 'Change'],
-              rows: movers.map<TableRow>((m) => ({
-                name: m.name, cells: [m.note ?? null, m.value],
-              })),
-            }}
-          >
-            <DivergingBars
-              rows={movers}
-              empty="Nobody has moved against last year."
-              caption="Maintenance and rental netted together. Trailer purchases are left out: a customer who bought last year and not this one has a trailer, not a problem."
-            />
-          </Panel>
-        )}
-
-        {/* ---- row 4: what is stuck, and what is coming ---- */}
-        <Panel
-          span={6}
-          title="How old the open work is"
-          hint="From the day the job was raised"
-          minBody={214}
-          table={{
-            columns: ['Age', 'Value', 'Jobs'],
-            rows: ageing.map<TableRow>((b) => ({
-              name: b.name, colour: b.colour, cells: [b.value, b.note ?? null],
-            })),
-          }}
-          foot={oldest && oldest.jobs > 0 ? (
-            <span style={{ color: 'var(--danger)' }}>
-              {money(oldest.value)} of it has been open over ninety days.
-            </span>
-          ) : undefined}
-        >
-          <RankedBars
-            rows={ageing}
-            colour="var(--chart-company)"
-            empty="No open work on the ramps."
-          />
-        </Panel>
-
-        <Panel
-          span={6}
-          title="What is coming"
-          hint="Open leads on the tracker, by stage"
-          minBody={214}
-          table={{
-            columns: ['Stage', 'Leads', 'Worth'],
-            rows: funnel.map<TableRow>((s) => ({
-              name: s.name, cells: [s.value.toString(), s.note ?? null],
-            })),
-          }}
-          foot={
-            <>
-              <span>
-                {pipeline
-                  .filter((p) => (only ? p.division === only : true))
-                  .reduce((s, p) => s + Number(p.won_this_year || 0), 0)} won this year
-              </span>
-              <Link href="/dashboard/sales" style={{ textDecoration: 'none', marginLeft: 'auto' }}>
-                <Button variant="ghost" size="sm">Open the tracker <ArrowRight size={12} /></Button>
-              </Link>
-            </>
-          }
-        >
-          <RankedBars
-            rows={funnel}
-            colour={picked ? HUE[picked.division]! : 'var(--chart-company)'}
-            format={(n) => n.toLocaleString('en-GB')}
-            empty="Nothing open on the tracker in this scope."
-          />
-        </Panel>
-
-        {/* ---- row 5: the one thing on this page you DO ----
-
-            Its own panel, full width, because a form that grows is what
-            broke the bottom of the last version when it lived inside a
-            division card. */}
-        {gaps > 0 && (
-          <Panel
-            span={12}
-            title="Billed to a name with no customer record"
-            hint="Counted in the totals above, and on nobody's customer page"
-            minBody={0}
-          >
-            <NeedsARecord
-              recon={deep?.recon ?? []}
-              waiting={deep?.waiting ?? []}
-              only={only}
-            />
-          </Panel>
-        )}
-      </PanelGrid>
+      )}
     </div>
   );
 }
 
-const PAGE: React.CSSProperties = {
-  padding: '18px 24px 40px', maxWidth: 1480, margin: '0 auto',
+function Waiting() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '40px 0', color: 'var(--text-muted)', fontSize: 13,
+    }}>
+      <Loader size={15} className="spin" /> Reading every division.
+    </div>
+  );
+}
+
+/* =============================================================
+   The control bar
+
+   Sticky, because it governs every figure below it and a reader who has
+   scrolled to the cohort grid still needs to see which period they are
+   in. Active filters sit on a second row rather than inside a panel, so
+   what has been cut out of the numbers is always visible.
+   ============================================================= */
+function ControlBar({ f, set, busy, onRefresh, data, person }: {
+  f: Filters;
+  set: (p: Partial<Filters>) => void;
+  busy: boolean;
+  onRefresh: () => void;
+  data: Analytics | null;
+  person: string | null;
+}) {
+  const [showModes, setShowModes] = useState(false);
+  const chips: { key: string; label: string; clear: () => void }[] = [
+    ...f.divisions.map((d) => ({
+      key: d, label: DIVISION_NAME[d],
+      clear: () => set({ divisions: f.divisions.filter((x) => x !== d) }),
+    })),
+    ...(person ? [{ key: 'person', label: person, clear: () => set({ person: null }) }] : []),
+    ...(f.trim ? [] : [{ key: 'trim', label: 'Comparison not trimmed', clear: () => set({ trim: true }) }]),
+  ];
+
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 20,
+      border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+      background: 'var(--surface)', overflow: 'hidden',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        padding: '10px 12px',
+      }}>
+        <div style={{ display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => set({ kind: p.key })}
+              aria-pressed={f.kind === p.key}
+              style={{
+                height: 30, padding: '0 13px', border: 0, cursor: 'pointer',
+                background: f.kind === p.key ? 'var(--primary)' : 'transparent',
+                color: f.kind === p.key ? 'var(--primary-fg)' : 'var(--text-muted)',
+                fontFamily: 'var(--inter)', fontSize: 12.5,
+                fontWeight: f.kind === p.key ? 700 : 500,
+              }}
+            >{p.label}</button>
+          ))}
+        </div>
+
+        {f.kind === 'custom' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <DateBox value={f.from} onChange={(v) => set({ from: v })} label="From" />
+            <span style={{ color: 'var(--text-subtle)', fontSize: 12 }}>to</span>
+            <DateBox value={f.to} onChange={(v) => set({ to: v })} label="To" />
+          </div>
+        ) : (
+          <span style={{
+            height: 30, display: 'inline-flex', alignItems: 'center', padding: '0 11px',
+            border: '1px solid var(--border)', borderRadius: 'var(--r)',
+            fontSize: 12.5, color: 'var(--text)', background: 'var(--bg-subtle)',
+          }}>
+            {data ? windowWords(data.period.window) : '…'}
+          </span>
+        )}
+
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowModes((s) => !s)}
+            style={{
+              height: 30, padding: '0 11px', display: 'inline-flex', alignItems: 'center', gap: 8,
+              border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+              background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
+              fontFamily: 'var(--inter)', fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            <SlidersHorizontal size={13} />
+            {data ? compareWords(data.period) : 'Comparison'}
+          </button>
+          {showModes && (
+            <div style={{
+              position: 'absolute', top: 36, left: 0, zIndex: 30, width: 300,
+              border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+              background: 'var(--surface)', boxShadow: 'var(--shadow-3)', padding: 6,
+            }}>
+              {MODES.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => { set({ mode: m.key }); setShowModes(false); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                    border: 0, borderRadius: 'var(--r)', cursor: 'pointer',
+                    background: f.mode === m.key ? 'var(--bg-subtle)' : 'transparent',
+                    fontFamily: 'var(--inter)',
+                  }}
+                >
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{m.label}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 1 }}>{m.blurb}</span>
+                </button>
+              ))}
+              <label style={{
+                display: 'flex', gap: 9, alignItems: 'flex-start', padding: '9px 10px',
+                borderTop: '1px solid var(--border)', marginTop: 4, cursor: 'pointer',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={f.trim}
+                  onChange={(e) => set({ trim: e.target.checked })}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>
+                    Trim the comparison to days elapsed
+                  </span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 1, lineHeight: 1.45 }}>
+                    On by default. Off compares a part month against a whole one, which is the
+                    easiest way to misread this page.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        <span style={{ flex: 1 }} />
+
+        <button
+          onClick={onRefresh}
+          disabled={busy}
+          style={{
+            height: 30, padding: '0 11px', display: 'inline-flex', alignItems: 'center', gap: 7,
+            border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+            background: 'var(--surface)', color: 'var(--text)',
+            cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+            fontFamily: 'var(--inter)', fontSize: 12.5, fontWeight: 600,
+          }}
+        >
+          {busy ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />} Refresh
+        </button>
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap',
+        padding: '8px 12px', borderTop: '1px solid var(--border)', background: 'var(--bg-subtle)',
+      }}>
+        <span style={{
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 9.5,
+          letterSpacing: '0.18em', color: 'var(--text-subtle)',
+        }}>SHOWING</span>
+
+        {chips.length === 0 ? (
+          <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+            Everything. Click a division or a person below to narrow the whole page.
+          </span>
+        ) : chips.map((c) => (
+          <button
+            key={c.key}
+            onClick={c.clear}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 7, height: 26,
+              padding: '0 9px', border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
+              cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+            }}
+          >{c.label}<X size={12} style={{ color: 'var(--text-subtle)' }} /></button>
+        ))}
+
+        {chips.length > 0 && (
+          <button
+            onClick={() => set({ divisions: [], person: null, trim: true })}
+            style={{
+              border: 0, background: 'transparent', color: 'var(--accent)', cursor: 'pointer',
+              fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+              textDecoration: 'underline', textUnderlineOffset: 3, marginLeft: 'auto',
+            }}
+          >Clear all</button>
+        )}
+      </div>
+
+      {data && trimWords(data.period) && (
+        <div style={{
+          padding: '7px 12px', borderTop: '1px solid var(--border)',
+          background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+          fontSize: 11.5, color: 'var(--text)',
+        }}>{trimWords(data.period)}</div>
+      )}
+    </div>
+  );
+}
+
+function DateBox({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+  return (
+    <input
+      type="date"
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        height: 30, padding: '0 8px', border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
+        fontFamily: 'var(--inter)', fontSize: 12.5,
+      }}
+    />
+  );
+}
+
+/* =============================================================
+   The glance
+
+   The first screen, and the only part that is never folded away.
+   ============================================================= */
+function Glance({ data, f, set, onExplain, maySetTargets, onSaved }: {
+  data: Analytics; f: Filters; set: (p: Partial<Filters>) => void;
+  onExplain: (fig: Figure) => void;
+  maySetTargets: boolean;
+  onSaved: () => void;
+}) {
+  const chips = data.divisions.map((d) => ({
+    name: d.name,
+    delta: d.was > 0 ? ((d.revenue - d.was) / d.was) * 100 : null,
+    colour: HUE[d.division],
+  }));
+
+  const bullets = data.divisions.map((d) => ({
+    key: d.division, name: d.name, value: d.revenue, target: d.target, colour: HUE[d.division],
+  }));
+
+  const total = data.divisions.reduce((a, d) => a + d.revenue, 0);
+  const targetSum = data.divisions.reduce((a, d) => a + (d.target ?? 0), 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <SectionHead
+        id="glance"
+        title="The whole business, one screen"
+        sub="Every device states its conclusion in words before it shows you a shape."
+      />
+
+      <Verdict sentence={data.verdict} chips={chips} decisions={data.decisions} />
+
+      <div style={{
+        display: 'grid', gap: 10,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(228px, 1fr))',
+      }}>
+        {data.headline.map((fig, at) => (
+          <Kpi key={fig.label} figure={fig} lead={at === 0} onExplain={() => onExplain(fig)} />
+        ))}
+      </div>
+
+      <Chart
+        title="Revenue against target, by division"
+        says={targetSum > 0
+          ? `${shortMoney(total)} against ${shortMoney(targetSum)} promised. ${total >= targetSum ? 'Ahead.' : `${shortMoney(targetSum - total)} short.`}`
+          : 'No targets are set for this period, so the bars show revenue with nothing to hit.'}
+        foot={(
+          <>
+            <span style={{ flex: 1, minWidth: 200 }}>
+              The notch is the only red on the chart, which is what makes a miss read instantly.
+              Click a division to narrow the whole page to it.
+            </span>
+            {maySetTargets && <Targets divisions={data.divisions} month={data.period.window.from} onSaved={onSaved} />}
+          </>
+        )}
+      >
+        <BulletRows
+          rows={bullets}
+          onPick={(key) => set({
+            divisions: f.divisions.includes(key as DivisionSlug)
+              ? f.divisions.filter((d) => d !== key)
+              : [...f.divisions, key as DivisionSlug],
+          })}
+        />
+      </Chart>
+    </div>
+  );
+}
+
+/* =============================================================
+   Setting the notch
+
+   A target that can only be written with SQL is a target nobody sets,
+   and a bullet chart with no notch on it is a bar. So the one screen
+   that reads targets is the screen that writes them, for whoever holds
+   `analytics.targets`, which is administrators.
+
+   Per month and per division, because that is the grain the table
+   holds and the grain a window sums over. Nought clears it rather than
+   storing a target of nothing: a target of nought and no target at all
+   look identical on a chart and only one of them is a statement
+   somebody made.
+   ============================================================= */
+function Targets({ divisions, month, onSaved }: {
+  divisions: Analytics['divisions'];
+  month: string;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
+  async function save(division: DivisionSlug) {
+    setBusy(division);
+    setFailed(null);
+    const res = await fetch('/api/analytics/target', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        month: `${month.slice(0, 7)}-01`,
+        division,
+        amount: Number(draft[division] ?? 0),
+      }),
+    });
+    setBusy(null);
+    if (!res.ok) { setFailed((await res.json())?.error ?? 'Not saved.'); return; }
+    onSaved();
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setDraft(Object.fromEntries(divisions.map((d) => [d.division, String(d.target ?? '')])));
+          setOpen(true);
+        }}
+        style={{
+          border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+          background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer',
+          height: 26, padding: '0 10px', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+          whiteSpace: 'nowrap', flex: 'none',
+        }}
+      >Set targets</button>
+    );
+  }
+
+  return (
+    <div style={{
+      width: '100%', marginTop: 8, padding: '11px 12px',
+      border: '1px solid var(--border)', borderRadius: 'var(--r)', background: 'var(--bg-subtle)',
+      display: 'flex', flexDirection: 'column', gap: 9,
+    }}>
+      <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>
+        Monthly target for {monthLabel(month)}. Nought clears it.
+      </div>
+      {divisions.map((d) => (
+        <div key={d.division} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{ width: 130, fontSize: 12.5, color: 'var(--text-muted)' }}>{d.name}</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={draft[d.division] ?? ''}
+            onChange={(e) => setDraft((was) => ({ ...was, [d.division]: e.target.value }))}
+            placeholder="No target"
+            style={{
+              width: 140, height: 28, padding: '0 9px',
+              border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
+              background: 'var(--surface)', color: 'var(--text)',
+              fontFamily: 'var(--inter)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums',
+            }}
+          />
+          <button
+            onClick={() => save(d.division)}
+            disabled={busy === d.division}
+            style={{
+              height: 28, padding: '0 11px', border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--r)', background: 'var(--surface)', color: 'var(--text)',
+              cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+            }}
+          >{busy === d.division ? 'Saving' : 'Save'}</button>
+        </div>
+      ))}
+      {failed && <div style={{ fontSize: 12, color: 'var(--danger)' }}>{failed}</div>}
+      <button
+        onClick={() => setOpen(false)}
+        style={{
+          alignSelf: 'flex-start', border: 0, background: 'transparent', color: 'var(--accent)',
+          cursor: 'pointer', fontFamily: 'var(--inter)', fontSize: 12, fontWeight: 600,
+          textDecoration: 'underline', textUnderlineOffset: 3, padding: 0,
+        }}
+      >Done</button>
+    </div>
+  );
+}
+
+/* =============================================================
+   Three divisions
+   ============================================================= */
+function Divisions({ data, f, set }: {
+  data: Analytics; f: Filters; set: (p: Partial<Filters>) => void;
+}) {
+  const points = useMemo(() => indexed(data.months), [data.months]);
+
+  return (
+    <>
+      <div>
+        <DeviceLabel
+          title="Indexed division trend"
+          sub="Every division starts at 100, so a line above the middle rule means growth regardless of what that division actually sells."
+        />
+        <Chart
+          title={`${data.months.length} months, indexed`}
+          says={growthWords(points)}
+          legend={<Legend items={[
+            { name: 'STC', colour: HUE.stc },
+            { name: 'Trailer sales', colour: HUE.trailer },
+            { name: 'Rentals', colour: HUE.rental },
+          ]} />}
+          foot={<span>Indexing hides the size of each division on purpose. Use it for direction, and the revenue bars above for weight.</span>}
+        >
+          <IndexedLines points={points} />
+        </Chart>
+      </div>
+
+      {data.period.compare && (
+        <div>
+          <DeviceLabel
+            title="How the group number moved"
+            sub="A waterfall, not a pie. It answers what changed rather than what is the split."
+          />
+          {/* The SAME two windows the rest of the page uses, not the last
+              two months. A waterfall on its own comparison is how a page
+              ends up saying the group is up in one panel and down in the
+              next, and a reader is right not to trust either. */}
+          <Chart
+            title={`${windowWords(data.period.compare)} to ${windowWords(data.period.window)}`}
+            says={movedWords(data.divisions)}
+            foot={<span>Each middle bar is one division&rsquo;s contribution to the change, not its size. The two ends are the same figures as the sentence at the top of the page.</span>}
+          >
+            <Waterfall
+              start={{
+                label: 'Before',
+                value: data.divisions.reduce((a, d) => a + d.was, 0),
+              }}
+              steps={data.divisions.map((d) => ({
+                label: d.name, delta: d.revenue - d.was, colour: HUE[d.division],
+              }))}
+              end={{
+                label: 'This period',
+                value: data.divisions.reduce((a, d) => a + d.revenue, 0),
+              }}
+            />
+          </Chart>
+        </div>
+      )}
+
+      <div>
+        <DeviceLabel
+          title="Division scorecards"
+          sub="Same shape each time, different unit. The unit is part of the number so nothing has to be inferred."
+        />
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+          {data.divisions.map((d) => {
+            const behind = d.target != null && d.target > 0 && d.revenue < d.target * 0.95;
+            const on = f.divisions.includes(d.division);
+            return (
+              <button
+                key={d.division}
+                onClick={() => set({
+                  divisions: on ? f.divisions.filter((x) => x !== d.division) : [...f.divisions, d.division],
+                })}
+                style={{
+                  textAlign: 'left', cursor: 'pointer', padding: 0,
+                  border: `1px solid ${behind ? 'var(--danger)' : on ? 'var(--primary)' : 'var(--border)'}`,
+                  borderTop: `2px solid ${behind ? 'var(--danger)' : HUE[d.division]}`,
+                  borderRadius: 'var(--r-md)', background: 'var(--surface)',
+                  fontFamily: 'var(--inter)',
+                }}
+              >
+                <div style={{ padding: '13px 15px 11px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, height: 20, padding: '0 8px',
+                      border: '1px solid var(--border)', borderRadius: 'var(--r-sm)',
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
+                      textTransform: 'uppercase', color: 'var(--text-muted)',
+                    }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 2, background: HUE[d.division] }} />
+                      {d.name}
+                    </span>
+                    {behind && (
+                      <span style={{
+                        fontSize: 9.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                        color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 12%, transparent)',
+                        padding: '2px 6px', borderRadius: 'var(--r-sm)',
+                      }}>Behind</span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 26, marginTop: 8,
+                    letterSpacing: '-0.03em', color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                  }}>{shortMoney(d.revenue)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 1 }}>
+                    {d.division === 'trailer' ? `sold, ${d.deals} trailers` : `invoiced, ${d.deals} invoices`}
+                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid var(--border)' }}>
+                  {d.detail.map((row) => (
+                    <div key={row.label} style={{
+                      display: 'flex', justifyContent: 'space-between', gap: 12,
+                      padding: '7px 15px', fontSize: 12.5,
+                      borderTop: '1px solid var(--border)',
+                    }}>
+                      <span style={{ color: 'var(--text-muted)' }}>{row.label}</span>
+                      <span style={{
+                        color: row.bad ? 'var(--danger)' : 'var(--text)', fontWeight: 600,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}>{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function growthWords(points: { stc: number; trailer: number; rental: number }[]): string {
+  const last = points[points.length - 1];
+  if (!last) return 'Not enough months to draw a trend yet.';
+  const say = (name: string, v: number) => {
+    const d = v - 100;
+    if (Math.abs(d) < 3) return `${name} is level`;
+    return `${name} is ${d > 0 ? 'up' : 'down'} ${Math.abs(d).toFixed(0)}%`;
+  };
+  return `${say('STC', last.stc)}, ${say('trailer sales', last.trailer)}, ${say('rentals', last.rental)} against where each started.`;
+}
+
+function movedWords(divisions: Analytics['divisions']): string {
+  const delta = divisions.reduce((a, d) => a + (d.revenue - d.was), 0);
+  const biggest = [...divisions]
+    .map((d) => ({ name: d.name, d: d.revenue - d.was }))
+    .sort((x, y) => Math.abs(y.d) - Math.abs(x.d))[0];
+  if (!biggest) return 'Nothing to compare.';
+  return `${delta >= 0 ? 'Up' : 'Down'} ${shortMoney(Math.abs(delta))}. `
+    + `${biggest.name} ${biggest.d >= 0 ? 'added' : 'gave back'} ${shortMoney(Math.abs(biggest.d))} of that.`;
+}
+
+function monthLabel(iso: string): string {
+  return new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+    .toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+/* =============================================================
+   People
+   ============================================================= */
+function People({ data, f, set }: {
+  data: Analytics; f: Filters; set: (p: Partial<Filters>) => void;
+}) {
+  const people = data.people;
+  const max = Math.max(1, ...people.map((p) => p.leads));
+  const totalLeads = people.reduce((a, p) => a + p.leads, 0);
+  const totalWon = people.reduce((a, p) => a + p.won, 0);
+  const groupRate = totalLeads > 0 ? totalWon / totalLeads : 0;
+
+  if (people.length === 0) {
+    return (
+      <Chart title="New business by person" says="Nobody raised a lead in this window."
+        foot={<span>Leads count against the window they were raised in, wins against the window they were agreed in.</span>}>
+        <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--text-subtle)' }}>
+          Nothing to rank. Widen the period or clear a filter.
+        </div>
+      </Chart>
+    );
+  }
+
+  return (
+    <>
+      <div>
+        <DeviceLabel
+          title="Leaderboard with progression"
+          sub="The bar is three nested segments: leads, of which quoted, of which won. A wide pale bar with a narrow dark tip is somebody generating interest but not closing."
+        />
+        <Chart
+          title="New business by person"
+          says={leaderWords(people)}
+          legend={<Legend items={[
+            { name: 'Leads', colour: PROGRESSION.leads },
+            { name: 'Quoted', colour: PROGRESSION.quoted },
+            { name: 'Won', colour: PROGRESSION.won },
+          ]} />}
+          foot={<span>Click a row to narrow the page to that person. Revenue stays group wide: a Protean invoice does not carry a salesperson.</span>}
+        >
+          <div>
+            {people.map((p, at) => (
+              <button
+                key={p.id}
+                onClick={() => set({ person: f.person === p.id ? null : p.id })}
+                style={{
+                  display: 'grid', width: '100%', textAlign: 'left', cursor: 'pointer',
+                  gridTemplateColumns: '26px 176px 1fr 108px 96px',
+                  gap: 12, alignItems: 'center', padding: '9px 4px',
+                  border: 0, borderTop: at === 0 ? 'none' : '1px solid var(--border)',
+                  background: f.person === p.id ? 'var(--bg-subtle)' : 'transparent',
+                  fontFamily: 'var(--inter)',
+                }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
+                  {at + 1}
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{p.name}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                    {p.division ? DIVISION_NAME[p.division] : 'No division'}
+                  </span>
+                </span>
+                <Progression leads={p.leads} quoted={p.quoted} won={p.won} max={max} />
+                <span style={{
+                  fontSize: 12, color: 'var(--text-muted)', textAlign: 'right',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>{p.leads} · {p.quoted} · <strong style={{ color: 'var(--text)' }}>{p.won}</strong></span>
+                <span style={{
+                  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 13, textAlign: 'right',
+                  color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                }}>{shortMoney(p.wonValue)}</span>
+              </button>
+            ))}
+          </div>
+        </Chart>
+      </div>
+
+      <div>
+        <DeviceLabel
+          title="Conversion against the group rate"
+          sub="A dot per person against the group average. Above the line is closing better than average, and dot size is how much they closed."
+        />
+        <Chart
+          title="Lead to won conversion"
+          says={`Group average is ${Math.round(groupRate * 100)}%.`}
+          foot={<span>Dot size is won value, so a small dot high up is a good rate on a small book. Both matter, and neither alone tells you who to back.</span>}
+        >
+          <DotPlot
+            groupRate={groupRate}
+            people={people.map((p) => ({
+              id: p.id, initials: p.initials, name: p.name, rate: p.conversion, value: p.wonValue,
+            }))}
+          />
+        </Chart>
+      </div>
+
+      {data.sources.length > 0 && (
+        <div>
+          <DeviceLabel
+            title="Where work came from, and what became of it"
+            sub="Bands from each source splitting into won by division, still open, and lost. The loss is drawn at full width rather than left as the gap."
+          />
+          <Chart
+            title={`${data.sources.reduce((a, s) => a + s.leads, 0)} leads raised in this window`}
+            says={sourceWords(data.sources)}
+            foot={(
+              <span>
+                The source is recorded on the CUSTOMER rather than on the lead, so this reads as
+                &ldquo;what work from this kind of customer turned into&rdquo;. Close to per lead
+                attribution and not identical to it.
+              </span>
+            )}
+          >
+            <SourceFlowChart rows={data.sources} />
+          </Chart>
+        </div>
+      )}
+    </>
+  );
+}
+
+function leaderWords(people: Analytics['people']): string {
+  if (people.length < 2) return `${people[0]?.name ?? 'Nobody'} is the only person with anything in this window.`;
+  const byValue = people[0]!;
+  const byLeads = [...people].sort((a, b) => b.leads - a.leads)[0]!;
+  if (byValue.id === byLeads.id) {
+    return `${byValue.name} leads on both volume and value.`;
+  }
+  return `${byLeads.name} generates the most leads but ${byValue.name} converts more value. `
+    + 'Two different conversations, in the same row.';
+}
+
+function sourceWords(sources: Analytics['sources']): string {
+  const best = [...sources]
+    .filter((s) => s.leads >= 3)
+    .sort((a, b) => rate(b) - rate(a))[0];
+  const worst = [...sources]
+    .filter((s) => s.leads >= 3)
+    .sort((a, b) => rate(a) - rate(b))[0];
+  if (!best || !worst || best === worst) return 'Not enough leads yet to compare sources.';
+  return `${best.source} converts best at ${Math.round(rate(best) * 100)}%. `
+    + `${worst.source} brought ${worst.leads} and closed ${won(worst)}.`;
+}
+
+const won = (s: Analytics['sources'][number]) => s.won.stc + s.won.trailer + s.won.rental;
+const rate = (s: Analytics['sources'][number]) => (s.leads > 0 ? won(s) / s.leads : 0);
+
+/* =============================================================
+   Trailer sales
+   ============================================================= */
+function Stock({ data }: { data: Analytics & { bands?: any[] } }) {
+  const units = data.stock;
+  const old = units.filter((u) => u.days > 120);
+  const thin = old.filter((u) => u.marginPct != null && u.marginPct < 8);
+  const noCost = units.filter((u) => u.marginPct == null);
+
+  if (units.length === 0) {
+    return (
+      <Chart title="Stock" says="Nothing is showing as in stock."
+        foot={<span>Reads the stock list, counting anything marked in stock or available.</span>}>
+        <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--text-subtle)' }}>
+          No units to plot.
+        </div>
+      </Chart>
+    );
+  }
+
+  return (
+    <>
+      <div>
+        <DeviceLabel
+          title="Stock age against margin"
+          sub="Every dot is a trailer. Right means it has been here too long, low means there is little margin left to give away. The bottom right corner is the problem corner."
+        />
+        <Chart
+          title={`${units.length} trailers in stock`}
+          says={`${old.length} are past 120 days. ${thin.length} of those have under 8% margin left to discount.`}
+          action={<span style={{
+            fontSize: 11, color: 'var(--text-muted)', padding: '4px 8px',
+            border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', whiteSpace: 'nowrap',
+          }}>Dot size = asking price</span>}
+          foot={(
+            <span>
+              Days are counted from the day the unit was added to the stock list, which is the
+              earliest date this application holds for it.
+              {noCost.length > 0 && ` ${noCost.length} units have no cost recorded and are not plotted: a margin cannot be worked out for them.`}
+            </span>
+          )}
+        >
+          <StockScatter units={units} />
+        </Chart>
+      </div>
+
+      {data.bands && (
+        <div>
+          <DeviceLabel
+            title="Stock ageing bands"
+            sub="How the units break down, and what each band is worth. The band, not the average, is what tells you whether stock is turning."
+          />
+          <Chart
+            title="What is tied up, by age"
+            says={bandWords(data.bands)}
+            foot={<span>Value is the asking price, not what a unit would fetch after a discount.</span>}
+          >
+            <BandStrip bands={data.bands} />
+          </Chart>
+        </div>
+      )}
+    </>
+  );
+}
+
+function bandWords(bands: { label: string; units: number; value: number; reading: string }[]): string {
+  const bad = bands[bands.length - 1];
+  if (!bad || bad.units === 0) return 'Nothing is older than four months. Stock is turning.';
+  return `${shortMoney(bad.value)} is tied up in stock older than four months, across ${bad.units} units.`;
+}
+
+/* =============================================================
+   FleetSmart+
+   ============================================================= */
+function Book({ data, set }: { data: Analytics; set: (p: Partial<Filters>) => void }) {
+  const book = data.book;
+  if (!book) {
+    return (
+      <Chart title="The contract book" says="No FleetSmart+ contracts have been accepted yet."
+        foot={<span>Counts accepted contracts only. Drafts and contracts sent and not signed are not a book.</span>}>
+        <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--text-subtle)' }}>
+          Nothing to draw. The book appears the first time a contract is accepted.
+        </div>
+      </Chart>
+    );
+  }
+
+  const first = book.months[0];
+  const last = book.months[book.months.length - 1];
+  const grew = first && last
+    ? ((total(last) - total(first)) / Math.max(1, total(first))) * 100
+    : 0;
+
+  return (
+    <>
+      <div>
+        <DeviceLabel
+          title="The book, built by tier"
+          sub="Stacked weekly value by month. The height is the whole book, and the segments show which tier is actually growing."
+        />
+        <Chart
+          title="Weekly contracted value"
+          says={first && last
+            ? `The book is ${grew >= 0 ? 'up' : 'down'} ${Math.abs(grew).toFixed(0)}% over these months.`
+            : 'Not enough months to show a trend yet.'}
+          legend={<Legend items={[
+            { name: 'Silver', colour: HUE.rental },
+            { name: 'Gold', colour: HUE.trailer },
+            { name: 'Platinum', colour: HUE.stc },
+          ]} />}
+          foot={<span>Drag across the bars to set the period for the whole page.</span>}
+        >
+          <StackedMonths
+            months={book.months as any}
+            series={[
+              { key: 'silver', name: 'Silver', colour: HUE.rental },
+              { key: 'gold', name: 'Gold', colour: HUE.trailer },
+              { key: 'platinum', name: 'Platinum', colour: HUE.stc },
+            ]}
+            onBrush={(from, to) => set({
+              kind: 'custom',
+              from,
+              to: endOfMonthIso(to),
+            })}
+          />
+        </Chart>
+
+        <div style={{
+          display: 'grid', gap: 1, marginTop: 12, background: 'var(--border)',
+          border: '1px solid var(--border)', borderRadius: 'var(--r-md)', overflow: 'hidden',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+        }}>
+          {[
+            ['This week', money(book.thisWeek), `across ${book.contracts} contracts`],
+            ['Annualised', shortMoney(book.annualised), 'if nothing changes'],
+            ['Added this period', money(book.addedThisPeriod), 'weekly value of new contracts'],
+            ['Average', money(book.contracts ? book.thisWeek / book.contracts : 0), 'per contract per week'],
+          ].map(([label, value, sub]) => (
+            <div key={label} style={{ background: 'var(--surface)', padding: '11px 13px' }}>
+              <div style={{
+                fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
+                letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+              }}>{label}</div>
+              <div style={{
+                fontFamily: 'var(--panton)', fontWeight: 800, fontSize: 21, marginTop: 3,
+                color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+              }}>{value}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 1 }}>{sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+        <Chart
+          title={`Mix today, ${book.contracts} contracts`}
+          says={mixWords(book)}
+          foot={<span>Contracts on the left of each row, weekly value on the right. They rank differently, which is the point.</span>}
+        >
+          <ShareRows rows={book.mix.map((m) => ({
+            name: m.tier, count: m.contracts, value: m.weekly,
+            colour: m.tier === 'Platinum' ? HUE.stc : m.tier === 'Gold' ? HUE.trailer : HUE.rental,
+          }))} />
+        </Chart>
+
+        <Chart
+          title="Contract retention by start month"
+          says={retentionWords(book)}
+          foot={<span>Dashed cells are months that have not happened yet, not missing data. Retention is contracts still live, not value.</span>}
+        >
+          <CohortGrid cohorts={book.cohorts} />
+        </Chart>
+      </div>
+    </>
+  );
+}
+
+const total = (m: { silver: number; gold: number; platinum: number }) => m.silver + m.gold + m.platinum;
+
+function mixWords(book: NonNullable<Analytics['book']>): string {
+  const weekly = book.mix.reduce((a, m) => a + m.weekly, 0);
+  const biggest = [...book.mix].sort((a, b) => b.weekly - a.weekly)[0];
+  if (!biggest || weekly === 0) return 'No live contracts to break down.';
+  return `${biggest.tier} is ${Math.round((biggest.weekly / weekly) * 100)}% of the weekly value `
+    + `from ${biggest.contracts} of ${book.contracts} contracts.`;
+}
+
+function retentionWords(book: NonNullable<Analytics['book']>): string {
+  const withData = book.cohorts.filter((c) => c.signed > 0);
+  if (withData.length === 0) return 'No contracts have started in these months.';
+  const worst = [...withData].sort((a, b) => {
+    const la = a.live.filter((v) => v != null).pop() ?? 100;
+    const lb = b.live.filter((v) => v != null).pop() ?? 100;
+    return la - lb;
+  })[0]!;
+  const kept = worst.live.filter((v) => v != null).pop() ?? 100;
+  if (kept === 100) return 'Every contract signed in these months is still live.';
+  return `The ${monthLabel(worst.month)} cohort has kept ${kept}% of what it signed, the lowest of any month here.`;
+}
+
+function endOfMonthIso(month: string): string {
+  const d = new Date(`${month.slice(0, 10)}T00:00:00Z`);
+  return iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)));
+}
+
+/* =============================================================
+   Customers
+   ============================================================= */
+function Customers({ data }: { data: Analytics }) {
+  if (data.customers.length === 0) {
+    return (
+      <Chart title="Top customers" says="Nothing invoiced in this window."
+        foot={<span>Reads Protean and Sage invoices by tax point.</span>}>
+        <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--text-subtle)' }}>
+          No customers to rank.
+        </div>
+      </Chart>
+    );
+  }
+  const top = data.customers;
+  const all = top.reduce((a, c) => a + c.revenue, 0);
+
+  return (
+    <Chart
+      title={`Top ${top.length} customers`}
+      says={`These ${top.length} account for ${shortMoney(all)} of invoicing in this window.`}
+      foot={<span>Protean and Sage account names, so a customer not yet matched to a CRM record still appears. Trailer sales are not invoiced through either and are not in this table.</span>}
+    >
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              {['Customer', 'Division', 'This window', 'Comparison', 'Change'].map((h, i) => (
+                <th key={h} style={{
+                  textAlign: i >= 2 ? 'right' : 'left', padding: '0 10px 7px',
+                  fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 10,
+                  letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-subtle)',
+                  borderBottom: '1px solid var(--border-strong)', whiteSpace: 'nowrap',
+                }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {top.map((c) => {
+              const change = c.was > 0 ? ((c.revenue - c.was) / c.was) * 100 : null;
+              return (
+                <tr key={`${c.division}-${c.name}`}>
+                  <td style={{ ...cellStyle, color: 'var(--text)', fontWeight: 500 }}>{c.name}</td>
+                  <td style={{ ...cellStyle, color: 'var(--text-subtle)' }}>{DIVISION_NAME[c.division]}</td>
+                  <td style={{ ...cellStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                    {money(c.revenue)}
+                  </td>
+                  <td style={{ ...cellStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-subtle)' }}>
+                    {c.was > 0 ? money(c.was) : '—'}
+                  </td>
+                  <td style={{
+                    ...cellStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+                    color: change == null ? 'var(--text-subtle)' : change >= 0 ? 'var(--success)' : 'var(--danger)',
+                  }}>
+                    {change == null ? 'new' : `${change >= 0 ? '+' : ''}${change.toFixed(0)}%`}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Chart>
+  );
+}
+
+const cellStyle: React.CSSProperties = {
+  padding: '8px 10px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
 };

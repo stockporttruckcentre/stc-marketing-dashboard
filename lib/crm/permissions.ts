@@ -44,6 +44,11 @@ export type CrmCapability =
      task on them. The business asked for granular wiring and this is
      the granule that matters. */
   | 'crm.health'
+  /* Moving the line the business is judged against. Its own capability
+     rather than `crm.edit`, because reading a target and setting one are
+     different rights: an MD who can see he is behind should not be able
+     to move it. Administrators only. */
+  | 'analytics.targets'
   /** Create and delete contacts. */
   | 'crm.create'
   | 'crm.delete'
@@ -236,7 +241,7 @@ export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
 
 const BY_ROLE: Record<UserRole, CrmCapability[]> = {
   admin: [
-    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.health', 'crm.create',
+    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.health', 'analytics.targets', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
     'admin.users', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',

@@ -1763,6 +1763,45 @@ for (const role of ['admin', 'sales', 'marketer'] as const) {
     suggestActions('mark them red', CAPS[role], 8).some((h) => h.action.id === 'record.flagRed'));
 }
 
+/* =============================================================
+   The Analytics hub.
+
+   One entry per question rather than one for the screen, so a person
+   before a board meeting types what they want to know rather than the
+   tab it lives on.
+   ============================================================= */
+for (const [said, id] of [
+  ['who is closing', 'nav.analyticsPeople'],
+  ['conversion rate', 'nav.analyticsPeople'],
+  ['sales leaderboard', 'nav.analyticsPeople'],
+  ['win rate', 'nav.analyticsPeople'],
+
+  ['old stock', 'nav.analyticsStock'],
+  ['stock ageing', 'nav.analyticsStock'],
+  ['what to discount', 'nav.analyticsStock'],
+  ['days in stock', 'nav.analyticsStock'],
+
+  ['contract book', 'nav.analyticsBook'],
+  ['recurring revenue', 'nav.analyticsBook'],
+  ['contract retention', 'nav.analyticsBook'],
+  ['annualised contracts', 'nav.analyticsBook'],
+] as [string, string][]) {
+  ok(`"${said}" reaches ${id}`,
+    suggestActions(said, CAPS.sales, 8).some((h) => h.action.id === id));
+}
+
+/* Setting a target is administrators only, and both directions are
+   swept: a target is the line the business is judged against, and
+   somebody who can see they are behind must not be able to move it. */
+for (const said of ['set a target', 'set the revenue target', 'monthly target']) {
+  ok(`"${said}" reaches the target editor for an administrator`,
+    suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === 'analytics.target'));
+  for (const role of ['sales', 'marketer', 'viewer'] as const) {
+    ok(`and a ${role} is not offered "${said}"`,
+      !suggestActions(said, CAPS[role], 8).some((h) => h.action.id === 'analytics.target'));
+  }
+}
+
 console.log(`\n${pass}/${pass + fail} passing`);
 if (failures.length) {
   console.log(`\nfirst failures:`);
