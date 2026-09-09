@@ -33,6 +33,9 @@ cd "$(dirname "$0")/../.." || exit 0
 fail=0
 report=""
 
+# check:kit-diff needs the preview running, so it is skipped when it is
+# not. That is stated rather than silent: a guard that quietly does
+# nothing is worse than no guard.
 for guard in check:invention check:kit; do
   out=$(npm run --silent "$guard" 2>&1)
   if [ $? -ne 0 ]; then
@@ -43,6 +46,21 @@ ${out}
 "
   fi
 done
+
+if curl -s -o /dev/null -m 2 http://localhost:3000/analytics-preview; then
+  out=$(npm run --silent check:kit-diff 2>&1)
+  if [ $? -ne 0 ]; then
+    fail=1
+    report="${report}
+--- check:kit-diff ---
+${out}
+"
+  fi
+else
+  report="${report}
+(check:kit-diff skipped: no preview on localhost:3000. Run npm run dev to include it.)
+"
+fi
 
 if [ "$fail" -ne 0 ]; then
   {

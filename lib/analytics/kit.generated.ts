@@ -557,6 +557,10 @@ export const KIT_DEVICES = {
               "style": "display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--text-subtle)",
               "kids": [
                 {
+                  "tag": "#text",
+                  "text": "70%"
+                },
+                {
                   "tag": "span",
                   "style": "display:flex",
                   "kids": [
@@ -585,6 +589,10 @@ export const KIT_DEVICES = {
                       "style": "width:15px;height:12px;background:rgba(9,22,58,1)"
                     }
                   ]
+                },
+                {
+                  "tag": "#text",
+                  "text": "100%"
                 }
               ]
             }
@@ -631,6 +639,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:#C4BFBC"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Silver"
                     }
                   ]
                 },
@@ -641,6 +653,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:#E0C63F"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Gold"
                     }
                   ]
                 },
@@ -651,6 +667,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:#09163A"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Platinum"
                     }
                   ]
                 }
@@ -1023,6 +1043,10 @@ export const KIT_DEVICES = {
                 {
                   "tag": "span",
                   "style": "width:2px;height:14px;background:var(--accent)"
+                },
+                {
+                  "tag": "#text",
+                  "text": "target"
                 }
               ]
             }
@@ -1200,6 +1224,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:14px;height:3px;background:#09163A"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "STC"
                     }
                   ]
                 },
@@ -1210,6 +1238,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:14px;height:2px;background:#3D5290"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Trailer sales"
                     }
                   ]
                 },
@@ -1220,6 +1252,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:14px;height:2px;background:#8492C0"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Rentals"
                     }
                   ]
                 }
@@ -1525,6 +1561,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:#D9DEEC"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Leads"
                     }
                   ]
                 },
@@ -1535,6 +1575,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:#8492C0"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Quoted"
                     }
                   ]
                 },
@@ -1545,6 +1589,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:11px;height:11px;background:var(--navy-900)"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "Won"
                     }
                   ]
                 }
@@ -1554,6 +1602,10 @@ export const KIT_DEVICES = {
               "tag": "span",
               "style": "display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text-subtle);cursor:pointer;font-weight:600",
               "kids": [
+                {
+                  "tag": "#text",
+                  "text": "Sort by won value"
+                },
                 {
                   "tag": "svg",
                   "style": "flex:none",
@@ -1608,6 +1660,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:6px;height:6px;background:currentColor"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "TRAILER SALES"
                     }
                   ]
                 }
@@ -1673,6 +1729,10 @@ export const KIT_DEVICES = {
                           "tag": "path"
                         }
                       ]
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "24.1%"
                     }
                   ]
                 }
@@ -1721,6 +1781,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:6px;height:6px;background:currentColor"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "STC"
                     }
                   ]
                 }
@@ -1786,6 +1850,10 @@ export const KIT_DEVICES = {
                           "tag": "path"
                         }
                       ]
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "8.4%"
                     }
                   ]
                 }
@@ -1834,6 +1902,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:6px;height:6px;background:currentColor"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "STC"
                     }
                   ]
                 }
@@ -1899,6 +1971,10 @@ export const KIT_DEVICES = {
                           "tag": "path"
                         }
                       ]
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "3.2%"
                     }
                   ]
                 }
@@ -1947,6 +2023,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:6px;height:6px;background:currentColor"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "RENTALS"
                     }
                   ]
                 }
@@ -2012,6 +2092,10 @@ export const KIT_DEVICES = {
                           "tag": "path"
                         }
                       ]
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "11.6%"
                     }
                   ]
                 }
@@ -2060,6 +2144,10 @@ export const KIT_DEVICES = {
                     {
                       "tag": "span",
                       "style": "width:6px;height:6px;background:currentColor"
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "TRAILER SALES"
                     }
                   ]
                 }
@@ -2125,6 +2213,10 @@ export const KIT_DEVICES = {
                           "tag": "path"
                         }
                       ]
+                    },
+                    {
+                      "tag": "#text",
+                      "text": "5.9%"
                     }
                   ]
                 }
@@ -2335,7 +2427,7 @@ export const KIT_DEVICES = {
         {
           "tag": "span",
           "style": "font-size:12px;color:var(--text-subtle);line-height:1.45;border-top:1px solid var(--border);padding-top:11px",
-          "text": "Dot size is won value, so a small dot high up is a good rate on a small book. Both matter, and neither alone tells you w"
+          "text": "Dot size is won value, so a small dot high up is a good rate on a small book. Both matter, and neither alone tells you who to back."
         }
       ]
     }
@@ -2355,7 +2447,7 @@ export const KIT_DEVICES = {
         {
           "tag": "span",
           "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
-          "text": "Bands from each source splitting into won by division and lost. The loss is drawn at full width rather than left as the "
+          "text": "Bands from each source splitting into won by division and lost. The loss is drawn at full width rather than left as the gap."
         }
       ]
     }
@@ -2375,7 +2467,7 @@ export const KIT_DEVICES = {
         {
           "tag": "span",
           "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
-          "text": "Every dot is a trailer in stock. Right means it has been here too long, low means there is little margin left to give aw"
+          "text": "Every dot is a trailer in stock. Right means it has been here too long, low means there is little margin left to give away. The bottom right corner is the probl"
         }
       ]
     }
@@ -2395,7 +2487,7 @@ export const KIT_DEVICES = {
         {
           "tag": "span",
           "style": "font-size:12.5px;color:var(--text-subtle);line-height:1.45;max-width:80ch",
-          "text": "How the 41 break down, and what each band is worth. The band, not the average, is what tells you whether stock is turnin"
+          "text": "How the 41 break down, and what each band is worth. The band, not the average, is what tells you whether stock is turning."
         }
       ]
     }

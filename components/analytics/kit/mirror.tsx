@@ -124,6 +124,16 @@ export function device(key: keyof typeof KIT_DEVICES): KitNode {
 export function mirror(node: KitNode, patch: Patch = {}, key?: string | number): ReactNode {
   if (patch.drop) return null;
 
+  /* A text node is a node.
+
+     The kit writes mixed content: its cohort legend is
+     70%<span>...swatches...</span>100%. Rendering only the elements
+     dropped both labels and shipped a scale with no numbers on it.
+     `#text` carries no tag and no style, so it renders as words. */
+  if (node.tag === '#text') {
+    return patch.text !== undefined ? String(patch.text) : (node.text ?? '');
+  }
+
   const style = node.style
     ? parseStyle(patch.style ? patch.style(node.style) : node.style)
     : undefined;

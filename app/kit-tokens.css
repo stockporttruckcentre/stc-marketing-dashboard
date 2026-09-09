@@ -301,6 +301,33 @@ body:has(.stc-force-dark) {
   line-height: 1.55;
   letter-spacing: -0.01em;
 }
+
+/* -------------------------------------------------------------
+   A page built from a kit in docs/source
+
+   That kit's own root carries four declarations and no more:
+
+     background:var(--bg);color:var(--text);
+     font-family:var(--inter);letter-spacing:-0.01em
+
+   No font size and no line height, so its text inherits the browser's
+   16px and `normal`. `.kit` above adds 14px and 1.55, which are the
+   design system's density rule rather than this file's, and inherited
+   type is inherited by everything: at 14px the root letter spacing of
+   -0.01em computes to -0.14px where the kit gets -0.16px, and every
+   undeclared line height on the page changes with it.
+
+   Two declarations, on every element, on the one screen that is meant
+   to be a copy. So a page mirroring a sent kit wears this instead, and
+   the values come back to what that kit actually sets.
+
+   Scoped rather than applied to `.kit`, because eight other surfaces
+   use that class and the rebrand is the business's to order.
+   ------------------------------------------------------------- */
+.kit-page {
+  font-size: 16px;
+  line-height: normal;
+}
 .kit :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* -------------------------------------------------------------
