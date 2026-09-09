@@ -107,13 +107,20 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
  *   contract minus all the t&c's and customer sign area ... the proposal
  *   would end at "Prices exclude tyres and VAT." below the assets
  *
- * So a proposal is a PREFIX of the contract rather than a document of
- * its own: the same masthead, the same details, the same schedule, the
- * same total, and then it stops. Nothing is worded differently and no
- * figure is worked out twice, which is the whole reason it is a variant
- * of this component and not a second one. A price that could disagree
- * between the proposal and the contract is the one fault neither
- * document may ever have.
+ * That was the first cut, and it stopped one section too early. The
+ * business again:
+ *
+ *   on the proposal generator (not the full contract) it needs to show
+ *   both the services and exclusions sections included below the price
+ *
+ * So a proposal is now the price plus what the price is for, and then
+ * it stops: no term, no charges, no standard terms, nowhere to sign.
+ *
+ * Still a variant of this component rather than a document of its own.
+ * Nothing is worded differently and no figure is worked out twice,
+ * which is the whole reason. A price that could disagree between the
+ * proposal and the contract is the one fault neither document may ever
+ * have, and the same now goes for what that price includes.
  */
 export type DocumentVariant = 'contract' | 'proposal';
 
@@ -128,6 +135,19 @@ export function ContractDocument({
 }) {
   const say = (key: Parameters<typeof wordingFor>[0]) => wordingFor(key, input, priced, extras);
   const shown = priced.assets.filter((a) => a.reg.trim() && a.cls);
+
+  /* The two sections both documents carry, written once. Placed by the
+     render below rather than here, because the contract puts them after
+     the term and the proposal finishes on them. */
+  const scope = (
+    <>
+      <Section title="Services">
+        <div style={{ marginBottom: 6 }}>The Services provided shall include:</div>
+        <Prose text={say('services')} />
+      </Section>
+      <Section title="Exclusions"><Prose text={say('exclusions')} /></Section>
+    </>
+  );
   const showPromo = input.promoOnContract && priced.promoDiscount !== 0;
   const isProposal = variant === 'proposal';
 
@@ -318,20 +338,40 @@ export function ContractDocument({
         </div>
       </Section>
 
+      {/* The term, contract only. A proposal quotes a monthly figure
+          and does not commit anybody to a length. */}
+      {isProposal ? null : (
+        <Section title="Term"><Prose text={say('term')} /></Section>
+      )}
+
+      {/* ---- WHAT THE PRICE IS FOR ----
+
+          Services and exclusions, on both documents. The business:
+
+            on the proposal generator (not the full contract) it needs
+            to show both the services and exclusions sections included
+            below the price. it currently does on the full contract,
+            ensure they load in on the proposal too
+
+          Which is right: a monthly figure with nothing saying what it
+          covers is a number somebody has to ring up to understand, and
+          the exclusions are the half of that answer a customer is most
+          likely to argue about later.
+
+          Written once and placed twice rather than repeated, because
+          the two documents disagreeing about what is included is a
+          worse fault than either of them being wrong on its own. The
+          contract keeps its existing order, with these after the term,
+          and the proposal ends on them. */}
+      {scope}
+
       {/* ---- WHERE A PROPOSAL ENDS ----
 
-          Named by the business to the line above: everything from here
-          down is the contract, and a proposal carries none of it. */}
+          Everything from here down is the contract, and a proposal
+          carries none of it: no term, no charges, no standard terms
+          and nowhere to sign. */}
       {isProposal ? null : (
         <>
-      <Section title="Term"><Prose text={say('term')} /></Section>
-
-      <Section title="Services">
-        <div style={{ marginBottom: 6 }}>The Services provided shall include:</div>
-        <Prose text={say('services')} />
-      </Section>
-
-      <Section title="Exclusions"><Prose text={say('exclusions')} /></Section>
       <Section title="Additional services"><Prose text={say('additional')} /></Section>
       <Section title="Charges"><Prose text={say('charges')} /></Section>
       <Section title="Collection and delivery"><Prose text={say('collection')} /></Section>
