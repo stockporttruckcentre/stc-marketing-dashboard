@@ -199,16 +199,36 @@ RETURNS TABLE (
   division TEXT,
   target   NUMERIC
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $fn$
+BEGIN
+  /* The same gate `analytics_window` has, and for the same reason.
+
+     SECURITY DEFINER means this function reads `revenue_targets` with
+     row level security switched off, so whatever gate it carries is
+     the only gate there is. Written without one it answered anybody
+     who could reach it: no session, no profile, no capability. Its
+     sibling refuses all three, and a pair of functions reading the
+     same table under different rules is a gap somebody eventually
+     finds.
+
+     All four roles hold `crm.view` today, so this is not about keeping
+     a colleague out. It is about the function refusing a caller who is
+     nobody, which is what the rest of this schema does. */
+  IF NOT command_may('crm.view') THEN
+    RAISE EXCEPTION 'Analytics needs access to the CRM.';
+  END IF;
+
+  RETURN QUERY
   SELECT t.period_month, t.division, t.target_amount
     FROM revenue_targets t
    WHERE t.user_id IS NULL
      AND t.period_month >= (DATE_TRUNC('month', CURRENT_DATE) - (p_months || ' months')::INTERVAL)::DATE
    ORDER BY t.period_month, t.division;
+END;
 $fn$;
 
 GRANT EXECUTE ON FUNCTION analytics_targets_by_month(INTEGER) TO authenticated;

@@ -61,6 +61,7 @@
     "check:nav": "tsx scripts/nav-check.ts",
     "check:reports": "tsx scripts/reports-check.ts",
     "check:analytics": "tsx scripts/analytics-check.ts",
+    "check:analytics-sql": "bash scripts/sql/analytics-check.sh",
     "check:health": "bash scripts/sql/health-check.sh",
     "check:export-window": "tsx scripts/export-window-check.ts",
     "check:divisions": "bash scripts/sql/divisions-check.sh",
