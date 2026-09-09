@@ -167,9 +167,12 @@ export function ContractWizard({
   const [printReminder, setPrintReminder] = useState<DocumentVariant | null>(null);
   /* WHICH OF THE TWO DOCUMENTS IS ON SCREEN WHEN PRINT FIRES.
 
-     A proposal is the contract with everything below the price taken
-     off, so it is the same component drawn with one prop changed rather
-     than a second document. Printing therefore has to change the page
+     A proposal is the contract with the term, the charges, the standard
+     terms and the signing page taken off, so it is the same component
+     drawn with one prop changed rather than a second document. It keeps
+     the services and the exclusions: a monthly figure with nothing
+     saying what it covers is a number somebody has to ring up about.
+     Printing therefore has to change the page
      first and print second, which is the same two frame wait the step
      swap below already needs. */
   const [variant, setVariant] = useState<DocumentVariant>('contract');
