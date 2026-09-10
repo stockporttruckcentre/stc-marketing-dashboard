@@ -176,6 +176,19 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['admin', 'permissions', 'roles', 'user', 'users', 'user management', 'user admin',
       'who can do what', 'permission hub', 'manage users', 'user accounts'] },
 
+  /* Filling blanks in from a file. `crm.import` and not `crm.edit`,
+     because it is a file being brought in: the same right the Import
+     button needs, and the same one the function behind it asks for. */
+  { id: 'crm.enrich', label: 'Fill in blanks from a file', blurb: 'Add missing emails, phone numbers and addresses without creating anything', kind: 'navigate',
+    path: '/dashboard/crm', verbs: [...GO, 'fill', 'add', 'update', 'import'],
+    capability: 'crm.import',
+    objects: ['missing emails', 'missing phone numbers', 'missing addresses',
+      'blank fields', 'fill in blanks', 'fill in the gaps', 'missing data',
+      'missing contact details', 'enrich the crm', 'update the crm from a file',
+      'add emails from a spreadsheet', 'customer site listing'],
+    phrases: ['fill in the missing phone numbers', 'add the emails from the maintenance listing',
+      'update the crm from a spreadsheet without adding anybody'] },
+
   /* Not gated. Asking for something is `access.request` and every one
      of the eleven roles holds it, so filtering this on `access.decide`
      would hide the screen from exactly the people who use it to see
