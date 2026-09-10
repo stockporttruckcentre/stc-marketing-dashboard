@@ -54,10 +54,26 @@ function wrap(items: string[]): string {
 export function seedSql(): string {
   const lines: string[] = [];
 
+  /* ---- The seed stops at a role somebody has taken over ----
+
+     This used to delete every grant on all eleven and put the seed back.
+     Which was right while the roles were only ever set here, and became
+     a trap the moment the Roles tab could edit one: the next time the
+     catch-up bundle was pasted, and it is pasted often, every change
+     made through the interface would have vanished with nothing said.
+
+     `customised_at` is set by `set_role_capability` the first time a
+     person changes a role. From then on the seed leaves that role
+     alone. So a fresh database still gets the eleven as designed, and a
+     role a human has taken responsibility for stays as they left it.
+
+     Written into the generated block rather than around it because the
+     generator is what the check compares against, so a hand written
+     guard would be deleted by the next `npm run gen:roles`. */
   lines.push('DELETE FROM role_template_capabilities');
   lines.push(' WHERE role_template_id IN (SELECT id FROM role_templates WHERE slug IN (');
   lines.push(`   ${ROLE_TEMPLATES.map((r) => quote(r.slug)).join(', ')}`);
-  lines.push(' ));');
+  lines.push(' ) AND customised_at IS NULL);');
   lines.push('');
   lines.push('INSERT INTO role_templates (slug, name, description, is_system, sort_order) VALUES');
   lines.push(ROLE_TEMPLATES.map((r) =>
@@ -86,6 +102,7 @@ export function seedSql(): string {
   lines.push(rows.join(',\n'));
   lines.push('  ) AS v(slug, caps) ON v.slug = rt.slug');
   lines.push('  CROSS JOIN LATERAL unnest(v.caps) AS cap');
+  lines.push(' WHERE rt.customised_at IS NULL');
   lines.push('ON CONFLICT (role_template_id, capability) DO UPDATE SET scope = EXCLUDED.scope;');
 
   return lines.join('\n');

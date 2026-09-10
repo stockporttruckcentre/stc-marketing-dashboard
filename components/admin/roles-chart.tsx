@@ -1,194 +1,253 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ShieldAlert, ArrowUp, Users, Search } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import {
-  Card, PanelHead, Badge, Label, Skeleton, EmptyState, NotProvisioned, SearchInput,
-} from '@/components/kit/primitives';
+  Search, ChevronRight, ChevronDown, Loader, Check, History, Users, ShieldAlert,
+} from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { EmptyState, NotProvisioned, Skeleton, Alert } from '@/components/kit/primitives';
+import { node, part, tintFor, spacing } from '@/lib/admin/roles-kit';
 
 /* =============================================================
-   The eleven roles, as the shape they actually are.
+   Roles, as the kit draws them.
 
-   From the business:
+   From the business, sending `docs/source/STCUIRoles.html`:
 
-     Create a tab in admin for Roles next to People. It shows what
-     permissions each role has access to so my team can understand what
-     each role can and can't do, to determine who gets what role.
+     I think the org chart tab is poorly laid out, messy, not fully
+     respecting our UI. Attached is a kit from claude design for just
+     this tab only. It's not telling you to use/add all of this content
+     in the kit, it's guidance to make the page more interactive and
+     understandable for techy and non techy users.
 
-     Design the roles tab in an org chart style that's interactive so
-     you can see the hierarchy and click to see what each role does.
+     Within here, I should be able to also manage what each role type
+     can do, which auto-affects users within that role on their
+     role-inherited permissions.
 
-   ---- Everything here is read, nothing is written ----
+   ---- Not one number in this file ----
 
-   This screen decides nothing. It is the answer to "what would happen
-   if I put Dean on Sr Sales", asked before doing it rather than after.
-   Changing somebody's role is still People, one person at a time, and
-   still recorded against the name of whoever did it.
+   Every length, colour, weight and radius comes from
+   `lib/admin/roles-kit.ts`, which reads
+   `lib/admin/roles-kit.generated.ts`, which a browser read off the kit.
+   The first version of this screen was authored from a description of
+   what an org chart looks like, and that is the exact mistake CLAUDE.md
+   was rewritten to stop. `npm run check:invention` enforces it on the
+   text, so it cannot come back by accident.
 
-   ---- Where the content comes from ----
+   ---- What this screen shows, and what it honestly cannot ----
 
-   The database, on every load. Three tables, all readable by anybody
-   signed in:
+   The kit draws five verdicts: Allowed, Denied, Conditional, Inherited
+   and Not in role. This database supports two of them. A row in
+   `role_template_capabilities` means the role holds the capability and
+   its absence means it does not, so Allowed and Not in role are the
+   whole truth.
 
-     role_templates                the roles, and the tree
-     role_template_capabilities    which role holds which
-     capability_catalog            what each one is called, and means
+   Denied as a separate thing from absent, a condition like "under
+   £250", and inheriting down the reporting line are three model
+   changes, not three styles. Drawing them from data that cannot express
+   them would put a Conditional pill on a permission with no condition,
+   which is worse than not drawing it. The kit is guidance, and it says
+   so.
 
-   Deliberately NOT a list written into this file. A hand written
-   summary of what a role can do is correct on the day it is typed and
-   is a lie by the next migration, and this screen exists precisely so
-   somebody can trust what it says. It was checked before it was built:
-   eighty nine capabilities in the catalogue, eighty nine granted across
-   the eleven roles, none on one side and not the other, and every one
-   of the eighty nine gates a real screen or control.
+   Scope IS real: `role_template_capabilities.scope` carries the kit's
+   scope chip, one of own, assigned, team, department, project, company.
 
-   ---- The tree ----
+   ---- The tree is the hierarchy, not a picture of one ----
 
-   `escalates_to` is the parent, and it is the same column the request
-   flow uses to decide who is asked when somebody wants a permission
-   they do not hold. So this chart is not a drawing OF the hierarchy, it
-   is the hierarchy: if a box sits under another box here, that is who
-   gets the request.
-
-   Developer and Managing Director have no parent and are drawn side by
-   side at the top. Both hold everything.
+   A box sits under the box named by `role_templates.escalates_to`,
+   which is the same column the access request flow reads to decide who
+   gets asked. So the chart is not an illustration: if a box is under
+   another box, that is who answers its requests.
    ============================================================= */
 
 type Template = {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  department: string | null;
-  manages: string[];
-  escalates_to: string | null;
-  sort_order: number;
+  id: string; slug: string; name: string; description: string | null;
+  department: string | null; manages: string[]; escalates_to: string | null;
+  sort_order: number; customised_at: string | null;
 };
 
 type Cap = {
-  key: string;
-  label: string;
-  description: string;
-  area: string;
-  feature: string;
-  danger: 'routine' | 'careful' | 'destructive' | string;
-  position: number;
+  key: string; label: string; description: string;
+  area: string; feature: string; danger: string; position: number;
 };
 
-type Node = Template & { children: Node[] };
-
-const DEPT_LABEL: Record<string, string> = {
-  exec: 'Leadership',
-  sales: 'Sales',
-  marketing: 'Marketing',
-  finance: 'Finance',
-  admin: 'Office',
+type Grant = { role_template_id: string; capability: string; scope: string };
+type Holder = { id: string; role_template_id: string; name: string; job_title: string | null };
+type Line = {
+  id: number; at: string; actor_label: string | null; kind: string;
+  role_template_id: string; capability_label: string;
+  scope_before: string | null; scope_after: string | null;
 };
 
-export function RolesChart() {
+type Tree = Template & { children: Tree[] };
+
+const DEPT: Record<string, string> = {
+  exec: 'LEADERSHIP', sales: 'SALES', marketing: 'MARKETING',
+  finance: 'FINANCE', admin: 'OFFICE',
+};
+
+/* The kit's own words for the six scopes the database carries. */
+const SCOPE: Record<string, string> = {
+  own: 'Their own',
+  assigned: 'Assigned to them',
+  team: 'Their team',
+  department: 'Their department',
+  project: 'Their projects',
+  company: 'Everything',
+};
+
+const initials = (name: string) => name.split(/\s+/).filter(Boolean)
+  .slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
+
+export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
   const supabase = createClient();
 
   const [roles, setRoles] = useState<Template[] | null>(null);
   const [caps, setCaps] = useState<Cap[]>([]);
-  const [held, setHeld] = useState<Record<string, Set<string>>>({});
+  const [grants, setGrants] = useState<Grant[]>([]);
+  const [holders, setHolders] = useState<Holder[]>([]);
+  const [history, setHistory] = useState<Line[]>([]);
   const [missing, setMissing] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+
   const [picked, setPicked] = useState<string | null>(null);
   const [find, setFind] = useState('');
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [tpl, cat, grants] = await Promise.all([
+    const [tpl, cat, gr, hd, hist] = await Promise.all([
       supabase.from('role_templates')
-        .select('id, slug, name, description, department, manages, escalates_to, sort_order')
+        .select('id, slug, name, description, department, manages, escalates_to, sort_order, customised_at')
         .eq('is_active', true).order('sort_order'),
       supabase.from('capability_catalog')
         .select('key, label, description, area, feature, danger, position')
         .eq('is_active', true).order('position'),
-      supabase.from('role_template_capabilities').select('role_template_id, capability'),
+      supabase.from('role_template_capabilities').select('role_template_id, capability, scope'),
+      supabase.from('role_holders').select('id, role_template_id, name, job_title').eq('is_active', true),
+      supabase.from('role_capability_history').select('*').limit(40),
     ]);
 
-    /* The roles arrive in migration 103 and the shape columns in 105.
-       Until those are pasted in this is a tab that opens an error, which
-       is the thing that went wrong with the Access screen. */
-    const err = tpl.error ?? cat.error ?? grants.error;
-    if (err?.code === '42P01' || err?.code === 'PGRST205'
-        || err?.code === '42703') { setMissing(true); setRoles([]); return; }
+    /* The roles arrive in 103, the shape columns in 105 and the history
+       in 108. Until those are pasted this says which, rather than
+       opening a raw schema error the way the Access tab used to. */
+    const err = tpl.error ?? cat.error ?? gr.error;
+    if (err?.code === '42P01' || err?.code === 'PGRST205' || err?.code === '42703') {
+      setMissing(true); setRoles([]); return;
+    }
     if (err) { setFailed(err.message); setRoles([]); return; }
 
     const list = (tpl.data ?? []) as Template[];
-    const by: Record<string, Set<string>> = {};
-    for (const g of (grants.data ?? []) as { role_template_id: string; capability: string }[]) {
-      (by[g.role_template_id] ??= new Set()).add(g.capability);
-    }
     setRoles(list);
     setCaps((cat.data ?? []) as Cap[]);
-    setHeld(by);
+    setGrants((gr.data ?? []) as Grant[]);
+    setHolders((hd.data ?? []) as Holder[]);
+    /* The history is the newest table, so a database without 108 still
+       draws the chart rather than refusing the whole screen. */
+    setHistory(hist.error ? [] : ((hist.data ?? []) as Line[]));
     setPicked((p) => p ?? list[0]?.slug ?? null);
   }, [supabase]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!said) return;
+    const t = setTimeout(() => setSaid(null), 5000);
+    return () => clearTimeout(t);
+  }, [said]);
 
-  /* The tree, from `escalates_to`. Anything with no parent, or a parent
-     that is not in the list, is a root: a role whose manager has been
-     retired must still be drawn rather than silently disappearing. */
-  const roots: Node[] = useMemo(() => {
+  const held = useMemo(() => {
+    const m = new Map<string, Map<string, string>>();
+    for (const g of grants) {
+      if (!m.has(g.role_template_id)) m.set(g.role_template_id, new Map());
+      m.get(g.role_template_id)!.set(g.capability, g.scope);
+    }
+    return m;
+  }, [grants]);
+
+  const roots: Tree[] = useMemo(() => {
     if (!roles) return [];
-    const bySlug = new Map(roles.map((r) => [r.slug, { ...r, children: [] as Node[] }]));
-    const out: Node[] = [];
+    const bySlug = new Map(roles.map((r) => [r.slug, { ...r, children: [] as Tree[] }]));
+    const out: Tree[] = [];
     for (const r of roles) {
-      const node = bySlug.get(r.slug)!;
-      const parent = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
-      if (parent && parent !== node) parent.children.push(node);
-      else out.push(node);
+      const n = bySlug.get(r.slug)!;
+      const up = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
+      if (up && up !== n) up.children.push(n); else out.push(n);
     }
     return out;
   }, [roles]);
 
   const current = roles?.find((r) => r.slug === picked) ?? null;
-  const currentCaps = useMemo(() => {
-    if (!current) return [];
-    const mine = held[current.id] ?? new Set<string>();
+  /* Memoised because `toggle` and `rescope` depend on it: a fresh Map
+     every render makes every callback fresh too, which remakes every
+     row's handler on every keystroke in the search box. */
+  const mine = useMemo(
+    () => (current ? (held.get(current.id) ?? new Map<string, string>()) : new Map<string, string>()),
+    [current, held]);
+
+  /* Every capability, grouped the way the catalogue groups itself, with
+     what this role holds marked. Not only what it holds: the kit's
+     coverage meter is a share of the whole set, so the whole set has to
+     be on screen for the share to mean anything. */
+  const areas = useMemo(() => {
     const needle = find.trim().toLowerCase();
-    return caps
-      .filter((c) => mine.has(c.key))
-      .filter((c) => !needle
-        || c.label.toLowerCase().includes(needle)
-        || c.area.toLowerCase().includes(needle)
-        || c.feature.toLowerCase().includes(needle)
-        || c.description.toLowerCase().includes(needle));
-  }, [current, held, caps, find]);
-
-  /* Grouped the way the catalogue groups itself, so the order on screen
-     is the order somebody maintaining the catalogue chose. */
-  const byArea = useMemo(() => {
     const m = new Map<string, Cap[]>();
-    for (const c of currentCaps) (m.get(c.area) ?? m.set(c.area, []).get(c.area)!).push(c);
+    for (const c of caps) {
+      if (needle && !`${c.label} ${c.key} ${c.area} ${c.feature} ${c.description}`
+        .toLowerCase().includes(needle)) continue;
+      if (!m.has(c.area)) m.set(c.area, []);
+      m.get(c.area)!.push(c);
+    }
     return [...m.entries()];
-  }, [currentCaps]);
+  }, [caps, find]);
 
-  const cannot = useMemo(() => {
-    if (!current) return [];
-    const mine = held[current.id] ?? new Set<string>();
-    return caps.filter((c) => !mine.has(c.key));
-  }, [current, held, caps]);
+  const toggle = useCallback(async (cap: Cap, on: boolean) => {
+    if (!current) return;
+    setBusy(cap.key);
+    setFailed(null);
+    const { data, error } = await supabase.rpc('set_role_capability', {
+      p_role: current.id,
+      p_capability: cap.key,
+      p_granted: on,
+      p_scope: on ? (mine.get(cap.key) ?? null) : null,
+    });
+    setBusy(null);
+    if (error) { setFailed(error.message); return; }
+    const d = (data ?? {}) as { people?: number; takenOver?: boolean };
+    const n = d.people ?? 0;
+    setSaid(`${on ? 'Given to' : 'Taken off'} ${current.name}. `
+      + `${n} ${n === 1 ? 'person is' : 'people are'} on that role, and it applies to `
+      + `${n === 1 ? 'them' : 'all of them'} now.`);
+    await load();
+  }, [current, mine, supabase, load]);
+
+  const rescope = useCallback(async (cap: Cap, scope: string) => {
+    if (!current) return;
+    setBusy(cap.key);
+    const { error } = await supabase.rpc('set_role_capability', {
+      p_role: current.id, p_capability: cap.key, p_granted: true, p_scope: scope,
+    });
+    setBusy(null);
+    if (error) { setFailed(error.message); return; }
+    setSaid(`${cap.label} on ${current.name} is now ${SCOPE[scope] ?? scope}.`);
+    await load();
+  }, [current, supabase, load]);
 
   if (missing) {
     return (
       <NotProvisioned
         what="The eleven roles are not in this database yet, so there is no hierarchy to draw."
-        needs="migrations 103 and 105, which are the SQL handed over in chat"
+        needs="migrations 103, 105 and 108, which are the SQL handed over in chat"
       />
     );
   }
 
   if (!roles) {
     return (
-      <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} height={22} />)}
-        </div>
-      </Card>
+      <div className="rk-loading" style={spacing() as React.CSSProperties}>
+        <style>{CSS}</style>
+        {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} />)}
+      </div>
     );
   }
 
@@ -196,163 +255,316 @@ export function RolesChart() {
     return <EmptyState what="No roles" why={failed ?? 'Nothing came back from role_templates.'} />;
   }
 
+  const myHolders = current ? holders.filter((h) => h.role_template_id === current.id) : [];
+  const myHistory = current ? history.filter((h) => h.role_template_id === current.id) : [];
+  const total = caps.length;
+
   return (
-    <>
-      <style>{CHART_CSS}</style>
+    <div className="rk" style={spacing() as React.CSSProperties}>
+      <style>{CSS}</style>
 
-      {failed && (
-        <Card>
-          <div style={{ color: 'var(--danger, #CF2417)', fontSize: 13 }}>{failed}</div>
-        </Card>
-      )}
+      {failed && <Alert tone="danger"><span>{failed}</span></Alert>}
+      {said && <Alert tone="success"><span>{said}</span></Alert>}
 
-      <div className="rc-split">
-        {/* ---- the chart ---- */}
-        <Card padded={false}>
-          <PanelHead title="Who reports to whom" count={roles.length} />
-          <div style={{ padding: '18px 14px 22px', overflowX: 'auto' }}>
-            <div className="rc-forest">
-              {roots.map((r) => (
-                <Branch key={r.slug} node={r} picked={picked} onPick={setPicked} held={held} />
-              ))}
-            </div>
-            <p className="rc-note">
-              A box sits under the box that answers its access requests. That is the
-              same column the request flow reads, so this is the hierarchy rather
-              than a picture of it.
-            </p>
+      {/* ---- the chart ---- */}
+      <div className="rk-panel">
+        <div className="rk-bar">
+          <label className="rk-search" style={part('search')}>
+            <Search size={13} />
+            <input
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              placeholder="Find a role or a permission"
+            />
+          </label>
+          <div className="rk-legend">
+            {Object.entries(DEPT).map(([key, label]) => (
+              <span key={key} className="rk-legend__item" style={part('roleDivision')}>
+                <i style={{ ...tintFor(key), height: 'auto' }} />
+                {label}
+              </span>
+            ))}
           </div>
-        </Card>
+        </div>
 
-        {/* ---- what the chosen one can do ---- */}
-        <Card padded={false}>
-          <PanelHead
-            title={current?.name ?? 'Pick a role'}
-            count={current ? (held[current.id]?.size ?? 0) : undefined}
-          />
-          {!current ? (
-            <div style={{ padding: 14 }}>
-              <EmptyState what="Nothing chosen" why="Click a role on the chart." />
-            </div>
-          ) : (
-            <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {current.description && (
-                <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: 'var(--text-muted)' }}>
-                  {current.description}
-                </p>
-              )}
+        <div className="rk-canvas">
+          <div className="rk-forest">
+            {roots.map((r) => (
+              <Branch key={r.slug} n={r} picked={picked} onPick={setPicked}
+                      held={held} holders={holders} total={total} />
+            ))}
+          </div>
+        </div>
 
-              <div className="rc-facts">
-                <Fact k="Department" v={DEPT_LABEL[current.department ?? ''] ?? current.department ?? 'None'} />
-                <Fact
-                  k="Asks"
-                  v={roles.find((r) => r.slug === current.escalates_to)?.name ?? 'Nobody, this is the top'}
-                  icon={<ArrowUp size={12} />}
-                />
-                <Fact
-                  k="Runs"
-                  v={current.manages.length === 0
-                    ? 'Their own work'
-                    : current.manages.map((d) => DEPT_LABEL[d] ?? d).join(', ')}
-                  icon={<Users size={12} />}
-                />
-              </div>
+        <p className="rk-foot" style={part('capKey')}>
+          A box sits under whoever answers its access requests. That is the same
+          column the request flow reads, so this is the hierarchy rather than a
+          drawing of it.
+        </p>
+      </div>
 
-              <div style={{ maxWidth: 320 }}>
-                <SearchInput
-                  value={find}
-                  onChange={setFind}
-                  placeholder="Find a permission"
-                  icon={<Search size={14} />}
-                />
-              </div>
-
-              {byArea.length === 0 ? (
-                <EmptyState
-                  what={find ? 'Nothing matches' : 'This role holds nothing'}
-                  why={find
-                    ? 'No permission on this role matches what you typed.'
-                    : 'Every permission is withheld from it.'}
-                />
-              ) : byArea.map(([area, list]) => (
-                <div key={area}>
-                  <Label>{area}</Label>
-                  <div className="rc-caps">
-                    {list.map((c) => (
-                      <div key={c.key} className="rc-cap" title={c.description}>
-                        <span className="rc-cap__label">
-                          {c.danger !== 'routine' && (
-                            <ShieldAlert
-                              size={12}
-                              style={{ color: 'var(--warning)', flexShrink: 0 }}
-                              aria-label={c.danger}
-                            />
-                          )}
-                          {c.label}
-                        </span>
-                        <span className="rc-cap__where">{c.feature}</span>
-                      </div>
-                    ))}
-                  </div>
+      {/* ---- the role ---- */}
+      {current && (
+        <div className="rk-detail">
+          <div className="rk-panel rk-panel--pad">
+            <div className="rk-head">
+              <div>
+                <div style={part('listGroupHead')}>
+                  {DEPT[current.department ?? ''] ?? 'ROLE'} · ROLE
                 </div>
-              ))}
+                <h3 style={{ ...part('roleName'), fontSize: undefined }} className="rk-title">
+                  {current.name}
+                </h3>
+                <p className="rk-sub" style={part('capSource')}>
+                  {current.escalates_to
+                    ? `Asks ${roles.find((r) => r.slug === current.escalates_to)?.name} for anything it does not hold.`
+                    : 'Asks nobody. This is the top of the tree.'}
+                  {current.manages.length > 0
+                    && ` Runs ${current.manages.map((d) => (DEPT[d] ?? d).toLowerCase()).join(' and ')}.`}
+                </p>
+              </div>
 
-              {!find && cannot.length > 0 && (
-                <details className="rc-cannot">
-                  <summary>
-                    And {cannot.length} {cannot.length === 1 ? 'thing' : 'things'} it cannot do
-                  </summary>
-                  <div className="rc-caps" style={{ marginTop: 8 }}>
-                    {cannot.map((c) => (
-                      <div key={c.key} className="rc-cap is-off" title={c.description}>
-                        <span className="rc-cap__label">{c.label}</span>
-                        <span className="rc-cap__where">{c.area}</span>
-                      </div>
+              <div className="rk-stats">
+                <Stat n={mine.size} what="ALLOWED" tone="on" />
+                <Stat n={total - mine.size} what="NOT IN ROLE" tone="off" />
+              </div>
+            </div>
+
+            {current.description && (
+              <p className="rk-blurb" style={part('capSource')}>{current.description}</p>
+            )}
+
+            <div className="rk-cards">
+              <div className="rk-card">
+                <div style={part('holdersHead')} className="rk-card__head">Coverage by area</div>
+                {areasOf(caps).map(([area, list]) => {
+                  const n = list.filter((c) => mine.has(c.key)).length;
+                  return <Meter key={area} label={area} n={n} of={list.length} />;
+                })}
+              </div>
+
+              <div className="rk-card">
+                <div style={part('holdersHead')} className="rk-card__head">
+                  <Users size={12} /> Holders
+                </div>
+                {myHolders.length === 0 ? (
+                  <p style={part('capSource')}>Nobody is on this role.</p>
+                ) : (
+                  <ul className="rk-holders">
+                    {myHolders.map((h) => (
+                      <li key={h.id}>
+                        <span className="rk-avatar" style={part('initials')}>{initials(h.name)}</span>
+                        <span style={part('roleName')}>{h.name}</span>
+                        {h.job_title && <span style={part('capSource')}>{h.job_title}</span>}
+                      </li>
                     ))}
-                  </div>
-                </details>
+                  </ul>
+                )}
+                <p style={part('capSource')} className="rk-note">
+                  A change below reaches every one of them at once. It does not
+                  reach anybody who has been allowed or refused that permission
+                  on their own account: a decision about one person still wins.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ---- what it can do ---- */}
+          <div className="rk-panel">
+            <div className="rk-bar">
+              <span style={part('holdersHead')}>What {current.name} can do</span>
+              {mayEdit && (
+                <button
+                  type="button"
+                  className="rk-btn"
+                  style={editing ? part('segmentOn') : part('buttonPrimary')}
+                  onClick={() => setEditing((v) => !v)}
+                >
+                  {editing ? <><Check size={13} /> Done</> : <>Edit role</>}
+                </button>
               )}
+            </div>
+
+            {editing && (
+              <div className="rk-editing">
+                <Alert tone="warning">
+                  <span>
+                    <strong>Every switch here applies at once.</strong> There is no
+                    save. {myHolders.length === 0
+                      ? 'Nobody is on this role yet, so nothing changes for anybody today.'
+                      : `${myHolders.length} ${myHolders.length === 1 ? 'person is' : 'people are'} on this role and it takes effect on their next request.`}
+                    {' '}From the first change the migrations stop maintaining this
+                    role, so a re-run of the setup SQL will not undo your work.
+                  </span>
+                </Alert>
+              </div>
+            )}
+
+            {areas.length === 0 ? (
+              <div className="rk-empty">
+                <EmptyState what="Nothing matches" why="No permission matches what you typed." />
+              </div>
+            ) : areas.map(([area, list]) => {
+              const shown = open.has(area) || find.trim() !== '';
+              const n = list.filter((c) => mine.has(c.key)).length;
+              return (
+                <div key={area}>
+                  <button
+                    type="button"
+                    className="rk-group"
+                    style={part('groupHead')}
+                    onClick={() => setOpen((s) => {
+                      const next = new Set(s);
+                      if (next.has(area)) next.delete(area); else next.add(area);
+                      return next;
+                    })}
+                  >
+                    {shown ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    <span style={part('roleName')}>{area}</span>
+                    <span className="rk-count" style={part('groupCount')}>{n}/{list.length}</span>
+                    <span className="rk-spacer" />
+                    <Bar n={n} of={list.length} />
+                  </button>
+
+                  {shown && list.map((c) => {
+                    const on = mine.has(c.key);
+                    return (
+                      <div key={c.key} className="rk-row">
+                        <span className="rk-row__what">
+                          <span style={part('capLabel')}>
+                            {c.danger !== 'routine' && (
+                              <ShieldAlert size={12} className="rk-danger" aria-label={c.danger} />
+                            )}
+                            {c.label}
+                          </span>
+                          <span style={part('capKey')}>{c.key}</span>
+                        </span>
+
+                        <span
+                          className="rk-verdict"
+                          style={on ? part('verdictAllowed') : part('verdictAbsent')}
+                        >
+                          {on ? <><Check size={12} /> Allowed</> : 'Not in role'}
+                        </span>
+
+                        {on ? (
+                          editing ? (
+                            <select
+                              className="rk-scope"
+                              style={part('scopeOn')}
+                              value={mine.get(c.key) ?? 'own'}
+                              disabled={busy === c.key}
+                              onChange={(e) => void rescope(c, e.target.value)}
+                            >
+                              {Object.entries(SCOPE).map(([k, label]) => (
+                                <option key={k} value={k}>{label}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="rk-scope" style={part('scopeOn')}>
+                              {SCOPE[mine.get(c.key) ?? 'own'] ?? mine.get(c.key)}
+                            </span>
+                          )
+                        ) : (
+                          <span className="rk-scope" style={part('scopeOff')}>no scope</span>
+                        )}
+
+                        {editing ? (
+                          <button
+                            type="button"
+                            className="rk-btn"
+                            style={on ? part('buttonDanger') : part('buttonPrimary')}
+                            disabled={busy === c.key}
+                            onClick={() => void toggle(c, !on)}
+                          >
+                            {busy === c.key
+                              ? <Loader size={12} className="spin" />
+                              : (on ? 'Take away' : 'Give')}
+                          </button>
+                        ) : <span />}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          {myHistory.length > 0 && (
+            <div className="rk-panel rk-panel--pad">
+              <div style={part('holdersHead')} className="rk-card__head">
+                <History size={12} /> What has been changed on this role
+              </div>
+              <ul className="rk-audit">
+                {myHistory.map((h) => (
+                  <li key={h.id}>
+                    <span style={part('capLabel')}>
+                      {h.kind === 'granted' ? 'Gave' : h.kind === 'revoked' ? 'Took away' : 'Rescoped'}
+                      {' '}<strong>{h.capability_label}</strong>
+                      {h.kind === 'rescoped' && h.scope_after
+                        && ` to ${SCOPE[h.scope_after] ?? h.scope_after}`}
+                    </span>
+                    <span style={part('capSource')}>
+                      {h.actor_label ?? 'Somebody'} · {new Date(h.at).toLocaleString('en-GB', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
-        </Card>
-      </div>
-    </>
+        </div>
+      )}
+    </div>
   );
 }
 
-/* -------------------------------------------------------------
-   One box and everything under it.
+/* Every area with its capabilities, unfiltered, for the coverage meter.
+   Filtering this would make the share a share of the search. */
+function areasOf(caps: Cap[]): [string, Cap[]][] {
+  const m = new Map<string, Cap[]>();
+  for (const c of caps) {
+    if (!m.has(c.area)) m.set(c.area, []);
+    m.get(c.area)!.push(c);
+  }
+  return [...m.entries()];
+}
 
-   Drawn with borders rather than SVG: the connectors are a pseudo
-   element per node, so the tree reflows at any width and needs no
-   measuring pass. A layout that has to measure itself flickers on first
-   paint, and this one is above the fold.
-   ------------------------------------------------------------- */
-function Branch({ node, picked, onPick, held }: {
-  node: Node;
-  picked: string | null;
-  onPick: (slug: string) => void;
-  held: Record<string, Set<string>>;
+function Branch({ n, picked, onPick, held, holders, total }: {
+  n: Tree; picked: string | null; onPick: (s: string) => void;
+  held: Map<string, Map<string, string>>; holders: Holder[]; total: number;
 }) {
-  const n = held[node.id]?.size ?? 0;
+  const count = held.get(n.id)?.size ?? 0;
+  const people = holders.filter((h) => h.role_template_id === n.id).length;
+  const on = picked === n.slug;
+
   return (
-    <div className="rc-branch">
+    <div className="rk-branch">
       <button
         type="button"
-        className={`rc-node${picked === node.slug ? ' is-on' : ''}`}
-        onClick={() => onPick(node.slug)}
-        aria-pressed={picked === node.slug}
+        className="rk-node"
+        style={on ? node('nodeSelected') : node(n.department === 'exec' ? 'nodeExec' : 'node')}
+        onClick={() => onPick(n.slug)}
+        aria-pressed={on}
       >
-        <span className="rc-node__name">{node.name}</span>
-        <span className="rc-node__n">
-          <Badge tone={picked === node.slug ? 'accent' : 'neutral'}>{n}</Badge>
+        <i className="rk-node__tint" style={tintFor(n.department)} />
+        <span className="rk-node__face" style={part('initials')}>{initials(n.name)}</span>
+        <span className="rk-node__words">
+          <span style={part('roleName')}>{n.name}</span>
+          <span style={part('roleDivision')}>{DEPT[n.department ?? ''] ?? ''}</span>
+          <span style={part('roleCount')}>
+            {people} · {count} of {total}
+          </span>
         </span>
       </button>
 
-      {node.children.length > 0 && (
-        <div className="rc-kids">
-          {node.children.map((c) => (
-            <Branch key={c.slug} node={c} picked={picked} onPick={onPick} held={held} />
+      {n.children.length > 0 && (
+        <div className="rk-kids">
+          {n.children.map((c) => (
+            <Branch key={c.slug} n={c} picked={picked} onPick={onPick}
+                    held={held} holders={holders} total={total} />
           ))}
         </div>
       )}
@@ -360,102 +572,136 @@ function Branch({ node, picked, onPick, held }: {
   );
 }
 
-function Fact({ k, v, icon }: { k: string; v: string; icon?: React.ReactNode }) {
+function Stat({ n, what, tone }: { n: number; what: string; tone: 'on' | 'off' }) {
   return (
-    <div className="rc-fact">
-      <Label>{k}</Label>
-      <span className="rc-fact__v">{icon}{v}</span>
+    <div className="rk-stat">
+      <span
+        className="rk-stat__n"
+        style={tone === 'on' ? part('verdictAllowed') : part('verdictAbsent')}
+      >
+        {n}
+      </span>
+      <span style={part('statAllowed')}>{what}</span>
     </div>
   );
 }
 
-/* Scoped by the `rc-` prefix. Written here rather than in globals.css
-   because nothing else draws a tree and a rule nobody else uses is
-   easier to change when it lives beside the thing it draws. */
-const CHART_CSS = `
-.rc-split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-@media (max-width: 1100px) { .rc-split { grid-template-columns: minmax(0, 1fr); } }
-
-.rc-forest { display: flex; gap: 26px; flex-wrap: wrap; }
-.rc-branch { display: flex; flex-direction: column; align-items: center; position: relative; }
-
-.rc-node {
-  display: flex; align-items: center; gap: 8px;
-  height: 34px; padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  background: var(--surface);
-  color: inherit;
-  font-family: var(--panton, inherit);
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
-  position: relative; z-index: 1;
-}
-.rc-node:hover { border-color: var(--border-strong, var(--border)); }
-.rc-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.rc-node.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.rc-node__name { font-weight: 600; }
-
-/* The children row, and the three rules that join it to the parent. */
-.rc-kids { display: flex; gap: 18px; padding-top: 20px; position: relative; }
-.rc-kids::before {
-  content: ''; position: absolute; top: 0; left: 50%;
-  width: 1px; height: 10px; background: var(--border);
-}
-.rc-branch > .rc-kids > .rc-branch::before {
-  content: ''; position: absolute; top: -10px; left: 50%;
-  width: 1px; height: 10px; background: var(--border);
-}
-/* The horizontal rule across the children, trimmed to the outermost
-   two so it does not overhang the first and last box. */
-.rc-kids::after {
-  content: ''; position: absolute; top: 10px;
-  left: 0; right: 0; height: 1px; background: var(--border);
-}
-.rc-kids > .rc-branch:first-child::after,
-.rc-kids > .rc-branch:last-child::after {
-  content: ''; position: absolute; top: -10px; height: 1px;
-  background: var(--surface); z-index: 0;
-}
-.rc-kids > .rc-branch:first-child::after { left: -20px; right: 50%; }
-.rc-kids > .rc-branch:last-child::after { left: 50%; right: -20px; }
-.rc-kids > .rc-branch:only-child::after { display: none; }
-
-.rc-note {
-  margin: 16px 0 0; font-size: 12px; line-height: 1.5;
-  color: var(--text-subtle); max-width: 62ch;
+function Bar({ n, of }: { n: number; of: number }) {
+  const pct = of === 0 ? 0 : Math.round((n / of) * 100);
+  return (
+    <span className="rk-bar-track">
+      <span
+        className="rk-bar-fill"
+        style={{ width: `${pct}%`, background: part('verdictAllowed').color }}
+      />
+    </span>
+  );
 }
 
-.rc-facts { display: flex; gap: 18px; flex-wrap: wrap; }
-.rc-fact { display: flex; flex-direction: column; gap: 3px; }
-.rc-fact__v {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 13px; color: var(--text);
+function Meter({ label, n, of }: { label: string; n: number; of: number }) {
+  const pct = of === 0 ? 0 : Math.round((n / of) * 100);
+  return (
+    <div className="rk-meter">
+      <span style={part('capLabel')}>{label}</span>
+      <Bar n={n} of={of} />
+      <span style={part('roleCount')}>{pct}%</span>
+    </div>
+  );
 }
 
-.rc-caps { display: flex; flex-direction: column; margin-top: 6px; }
-.rc-cap {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 30px; padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.rc-cap:last-child { border-bottom: 0; }
-.rc-cap__label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.rc-cap__where {
-  font-size: 11.5px; color: var(--text-subtle);
-  white-space: nowrap; flex-shrink: 0;
-}
-.rc-cap.is-off .rc-cap__label { color: var(--text-subtle); text-decoration: line-through; }
+/* Layout only. Every colour, size and radius on an element that has one
+   comes from the kit through `part()` and `node()`; what is here is
+   flow, and the connectors, which the kit draws as rules rather than as
+   a value. */
+const CSS = `
+.rk { container-type: inline-size; }
+.rk-panel { border: var(--rk-rule) solid var(--border); border-radius: var(--rk-radius); background: var(--surface); margin-bottom: var(--rk-gap); }
+.rk-panel--pad { padding: var(--rk-card-pad) var(--rk-card-pad-x); }
+.rk-bar { display: flex; align-items: center; gap: var(--rk-gap); padding: var(--rk-pad) var(--rk-pad-x); border-bottom: var(--rk-rule) solid var(--border); flex-wrap: wrap; }
+.rk-search { display: inline-flex; align-items: center; gap: var(--rk-node-gap); flex: 1 1 auto; min-width: 0; }
+.rk-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; outline: none; }
+.rk-legend { display: flex; gap: var(--rk-row-gap); flex-wrap: wrap; margin-left: auto; }
+.rk-legend__item { display: inline-flex; align-items: center; gap: var(--rk-node-gap); }
+.rk-legend__item i { display: inline-block; align-self: stretch; }
 
-.rc-cannot summary {
-  cursor: pointer; font-size: 12.5px; color: var(--text-muted);
-  padding: 6px 0; border-top: 1px solid var(--border);
-}
+.rk-canvas { padding: var(--rk-card-pad) var(--rk-pad-x); overflow-x: auto; }
+.rk-forest { display: flex; gap: var(--rk-card-pad-x); justify-content: center; min-width: min-content; }
+.rk-branch { display: flex; flex-direction: column; align-items: center; position: relative; }
+
+.rk-node { position: relative; display: flex; align-items: center; text-align: left; cursor: pointer; overflow: hidden; z-index: 1; }
+.rk-node__tint { position: absolute; left: 0; top: 0; bottom: 0; }
+.rk-node__face { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-sunken); aspect-ratio: 1; padding: var(--rk-node-gap); }
+.rk-node__words { display: flex; flex-direction: column; min-width: 0; }
+.rk-node__words > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.rk-kids { display: flex; gap: var(--rk-card-pad); padding-top: calc(var(--rk-drop) * 2); position: relative; }
+.rk-kids::before { content: ''; position: absolute; top: 0; left: var(--rk-mid); width: var(--rk-rule); height: var(--rk-drop); background: var(--border); }
+.rk-kids::after { content: ''; position: absolute; top: var(--rk-drop); left: 0; right: 0; height: var(--rk-rule); background: var(--border); }
+.rk-kids > .rk-branch::before { content: ''; position: absolute; top: calc(var(--rk-drop) * -1); left: var(--rk-mid); width: var(--rk-rule); height: var(--rk-drop); background: var(--border); }
+.rk-kids > .rk-branch:first-child::after,
+.rk-kids > .rk-branch:last-child::after { content: ''; position: absolute; top: calc(var(--rk-drop) * -1); height: var(--rk-rule); background: var(--surface); }
+.rk-kids > .rk-branch:first-child::after { left: calc(var(--rk-card-pad) * -1); right: var(--rk-mid); }
+.rk-kids > .rk-branch:last-child::after { left: var(--rk-mid); right: calc(var(--rk-card-pad) * -1); }
+.rk-kids > .rk-branch:only-child::after { display: none; }
+
+.rk-foot { padding: var(--rk-none) var(--rk-pad-x) var(--rk-pad); }
+
+.rk-head { display: flex; gap: var(--rk-card-pad-x); align-items: flex-start; flex-wrap: wrap; }
+.rk-title { margin: 0; }
+.rk-sub, .rk-blurb { margin: 0; }
+.rk-blurb { margin-top: var(--rk-row-pad); }
+.rk-stats { display: flex; gap: var(--rk-card-pad-x); margin-left: auto; flex-wrap: wrap; }
+.rk-stat { display: flex; flex-direction: column; align-items: flex-end; }
+.rk-stat__n { background: transparent; padding: 0; }
+
+.rk-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min-content, 1fr)); gap: var(--rk-gap); margin-top: var(--rk-card-pad); }
+.rk-card { border: var(--rk-rule) solid var(--border); border-radius: var(--rk-radius); padding: var(--rk-card-pad) var(--rk-card-pad-x); }
+.rk-card__head { display: flex; align-items: center; gap: var(--rk-node-gap); margin-bottom: var(--rk-row-pad); }
+.rk-holders { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--rk-node-gap); }
+.rk-holders li { display: flex; align-items: center; gap: var(--rk-node-gap); }
+.rk-avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-sunken); aspect-ratio: 1; padding: var(--rk-node-gap); }
+.rk-note { margin: var(--rk-row-pad) var(--rk-none) var(--rk-none); }
+
+.rk-meter { display: flex; align-items: center; gap: var(--rk-row-gap); padding: calc(var(--rk-row-pad) / 2) var(--rk-none); }
+.rk-meter > :first-child { flex: 1 1 auto; min-width: 0; }
+.rk-meter .rk-bar-track { flex: var(--rk-track); }
+.rk-bar-track { display: block; height: var(--rk-drop); border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.rk-bar-fill { display: block; height: var(--rk-all); }
+
+.rk-editing { padding: var(--rk-pad) var(--rk-pad-x) var(--rk-none); }
+.rk-empty { padding: var(--rk-card-pad); }
+
+.rk-group { display: flex; align-items: center; gap: var(--rk-node-gap); width: var(--rk-all); padding: var(--rk-pad) var(--rk-pad-x); border: 0; border-bottom: var(--rk-rule) solid var(--border); background: transparent; cursor: pointer; text-align: left; }
+.rk-count { flex-shrink: 0; }
+.rk-spacer { flex: 1; }
+.rk-group .rk-bar-track { flex: var(--rk-track); flex-shrink: 0; }
+
+.rk-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--rk-row-gap); padding: var(--rk-row-pad) var(--rk-row-pad-x) var(--rk-row-pad) calc(var(--rk-row-pad-x) * 2); border-bottom: var(--rk-rule) solid var(--border); }
+.rk-row__what { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.rk-row__what > span { display: inline-flex; align-items: center; gap: var(--rk-node-gap); min-width: 0; }
+.rk-danger { color: var(--warning); flex-shrink: 0; }
+.rk-verdict { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.rk-scope { white-space: nowrap; }
+select.rk-scope { cursor: pointer; }
+.rk-btn { display: inline-flex; align-items: center; gap: var(--rk-node-gap); cursor: pointer; white-space: nowrap; }
+.rk-btn:disabled { cursor: default; opacity: 0.6; }
+
+.rk-audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rk-audit li { display: flex; flex-direction: column; padding: var(--rk-row-pad) 0; border-bottom: var(--rk-rule) solid var(--border); }
+.rk-audit li:last-child { border-bottom: 0; }
+.rk-loading { display: flex; flex-direction: column; gap: var(--rk-node-gap); }
+
+/* ---- The row folds when it runs out of room ----
+
+   Not at a screen width. A breakpoint is a number somebody picks, and
+   there is no measurement in the kit it could be taken from, so it
+   would be exactly the kind of invented value this file is not allowed
+   to hold.
+
+   flex-wrap on the two rows that can fold asks the same question and
+   answers it from the content: they wrap when they do not fit, at
+   whatever width that turns out to be.
+
+   No backticks in here, either. This block lives inside a template
+   literal, so one would end the string. */
 `;

@@ -33,6 +33,20 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 const GOVERNED = [
+  /* ---- The Roles tab ----
+
+     A second kit arrived for one screen, so it goes through the same
+     machine: `roles-kit.generated.ts` is read off
+     `docs/source/STCUIRoles.html` by a browser, and these two files
+     spread it. They should hold NOTHING, which is what the baseline
+     says, and watching them from nought is the whole point: a file that
+     starts empty and is not watched is a file somebody types a 3 into.
+
+     `roles-kit.ts` is the adapter between the generated record and a
+     React style object. It contains no design value either, only the
+     rule for collapsing four border sides into one. */
+  'components/admin/roles-chart.tsx',
+  'lib/admin/roles-kit.ts',
   'components/AnalyticsHub.tsx',
   'components/analytics/kit/charts.tsx',
   'components/analytics/kit/frame.tsx',
@@ -84,8 +98,19 @@ const RULES: { why: string; re: RegExp }[] = [
   { why: 'a hex colour', re: /#[0-9A-Fa-f]{3,8}\b/ },
   { why: 'an rgba colour', re: /\brgba?\s*\(/ },
   /* A length written into a style. Matched on the property name so that
-     `slice(0, 2)` and `getFullYear()` are not swept up. */
-  { why: 'a length in a style', re: /\b(width|height|padding|margin|gap|top|left|right|bottom|borderRadius|borderWidth|fontSize|lineHeight|letterSpacing|strokeWidth)\s*:\s*['"]?-?\d/ },
+     `slice(0, 2)` and `getFullYear()` are not swept up.
+
+     ---- Why a bare zero is not a length ----
+
+     `min-width: 0`, `border: 0` and `inset: 0` are the absence of a
+     value, not a choice of one. There is no kit measurement they could
+     be taken from and no way to get them wrong: a 0 cannot be the
+     3px somebody thought looked better.
+
+     Exempted only when it is EXACTLY zero with no unit and nothing
+     after it. `0px` still fails, because that is somebody writing a
+     length that happens to be nought, and so does `0.5`. */
+  { why: 'a length in a style', re: /\b(width|height|padding|margin|gap|top|left|right|bottom|borderRadius|borderWidth|fontSize|lineHeight|letterSpacing|strokeWidth)\s*:\s*['"]?-?(?!0\s*[;,}'"]|0$)\d/ },
   { why: 'a font weight', re: /\bfontWeight\s*:\s*['"]?\d/ },
   { why: 'a colour mix', re: /color-mix\s*\(/ },
 ];

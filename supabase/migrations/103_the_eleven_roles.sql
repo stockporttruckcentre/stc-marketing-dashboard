@@ -98,6 +98,12 @@ INSERT INTO capability_catalog (key, label, description, area, feature, danger, 
   ('brand.view', 'Use the brand kit', 'Open the brand kit and take a colour, a logo or a font from it.', 'Content', 'Brand', 'routine', '{}', FALSE, 200),
   ('brand.manage', 'Change the brand kit', 'Add, replace or remove brand assets. Everybody downstream uses whatever is in here.', 'Content', 'Brand', 'sensitive', '{brand.view}', FALSE, 210),
   ('access.request', 'Ask for something you may not do', 'Raise a request to whoever is senior to you for an export, an import or an approval you do not hold yourself.', 'Admin', 'Requests', 'routine', '{}', FALSE, 40),
+  /* Added with migration 108, which is what uses it, but declared here
+     because the seed below grants it and 103 refuses to finish if a
+     granted capability has no catalogue row. That assertion is why
+     this is in the right file: it caught the ordering at build time
+     rather than leaving a permission nothing could ever explain. */
+  ('admin.roles', 'Change what a role can do', 'Grant or take away a permission on a role template. It applies at once to everybody on that role, so this is the most far reaching change in the application.', 'Admin', 'Roles', 'destructive', '{}', FALSE, 45),
   ('access.decide', 'Decide those requests', 'Approve or refuse what the people you are senior to have asked for.', 'Admin', 'Requests', 'sensitive', '{}', FALSE, 50),
   ('admin.usersDepartment', 'Manage accounts in your own departments', 'Change roles and permissions for people in the departments you run, and nobody else. Narrower than admin.users, which reaches everybody.', 'Admin', 'Accounts', 'sensitive', '{}', FALSE, 15)
 ON CONFLICT (key) DO UPDATE
@@ -117,12 +123,27 @@ ON CONFLICT (key) DO UPDATE
 -- Generated. Edit `lib/platform/permissions/roles.ts` and run
 -- `npm run gen:roles`, never this block.
 -- -------------------------------------------------------------
+/* ---- The column the seed below checks ----
+
+   Set by `set_role_capability` in migration 108 the first time somebody
+   changes a role through the Roles tab. The generated block skips any
+   role where it is set, so re-pasting the catch-up bundle cannot undo
+   a change made through the interface.
+
+   Added here rather than in 108 because the seed below reads it, and
+   103 runs first. */
+ALTER TABLE role_templates ADD COLUMN IF NOT EXISTS customised_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN role_templates.customised_at IS
+  'When a person first changed this role through the Roles tab. Set '
+  'means the seed in migration 103 no longer touches it.';
+
 -- >>> GENERATED FROM lib/platform/permissions/roles.ts. Do not edit by hand.
 
 DELETE FROM role_template_capabilities
  WHERE role_template_id IN (SELECT id FROM role_templates WHERE slug IN (
    'developer', 'managing_director', 'business_development', 'sr_sales', 'sales_rep', 'sr_marketing', 'marketing_exec', 'sr_finance', 'finance', 'sr_office_admin', 'office_admin'
- ));
+ ) AND customised_at IS NULL);
 
 INSERT INTO role_templates (slug, name, description, is_system, sort_order) VALUES
   ('developer', 'Developer', 'Access to the entire app, including settings and the audit trail.', TRUE, 1),
@@ -147,57 +168,57 @@ INSERT INTO role_template_capabilities (role_template_id, capability, scope)
 SELECT rt.id, cap, 'company'::capability_scope
   FROM role_templates rt
   JOIN (VALUES
-  -- Developer (89)
+  -- Developer (90)
   ('developer', ARRAY[
-    'access.decide', 'access.request', 'admin.audit', 'admin.settings',
-    'admin.users', 'admin.usersDepartment', 'analytics.targets', 'analytics.view',
-    'brand.manage', 'brand.view', 'compliance.sensitive', 'crm.assign',
-    'crm.create', 'crm.delegate', 'crm.delete', 'crm.edit',
-    'crm.enrich', 'crm.export', 'crm.health', 'crm.import',
-    'crm.manageLists', 'crm.proposal', 'crm.proposalForOthers', 'crm.view',
-    'crm.viewGlobal', 'crm.viewOthers', 'entity.setOthers', 'entity.setOwn',
-    'entity.viewAll', 'finder.view', 'fleetsmart.build', 'fleetsmart.discount',
-    'fleetsmart.send', 'fleetsmart.view', 'leads.create', 'marketing.approve',
-    'marketing.edit', 'news.view', 'reports.export', 'reports.view',
-    'revenue.export', 'revenue.import', 'revenue.view', 'social.analytics',
-    'social.analyticsExport', 'social.approve', 'social.approveOwn', 'social.channels',
-    'social.delete', 'social.draft', 'social.editAny', 'social.library',
-    'social.metricSets', 'social.publishNow', 'social.schedule', 'social.tags',
-    'social.templates', 'social.view', 'stock.edit', 'stock.export',
-    'stock.view', 'tracker.view', 'work.analytics', 'work.analyticsAll',
-    'work.approve', 'work.assignDepartment', 'work.assignOthers', 'work.create',
-    'work.decideRelease', 'work.delete', 'work.edit', 'work.editAny',
-    'work.forceRelease', 'work.manageFields', 'work.manageProjects', 'work.manageSystemViews',
-    'work.projects', 'work.publishProject', 'work.reassign', 'work.requestRelease',
-    'work.review', 'work.rollback', 'work.schedule', 'work.setDue',
-    'work.shareViews', 'work.view', 'work.viewAll', 'work.viewDepartment',
-    'work.views'
+    'access.decide', 'access.request', 'admin.audit', 'admin.roles',
+    'admin.settings', 'admin.users', 'admin.usersDepartment', 'analytics.targets',
+    'analytics.view', 'brand.manage', 'brand.view', 'compliance.sensitive',
+    'crm.assign', 'crm.create', 'crm.delegate', 'crm.delete',
+    'crm.edit', 'crm.enrich', 'crm.export', 'crm.health',
+    'crm.import', 'crm.manageLists', 'crm.proposal', 'crm.proposalForOthers',
+    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'entity.setOthers',
+    'entity.setOwn', 'entity.viewAll', 'finder.view', 'fleetsmart.build',
+    'fleetsmart.discount', 'fleetsmart.send', 'fleetsmart.view', 'leads.create',
+    'marketing.approve', 'marketing.edit', 'news.view', 'reports.export',
+    'reports.view', 'revenue.export', 'revenue.import', 'revenue.view',
+    'social.analytics', 'social.analyticsExport', 'social.approve', 'social.approveOwn',
+    'social.channels', 'social.delete', 'social.draft', 'social.editAny',
+    'social.library', 'social.metricSets', 'social.publishNow', 'social.schedule',
+    'social.tags', 'social.templates', 'social.view', 'stock.edit',
+    'stock.export', 'stock.view', 'tracker.view', 'work.analytics',
+    'work.analyticsAll', 'work.approve', 'work.assignDepartment', 'work.assignOthers',
+    'work.create', 'work.decideRelease', 'work.delete', 'work.edit',
+    'work.editAny', 'work.forceRelease', 'work.manageFields', 'work.manageProjects',
+    'work.manageSystemViews', 'work.projects', 'work.publishProject', 'work.reassign',
+    'work.requestRelease', 'work.review', 'work.rollback', 'work.schedule',
+    'work.setDue', 'work.shareViews', 'work.view', 'work.viewAll',
+    'work.viewDepartment', 'work.views'
   ]),
-  -- Managing Director (89)
+  -- Managing Director (90)
   ('managing_director', ARRAY[
-    'access.decide', 'access.request', 'admin.audit', 'admin.settings',
-    'admin.users', 'admin.usersDepartment', 'analytics.targets', 'analytics.view',
-    'brand.manage', 'brand.view', 'compliance.sensitive', 'crm.assign',
-    'crm.create', 'crm.delegate', 'crm.delete', 'crm.edit',
-    'crm.enrich', 'crm.export', 'crm.health', 'crm.import',
-    'crm.manageLists', 'crm.proposal', 'crm.proposalForOthers', 'crm.view',
-    'crm.viewGlobal', 'crm.viewOthers', 'entity.setOthers', 'entity.setOwn',
-    'entity.viewAll', 'finder.view', 'fleetsmart.build', 'fleetsmart.discount',
-    'fleetsmart.send', 'fleetsmart.view', 'leads.create', 'marketing.approve',
-    'marketing.edit', 'news.view', 'reports.export', 'reports.view',
-    'revenue.export', 'revenue.import', 'revenue.view', 'social.analytics',
-    'social.analyticsExport', 'social.approve', 'social.approveOwn', 'social.channels',
-    'social.delete', 'social.draft', 'social.editAny', 'social.library',
-    'social.metricSets', 'social.publishNow', 'social.schedule', 'social.tags',
-    'social.templates', 'social.view', 'stock.edit', 'stock.export',
-    'stock.view', 'tracker.view', 'work.analytics', 'work.analyticsAll',
-    'work.approve', 'work.assignDepartment', 'work.assignOthers', 'work.create',
-    'work.decideRelease', 'work.delete', 'work.edit', 'work.editAny',
-    'work.forceRelease', 'work.manageFields', 'work.manageProjects', 'work.manageSystemViews',
-    'work.projects', 'work.publishProject', 'work.reassign', 'work.requestRelease',
-    'work.review', 'work.rollback', 'work.schedule', 'work.setDue',
-    'work.shareViews', 'work.view', 'work.viewAll', 'work.viewDepartment',
-    'work.views'
+    'access.decide', 'access.request', 'admin.audit', 'admin.roles',
+    'admin.settings', 'admin.users', 'admin.usersDepartment', 'analytics.targets',
+    'analytics.view', 'brand.manage', 'brand.view', 'compliance.sensitive',
+    'crm.assign', 'crm.create', 'crm.delegate', 'crm.delete',
+    'crm.edit', 'crm.enrich', 'crm.export', 'crm.health',
+    'crm.import', 'crm.manageLists', 'crm.proposal', 'crm.proposalForOthers',
+    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'entity.setOthers',
+    'entity.setOwn', 'entity.viewAll', 'finder.view', 'fleetsmart.build',
+    'fleetsmart.discount', 'fleetsmart.send', 'fleetsmart.view', 'leads.create',
+    'marketing.approve', 'marketing.edit', 'news.view', 'reports.export',
+    'reports.view', 'revenue.export', 'revenue.import', 'revenue.view',
+    'social.analytics', 'social.analyticsExport', 'social.approve', 'social.approveOwn',
+    'social.channels', 'social.delete', 'social.draft', 'social.editAny',
+    'social.library', 'social.metricSets', 'social.publishNow', 'social.schedule',
+    'social.tags', 'social.templates', 'social.view', 'stock.edit',
+    'stock.export', 'stock.view', 'tracker.view', 'work.analytics',
+    'work.analyticsAll', 'work.approve', 'work.assignDepartment', 'work.assignOthers',
+    'work.create', 'work.decideRelease', 'work.delete', 'work.edit',
+    'work.editAny', 'work.forceRelease', 'work.manageFields', 'work.manageProjects',
+    'work.manageSystemViews', 'work.projects', 'work.publishProject', 'work.reassign',
+    'work.requestRelease', 'work.review', 'work.rollback', 'work.schedule',
+    'work.setDue', 'work.shareViews', 'work.view', 'work.viewAll',
+    'work.viewDepartment', 'work.views'
   ]),
   -- Business Development (76)
   ('business_development', ARRAY[
@@ -277,26 +298,26 @@ SELECT rt.id, cap, 'company'::capability_scope
     'social.templates', 'social.view', 'work.create', 'work.edit',
     'work.requestRelease', 'work.setDue', 'work.view', 'work.views'
   ]),
-  -- Sr Finance (69)
+  -- Sr Finance (70)
   ('sr_finance', ARRAY[
-    'access.decide', 'access.request', 'admin.audit', 'admin.settings',
-    'admin.users', 'admin.usersDepartment', 'analytics.targets', 'analytics.view',
-    'compliance.sensitive', 'crm.assign', 'crm.create', 'crm.delegate',
-    'crm.delete', 'crm.edit', 'crm.enrich', 'crm.export',
-    'crm.health', 'crm.import', 'crm.manageLists', 'crm.proposal',
-    'crm.proposalForOthers', 'crm.view', 'crm.viewGlobal', 'crm.viewOthers',
-    'entity.setOthers', 'entity.setOwn', 'entity.viewAll', 'finder.view',
-    'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send', 'fleetsmart.view',
-    'leads.create', 'reports.export', 'reports.view', 'revenue.export',
-    'revenue.import', 'revenue.view', 'stock.edit', 'stock.export',
-    'stock.view', 'tracker.view', 'work.analytics', 'work.analyticsAll',
-    'work.approve', 'work.assignDepartment', 'work.assignOthers', 'work.create',
-    'work.decideRelease', 'work.delete', 'work.edit', 'work.editAny',
-    'work.forceRelease', 'work.manageFields', 'work.manageProjects', 'work.manageSystemViews',
-    'work.projects', 'work.publishProject', 'work.reassign', 'work.requestRelease',
-    'work.review', 'work.rollback', 'work.schedule', 'work.setDue',
-    'work.shareViews', 'work.view', 'work.viewAll', 'work.viewDepartment',
-    'work.views'
+    'access.decide', 'access.request', 'admin.audit', 'admin.roles',
+    'admin.settings', 'admin.users', 'admin.usersDepartment', 'analytics.targets',
+    'analytics.view', 'compliance.sensitive', 'crm.assign', 'crm.create',
+    'crm.delegate', 'crm.delete', 'crm.edit', 'crm.enrich',
+    'crm.export', 'crm.health', 'crm.import', 'crm.manageLists',
+    'crm.proposal', 'crm.proposalForOthers', 'crm.view', 'crm.viewGlobal',
+    'crm.viewOthers', 'entity.setOthers', 'entity.setOwn', 'entity.viewAll',
+    'finder.view', 'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send',
+    'fleetsmart.view', 'leads.create', 'reports.export', 'reports.view',
+    'revenue.export', 'revenue.import', 'revenue.view', 'stock.edit',
+    'stock.export', 'stock.view', 'tracker.view', 'work.analytics',
+    'work.analyticsAll', 'work.approve', 'work.assignDepartment', 'work.assignOthers',
+    'work.create', 'work.decideRelease', 'work.delete', 'work.edit',
+    'work.editAny', 'work.forceRelease', 'work.manageFields', 'work.manageProjects',
+    'work.manageSystemViews', 'work.projects', 'work.publishProject', 'work.reassign',
+    'work.requestRelease', 'work.review', 'work.rollback', 'work.schedule',
+    'work.setDue', 'work.shareViews', 'work.view', 'work.viewAll',
+    'work.viewDepartment', 'work.views'
   ]),
   -- Finance (28)
   ('finance', ARRAY[
@@ -326,6 +347,7 @@ SELECT rt.id, cap, 'company'::capability_scope
   ])
   ) AS v(slug, caps) ON v.slug = rt.slug
   CROSS JOIN LATERAL unnest(v.caps) AS cap
+ WHERE rt.customised_at IS NULL
 ON CONFLICT (role_template_id, capability) DO UPDATE SET scope = EXCLUDED.scope;
 
 -- <<< END GENERATED

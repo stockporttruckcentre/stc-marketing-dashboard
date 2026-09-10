@@ -73,6 +73,13 @@ export type CrmCapability =
      second file, because two permission models is how they drift. */
   /** Manage the team: add people, change roles, set dashboards. */
   | 'admin.users'
+  /**
+   * Change what a ROLE can do, which changes it for everybody on that
+   * role at once. Separate from `admin.users` because they are
+   * different jobs: putting Dean on Sr Sales is one person, deciding
+   * what Sr Sales means is all of them.
+   */
+  | 'admin.roles'
   /** Trailer stock: add, edit, mark sold. */
   | 'stock.edit'
   /** Social planner and brand kit. */
@@ -330,7 +337,7 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.health', 'analytics.targets', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
-    'admin.users', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',
+    'admin.users', 'admin.roles', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',
     /* Every Content capability, including the three the role templates
        withhold by default.
 
