@@ -372,6 +372,82 @@ BEGIN
       (SELECT email FROM crm_contacts WHERE id = ipsum) = 'iwe.accounts@ipsumutilities.com');
   END;
 
+  -- ===========================================================
+  -- An address is a ROW, not a column.
+  --
+  -- `contact_addresses` is where an address lives and
+  -- `crm_contacts.address` is a shadow of the primary one, maintained by
+  -- `contact_addresses_sync` in one direction. Writing the shadow, which
+  -- the first version did, leaves the record's Addresses panel empty and
+  -- the shadow full, so the next run says "nothing to add" about an
+  -- address nobody can see. Reported as: "It found ipsum and said
+  -- nothing to add, but the address is missing from the crm record."
+  --
+  -- Three states, and the middle one is the one that must not overwrite.
+  -- ===========================================================
+  DECLARE
+    broke UUID;
+    typed UUID;
+    empty UUID;
+    said3 JSONB;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+
+    /* a. what the broken version left: the shadow holds the file's own
+          address and there is no address row. */
+    INSERT INTO crm_contacts (company_name, address)
+    VALUES ('Broken Shadow Ltd', 'Rochester House, Chorley, PR7 1NY') RETURNING id INTO broke;
+    /* b. a hand typed address in the old field, DIFFERENT from the
+          file's. Theirs, and it must survive. */
+    INSERT INTO crm_contacts (company_name, address)
+    VALUES ('Hand Typed Ltd', 'Old Yard, Stockport, SK1 1AA') RETURNING id INTO typed;
+    /* c. nothing at all. */
+    INSERT INTO crm_contacts (company_name) VALUES ('Empty Haulage Ltd') RETURNING id INTO empty;
+
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'BROKESHA', 'Broken Shadow Ltd', broke),
+           ('stc', 'HANDTYPE', 'Hand Typed Ltd',    typed),
+           ('stc', 'EMPTYHAU', 'Empty Haulage Ltd', empty)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    said3 := jsonb_build_array(
+      jsonb_build_object('alpha', 'BROKESHA', 'name', 'Broken Shadow Ltd',
+        'email', '', 'phone', '', 'address', 'Rochester House, Chorley, PR7 1NY', 'city', 'Chorley'),
+      jsonb_build_object('alpha', 'HANDTYPE', 'name', 'Hand Typed Ltd',
+        'email', '', 'phone', '', 'address', 'A DIFFERENT ADDRESS, Leeds, LS1 1AA', 'city', 'Leeds'),
+      jsonb_build_object('alpha', 'EMPTYHAU', 'name', 'Empty Haulage Ltd',
+        'email', '', 'phone', '', 'address', 'New Depot, Warrington, WA1 1AA', 'city', 'Warrington'));
+
+    PERFORM crm_apply_enrichment(said3);
+
+    PERFORM pg_temp.must('an address goes on the Addresses list, where the map reads it',
+      (SELECT count(*) FROM contact_addresses a WHERE a.contact_id = empty) = 1);
+    PERFORM pg_temp.must('and is the primary one, which is what sets the record''s location',
+      (SELECT is_primary FROM contact_addresses a WHERE a.contact_id = empty));
+    PERFORM pg_temp.must('with the city, so the map can place it even if it cannot geocode the street',
+      (SELECT city FROM contact_addresses a WHERE a.contact_id = empty) = 'Warrington');
+    PERFORM pg_temp.must('and no coordinates, so the map geocodes it once and keeps them',
+      (SELECT lat IS NULL AND lng IS NULL FROM contact_addresses a WHERE a.contact_id = empty));
+
+    PERFORM pg_temp.must('a record stranded on the old single field gets a proper row',
+      (SELECT count(*) FROM contact_addresses a WHERE a.contact_id = broke) = 1);
+
+    /* The one that matters most. A hand typed address is theirs. */
+    PERFORM pg_temp.must('and a hand typed address is promoted, never replaced by the file',
+      (SELECT address FROM contact_addresses a WHERE a.contact_id = typed) = 'Old Yard, Stockport, SK1 1AA');
+
+    PERFORM pg_temp.must('and the shadow column follows the row rather than being written directly',
+      (SELECT c.address FROM crm_contacts c WHERE c.id = typed) = 'Old Yard, Stockport, SK1 1AA');
+
+    /* Running it again adds no second address row. */
+    PERFORM crm_apply_enrichment(said3);
+    PERFORM pg_temp.must('running it again does not add a second address',
+      (SELECT count(*) FROM contact_addresses a WHERE a.contact_id = empty) = 1);
+  END;
+
   -- =============================================================
   -- Applying it.
   -- =============================================================

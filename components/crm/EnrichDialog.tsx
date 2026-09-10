@@ -6,6 +6,7 @@ import { Upload, Check, Loader, ArrowLeft } from 'lucide-react';
 import { Button, Badge, Alert } from '@/components/kit/primitives';
 import { Modal, Select } from '@/components/kit/forms';
 import { createClient } from '@/lib/supabase/client';
+import { extractCityFromAddress } from '@/lib/uk-cities';
 
 /* =============================================================
    Filling in what the CRM is missing, from somebody else's file.
@@ -47,7 +48,16 @@ import { createClient } from '@/lib/supabase/client';
 
 type Step = 'file' | 'review' | 'done';
 
-type Row = { alpha: string; name: string; email: string; phone: string; address: string };
+type Row = {
+  alpha: string; name: string; email: string; phone: string; address: string;
+  /* Worked out here rather than in the database, because
+     `extractCityFromAddress` has the list of UK cities in it and a
+     second implementation in SQL would disagree with this one the first
+     time somebody edited either. It sets the city on the address row,
+     which is what the map falls back to when it cannot place the full
+     address. */
+  city: string;
+};
 
 type Plan = {
   alpha: string;
@@ -93,8 +103,11 @@ const TONE: Record<string, 'neutral' | 'info' | 'warning' | 'accent'> = {
   'same customer as another row': 'neutral',
 };
 
+/** The fields that come from a column in the file. `city` is derived. */
+type Mapped = 'alpha' | 'name' | 'email' | 'phone' | 'address';
+
 /** Header names we recognise without being told. */
-const GUESS: Record<keyof Row, string[]> = {
+const GUESS: Record<Mapped, string[]> = {
   alpha: ['alpha', 'account', 'account code', 'code', 'customer code'],
   name: ['customer name', 'company name', 'customer', 'company', 'name'],
   email: ['email', 'e-mail', 'email address'],
@@ -116,7 +129,7 @@ export function EnrichDialog({ onClose, onDone }: {
   const [failed, setFailed] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [raw, setRaw] = useState<Record<string, string>[]>([]);
-  const [cols, setCols] = useState<Record<keyof Row, string>>({
+  const [cols, setCols] = useState<Record<Mapped, string>>({
     alpha: '', name: '', email: '', phone: '', address: '',
   });
   const [plan, setPlan] = useState<Plan[] | null>(null);
@@ -128,10 +141,10 @@ export function EnrichDialog({ onClose, onDone }: {
     setHeaders(head);
     setRaw(rows);
 
-    const picked: Record<keyof Row, string> = {
+    const picked: Record<Mapped, string> = {
       alpha: '', name: '', email: '', phone: '', address: '',
     };
-    for (const field of Object.keys(GUESS) as (keyof Row)[]) {
+    for (const field of Object.keys(GUESS) as Mapped[]) {
       picked[field] = head.find((h) => GUESS[field].includes(norm(h))) ?? '';
     }
     setCols(picked);
@@ -168,13 +181,17 @@ export function EnrichDialog({ onClose, onDone }: {
     take((res.data ?? []).filter((r) => Object.values(r).some((v) => v?.trim())));
   }, [take]);
 
-  const rows: Row[] = useMemo(() => raw.map((r) => ({
-    alpha: (cols.alpha ? r[cols.alpha] : '') ?? '',
-    name: (cols.name ? r[cols.name] : '') ?? '',
-    email: (cols.email ? r[cols.email] : '') ?? '',
-    phone: (cols.phone ? r[cols.phone] : '') ?? '',
-    address: (cols.address ? r[cols.address] : '') ?? '',
-  })), [raw, cols]);
+  const rows: Row[] = useMemo(() => raw.map((r) => {
+    const address = (cols.address ? r[cols.address] : '') ?? '';
+    return {
+      alpha: (cols.alpha ? r[cols.alpha] : '') ?? '',
+      name: (cols.name ? r[cols.name] : '') ?? '',
+      email: (cols.email ? r[cols.email] : '') ?? '',
+      phone: (cols.phone ? r[cols.phone] : '') ?? '',
+      address,
+      city: (address ? extractCityFromAddress(address) : null) ?? '',
+    };
+  }), [raw, cols]);
 
   const preview = useCallback(async () => {
     setBusy(true);
@@ -257,6 +274,8 @@ export function EnrichDialog({ onClose, onDone }: {
             This only fills in blanks. It never creates a record and never
             overwrites something that is already there, so a company on the
             file that is not in the CRM is left alone.
+            {' '}An address goes on the customer&rsquo;s Addresses list as the head
+            office, so it appears on the map, and not in the old single field.
           </p>
 
           <div
@@ -293,7 +312,7 @@ export function EnrichDialog({ onClose, onDone }: {
                 Which column is which. The account code is the one that matches
                 without guessing, so leave it set if the file has one.
               </div>
-              {(Object.keys(GUESS) as (keyof Row)[]).map((field) => (
+              {(Object.keys(GUESS) as Mapped[]).map((field) => (
                 <div key={field} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <span style={{ fontSize: 13, width: 130, textTransform: 'capitalize' }}>
                     {field === 'alpha' ? 'Account code' : field}
