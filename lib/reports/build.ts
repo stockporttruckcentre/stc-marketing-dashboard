@@ -539,9 +539,15 @@ async function openJobsSection(db: Db, f: ReportFilters): Promise<Section> {
 
 async function oldestJobsSection(db: Db, f: ReportFilters): Promise<Section> {
   const divisions = divisionFilter(f);
+  /* `protean_name` and `logged_on`, which is what the table calls them.
+     This asked for `customer` and `logged_date`, so PostgREST refused
+     the whole select and the section fell into the branch below saying
+     the table is not on this installation. It is, and this section has
+     never once rendered. `npm run check:columns` had been reporting it
+     and nothing ran that check. */
   let q = db.from('protean_open_jobs')
-    .select('job_no, customer, job_type, depot, logged_date, job_total, division')
-    .order('logged_date', { ascending: true });
+    .select('job_no, protean_name, job_type, depot, logged_on, job_total, division')
+    .order('logged_on', { ascending: true });
   if (divisions) q = q.in('division', divisions);
   const { data, error } = await q.limit(20);
   if (error) {
@@ -565,10 +571,10 @@ async function oldestJobsSection(db: Db, f: ReportFilters): Promise<Section> {
     ],
     rows: rows.map((r) => ({
       job: r.job_no,
-      customer: r.customer,
+      customer: r.protean_name,
       type: r.job_type ?? '—',
       depot: r.depot ?? '—',
-      logged: when(r.logged_date),
+      logged: when(r.logged_on),
       value: money(r.job_total),
     })),
   };
@@ -638,12 +644,23 @@ async function diarySection(db: Db): Promise<Section> {
   const from = new Date();
   const to = new Date();
   to.setDate(to.getDate() + 14);
-  const { data } = await db.from('calendar_events')
-    .select('title, start_at, location, contact_id')
+  /* No `location`. `calendar_events` has never had one, so this select
+     was refused outright and every diary section in every report came
+     back empty rather than saying why. The error was not read either,
+     which is how it stayed quiet.
+
+     `description` is the nearest thing the table has and is where
+     somebody types where a meeting is, so it carries the same job. */
+  const { data, error } = await db.from('calendar_events')
+    .select('title, start_at, description, contact_id')
     .gte('start_at', from.toISOString())
     .lte('start_at', to.toISOString())
     .order('start_at')
     .limit(50);
+  if (error) {
+    return { kind: 'note', id: 'diary', title: 'In the diary, next two weeks',
+      text: `The diary could not be read: ${error.message}` };
+  }
   const rows = (data ?? []) as any[];
 
   return {
@@ -655,7 +672,7 @@ async function diarySection(db: Db): Promise<Section> {
       title: r.title,
       meta: new Date(r.start_at).toLocaleString('en-GB', {
         weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      }) + (r.location ? ` · ${r.location}` : ''),
+      }) + (r.description ? ` · ${String(r.description).split('\n')[0].slice(0, 60)}` : ''),
       tone: 'info' as const,
     })),
   };

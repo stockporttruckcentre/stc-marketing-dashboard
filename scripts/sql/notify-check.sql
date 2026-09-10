@@ -628,8 +628,21 @@ BEGIN
   END IF;
   RAISE NOTICE 'ok  a contract accepted books all four renewal reminders, in order';
 
-  -- Renewed, so the ones that have not landed come back down.
-  PERFORM fleetsmart_decide(c, 'expired', 'Replaced by a new contract');
+  /* ---- Ended, so the ones that have not landed come back down ----
+
+     Through `fleetsmart_end`, which is how an accepted contract is
+     actually closed. This said `fleetsmart_decide(c, 'expired', ...)`,
+     and migration 067 later gave `fleetsmart_decide` a guard refusing a
+     second answer on a contract already accepted. So this line threw,
+     and it is the SECOND assertion in a file of thirty two: every one
+     after it has been dead since that migration landed.
+
+     Nothing was wrong with the product. `notify_on_contract_decided`
+     takes the ladder down on `OLD.status = 'accepted'`, whatever the
+     new status is, so ending works and always did. What was wrong is
+     that nobody ran this file, which is why `npm run check:all` now
+     exists. */
+  PERFORM fleetsmart_end(c, 'Replaced by a new contract');
 
   SELECT count(*) INTO rungs
     FROM pg_temp.rows_for('cc000000-0000-0000-0000-000000000002', 'fleetsmart.renewal')
@@ -637,7 +650,7 @@ BEGIN
   IF rungs <> 0 THEN
     RAISE EXCEPTION '% renewal reminders survived the contract being closed', rungs;
   END IF;
-  RAISE NOTICE 'ok  and closing it takes the ones that have not landed back down';
+  RAISE NOTICE 'ok  and ending it takes the ones that have not landed back down';
 END $$;
 
 SELECT pg_temp.wipe();

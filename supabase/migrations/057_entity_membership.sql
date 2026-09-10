@@ -365,6 +365,26 @@ CREATE TRIGGER trg_task_comments_entity BEFORE INSERT ON task_comments
 -- yours. Cross-company assignment is normal and this makes it visible
 -- rather than silent.
 -- -------------------------------------------------------------
+/* ---- Dropped, not replaced ----
+
+   `CREATE OR REPLACE VIEW` can change a view's body. It cannot change
+   its COLUMNS, so the first migration that adds one turns every earlier
+   definition of the same view into a statement that fails.
+
+   That is what happened here. Migration 101 added `photo_url`, so on a
+   second pass through the bundle this eleven column definition met the
+   twelve column view 101 had left, and Postgres said:
+
+     ERROR:  cannot drop columns from view
+
+   Which made the note at the top of every catch-up bundle, "safe to run
+   more than once", untrue. `npm run check:bundle-twice` proves that
+   claim and had been failing on exactly this.
+
+   Nothing depends on this view, so the drop is free. It is here on
+   every definition rather than only the one that clashed, because the
+   next column somebody adds must not reintroduce it. */
+DROP VIEW IF EXISTS assignable_people;
 CREATE OR REPLACE VIEW assignable_people AS
 SELECT
   p.id,

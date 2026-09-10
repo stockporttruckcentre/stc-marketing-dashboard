@@ -42,7 +42,10 @@ export PGHOST=/var/tmp/pgtest
 
 STOP_AT=073_the_permission_hub
 # Every "Migration" cell that must say NO on the database that stops there.
-MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 093 094 095"
+# 093 is not here: it renamed the rental division to S&L and 098 renamed
+# it back, so it left no trace to look for and its catalogue row is now
+# 098 instead. See the note beside that row in whats-applied.sql.
+MISSING="074 075 076 077 078 079 080 081 082 083 084 085 086 087 088 089 090 091 092 094 095 098"
 
 FAILED=0
 say() { printf '  %-6s %s\n' "$1" "$2"; }
