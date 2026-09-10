@@ -34,6 +34,70 @@
 
 BEGIN;
 
+/* -------------------------------------------------------------
+   No function writes without saying which rows.
+
+   Supabase preloads `pg_safeupdate`, which refuses any DELETE or UPDATE
+   with no WHERE clause and says "DELETE requires a WHERE clause". The
+   disposable Postgres here does not have it, and that difference let a
+   bare `DELETE FROM _enrich;` through every check in this file and fail
+   on the first real press of Apply.
+
+   The extension cannot be installed here, so the rule is asserted
+   statically instead, over every function this application owns rather
+   than only the two this file is about. A check that runs under looser
+   rules than production passes for the wrong reason, and the fix is to
+   stop it passing rather than to remember harder.
+   ------------------------------------------------------------- */
+/* Comments off first. This very check is explained inside
+   `crm_apply_enrichment` and the explanation quotes the bad statement,
+   so a scan of the raw source fails on the note describing the fix.
+   The screen capability check hit the same trap and solves it the same
+   way. */
+CREATE OR REPLACE FUNCTION pg_temp.body(p_src TEXT) RETURNS TEXT
+LANGUAGE SQL IMMUTABLE AS $fn$
+  SELECT regexp_replace(
+           regexp_replace(p_src, '/\*.*?\*/', ' ', 'g'),
+           '--[^' || chr(10) || ']*', ' ', 'g')
+$fn$;
+
+DO $$
+DECLARE bad TEXT;
+BEGIN
+  SELECT string_agg(x.proname, ', ' ORDER BY x.proname) INTO bad
+    FROM (
+      SELECT p.proname, pg_temp.body(p.prosrc) AS src
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND p.prolang = (SELECT oid FROM pg_language WHERE lanname = 'plpgsql')
+    ) x
+     /* `DELETE FROM something;` with nothing between the table and the
+        semicolon. The only form that matters, and the only one a regex
+        over a function body can call with confidence. */
+   WHERE x.src ~* '\mDELETE\s+FROM\s+[a-z_][a-z0-9_.]*\s*;';
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL  these delete without a WHERE and Supabase will refuse them: %', bad;
+  END IF;
+
+  SELECT string_agg(x.proname, ', ' ORDER BY x.proname) INTO bad
+    FROM (
+      SELECT p.proname, pg_temp.body(p.prosrc) AS src
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND p.prolang = (SELECT oid FROM pg_language WHERE lanname = 'plpgsql')
+    ) x
+     /* `UPDATE something SET ... ;` with no WHERE anywhere in it. The
+        SET clause may span lines, so the class runs to the terminator,
+        and a WHERE inside it lets the statement through. */
+   WHERE x.src ~* '\mUPDATE\s+[a-z_][a-z0-9_.]*\s+SET\s+[^;]*;'
+     AND x.src !~* '\mUPDATE\s+[a-z_][a-z0-9_.]*\s+SET\s+[^;]*\yWHERE\y[^;]*;';
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL  these update without a WHERE and Supabase will refuse them: %', bad;
+  END IF;
+
+  RAISE NOTICE 'ok    no function writes without saying which rows, which Supabase refuses';
+END $$;
+
 CREATE OR REPLACE FUNCTION pg_temp.must(p_what TEXT, p_ok BOOLEAN) RETURNS VOID
 LANGUAGE plpgsql AS $fn$
 BEGIN

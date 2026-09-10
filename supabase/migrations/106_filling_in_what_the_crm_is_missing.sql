@@ -357,41 +357,49 @@ BEGIN
     RAISE EXCEPTION 'Bringing a file into the CRM needs the import permission.';
   END IF;
 
-  CREATE TEMP TABLE IF NOT EXISTS _enrich (
-    contact_id UUID PRIMARY KEY,
-    email      TEXT,
-    phone      TEXT,
-    address    TEXT
-  ) ON COMMIT DROP;
-  DELETE FROM _enrich;
+  /* One statement, no scratch table.
 
-  INSERT INTO _enrich (contact_id, email, phone, address)
-  SELECT p.contact_id,
-         max(p.fill_email),
-         max(p.fill_phone),
-         max(p.fill_address)
-    FROM crm_enrichment_plan(p_rows) p
-   WHERE p.verdict = 'fill' AND p.contact_id IS NOT NULL
-   GROUP BY p.contact_id;
+     The first version built a temp table and cleared it with
+     `DELETE FROM _enrich;`. Supabase runs with `sql_safe_updates` on,
+     which refuses any DELETE or UPDATE without a WHERE clause, so the
+     whole thing failed at the point of pressing Apply with "DELETE
+     requires a WHERE clause". The disposable Postgres this was written
+     against does not have that setting on by default, which is why it
+     passed here and failed there. `enrichment-check.sql` turns it on
+     now so the next one cannot get through.
 
-  SELECT count(*) FILTER (WHERE email IS NOT NULL),
-         count(*) FILTER (WHERE phone IS NOT NULL),
-         count(*) FILTER (WHERE address IS NOT NULL),
-         count(*)
-    INTO emails, phones, addrs, filled
-    FROM _enrich;
-
-  /* COALESCE on the existing value, not on the incoming one. The plan
-     has already decided the column is empty; this is the second lock on
-     the same door, because "never overwrite" is the requirement that
-     cannot be got wrong quietly. */
-  UPDATE crm_contacts c
-     SET email      = COALESCE(NULLIF(btrim(COALESCE(c.email, '')), ''), e.email),
-         phone      = COALESCE(NULLIF(btrim(COALESCE(c.phone, '')), ''), e.phone),
-         address    = COALESCE(NULLIF(btrim(COALESCE(c.address, '')), ''), e.address),
-         updated_at = NOW()
-    FROM _enrich e
-   WHERE c.id = e.contact_id;
+     A CTE is the better shape anyway: the plan is computed once, the
+     update reads it, and the counts come back out of the same
+     statement rather than from a table that has to be kept in step. */
+  WITH decided AS (
+    SELECT p.contact_id,
+           max(p.fill_email)   AS email,
+           max(p.fill_phone)   AS phone,
+           max(p.fill_address) AS address
+      FROM crm_enrichment_plan(p_rows) p
+     WHERE p.verdict = 'fill' AND p.contact_id IS NOT NULL
+     GROUP BY p.contact_id
+  ),
+  applied AS (
+    /* COALESCE on the EXISTING value, not on the incoming one. The plan
+       has already decided the column is empty; this is the second lock
+       on the same door, because "never overwrite" is the requirement
+       that cannot be got wrong quietly. */
+    UPDATE crm_contacts c
+       SET email      = COALESCE(NULLIF(btrim(COALESCE(c.email, '')), ''), d.email),
+           phone      = COALESCE(NULLIF(btrim(COALESCE(c.phone, '')), ''), d.phone),
+           address    = COALESCE(NULLIF(btrim(COALESCE(c.address, '')), ''), d.address),
+           updated_at = NOW()
+      FROM decided d
+     WHERE c.id = d.contact_id
+    RETURNING d.email AS put_email, d.phone AS put_phone, d.address AS put_address
+  )
+  SELECT count(*),
+         count(put_email),
+         count(put_phone),
+         count(put_address)
+    INTO filled, emails, phones, addrs
+    FROM applied;
 
   PERFORM audit(
     'update', 'crm_contacts', NULL, 'filled in from a file',
