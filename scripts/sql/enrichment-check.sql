@@ -22,9 +22,13 @@
 --   4. AN AMBIGUOUS NAME IS REFUSED, on either side. Two CRM records
 --      with the same normalised name, or a name appearing twice in the
 --      file, and the answer is to report rather than pick.
---   5. TWO ROWS THAT DISAGREE ARE BOTH REFUSED. Two Protean accounts on
---      one customer is normal. Disagreeing about the phone number is a
---      question.
+--   5. ONE CUSTOMER, TWO ACCOUNT CODES. Normal, and not a
+--      contradiction. Ipsum is IPSUM in Chorley and IPSUM01 in Glasgow,
+--      both bound to one record. The first version called that "two
+--      rows disagree" and refused everything for that customer,
+--      including the email only one row had. Reported by the business:
+--      "if you're doing a direct alpha match what's the confusion? ...
+--      It didn't put the address in. One of many".
 --   6. A NAME THAT IS ONLY A SUFFIX IS NOT A NAME. "Ltd" must not
 --      become a key that matches half the CRM.
 --
@@ -281,15 +285,92 @@ BEGIN
   PERFORM pg_temp.must('a name that is only a company suffix matches nothing',
     plan.contact_id IS NULL);
 
-  -- ---- 7. a row with nothing to give ----
+  -- ---- 7. Booker's second account code ----
+  /* BOOKERLIM is Booker's other Protean account and carries nothing. It
+     used to read "file has nothing"; now it reads as what it is, the
+     second row for a customer another row speaks for. Both are true and
+     the second is the more useful thing to see when looking for why a
+     line did not fill. */
   SELECT * INTO plan FROM crm_enrichment_plan(said) p WHERE p.alpha = 'BOOKERLIM';
-  PERFORM pg_temp.must('a row carrying nothing says so rather than counting as work',
-    plan.contact_id = booker AND plan.verdict = 'file has nothing');
+  PERFORM pg_temp.must('a second account code on a customer says which it is',
+    plan.contact_id = booker AND plan.verdict = 'same customer as another row');
+
+  /* And a customer with ONE account code and an empty row still says
+     the file had nothing for it, which is a different fact. */
+  DECLARE
+    quiet UUID;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+    INSERT INTO crm_contacts (company_name) VALUES ('Quiet Haulage Ltd') RETURNING id INTO quiet;
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'QUIETHAU', 'Quiet Haulage Ltd', quiet)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    SELECT * INTO plan FROM crm_enrichment_plan(jsonb_build_array(
+      jsonb_build_object('alpha', 'QUIETHAU', 'name', 'Quiet Haulage Ltd',
+        'email', '', 'phone', '', 'address', ''))) p;
+    PERFORM pg_temp.must('a row carrying nothing says so rather than counting as work',
+      plan.contact_id = quiet AND plan.verdict = 'file has nothing');
+  END;
 
   -- ---- 8. a field that is not what it claims ----
   SELECT * INTO plan FROM crm_enrichment_plan(said) p WHERE p.alpha = 'DUMMYMAIL';
   PERFORM pg_temp.must('"no email on file" is not an email address and is dropped',
     plan.fill_email IS NULL);
+
+  -- ===========================================================
+  -- One customer with two account codes.
+  --
+  -- The case that was reported, with the real names and the real
+  -- addresses. Both codes bound to one record, one row carrying an
+  -- email and a Chorley address, the other carrying a Glasgow one.
+  --
+  -- What must happen: the record is filled, the email goes in, and the
+  -- address is the one from the row whose own name IS the record's
+  -- name. What must NOT happen is the first version's answer, which was
+  -- to refuse the lot.
+  -- ===========================================================
+  DECLARE
+    ipsum UUID;
+    two   JSONB;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+    INSERT INTO crm_contacts (company_name) VALUES ('Ipsum Water England & Wales')
+    RETURNING id INTO ipsum;
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'IPSUM',   'Ipsum Water England & Wales',    ipsum),
+           ('stc', 'IPSUM01', 'Ipsum - Infrastructure Vehicle', ipsum)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    two := jsonb_build_array(
+      jsonb_build_object('alpha', 'IPSUM', 'name', 'Ipsum Water England & Wales',
+        'email', 'iwe.accounts@ipsumutilities.com', 'phone', '',
+        'address', 'Rochester House, Ackhurst Business Park, Foxhole Road, Chorley, PR7 1NY'),
+      jsonb_build_object('alpha', 'IPSUM01', 'name', 'Ipsum - Infrastructure Vehicle',
+        'email', '', 'phone', '', 'address', '2-4 Watt Road, , Hillington, Glasgow, G52 4RR'));
+
+    SELECT * INTO plan FROM crm_enrichment_plan(two) p WHERE p.alpha = 'IPSUM';
+    PERFORM pg_temp.must('a customer with two account codes is filled, not refused',
+      plan.verdict = 'fill');
+    PERFORM pg_temp.must('and the address comes from the row whose name IS the record''s name',
+      plan.fill_address LIKE 'Rochester House%');
+    PERFORM pg_temp.must('and the email only one of the two rows had still goes in',
+      plan.fill_email = 'iwe.accounts@ipsumutilities.com');
+
+    SELECT * INTO plan FROM crm_enrichment_plan(two) p WHERE p.alpha = 'IPSUM01';
+    PERFORM pg_temp.must('and the other row says why it is not the one supplying them',
+      plan.verdict = 'same customer as another row' AND plan.contact_id = ipsum);
+
+    PERFORM crm_apply_enrichment(two);
+    PERFORM pg_temp.must('and applying it actually writes the Chorley address',
+      (SELECT address FROM crm_contacts WHERE id = ipsum) LIKE 'Rochester House%');
+    PERFORM pg_temp.must('and the email',
+      (SELECT email FROM crm_contacts WHERE id = ipsum) = 'iwe.accounts@ipsumutilities.com');
+  END;
 
   -- =============================================================
   -- Applying it.
