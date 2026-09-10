@@ -185,6 +185,21 @@ CREATE INDEX IF NOT EXISTS idx_crm_contacts_company_key
 --                     the file, and another of its rows is the one
 --                     supplying the values. Not a refusal.
 -- -------------------------------------------------------------
+/* Dropped first, because this returns a TABLE and `CREATE OR REPLACE`
+   cannot change one: Postgres answers "cannot change return type of
+   existing function ... Row type defined by OUT parameters is
+   different". Adding `fill_city` to the column list is exactly that.
+
+   It failed on the live database and passed every check here, because
+   the disposable server is built from nothing every time and had never
+   seen the older shape. `bundle-twice-check` did not catch it either:
+   it applies this file twice over a base that never had the old
+   version, so the second pass is replacing a function that already
+   matches.
+
+   `npm run check:migrations` is the guard for the class. */
+DROP FUNCTION IF EXISTS crm_enrichment_plan(JSONB);
+
 CREATE OR REPLACE FUNCTION crm_enrichment_plan(p_rows JSONB)
 RETURNS TABLE (
   alpha        TEXT,

@@ -94,6 +94,11 @@ UPDATE role_templates rt
 -- above them has it either, and the interface says "nobody here can do
 -- that" rather than sending them on a walk.
 -- -------------------------------------------------------------
+/* Dropped first. It returns a TABLE, and `CREATE OR REPLACE` cannot
+   change one: adding a column to the list answers "cannot change return
+   type of existing function". `npm run check:migrations` enforces it. */
+DROP FUNCTION IF EXISTS escalation_for(TEXT);
+
 CREATE OR REPLACE FUNCTION escalation_for(p_capability TEXT)
 RETURNS TABLE (slug TEXT, name TEXT)
 LANGUAGE plpgsql
@@ -545,6 +550,8 @@ ON CONFLICT (key) DO UPDATE SET
 -- design, and sending it up the chain as well would make the two levels
 -- mean the same thing.
 -- -------------------------------------------------------------
+DROP FUNCTION IF EXISTS crm_red_flag_audience(UUID);
+
 CREATE OR REPLACE FUNCTION crm_red_flag_audience(p_contact UUID)
 RETURNS TABLE (user_id UUID)
 LANGUAGE sql
