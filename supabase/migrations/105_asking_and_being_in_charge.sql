@@ -529,6 +529,18 @@ ON CONFLICT (key) DO UPDATE SET
 -- charge of sales. Naming those two by slug would have been shorter and
 -- would have stopped being true the first time somebody added a role.
 --
+-- ---- Running everything is not being the sales overseer ----
+--
+-- Developer and Managing Director run every department, which is right
+-- for editing accounts and wrong here: the list asked for was three
+-- people, and an urgent notification that cannot be muted, on every red
+-- account in the company, is how the MD stops reading them.
+--
+-- So the rule is "runs sales, and does not run the executive layer".
+-- Only the two roles that hold the whole application run `exec`. If the
+-- MD does want them, take the `exec` line out and everybody who runs
+-- sales hears, which is the one line this turns on.
+--
 -- Amber is deliberately not included. Amber waits for the button by
 -- design, and sending it up the chain as well would make the two levels
 -- mean the same thing.
@@ -547,15 +559,17 @@ AS $fn$
     JOIN role_templates rt ON rt.id = p.role_template_id
    WHERE rt.is_active
      AND p.is_active IS NOT FALSE
-     AND 'sales' = ANY(rt.manages);
+     AND 'sales' = ANY(rt.manages)
+     AND NOT ('exec' = ANY(rt.manages));
 $fn$;
 
 GRANT EXECUTE ON FUNCTION crm_red_flag_audience(UUID) TO authenticated;
 
 COMMENT ON FUNCTION crm_red_flag_audience(UUID) IS
   'Who hears when an account goes red: whoever owns it, plus everybody '
-  'whose role runs the sales department. Driven off the role rather '
-  'than a list of names, so it stays right when somebody is promoted.';
+  'whose role runs the sales department without running the whole '
+  'company. Driven off the role rather than a list of names, so it '
+  'stays right when somebody is promoted.';
 
 COMMIT;
 
@@ -614,9 +628,9 @@ BEGIN
   END IF;
 
   SELECT count(*) INTO n FROM role_templates
-   WHERE is_active AND 'sales' = ANY(manages);
-  IF n < 2 THEN
-    RAISE EXCEPTION '105 did not land: only % role(s) run sales, expected Sr Sales and BD', n;
+   WHERE is_active AND 'sales' = ANY(manages) AND NOT ('exec' = ANY(manages));
+  IF n <> 2 THEN
+    RAISE EXCEPTION '105 did not land: % role(s) hear about a red account, expected Sr Sales and BD', n;
   END IF;
 
   IF to_regclass('public.capability_requests') IS NULL THEN
