@@ -7,7 +7,7 @@ import { type Suggestion } from '@/lib/command/features';
 import { suggestActions } from '@/lib/command/actions';
 import { composeSuggestions } from '@/lib/command/compose';
 import { composeEdits } from '@/lib/command/mutate';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { capabilitiesFor, type CrmCapability } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 import { planCommand } from '@/lib/command/plan';
 import type { PlannedMeaning } from '@/lib/command/server/planner';
@@ -100,7 +100,7 @@ const SHORT_EXAMPLES = [
  * `seed` lets the quick action buttons drive this bar instead of each
  * one growing its own modal. Bump the nonce to re-apply the same text.
  */
-export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
+export function CommandBar({ seed, variant = 'panel', role = 'viewer', caps: given }: {
   seed?: { text: string; nonce: number };
   /**
    * What this person may do. Actions they cannot reach are never
@@ -108,6 +108,12 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
    * bar is unreliable. "Elevate Dave to admin" exists for one person.
    */
   role?: UserRole;
+  /* Resolved on the server from the person's role template and their
+     overrides. CLAUDE.md is blunt about why this matters here: "Nothing
+     you cannot do is ever offered", and an action filtered on the four
+     value role column offers Sr Sales an export the template gives them
+     and offers Marketing one it does not. */
+  caps?: string[];
   /**
    * `panel` is the dashboard card. `bar` is the form that lives in the
    * top bar on every page: a 38px input, centred, whose results float
@@ -208,7 +214,10 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer' }: {
      the server's canonical plan, and a sentence it refuses is refused. */
   // Everything the app can do, ranked against what has been typed. This is
   // what stops a bare word like "meeting" hitting a dead end.
-  const caps = useMemo(() => capabilitiesFor({ role }), [role]);
+  const caps = useMemo(
+    () => (given ? new Set(given) : capabilitiesFor({ role })) as Set<CrmCapability>,
+    [role, given],
+  );
 
   /**
    * Everything the product can do, filtered to this person, ahead of the

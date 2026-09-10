@@ -1,6 +1,19 @@
 -- =============================================================
 -- The permission hub, and the five things it must never let happen.
 --
+-- ---- The template names this file uses ----
+--
+-- Migration 103 replaced the five templates this check was written
+-- against, so it names three of the eleven instead:
+--
+--   managing_director   a template that carries admin.users
+--   office_admin        a template that carries none of the admin ones
+--   sales_rep           an ordinary template to move somebody onto
+--
+-- `admin_set_role_template` refuses a retired template, which is
+-- correct and is what caught this: the check asked for `contributor`
+-- and was told there is no role called that.
+--
 -- 1. Somebody who is not an administrator changing anybody's access.
 -- 2. The last administrator losing `admin.users`, by any of the three
 --    routes that can take it: an override, a role template, or the
@@ -124,7 +137,7 @@ BEGIN
   PERFORM pg_temp.act_as('cc000000-0000-0000-0000-000000000004');
   ok := FALSE;
   BEGIN
-    PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000003', 'administrator');
+    PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000003', 'managing_director');
   EXCEPTION WHEN OTHERS THEN ok := TRUE;
   END;
   IF NOT ok THEN RAISE EXCEPTION 'a viewer made somebody an administrator'; END IF;
@@ -280,7 +293,7 @@ BEGIN
   -- Route two: a role template with no admin.users on it. Refused.
   ok := FALSE;
   BEGIN
-    PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000001', 'observer');
+    PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000001', 'office_admin');
   EXCEPTION WHEN OTHERS THEN ok := TRUE;
   END;
   IF NOT ok THEN RAISE EXCEPTION 'the last administrator moved themselves onto a template with no admin'; END IF;
@@ -363,10 +376,10 @@ BEGIN
   cap := pg_temp.a_capability_needing(FALSE);
 
   PERFORM admin_set_capability('cc000000-0000-0000-0000-000000000004', cap, TRUE, 'an exception, on purpose');
-  PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000004', 'contributor');
+  PERFORM admin_set_role_template('cc000000-0000-0000-0000-000000000004', 'sales_rep');
 
   IF (SELECT t.slug FROM profiles p JOIN role_templates t ON t.id = p.role_template_id
-       WHERE p.id = 'cc000000-0000-0000-0000-000000000004') <> 'contributor' THEN
+       WHERE p.id = 'cc000000-0000-0000-0000-000000000004') <> 'sales_rep' THEN
     RAISE EXCEPTION 'the template did not move';
   END IF;
 
@@ -637,7 +650,7 @@ DECLARE
   columns   TEXT[][];
 BEGIN
   PERFORM pg_temp.act_as('cc000000-0000-0000-0000-000000000001');
-  SELECT id INTO admin_tpl FROM role_templates WHERE slug = 'administrator';
+  SELECT id INTO admin_tpl FROM role_templates WHERE slug = 'managing_director';
   IF admin_tpl IS NULL THEN RAISE EXCEPTION 'fixture: no administrator template to escalate onto'; END IF;
 
   /* A write that does not change the value is not a write the trigger
@@ -709,7 +722,7 @@ DO $$
 DECLARE admin_tpl UUID;
 BEGIN
   PERFORM pg_temp.act_as('cc000000-0000-0000-0000-000000000001');
-  SELECT id INTO admin_tpl FROM role_templates WHERE slug = 'administrator';
+  SELECT id INTO admin_tpl FROM role_templates WHERE slug = 'managing_director';
 
   UPDATE profiles SET role_template_id = admin_tpl, role = 'viewer'
    WHERE id = 'cc000000-0000-0000-0000-000000000002';

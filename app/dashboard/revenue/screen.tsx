@@ -12,24 +12,30 @@ import type { Division } from '@/lib/protean/rpc';
 
    ---- Who gets through this door ----
 
-   Reading revenue is `crm.view`, the same permission that opens a
-   customer record, because what a company has spent is on that record
-   anyway and gating the two differently would be a fiction.
+   Reading revenue is `revenue.view` and importing is `revenue.import`,
+   both of which used to be `crm.view` and `crm.import`.
 
-   Importing is `crm.import`, asked separately and passed down so the
-   Import tab is not drawn for somebody who would be refused at the
-   database. The tab is a courtesy: every write function asks the same
-   question again for itself.
+   That was a fiction and migration 103 is where it stopped being one.
+   From the business, describing the office administrators: "see the
+   revenue tab entirely and import but no export". They hold neither
+   CRM capability and should not: importing invoicing has nothing to do
+   with bulk loading customers, and reading what a haulier has spent is
+   not the same right as opening their record and editing it.
+
+   Migration 104 repoints the five Protean import functions to match, so
+   the tab this decides to draw and the function behind it now ask the
+   same question. The tab is still only a courtesy: every write function
+   asks for itself, inside the transaction.
    ============================================================= */
 export async function revenueScreen(division: Division, divisionName: string) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'crm.view' });
+  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'revenue.view' });
   if (mayRead !== true) redirect('/dashboard');
 
-  const { data: mayImport } = await supabase.rpc('command_may', { p_capability: 'crm.import' });
+  const { data: mayImport } = await supabase.rpc('command_may', { p_capability: 'revenue.import' });
 
   return (
     <RevenuePanel

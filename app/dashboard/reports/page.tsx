@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { ReportsHub } from '@/components/ReportsHub';
 import { reportBySlug } from '@/lib/reports/catalogue';
 import type { Profile } from '@/lib/types';
@@ -35,9 +35,9 @@ export default async function ReportsPage({
   const { data: profileRow } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
   const profile = profileRow as Profile | null;
-  const caps = capabilitiesFor(profile ?? { role: 'viewer' });
+  const caps = await screenCapabilities(supabase, profile, user.id);
 
-  if (!caps.has('crm.view')) redirect('/dashboard');
+  if (!caps.has('reports.view')) redirect('/dashboard');
 
   const { data: people } = caps.has('crm.viewOthers')
     ? await supabase.from('profiles').select('id, full_name, email').order('full_name')
@@ -52,7 +52,7 @@ export default async function ReportsPage({
   return (
     <ReportsHub
       people={(people ?? []) as { id: string; full_name: string | null; email: string | null }[]}
-      mayExport={caps.has('crm.export')}
+      mayExport={caps.has('reports.export')}
       initial={asked && reportBySlug(asked) ? asked : null}
     />
   );

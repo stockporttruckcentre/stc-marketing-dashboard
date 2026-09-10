@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { WorkHub } from '@/components/WorkHub';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type {
   Task, TaskView, Person, Entity, DelegationRequest,
@@ -84,6 +84,10 @@ export default async function WorkPage({
   ]);
 
   const profile = (profileRes.data as Profile) ?? null;
+  /* Resolved rather than derived from the role column, so somebody on
+     one of the eleven role templates, or holding a single capability by
+     override, gets what they actually hold. */
+  const caps = [...await screenCapabilities(supabase, profile, user.id)];
 
   /* The Work tables arrive in migrations 046 to 059, which are pasted
      into the database by hand. Until that has happened the tab has to
@@ -131,7 +135,7 @@ export default async function WorkPage({
         entityIds,
         releaseAskedOfMe: askedOfMe,
       }}
-      capabilities={[...capabilitiesFor(profile ?? { role: 'viewer' } as Profile)]}
+      capabilities={caps}
       /* Only somebody on both companies is offered the switcher. */
       multiEntity={entityIds.length > 1}
       openView={searchParams?.view ?? null}

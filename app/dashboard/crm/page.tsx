@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requirePage } from '@/lib/platform/permissions/page';
 import { CrmListRestore } from '@/components/CrmListRestore';
 import { CrmWorkspace } from '@/components/CrmWorkspace';
 import type { CRMContact, CrmList, Profile } from '@/lib/types';
@@ -9,6 +10,7 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
+  await requirePage(supabase, 'crm.view', profile as { role?: string | null } | null);
 
   // Load lists the user can see
   const { data: lists } = await supabase.from('crm_lists').select('*').order('is_global', { ascending: false }).order('created_at', { ascending: true });
