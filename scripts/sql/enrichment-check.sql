@@ -320,6 +320,41 @@ BEGIN
   PERFORM pg_temp.must('"no email on file" is not an email address and is dropped',
     plan.fill_email IS NULL);
 
+  -- ---- 9. two email addresses in one cell ----
+  /* Four rows of `Dean_Customers.xlsx` do this, written
+     "armtransportltd@gmail.com, l.walker@armtransport.co.uk". The first
+     version matched the whole cell against an email pattern and so
+     rejected these outright, which threw away an address we have. */
+  DECLARE
+    twomail UUID;
+    pair2   JSONB;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+    INSERT INTO crm_contacts (company_name) VALUES ('Arm Transport Limited')
+    RETURNING id INTO twomail;
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'ARMTRANS', 'Arm Transport Limited', twomail)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    pair2 := jsonb_build_array(jsonb_build_object(
+      'alpha', 'ARMTRANS', 'name', 'Arm Transport Limited',
+      'email', 'armtransportltd@gmail.com, l.walker@armtransport.co.uk',
+      'phone', '', 'contact', '', 'address', ''));
+
+    SELECT * INTO plan FROM crm_enrichment_plan(pair2) p;
+    PERFORM pg_temp.must('a cell holding two email addresses yields the first, not nothing',
+      plan.fill_email = 'armtransportltd@gmail.com');
+
+    /* And a sentence about email is still not an email. */
+    SELECT * INTO plan FROM crm_enrichment_plan(jsonb_build_array(jsonb_build_object(
+      'alpha', 'ARMTRANS', 'name', 'Arm Transport Limited',
+      'email', 'ask reception', 'phone', '', 'contact', '', 'address', ''))) p;
+    PERFORM pg_temp.must('and a cell with no address in it still yields nothing',
+      plan.fill_email IS NULL);
+  END;
+
   -- ===========================================================
   -- One customer with two account codes.
   --
@@ -446,6 +481,154 @@ BEGIN
     PERFORM crm_apply_enrichment(said3);
     PERFORM pg_temp.must('running it again does not add a second address',
       (SELECT count(*) FROM contact_addresses a WHERE a.contact_id = empty) = 1);
+  END;
+
+  -- ===========================================================
+  -- A note in a column is not a value.
+  --
+  -- Thirteen rows of `Dean_Customers.xlsx` have this in the Contact
+  -- Number column: "mot/tacho only customer - Sam Clayton will have the
+  -- contact details for this, have never contacted them before." That
+  -- is a real thing somebody wrote and it is not a phone number, and a
+  -- phone field that holds a sentence breaks the dial link and the
+  -- export.
+  --
+  -- The contact field is treated differently on purpose, and the reason
+  -- is asserted here rather than only argued in a comment.
+  -- ===========================================================
+  DECLARE
+    noted UUID;
+    titled UUID;
+    naman UUID;
+    notes JSONB;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+    INSERT INTO crm_contacts (company_name) VALUES ('Beeson') RETURNING id INTO noted;
+    INSERT INTO crm_contacts (company_name) VALUES ('MRK Transport Limited') RETURNING id INTO titled;
+    INSERT INTO crm_contacts (company_name) VALUES ('Curries Transport & Storage UK Limited')
+    RETURNING id INTO naman;
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'BEESON',   'Beeson',                noted),
+           ('stc', 'MRKTRANS', 'MRK Transport Limited', titled),
+           ('stc', 'CURRIEST', 'Curries Transport',     naman)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    notes := jsonb_build_array(
+      jsonb_build_object('alpha', 'BEESON', 'name', 'Beeson',
+        'contact', 'mot/tacho only customer - Sam Clayton will have the contact details '
+                   || 'for this, have never contacted them before',
+        'phone',   'mot/tacho only customer - Sam Clayton will have the contact details '
+                   || 'for this, have never contacted them before',
+        'email', '', 'address', ''),
+      /* Fifty three characters and two real people. A length test would
+         have thrown this away to catch the one above. */
+      jsonb_build_object('alpha', 'MRKTRANS', 'name', 'MRK Transport Limited',
+        'contact', 'Mahmood Khan (owner) / Aamna Raza (Transport Manager)',
+        'phone', 'Office: 0161 406 8734 / Mobile: 07572 440628',
+        'email', '', 'address', ''),
+      jsonb_build_object('alpha', 'CURRIEST', 'name', 'Curries Transport & Storage UK Limited',
+        'contact', 'n/a', 'phone', '0161 339 1098', 'email', '', 'address', ''));
+
+    SELECT * INTO plan FROM crm_enrichment_plan(notes) p WHERE p.alpha = 'BEESON';
+    PERFORM pg_temp.must('a sentence in the phone column is not written as a phone number',
+      plan.fill_phone IS NULL);
+    PERFORM pg_temp.must('and the same sentence in the contact column goes in as written',
+      plan.fill_contact LIKE 'mot/tacho only customer%');
+
+    SELECT * INTO plan FROM crm_enrichment_plan(notes) p WHERE p.alpha = 'MRKTRANS';
+    PERFORM pg_temp.must('two people with their job titles are not mistaken for a note',
+      plan.fill_contact = 'Mahmood Khan (owner) / Aamna Raza (Transport Manager)');
+    PERFORM pg_temp.must('and an office and a mobile in one cell are kept whole, both of them',
+      plan.fill_phone = 'Office: 0161 406 8734 / Mobile: 07572 440628');
+
+    SELECT * INTO plan FROM crm_enrichment_plan(notes) p WHERE p.alpha = 'CURRIEST';
+    PERFORM pg_temp.must('"n/a" is a way of writing nobody and leaves the field empty',
+      plan.fill_contact IS NULL);
+    PERFORM pg_temp.must('and the row is still used for the phone number it does have',
+      plan.verdict = 'fill' AND plan.fill_phone = '0161 339 1098');
+  END;
+
+  -- ===========================================================
+  -- The people.
+  --
+  -- `Dean_Customers.xlsx`, which is a second file with a Contact Name
+  -- column in it. `crm_contacts.contact_name` is one free text column
+  -- and the drawer edits it as one, so a cell naming two people goes in
+  -- naming two people. Twenty three of the hundred and twenty eight
+  -- rows do that, written as "Alan & Ian Edwards" and
+  -- "Daniel Smith / Paul Redmond", and splitting them would mean
+  -- deciding which of the two the record is about.
+  --
+  -- The rules are the same as every other field: never overwrite, and a
+  -- row carrying only a person is still work worth doing.
+  -- ===========================================================
+  DECLARE
+    pair  UUID;
+    known UUID;
+    lone  UUID;
+    folk  JSONB;
+    again JSONB;
+  BEGIN
+    PERFORM set_config('request.jwt.claim.sub', '', TRUE);
+
+    INSERT INTO crm_contacts (company_name) VALUES ('Edwards Transport Ltd')
+    RETURNING id INTO pair;
+    /* Somebody already put a person on this one. Theirs. */
+    INSERT INTO crm_contacts (company_name, contact_name)
+    VALUES ('Redmond Haulage Ltd', 'Paul Redmond') RETURNING id INTO known;
+    /* Nothing on the file but a name, and the record has everything
+       else. Still a fill: a customer with no named contact is exactly
+       what this file is for. */
+    INSERT INTO crm_contacts (company_name, email, phone)
+    VALUES ('Lone Name Ltd', 'accounts@lone.test', '0161 900 0000')
+    RETURNING id INTO lone;
+
+    INSERT INTO protean_accounts (division, alpha, protean_name, contact_id)
+    VALUES ('stc', 'EDWARDST', 'Edwards Transport Ltd', pair),
+           ('stc', 'REDMONDH', 'Redmond Haulage Ltd',   known),
+           ('stc', 'LONENAME', 'Lone Name Ltd',         lone)
+    ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+
+    PERFORM set_config('request.jwt.claim.sub',
+      (SELECT id::TEXT FROM profiles WHERE role = 'admin' LIMIT 1), TRUE);
+
+    folk := jsonb_build_array(
+      jsonb_build_object('alpha', 'EDWARDST', 'name', 'Edwards Transport Ltd',
+        'contact', 'Alan & Ian Edwards', 'email', '', 'phone', '', 'address', ''),
+      jsonb_build_object('alpha', 'REDMONDH', 'name', 'Redmond Haulage Ltd',
+        'contact', 'Somebody Else', 'email', '', 'phone', '', 'address', ''),
+      jsonb_build_object('alpha', 'LONENAME', 'name', 'Lone Name Ltd',
+        'contact', 'Daniel Smith / Paul Redmond', 'email', '', 'phone', '', 'address', ''));
+
+    SELECT * INTO plan FROM crm_enrichment_plan(folk) p WHERE p.alpha = 'EDWARDST';
+    PERFORM pg_temp.must('a contact name is offered like any other blank',
+      plan.verdict = 'fill' AND plan.fill_contact = 'Alan & Ian Edwards');
+
+    SELECT * INTO plan FROM crm_enrichment_plan(folk) p WHERE p.alpha = 'REDMONDH';
+    PERFORM pg_temp.must('a record that already names somebody is left alone',
+      plan.fill_contact IS NULL AND plan.verdict = 'nothing to add');
+
+    SELECT * INTO plan FROM crm_enrichment_plan(folk) p WHERE p.alpha = 'LONENAME';
+    PERFORM pg_temp.must('a row offering only a person is still work worth doing',
+      plan.verdict = 'fill' AND plan.fill_contact = 'Daniel Smith / Paul Redmond');
+
+    again := crm_apply_enrichment(folk);
+
+    PERFORM pg_temp.must('two people in one cell go in as they were typed',
+      (SELECT contact_name FROM crm_contacts WHERE id = pair) = 'Alan & Ian Edwards');
+    PERFORM pg_temp.must('and a slash between them is not a split either',
+      (SELECT contact_name FROM crm_contacts WHERE id = lone) = 'Daniel Smith / Paul Redmond');
+    PERFORM pg_temp.must('and the person already on the record is untouched',
+      (SELECT contact_name FROM crm_contacts WHERE id = known) = 'Paul Redmond');
+    PERFORM pg_temp.must('and it counts the people separately from the rest',
+      (again ->> 'people')::INTEGER = 2 AND (again ->> 'records')::INTEGER = 2
+      AND (again ->> 'emails')::INTEGER = 0);
+
+    again := crm_apply_enrichment(folk);
+    PERFORM pg_temp.must('and running the people file again fills nobody in twice',
+      (again ->> 'people')::INTEGER = 0);
   END;
 
   -- =============================================================

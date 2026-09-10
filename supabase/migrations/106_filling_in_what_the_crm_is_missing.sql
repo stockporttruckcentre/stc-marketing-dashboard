@@ -210,6 +210,7 @@ RETURNS TABLE (
   verdict      TEXT,
   fill_email   TEXT,
   fill_phone   TEXT,
+  fill_contact TEXT,
   fill_address TEXT,
   /* Carried through so `crm_apply_enrichment` can put it on the address
      row. The map falls back to the city when it cannot geocode the full
@@ -230,12 +231,68 @@ BEGIN
   WITH raw AS (
     SELECT btrim(COALESCE(r ->> 'alpha', ''))   AS alpha,
            btrim(COALESCE(r ->> 'name', ''))    AS file_name,
-           /* Lower cased and only if it looks like an address. A field
-              with no @ is not an email and putting it in the email
-              column is worse than leaving the column empty. */
-           CASE WHEN btrim(COALESCE(r ->> 'email', '')) ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
-                THEN lower(btrim(r ->> 'email')) END AS email,
-           NULLIF(btrim(COALESCE(r ->> 'phone', '')), '')   AS phone,
+           /* The first thing in the cell that is an email address.
+
+              Not the whole cell. `crm_contacts.email` is one address
+              and things send to it, so "no email on file" must not go
+              in. But four rows of `Dean_Customers.xlsx` carry two,
+              written "armtransportltd@gmail.com,
+              l.walker@armtransport.co.uk", and an anchored match on the
+              whole cell rejects those as well, which loses an address
+              we have rather than refusing one we do not.
+
+              So: pull the first address out of whatever the cell says.
+              A cell with no address in it still yields nothing, which
+              is the case that mattered. The second address is not
+              thrown away, it is in the file, and if a second email
+              column is ever wanted it is a column, not a guess made
+              here. */
+           (regexp_match(lower(btrim(COALESCE(r ->> 'email', ''))),
+                         '[^@[:space:],;/<>()]+@[^@[:space:],;/<>()]+\.[a-z]{2,}'))[1] AS email,
+           /* Only if there is a phone number in it.
+
+              Thirteen rows of `Dean_Customers.xlsx` have a note in the
+              Contact Number column instead: "mot/tacho only customer -
+              Sam Clayton will have the contact details for this, have
+              never contacted them before." Written into `phone` that
+              breaks the dial link, the export and every place a number
+              is expected to be a number.
+
+              The cell is kept WHOLE when it does carry one, because
+              twenty three rows read "Office: 0161 ... / Mobile: 07..."
+              and a person reading the field wants both. Nine digits is
+              the shortest a UK number gets, so it is the test, and it
+              is a fact about telephone numbers rather than a threshold
+              picked to suit this file. */
+           CASE WHEN length(regexp_replace(
+                       COALESCE((regexp_match(btrim(COALESCE(r ->> 'phone', '')),
+                                              '\+?[0-9][0-9 ()./-]{7,}[0-9]'))[1], ''),
+                       '[^0-9]', '', 'g')) >= 9
+                THEN NULLIF(btrim(r ->> 'phone'), '') END AS phone,
+           /* The person, as one string. `crm_contacts.contact_name` is
+              a single free text field and the drawer edits it as one,
+              so "Alan & Ian Edwards" goes in exactly as typed. There is
+              no people table to split them into and inventing one to
+              hold twenty three rows would be the tail wagging the dog. */
+           /* ---- And the word somebody writes for "nobody" ----
+
+              "n/a" is not a person. Neither is a dash or a question
+              mark. That is a closed list of ways of writing "I have not
+              got one", and each of them is worse in the field than the
+              field being empty, because empty is what the CRM already
+              means by "we do not know who to ask for".
+
+              Nothing else is filtered. "Mahmood Khan (owner) / Aamna
+              Raza (Transport Manager)" is fifty three characters and is
+              two real people, so a length test would have thrown away a
+              right answer to catch a wrong one. Where the cell holds a
+              note rather than a name, it goes in as the note, because
+              that is what somebody chose to write in the column headed
+              Contact Name and this is not the place to overrule them. */
+           CASE WHEN lower(btrim(COALESCE(r ->> 'contact', ''))) NOT IN (
+                       '', 'n/a', 'n\a', 'na', 'none', 'no contact', 'no contacts',
+                       'unknown', 'tbc', 'tba', '-', '--', '?', 'x')
+                THEN NULLIF(btrim(r ->> 'contact'), '') END AS contact,
            NULLIF(btrim(COALESCE(r ->> 'address', '')), '') AS address,
            /* Worked out in the browser by `extractCityFromAddress`,
               which has the list of UK cities in it. Recomputing it here
@@ -300,6 +357,8 @@ BEGIN
            c.company_name AS crm_name,
            CASE WHEN NULLIF(btrim(COALESCE(c.email, '')), '') IS NULL   THEN m.email END   AS put_email,
            CASE WHEN NULLIF(btrim(COALESCE(c.phone, '')), '') IS NULL   THEN m.phone END   AS put_phone,
+           CASE WHEN NULLIF(btrim(COALESCE(c.contact_name, '')), '') IS NULL
+                THEN m.contact END AS put_contact,
            /* ---- Where an address actually lives ----
 
               `contact_addresses`, one row per site, one of them
@@ -389,6 +448,7 @@ BEGIN
     SELECT r.hit,
            (array_agg(r.put_email   ORDER BY r.rank) FILTER (WHERE r.put_email   IS NOT NULL))[1] AS email,
            (array_agg(r.put_phone   ORDER BY r.rank) FILTER (WHERE r.put_phone   IS NOT NULL))[1] AS phone,
+           (array_agg(r.put_contact ORDER BY r.rank) FILTER (WHERE r.put_contact IS NOT NULL))[1] AS contact,
            (array_agg(r.put_address ORDER BY r.rank) FILTER (WHERE r.put_address IS NOT NULL))[1] AS address,
            /* The city that came with the winning address, and not the
               highest ranked city on its own: a town from one row against
@@ -424,15 +484,16 @@ BEGIN
            WHEN p.rank > 1
              THEN 'same customer as another row'
            WHEN p.email IS NULL AND p.phone IS NULL AND p.address IS NULL
+                AND p.contact IS NULL
                 AND NOT EXISTS (SELECT 1 FROM chosen c
                                  WHERE c.hit = p.hit
                                    AND (c.email IS NOT NULL OR c.phone IS NOT NULL
-                                        OR c.address IS NOT NULL))
+                                        OR c.address IS NOT NULL OR c.contact IS NOT NULL))
              THEN 'file has nothing'
            WHEN NOT EXISTS (SELECT 1 FROM chosen c
                              WHERE c.hit = p.hit
                                AND (c.email IS NOT NULL OR c.phone IS NOT NULL
-                                    OR c.address IS NOT NULL))
+                                    OR c.address IS NOT NULL OR c.contact IS NOT NULL))
              THEN 'nothing to add'
            ELSE 'fill'
          END,
@@ -441,6 +502,7 @@ BEGIN
             one address whichever line supplied them. */
          CASE WHEN p.rank = 1 THEN (SELECT c.email   FROM chosen c WHERE c.hit = p.hit) END,
          CASE WHEN p.rank = 1 THEN (SELECT c.phone   FROM chosen c WHERE c.hit = p.hit) END,
+         CASE WHEN p.rank = 1 THEN (SELECT c.contact FROM chosen c WHERE c.hit = p.hit) END,
          CASE WHEN p.rank = 1 THEN (SELECT c.address FROM chosen c WHERE c.hit = p.hit) END,
          CASE WHEN p.rank = 1 THEN (SELECT c.city    FROM chosen c WHERE c.hit = p.hit) END
     FROM ranked p
@@ -478,6 +540,7 @@ DECLARE
   filled   INTEGER := 0;
   emails   INTEGER := 0;
   phones   INTEGER := 0;
+  people   INTEGER := 0;
   addrs    INTEGER := 0;
 BEGIN
   IF NOT command_may('crm.import') THEN
@@ -531,6 +594,7 @@ BEGIN
   SELECT p.contact_id,
          max(p.fill_email)   AS email,
          max(p.fill_phone)   AS phone,
+         max(p.fill_contact) AS contact,
          max(p.fill_address) AS address,
          max(p.fill_city)    AS city
     FROM crm_enrichment_plan(p_rows) p
@@ -554,24 +618,26 @@ BEGIN
        on the same door, because "never overwrite" is the requirement
        that cannot be got wrong quietly. */
     UPDATE crm_contacts c
-       SET email      = COALESCE(NULLIF(btrim(COALESCE(c.email, '')), ''), d.email),
-           phone      = COALESCE(NULLIF(btrim(COALESCE(c.phone, '')), ''), d.phone),
-           updated_at = NOW()
+       SET email        = COALESCE(NULLIF(btrim(COALESCE(c.email, '')), ''), d.email),
+           phone        = COALESCE(NULLIF(btrim(COALESCE(c.phone, '')), ''), d.phone),
+           contact_name = COALESCE(NULLIF(btrim(COALESCE(c.contact_name, '')), ''), d.contact),
+           updated_at   = NOW()
       FROM _decided d
      WHERE c.id = d.contact_id
-    RETURNING d.email AS put_email, d.phone AS put_phone
+    RETURNING d.email AS put_email, d.phone AS put_phone, d.contact AS put_contact
   )
-  SELECT count(*), count(put_email), count(put_phone)
-    INTO filled, emails, phones
+  SELECT count(*), count(put_email), count(put_phone), count(put_contact)
+    INTO filled, emails, phones, people
     FROM done;
 
   PERFORM audit(
     'update', 'crm_contacts', NULL, 'filled in from a file',
-    jsonb_build_object('records', filled, 'emails', emails,
-                       'phones', phones, 'addresses', addrs));
+    jsonb_build_object('records', filled, 'emails', emails, 'phones', phones,
+                       'people', people, 'addresses', addrs));
 
   RETURN jsonb_build_object(
-    'records', filled, 'emails', emails, 'phones', phones, 'addresses', addrs);
+    'records', filled, 'emails', emails, 'phones', phones,
+    'people', people, 'addresses', addrs);
 END;
 $fn$;
 
