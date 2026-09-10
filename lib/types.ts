@@ -34,6 +34,11 @@ export interface Profile {
   manager_id?: string | null;
   job_title?: string | null;
   is_active?: boolean;
+
+  /** Which of the eleven roles they hold. Migration 049 added the
+      column, 103 filled it with roles this company recognises, and 104
+      put people on them. Optional for the same reason as the rest. */
+  role_template_id?: string | null;
 }
 
 export interface CrmList {
