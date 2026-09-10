@@ -332,6 +332,17 @@ BEGIN
   SELECT count(*) INTO n FROM crm_red_flag_audience(cust) a WHERE a.user_id = wayne;
   PERFORM pg_temp.must('and the finance director does not, because he does not run sales', n = 0);
 
+  /* And the MD does not, although he runs every department including
+     sales. The list asked for was three people, and an urgent alert
+     that cannot be muted, on every red account in the company, is how
+     the MD stops reading them. Running everything is not the same as
+     being the sales overseer. */
+  DECLARE md UUID := pg_temp.person('check.md@stc-uk.test', 'Check MD', 'managing_director');
+  BEGIN
+    SELECT count(*) INTO n FROM crm_red_flag_audience(cust) a WHERE a.user_id = md;
+    PERFORM pg_temp.must('and neither does the MD, who runs every department', n = 0);
+  END;
+
   /* And it is driven off the role rather than a list of two slugs. Put
      somebody else in charge of sales and they hear about it, which is
      the whole reason `manages` is a column instead of an IN clause. */
