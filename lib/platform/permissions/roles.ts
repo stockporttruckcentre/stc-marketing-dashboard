@@ -186,7 +186,7 @@ const EVERYTHING: Capability[] = [
   'analytics.view', 'reports.view', 'reports.export',
   'revenue.view', 'revenue.import', 'revenue.export',
   'tracker.view', 'finder.view',
-  'admin.users', 'admin.usersDepartment', 'admin.settings', 'admin.audit',
+  'admin.users', 'admin.roles', 'admin.usersDepartment', 'admin.settings', 'admin.audit',
   'access.request', 'access.decide',
 ];
 

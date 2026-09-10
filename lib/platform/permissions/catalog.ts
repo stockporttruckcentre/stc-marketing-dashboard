@@ -107,7 +107,7 @@ export type Capability =
   // ---- FleetSmart+ ----
   | 'fleetsmart.view' | 'fleetsmart.build' | 'fleetsmart.discount' | 'fleetsmart.send'
   // ---- Administration ----
-  | 'admin.users' | 'admin.usersDepartment' | 'admin.settings' | 'admin.audit';
+  | 'admin.users' | 'admin.roles' | 'admin.usersDepartment' | 'admin.settings' | 'admin.audit';
 
 /* -------------------------------------------------------------
    The mirror.
@@ -160,6 +160,7 @@ export const CAPABILITY_CATALOG = [
 
   // ---- Administration ----
   { key: 'admin.users', label: 'Manage people', description: 'Add people, change their role, and set what they can reach.', area: 'Admin', feature: 'People', danger: 'destructive', requires: [], scoped: false, position: 10 },
+  { key: 'admin.roles', label: 'Change what a role can do', description: 'Grant or take away a permission on a role template. It applies at once to everybody on that role, so this is the most far reaching change in the application.', area: 'Admin', feature: 'Roles', danger: 'destructive', requires: [], scoped: false, position: 45 },
   { key: 'admin.settings', label: 'Change settings', description: 'Change what this installation is called, how it is branded, and how its pipelines are configured.', area: 'Admin', feature: 'Installation', danger: 'destructive', requires: [], scoped: false, position: 20 },
   // ---- Work ----
   { key: 'work.view', label: 'See the Work tab', description: 'Open Work and see the tasks they are allowed to see.', area: 'Work', feature: 'Access', danger: 'routine', requires: [], scoped: true, position: 10 },

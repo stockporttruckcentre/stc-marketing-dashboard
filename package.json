@@ -41,6 +41,7 @@
     "check:screens": "tsx scripts/screen-capability-check.ts",
     "check:view-as": "tsx scripts/view-as-check.ts",
     "check:asking": "bash scripts/sql/asking-check.sh",
+    "check:role-edit": "bash scripts/sql/role-edit-check.sh",
     "check:enrichment": "bash scripts/sql/enrichment-check.sh",
     "check:location": "bash scripts/sql/location-check.sh",
     "check:migrations": "tsx scripts/migration-shape-check.ts",
