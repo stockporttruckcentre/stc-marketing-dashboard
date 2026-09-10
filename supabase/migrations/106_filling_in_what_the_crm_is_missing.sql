@@ -195,7 +195,11 @@ RETURNS TABLE (
   verdict      TEXT,
   fill_email   TEXT,
   fill_phone   TEXT,
-  fill_address TEXT
+  fill_address TEXT,
+  /* Carried through so `crm_apply_enrichment` can put it on the address
+     row. The map falls back to the city when it cannot geocode the full
+     address, so it earns its place. */
+  fill_city    TEXT
 )
 LANGUAGE plpgsql
 STABLE
@@ -218,6 +222,11 @@ BEGIN
                 THEN lower(btrim(r ->> 'email')) END AS email,
            NULLIF(btrim(COALESCE(r ->> 'phone', '')), '')   AS phone,
            NULLIF(btrim(COALESCE(r ->> 'address', '')), '') AS address,
+           /* Worked out in the browser by `extractCityFromAddress`,
+              which has the list of UK cities in it. Recomputing it here
+              would be a second implementation of the same idea, and the
+              two would disagree the first time somebody edited one. */
+           NULLIF(btrim(COALESCE(r ->> 'city', '')), '')    AS city,
            ordinality AS seq
       FROM jsonb_array_elements(p_rows) WITH ORDINALITY AS t(r, ordinality)
   ),
@@ -276,7 +285,47 @@ BEGIN
            c.company_name AS crm_name,
            CASE WHEN NULLIF(btrim(COALESCE(c.email, '')), '') IS NULL   THEN m.email END   AS put_email,
            CASE WHEN NULLIF(btrim(COALESCE(c.phone, '')), '') IS NULL   THEN m.phone END   AS put_phone,
-           CASE WHEN NULLIF(btrim(COALESCE(c.address, '')), '') IS NULL THEN m.address END AS put_address
+           /* ---- Where an address actually lives ----
+
+              `contact_addresses`, one row per site, one of them
+              primary. `crm_contacts.address` is a SHADOW of the primary
+              one, kept up to date by `contact_addresses_sync` in one
+              direction only.
+
+              The first version wrote the shadow. So the record's
+              Addresses panel, which reads the real table, went on saying
+              "No address saved", and running the file a second time said
+              "nothing to add" because the shadow was now full. Reported
+              as: "It found ipsum and said nothing to add, but the
+              address is missing from the crm record." Exactly right, and
+              the fault was writing to the wrong place.
+
+              So the question is whether the customer has an address ROW,
+              and the shadow column is not consulted at all. A record
+              carrying only the old single field counts as having no
+              address, which is what the drawer already tells people:
+              "One address on the old single field. Adding it properly
+              lets a customer have more than one site." */
+           CASE WHEN NOT EXISTS (
+                  SELECT 1 FROM contact_addresses a
+                   WHERE a.contact_id = c.id
+                     AND a.deleted_at IS NULL
+                     AND btrim(COALESCE(a.address, '')) <> ''
+                )
+                /* ---- Never overwrite, including here ----
+
+                   A record with no address row but something in the old
+                   single field already HAS an address. It is in the
+                   wrong place, which is a repair, not a blank.
+
+                   So the shadow wins over the file when it is there.
+                   That covers both cases with one rule: a record the
+                   broken version filled has the file's own address in
+                   the shadow and comes out the same either way, and a
+                   record that had a hand typed address before any of
+                   this keeps it. */
+                THEN COALESCE(NULLIF(btrim(COALESCE(c.address, '')), ''), m.address)
+                END AS put_address
       FROM matched m
       LEFT JOIN crm_contacts c ON c.id = m.hit
   ),
@@ -325,7 +374,17 @@ BEGIN
     SELECT r.hit,
            (array_agg(r.put_email   ORDER BY r.rank) FILTER (WHERE r.put_email   IS NOT NULL))[1] AS email,
            (array_agg(r.put_phone   ORDER BY r.rank) FILTER (WHERE r.put_phone   IS NOT NULL))[1] AS phone,
-           (array_agg(r.put_address ORDER BY r.rank) FILTER (WHERE r.put_address IS NOT NULL))[1] AS address
+           (array_agg(r.put_address ORDER BY r.rank) FILTER (WHERE r.put_address IS NOT NULL))[1] AS address,
+           /* The city that came with the winning address, and not the
+              highest ranked city on its own: a town from one row against
+              a street from another is a nonsense.
+
+              Null where the address being written is the promoted shadow
+              rather than the file's, because the city the browser worked
+              out belongs to the file's text. The map geocodes from the
+              address itself when there is no city, so nothing is lost. */
+           (array_agg(CASE WHEN r.put_address = r.address THEN r.city END
+                      ORDER BY r.rank) FILTER (WHERE r.put_address IS NOT NULL))[1] AS city
       FROM ranked r
      WHERE r.hit IS NOT NULL
      GROUP BY r.hit
@@ -367,7 +426,8 @@ BEGIN
             one address whichever line supplied them. */
          CASE WHEN p.rank = 1 THEN (SELECT c.email   FROM chosen c WHERE c.hit = p.hit) END,
          CASE WHEN p.rank = 1 THEN (SELECT c.phone   FROM chosen c WHERE c.hit = p.hit) END,
-         CASE WHEN p.rank = 1 THEN (SELECT c.address FROM chosen c WHERE c.hit = p.hit) END
+         CASE WHEN p.rank = 1 THEN (SELECT c.address FROM chosen c WHERE c.hit = p.hit) END,
+         CASE WHEN p.rank = 1 THEN (SELECT c.city    FROM chosen c WHERE c.hit = p.hit) END
     FROM ranked p
    ORDER BY p.seq;
 END;
@@ -425,16 +485,55 @@ BEGIN
      A CTE is the better shape anyway: the plan is computed once, the
      update reads it, and the counts come back out of the same
      statement rather than from a table that has to be kept in step. */
-  WITH decided AS (
-    SELECT p.contact_id,
-           max(p.fill_email)   AS email,
-           max(p.fill_phone)   AS phone,
-           max(p.fill_address) AS address
-      FROM crm_enrichment_plan(p_rows) p
-     WHERE p.verdict = 'fill' AND p.contact_id IS NOT NULL
-     GROUP BY p.contact_id
-  ),
-  applied AS (
+  /* ---- Two writes, because an address is not a column ----
+
+     Email and phone are columns on `crm_contacts`. An address is a ROW
+     in `contact_addresses`, and `crm_contacts.address` is only a shadow
+     of the primary one that `contact_addresses_sync` maintains.
+
+     Writing the shadow, which is what the first version did, leaves the
+     record's Addresses panel empty and the shadow full, so the next run
+     reports "nothing to add" about an address nobody can see. Inserting
+     the row and letting the existing trigger update the shadow is the
+     way round that works, and it is also how the drawer does it.
+
+     The plan already decided the customer has no address row, so this
+     inserts rather than updates and marks it primary.
+
+     "Location" and "Addresses" are the same thing and must not coexist:
+     the primary address row is the one, and the sync trigger is what
+     puts it on the customer record for the grid. Any record left with a
+     value in the old single field and no row gets that value promoted
+     to a proper row here, which is the repair. */
+  /* Dropped first, because ON COMMIT DROP is the END of the
+     transaction and not the end of this call. Two presses of Apply
+     inside one transaction found that: the second answered "relation
+     _decided already exists". The dialog does one press per request so
+     it would not have hit it, and a check that only ever calls a
+     function once would not have found it either. */
+  DROP TABLE IF EXISTS _decided;
+  CREATE TEMP TABLE _decided ON COMMIT DROP AS
+  SELECT p.contact_id,
+         max(p.fill_email)   AS email,
+         max(p.fill_phone)   AS phone,
+         max(p.fill_address) AS address,
+         max(p.fill_city)    AS city
+    FROM crm_enrichment_plan(p_rows) p
+   WHERE p.verdict = 'fill' AND p.contact_id IS NOT NULL
+   GROUP BY p.contact_id;
+
+  /* The address rows first, so the sync trigger has already put the
+     shadow column in step before anything reads it back. */
+  WITH put AS (
+    INSERT INTO contact_addresses (contact_id, label, address, city, is_primary)
+    SELECT d.contact_id, 'Head office', d.address, d.city, TRUE
+      FROM _decided d
+     WHERE d.address IS NOT NULL
+    RETURNING 1
+  )
+  SELECT count(*) INTO addrs FROM put;
+
+  WITH done AS (
     /* COALESCE on the EXISTING value, not on the incoming one. The plan
        has already decided the column is empty; this is the second lock
        on the same door, because "never overwrite" is the requirement
@@ -442,18 +541,14 @@ BEGIN
     UPDATE crm_contacts c
        SET email      = COALESCE(NULLIF(btrim(COALESCE(c.email, '')), ''), d.email),
            phone      = COALESCE(NULLIF(btrim(COALESCE(c.phone, '')), ''), d.phone),
-           address    = COALESCE(NULLIF(btrim(COALESCE(c.address, '')), ''), d.address),
            updated_at = NOW()
-      FROM decided d
+      FROM _decided d
      WHERE c.id = d.contact_id
-    RETURNING d.email AS put_email, d.phone AS put_phone, d.address AS put_address
+    RETURNING d.email AS put_email, d.phone AS put_phone
   )
-  SELECT count(*),
-         count(put_email),
-         count(put_phone),
-         count(put_address)
-    INTO filled, emails, phones, addrs
-    FROM applied;
+  SELECT count(*), count(put_email), count(put_phone)
+    INTO filled, emails, phones
+    FROM done;
 
   PERFORM audit(
     'update', 'crm_contacts', NULL, 'filled in from a file',

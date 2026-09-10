@@ -112,3 +112,4 @@
 104_the_seven_people
 105_asking_and_being_in_charge
 106_filling_in_what_the_crm_is_missing
+107_location_is_the_primary_addresss_city

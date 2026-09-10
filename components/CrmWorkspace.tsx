@@ -462,7 +462,16 @@ export function CrmWorkspace({
                    and the gesture it advertised does nothing for
                    anybody. An empty cell is an empty cell. */
                 : <span style={{ color: 'var(--text-subtle)' }}>—</span> },
-    { field: 'location', headerName: 'Location', width: 120, editable: canEdit, valueSetter: saveCell },
+    /* Not editable, and that is the point of it. Location is the city
+       off the front of the customer's PRIMARY address and nothing else:
+       migration 107 made it a mirror rather than a column anybody can
+       type into, because a column that could be typed into is how "£7k
+       billed this year" ended up in it with no way to clear it.
+
+       Changing it means changing the address, or marking a different
+       one primary, on the record's Addresses list. */
+    { field: 'location', headerName: 'Location', width: 120, editable: false,
+      headerTooltip: 'The city of the primary address. Change it on the record\u2019s Addresses list.' },
     { field: 'fleet_size', headerName: 'Fleet', width: 80, editable: false,
       valueGetter: (p) => {
         const r = p.data!;
