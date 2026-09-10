@@ -180,8 +180,10 @@ CREATE INDEX IF NOT EXISTS idx_crm_contacts_company_key
 --   ambiguous name    the name picks out more than one CRM record
 --   name twice        the name appears more than once in the file
 --   name too short    under four characters once normalised
---   two rows disagree two file rows reach the same record with
---                     different values for the same blank field
+--   same customer as another row
+--                     this customer has more than one account code on
+--                     the file, and another of its rows is the one
+--                     supplying the values. Not a refusal.
 -- -------------------------------------------------------------
 CREATE OR REPLACE FUNCTION crm_enrichment_plan(p_rows JSONB)
 RETURNS TABLE (
@@ -278,18 +280,55 @@ BEGIN
       FROM matched m
       LEFT JOIN crm_contacts c ON c.id = m.hit
   ),
-  /* Two file rows can reach one CRM record: two Protean accounts bound
-     to the same customer is normal. Agreeing is fine. Disagreeing about
-     what goes in the same blank is a question, and both are refused
-     rather than one being picked by whichever sorted first. */
-  clashes AS (
-    SELECT hit
-      FROM proposed
-     WHERE hit IS NOT NULL
-     GROUP BY hit
-    HAVING count(DISTINCT put_email)   > 1
-        OR count(DISTINCT put_phone)   > 1
-        OR count(DISTINCT put_address) > 1
+  /* ---- Two file rows reaching one CRM record ----
+
+     Normal, and not a problem. A customer with two Protean accounts is
+     the ordinary case: Ipsum is IPSUM and IPSUM01, one for the water
+     business in Chorley and one for the infrastructure vehicles in
+     Glasgow, both bound to the one customer record.
+
+     The first version treated that as a contradiction and refused
+     everything for that customer, including the email address only one
+     of the rows had. So Ipsum came back "two rows disagree" and nothing
+     went in, and so did every other firm with a second account code.
+     That was a design mistake, not a typo: two rows disagreeing about
+     which SITE to record is a data question, and it was being handled
+     as though it were a question about WHICH COMPANY.
+
+     Which company is already settled by the time we get here. So the
+     rows are ranked and the best value for each FIELD is taken, in a
+     stated order rather than by luck:
+
+       1. The row whose own name reduces to the same thing as the
+          customer record's name. That row is literally about this
+          record: "Ipsum Water England & Wales" on the file against
+          "Ipsum Water England & Wales" in the CRM.
+       2. Otherwise a row matched by account code beats one matched by
+          name.
+       3. Otherwise the earlier row in the file.
+
+     Per field, so a row that loses the address can still supply the
+     email nobody else has. No identity can be got wrong by any of this,
+     because every row being ranked has already resolved to the same
+     customer. */
+  ranked AS (
+    SELECT p.*,
+           ROW_NUMBER() OVER (
+             PARTITION BY p.hit
+             ORDER BY (company_key(p.crm_name) IS NOT DISTINCT FROM p.key) DESC,
+                      (p.how = 'account code') DESC,
+                      p.seq
+           ) AS rank
+      FROM proposed p
+  ),
+  chosen AS (
+    SELECT r.hit,
+           (array_agg(r.put_email   ORDER BY r.rank) FILTER (WHERE r.put_email   IS NOT NULL))[1] AS email,
+           (array_agg(r.put_phone   ORDER BY r.rank) FILTER (WHERE r.put_phone   IS NOT NULL))[1] AS phone,
+           (array_agg(r.put_address ORDER BY r.rank) FILTER (WHERE r.put_address IS NOT NULL))[1] AS address
+      FROM ranked r
+     WHERE r.hit IS NOT NULL
+     GROUP BY r.hit
   )
   SELECT p.alpha,
          p.file_name,
@@ -305,18 +344,31 @@ BEGIN
              THEN 'ambiguous name'
            WHEN p.hit IS NULL
              THEN 'no match'
-           WHEN p.hit IN (SELECT hit FROM clashes)
-             THEN 'two rows disagree'
+           /* Not the row that speaks for this customer. Said plainly
+              rather than hidden, because somebody looking for Ipsum
+              wants to find both of its lines and see what happened. */
+           WHEN p.rank > 1
+             THEN 'same customer as another row'
            WHEN p.email IS NULL AND p.phone IS NULL AND p.address IS NULL
+                AND NOT EXISTS (SELECT 1 FROM chosen c
+                                 WHERE c.hit = p.hit
+                                   AND (c.email IS NOT NULL OR c.phone IS NOT NULL
+                                        OR c.address IS NOT NULL))
              THEN 'file has nothing'
-           WHEN p.put_email IS NULL AND p.put_phone IS NULL AND p.put_address IS NULL
+           WHEN NOT EXISTS (SELECT 1 FROM chosen c
+                             WHERE c.hit = p.hit
+                               AND (c.email IS NOT NULL OR c.phone IS NOT NULL
+                                    OR c.address IS NOT NULL))
              THEN 'nothing to add'
            ELSE 'fill'
          END,
-         CASE WHEN p.hit IN (SELECT hit FROM clashes) THEN NULL ELSE p.put_email END,
-         CASE WHEN p.hit IN (SELECT hit FROM clashes) THEN NULL ELSE p.put_phone END,
-         CASE WHEN p.hit IN (SELECT hit FROM clashes) THEN NULL ELSE p.put_address END
-    FROM proposed p
+         /* The chosen value, attributed to the row that speaks for the
+            customer, because the record gets one email, one phone and
+            one address whichever line supplied them. */
+         CASE WHEN p.rank = 1 THEN (SELECT c.email   FROM chosen c WHERE c.hit = p.hit) END,
+         CASE WHEN p.rank = 1 THEN (SELECT c.phone   FROM chosen c WHERE c.hit = p.hit) END,
+         CASE WHEN p.rank = 1 THEN (SELECT c.address FROM chosen c WHERE c.hit = p.hit) END
+    FROM ranked p
    ORDER BY p.seq;
 END;
 $fn$;

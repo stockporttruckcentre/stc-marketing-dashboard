@@ -65,8 +65,8 @@ type Plan = {
    a person are the reason this screen exists. `fill` is last: it is the
    part that needs no decision. */
 const VERDICTS = [
-  'ambiguous name', 'two rows disagree', 'name twice', 'name too short',
-  'no match', 'file has nothing', 'nothing to add', 'fill',
+  'ambiguous name', 'name twice', 'name too short', 'no match',
+  'file has nothing', 'same customer as another row', 'nothing to add', 'fill',
 ] as const;
 
 const EXPLAIN: Record<string, string> = {
@@ -77,7 +77,9 @@ const EXPLAIN: Record<string, string> = {
   'ambiguous name': 'The name picks out more than one CRM record. Refused rather than guessed.',
   'name twice': 'That name appears more than once in this file, so it cannot identify anybody.',
   'name too short': 'Too little of a name left to match on safely.',
-  'two rows disagree': 'Two rows in the file reach the same record and disagree about what to put in it.',
+  'same customer as another row': 'This customer has more than one account code on the file. '
+    + 'Another of its rows is the one supplying the values, and the row whose own name matches the '
+    + 'customer record is the one that wins. Nothing is being refused here.',
 };
 
 const TONE: Record<string, 'neutral' | 'info' | 'warning' | 'accent'> = {
@@ -88,7 +90,7 @@ const TONE: Record<string, 'neutral' | 'info' | 'warning' | 'accent'> = {
   'ambiguous name': 'warning',
   'name twice': 'warning',
   'name too short': 'warning',
-  'two rows disagree': 'accent',
+  'same customer as another row': 'neutral',
 };
 
 /** Header names we recognise without being told. */
@@ -383,7 +385,7 @@ export function EnrichDialog({ onClose, onDone }: {
             )}
           </div>
 
-          {(counts['ambiguous name'] || counts['two rows disagree']) ? (
+          {counts['ambiguous name'] ? (
             <Alert tone="warning">
               <span><strong>Some rows need a person.</strong> These are not being
               written. An ambiguous name is a question, and the answer is to bind
