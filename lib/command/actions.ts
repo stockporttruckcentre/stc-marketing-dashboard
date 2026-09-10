@@ -176,6 +176,19 @@ export const ACTIONS: CommandActionSpec[] = [
     objects: ['admin', 'permissions', 'roles', 'user', 'users', 'user management', 'user admin',
       'who can do what', 'permission hub', 'manage users', 'user accounts'] },
 
+  /* Not gated. Asking for something is `access.request` and every one
+     of the eleven roles holds it, so filtering this on `access.decide`
+     would hide the screen from exactly the people who use it to see
+     whether their own request was answered. */
+  { id: 'nav.requests', label: 'Access requests', blurb: 'Ask to be allowed something, and answer what your team has asked', kind: 'navigate',
+    path: '/dashboard/requests', verbs: GO,
+    objects: ['access request', 'access requests', 'permission request', 'permission requests',
+      'request access', 'ask for access', 'my requests', 'requests waiting on me',
+      'who has asked for access', 'approve access', 'approve a request', 'access approvals',
+      'permission approvals', 'what have i asked for'],
+    phrases: ['ask for the crm export', 'who has asked me for access',
+      'approve dean\u2019s export request', 'has my request been answered'] },
+
   { id: 'nav.settings', label: 'Settings', blurb: 'Your profile, password, theme and access', kind: 'navigate',
     path: '/dashboard/settings', verbs: GO,
     objects: ['settings', 'preferences', 'options', 'my profile', 'account settings', 'config', 'password', 'change my password'] },

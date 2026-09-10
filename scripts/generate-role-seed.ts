@@ -28,6 +28,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { ROLE_TEMPLATES } from '../lib/platform/permissions/roles';
 
 const MIGRATION = 'supabase/migrations/103_the_eleven_roles.sql';
+/**
+ * The second block, in the migration that gave role templates a shape:
+ * which department a role belongs to, which it runs, and who it
+ * escalates to. Separate file because 103 had already been run against
+ * the live database by the time those three were needed, and a
+ * generated block that changes after it has been pasted in is a block
+ * nobody can trust.
+ */
+const SHAPE_MIGRATION = 'supabase/migrations/105_asking_and_being_in_charge.sql';
 const OPEN = '-- >>> GENERATED FROM lib/platform/permissions/roles.ts. Do not edit by hand.';
 const CLOSE = '-- <<< END GENERATED';
 
@@ -82,36 +91,69 @@ export function seedSql(): string {
   return lines.join('\n');
 }
 
-function main() {
-  const check = process.argv.includes('--check');
-  const file = readFileSync(MIGRATION, 'utf8');
-  const from = file.indexOf(OPEN);
-  const to = file.indexOf(CLOSE);
+/**
+ * Which department each role is in, which it runs, and who it escalates
+ * to, as one UPDATE per role.
+ */
+export function shapeSql(): string {
+  const lines: string[] = [];
+  lines.push('UPDATE role_templates rt');
+  lines.push('   SET department   = v.department,');
+  lines.push('       manages      = v.manages,');
+  lines.push('       escalates_to = v.escalates_to');
+  lines.push('  FROM (VALUES');
+  lines.push(ROLE_TEMPLATES.map((r) => {
+    const manages = r.manages.length === 0
+      ? `'{}'::TEXT[]`
+      : `ARRAY[${r.manages.map(quote).join(', ')}]::TEXT[]`;
+    const up = r.escalatesTo ? quote(r.escalatesTo) : 'NULL';
+    return `    (${quote(r.slug)}, ${quote(r.department)}, ${manages}, ${up}::TEXT)`;
+  }).join(',\n'));
+  lines.push('  ) AS v(slug, department, manages, escalates_to)');
+  lines.push(' WHERE rt.slug = v.slug;');
+  return lines.join('\n');
+}
+
+/** One block, written into or compared against one file. */
+function block(file: string, body: string, check: boolean): boolean {
+  const text = readFileSync(file, 'utf8');
+  const from = text.indexOf(OPEN);
+  const to = text.indexOf(CLOSE);
 
   if (from < 0 || to < 0) {
-    console.log(`\n  FAIL  ${MIGRATION} has no generated block.`);
+    console.log(`\n  FAIL  ${file} has no generated block.`);
     console.log(`        It needs the marker ${OPEN}`);
     console.log(`        and ${CLOSE} after it.\n`);
     process.exit(1);
   }
 
-  const wanted = `${OPEN}\n\n${seedSql()}\n\n`;
-  const found = file.slice(from, to);
+  const wanted = `${OPEN}\n\n${body}\n\n`;
+  if (check) return text.slice(from, to) === wanted;
+
+  writeFileSync(file, text.slice(0, from) + wanted + text.slice(to));
+  return true;
+}
+
+function main() {
+  const check = process.argv.includes('--check');
+  const capsOk = block(MIGRATION, seedSql(), check);
+  const shapeOk = block(SHAPE_MIGRATION, shapeSql(), check);
+  const caps = ROLE_TEMPLATES.reduce((a, r) => a + r.capabilities.length, 0);
 
   if (check) {
-    if (found === wanted) {
-      const caps = ROLE_TEMPLATES.reduce((a, r) => a + r.capabilities.length, 0);
-      console.log(`\n  ok    ${ROLE_TEMPLATES.length} roles and ${caps} grants, and the migration says the same\n`);
+    if (capsOk && shapeOk) {
+      console.log(`\n  ok    ${ROLE_TEMPLATES.length} roles and ${caps} grants, and both migrations say the same\n`);
       process.exit(0);
     }
-    console.log('\n  FAIL  the migration has drifted from lib/platform/permissions/roles.ts');
-    console.log('        Regenerate it:  npm run gen:roles\n');
+    console.log('\n  FAIL  the migrations have drifted from lib/platform/permissions/roles.ts');
+    if (!capsOk) console.log(`        ${MIGRATION}`);
+    if (!shapeOk) console.log(`        ${SHAPE_MIGRATION}`);
+    console.log('        Regenerate them:  npm run gen:roles\n');
     process.exit(1);
   }
 
-  writeFileSync(MIGRATION, file.slice(0, from) + wanted + file.slice(to));
-  const caps = ROLE_TEMPLATES.reduce((a, r) => a + r.capabilities.length, 0);
   console.log(`\n  wrote ${MIGRATION}`);
+  console.log(`  wrote ${SHAPE_MIGRATION}`);
   console.log(`  ${ROLE_TEMPLATES.length} roles, ${caps} grants\n`);
 }
 

@@ -918,9 +918,33 @@ for (const [said, id] of [
   ['team capacity', 'nav.workload'],
   ['who has the most on', 'nav.workload'],
   ['show me the workload', 'nav.workload'],
+
+  /* Access requests, added with migration 105. Somebody who has just
+     been refused a button types what they were refused, not the name of
+     a screen they have never seen, so the words that have to work are
+     "access", "permission" and "ask", in whatever order they land in. */
+  ['access requests', 'nav.requests'],
+  ['permission requests', 'nav.requests'],
+  ['request access', 'nav.requests'],
+  ['ask for access', 'nav.requests'],
+  ['my requests', 'nav.requests'],
+  ['who has asked for access', 'nav.requests'],
+  ['approve access', 'nav.requests'],
+  ['access approvals', 'nav.requests'],
+  ['what have i asked for', 'nav.requests'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
+}
+
+/* And it reaches everybody, because everybody can ask. A screen that
+   answers only an administrator is a screen the person who was refused
+   cannot use to find out what happened to their asking. */
+for (const role of ROLES) {
+  ok(`a ${role} can get to the access requests screen by typing`,
+    suggestActions('access requests', CAPS[role], 8).some((h) => h.action.id === 'nav.requests'));
+  ok(`and by asking for the thing rather than the screen, as a ${role}`,
+    suggestActions('ask for access', CAPS[role], 8).some((h) => h.action.id === 'nav.requests'));
 }
 
 /* And it lands on the shape as well as the view. A sentence that gets
@@ -1497,17 +1521,31 @@ for (const role of ROLES) {
       hrefs(role).includes('/dashboard/team'));
   }
 
-  ok('Team, Settings and Admin sit under the scroll, in that order',
+  /* Access sits between Team and Settings and is open to everybody, for
+     the reason `lib/nav.ts` gives: asking for something you cannot do is
+     a right every one of the eleven roles holds, and the screen is also
+     where somebody reads the answer. Gating it on the deciding half
+     would hide it from the people who ask. */
+  ok('Team, Access, Settings and Admin sit under the scroll, in that order',
     sectionsFor('admin').some((s) => s.atFoot
       && s.items.map((i) => i.href).join(',')
-        === '/dashboard/team,/dashboard/settings,/dashboard/admin'));
+        === '/dashboard/team,/dashboard/requests,/dashboard/settings,/dashboard/admin'));
 
-  /* And the foot section still holds the two open rows for somebody
-     with no admin permission, rather than collapsing to Settings on its
-     own or disappearing. */
-  ok('a read only viewer still gets Team and Settings at the foot',
+  /* And the foot section still holds the open rows for somebody with no
+     admin permission, rather than collapsing to Settings on its own or
+     disappearing. */
+  ok('a read only viewer still gets Team, Access and Settings at the foot',
     sectionsFor('viewer').some((s) => s.atFoot
-      && s.items.map((i) => i.href).join(',') === '/dashboard/team,/dashboard/settings'));
+      && s.items.map((i) => i.href).join(',')
+        === '/dashboard/team,/dashboard/requests,/dashboard/settings'));
+
+  /* And the row is there for every role, not only the ones who decide.
+     The person who was refused is the one who needs to see what happened
+     to their asking. */
+  for (const role of ROLES) {
+    ok(`a ${role} has the access requests row in the sidebar`,
+      hrefs(role).includes('/dashboard/requests'));
+  }
 
   ok('no section is drawn with nothing in it',
     ROLES.every((r) => sectionsFor(r).every((s) => s.items.length > 0)));

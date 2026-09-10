@@ -250,6 +250,51 @@ function main() {
     }
   }
 
+  /* The shape, added by migration 105. Same principle: these are the
+     business's sentences, not a read-back of the roles file. */
+  let shape: Map<string, { department: string; manages: string[] }>;
+  try {
+    shape = new Map(query(
+      `SELECT slug || '|' || COALESCE(department, '') || '|' || array_to_string(manages, ',')
+         FROM role_templates WHERE is_active`,
+    ).map((row) => {
+      const [slug, department, manages] = row.split('|');
+      return [slug, { department, manages: manages ? manages.split(',') : [] }];
+    }));
+  } catch {
+    shape = new Map();
+  }
+
+  const runs = (slug: string, dept: string) => shape.get(slug)?.manages.includes(dept) === true;
+  const inDept = (slug: string, dept: string) => shape.get(slug)?.department === dept;
+
+  const SHAPE: Array<[string, boolean]> = [
+    ['Tom runs sales',                       runs('business_development', 'sales')],
+    ['and marketing',                        runs('business_development', 'marketing')],
+    ['and not finance',                      !runs('business_development', 'finance')],
+    ['and not the office administrators',    !runs('business_development', 'admin')],
+    ['Sr Sales runs sales',                  runs('sr_sales', 'sales')],
+    ['and nothing else',                     shape.get('sr_sales')?.manages.length === 1],
+    ['a salesperson runs nothing',           shape.get('sales_rep')?.manages.length === 0],
+    ['a marketer runs nothing',              shape.get('marketing_exec')?.manages.length === 0],
+    ['Sr Marketing runs marketing',          runs('sr_marketing', 'marketing')],
+    ['and not sales',                        !runs('sr_marketing', 'sales')],
+    ['Sr Admin runs the office administrators', runs('sr_office_admin', 'admin')],
+    ['Sales sits in sales',                  inDept('sales_rep', 'sales')],
+    ['Marketing in marketing',               inDept('marketing_exec', 'marketing')],
+    ['Finance in finance',                   inDept('finance', 'finance')],
+    ['Admin with the office administrators', inDept('office_admin', 'admin')],
+  ];
+
+  if (shape.size === 0) {
+    problems.push('\n  the role shape is empty, so migration 105 has not run');
+  } else {
+    for (const [said, held] of SHAPE) {
+      checked += 1;
+      if (!held) problems.push(`\n  ${said}: the database says otherwise`);
+    }
+  }
+
   if (active.length !== 11) {
     problems.push(`\n  ${active.length} active role templates, not 11: ${active.join(', ')}`);
   }

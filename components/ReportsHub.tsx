@@ -16,6 +16,7 @@ import {
   DIVISION_LABEL, PERIOD_LABEL,
   type Division, type Period, type Report, type ReportFilters,
 } from '@/lib/reports/types';
+import { Gated } from '@/components/permissions/ask';
 
 /* =============================================================
    The Reports screen.
@@ -138,23 +139,29 @@ export function ReportsHub({ people, mayExport, initial = null }: {
             <Button variant="secondary" onClick={() => run(def.slug, filters)} disabled={busy}>
               {busy ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />} Refresh
             </Button>
+            {/* From the business, about the office administrators:
+                "have a hover-over 'ask your department lead to run this'
+                for regular admin users". Running a report on screen is
+                theirs. Taking it away as a file is Sr Admin's, and the
+                button says so rather than not being there. */}
+            <Gated may={mayExport} capability="reports.export"
+                   doing="Download this report" label="Word" size="md">
+              <Button
+                variant="secondary"
+                onClick={() => window.open(docxHref(def.slug, filters), '_blank')}
+                disabled={busy || !report}
+              >
+                <FileText size={14} /> Word
+              </Button>
+            </Gated>
             {mayExport && (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => window.open(docxHref(def.slug, filters), '_blank')}
-                  disabled={busy || !report}
-                >
-                  <FileText size={14} /> Word
-                </Button>
-                <Button
-                  variant="accent"
-                  onClick={() => window.open(printHref(def.slug, filters), '_blank')}
-                  disabled={busy || !report}
-                >
-                  <Printer size={14} /> Print or PDF
-                </Button>
-              </>
+              <Button
+                variant="accent"
+                onClick={() => window.open(printHref(def.slug, filters), '_blank')}
+                disabled={busy || !report}
+              >
+                <Printer size={14} /> Print or PDF
+              </Button>
             )}
           </div>
         )}

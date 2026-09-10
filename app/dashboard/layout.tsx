@@ -52,6 +52,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
      behind it allows cannot disagree. */
   const caps = [...await screenCapabilities(supabase, p, user.id)];
 
+  /* And what that role is CALLED. The footer printed `p.role`, which is
+     the four value column: a Developer read "admin", an office
+     administrator read "viewer", and neither is their job. */
+  const { data: roleRow } = p.role_template_id
+    ? await supabase.from('role_templates').select('name').eq('id', p.role_template_id).maybeSingle()
+    : { data: null };
+  const roleName = (roleRow as { name?: string } | null)?.name ?? null;
+
   /* One reading of the bell, above both the sidebar and the top bar.
      Two ways in now, and they must never show different numbers: the
      first time somebody sees a three on one and a two on the other,
@@ -59,7 +67,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <NotificationsProvider>
       <div className="app">
-        <Sidebar profile={p} caps={caps} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
+        <Sidebar profile={p} caps={caps} roleName={roleName} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
         <div className="main">
           <TopBar role={p.role} caps={caps} />
           <main className="page">{children}</main>

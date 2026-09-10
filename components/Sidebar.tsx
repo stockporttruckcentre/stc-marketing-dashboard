@@ -52,9 +52,16 @@ const SETTINGS_HREF = '/dashboard/settings';
 
 
 export function Sidebar({
-  profile, caps, pendingPosts = 0, emblemUrl = null,
+  profile, caps, roleName = null, pendingPosts = 0, emblemUrl = null,
 }: {
   profile: Profile;
+  /* What their role is CALLED. The footer printed `profile.role`, which
+     is the four value column, so a Developer read "admin" and an office
+     administrator read "viewer". Neither is their job and neither is a
+     word anybody at this company uses.
+
+     Null falls back to the column, for the preview pages. */
+  roleName?: string | null;
   /* Resolved on the server by `screenCapabilities`, which reads the
      person's role template and their overrides. Derived from
      `profile.role` here, this list was four values wide and knew
@@ -250,7 +257,7 @@ export function Sidebar({
         )}
         <div className="sidebar__user">
           <div className="sidebar__user-name">{profile.full_name}</div>
-          <div className="sidebar__user-role">{profile.role}</div>
+          <div className="sidebar__user-role">{roleName ?? profile.role}</div>
         </div>
         <ThemeToggle profileId={profile.id} initialTheme={profile.theme ?? 'dark'} />
         <Link

@@ -73,12 +73,38 @@ export const ROLE_SLUGS = [
 
 export type RoleSlug = (typeof ROLE_SLUGS)[number];
 
+/**
+ * The parts of the business, as the sidebar divides them.
+ *
+ * `exec` is not a department anybody works in. It is the three roles
+ * that are not inside one: the MD, the developer, and Tom, who runs two
+ * of the others.
+ */
+export const DEPARTMENTS = ['sales', 'marketing', 'finance', 'admin', 'exec'] as const;
+export type Department = (typeof DEPARTMENTS)[number];
+
 export type RoleTemplate = {
   slug: RoleSlug;
   name: string;
   description: string;
   /** Who signs off what this role is refused. Null where nothing is. */
   escalatesTo: RoleSlug | null;
+  /** Which part of the business somebody on this role works in. */
+  department: Department;
+  /**
+   * Which departments this role RUNS.
+   *
+   * From the business, about Tom: "he manages sales and marketing
+   * departments. He needs everything they have and ways of managing
+   * them." So this is what `admin.usersDepartment` reaches, and it is
+   * also what decides who hears about a red account: "Account owner, Sr
+   * Sales and BD", which is the owner plus everybody who runs sales.
+   *
+   * Written here rather than as a list of slugs in a migration, because
+   * a list of slugs stops being right the first time somebody adds a
+   * role and nothing tells them.
+   */
+  manages: readonly Department[];
   sort: number;
   capabilities: readonly Capability[];
 };
@@ -184,6 +210,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Developer',
     description: 'Access to the entire app, including settings and the audit trail.',
     escalatesTo: null,
+    department: 'exec',
+    manages: ['sales', 'marketing', 'finance', 'admin', 'exec'],
     sort: 1,
     capabilities: set(EVERYTHING),
   },
@@ -192,6 +220,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Managing Director',
     description: 'Access to the entire app.',
     escalatesTo: null,
+    department: 'exec',
+    manages: ['sales', 'marketing', 'finance', 'admin', 'exec'],
     sort: 2,
     capabilities: set(EVERYTHING),
   },
@@ -210,6 +240,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Runs sales and marketing. Everything both departments have, '
       + 'the approvals over them, and their accounts.',
     escalatesTo: 'managing_director',
+    department: 'exec',
+    manages: ['sales', 'marketing'],
     sort: 3,
     capabilities: set(
       OWN_WORK, SALES_DOES, MARKETING_DOES, MARKETING_SIGNS_OFF, OVERSEES,
@@ -234,6 +266,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Everything a salesperson does, plus the exports, the bulk imports, '
       + 'the manager discount and the decisions on what the team asks for.',
     escalatesTo: 'business_development',
+    department: 'sales',
+    manages: ['sales'],
     sort: 4,
     capabilities: set(
       OWN_WORK, SALES_DOES, OVERSEES, TAKES_DATA_OUT, PUTS_DATA_IN,
@@ -260,6 +294,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'The full sales desk: customers, leads, contracts, stock and reports. '
       + 'Exports and bulk imports go to Sr Sales.',
     escalatesTo: 'sr_sales',
+    department: 'sales',
+    manages: [],
     sort: 5,
     capabilities: set(
       OWN_WORK, SALES_DOES,
@@ -274,6 +310,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Runs marketing. Approves posts, manages the brand kit, and can take '
       + 'data out of the CRM and put it back in.',
     escalatesTo: 'business_development',
+    department: 'marketing',
+    manages: ['marketing'],
     sort: 6,
     capabilities: set(
       OWN_WORK, CRM_DAILY, MARKETING_DOES, MARKETING_SIGNS_OFF,
@@ -300,6 +338,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
       + 'the brand kit. Can create CRM records but not leads, and cannot '
       + 'take data out or bring it in.',
     escalatesTo: 'sr_marketing',
+    department: 'marketing',
+    manages: [],
     sort: 7,
     capabilities: set(
       OWN_WORK, CRM_DAILY, MARKETING_DOES,
@@ -316,6 +356,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     name: 'Sr Finance',
     description: 'Financial director. The whole application except the Marketing section.',
     escalatesTo: 'managing_director',
+    department: 'finance',
+    manages: ['finance', 'admin'],
     sort: 8,
     capabilities: set(without(EVERYTHING, MARKETING_SECTION)),
   },
@@ -328,6 +370,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Dashboard, analytics, every report, the CRM, the finder, trailer sales, '
       + 'FleetSmart+ and all of revenue.',
     escalatesTo: 'sr_finance',
+    department: 'finance',
+    manages: [],
     sort: 9,
     capabilities: set(
       OWN_WORK, CRM_DAILY,
@@ -350,6 +394,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
     description: 'Runs the admin team. Everything an administrator does, plus taking '
       + 'revenue and reports out.',
     escalatesTo: 'managing_director',
+    department: 'admin',
+    manages: ['admin'],
     sort: 10,
     capabilities: set(
       OWN_WORK,
@@ -384,6 +430,8 @@ export const ROLE_TEMPLATES: readonly RoleTemplate[] = [
       + 'imports, the finder, the CRM pipeline and FleetSmart+. No analytics, '
       + 'and exports go to Sr Admin.',
     escalatesTo: 'sr_office_admin',
+    department: 'admin',
+    manages: [],
     sort: 11,
     capabilities: set(
       OWN_WORK,

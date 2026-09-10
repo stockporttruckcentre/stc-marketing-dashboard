@@ -157,6 +157,12 @@ export const NAVIGATION: NavSection[] = [
     key: 'admin', label: 'Admin', atFoot: true,
     items: [
       { href: '/dashboard/team', label: 'Team', icon: 'team', capability: null },
+      /* Not gated, and deliberately so. Everybody can ask for something
+         they cannot do, so everybody can see what they asked for.
+         Deciding is gated inside `decide_capability_request`, which
+         refuses anybody who does not run the asker's department, and the
+         panel for it is only drawn for whoever holds `access.decide`. */
+      { href: '/dashboard/requests', label: 'Access', icon: 'admin', capability: null },
       { href: '/dashboard/settings', label: 'Settings', icon: 'settings', capability: null },
       { href: '/dashboard/admin', label: 'Admin', icon: 'admin', capability: 'admin.users' },
     ],

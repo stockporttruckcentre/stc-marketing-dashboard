@@ -12,6 +12,7 @@ import {
   Globe, Users, UserPlus, Send, Star, Search, ChevronDown, SearchX, Tag,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { Gated } from '@/components/permissions/ask';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
 import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
@@ -40,11 +41,19 @@ type Member = { list_id: string; user_id: string; can_edit: boolean };
 
 export function CrmWorkspace({
   profile, lists: initialLists, members: initialMembers, profiles, selectedListId, initialContacts,
+  caps: given, roleName = null,
 }: {
   profile: Profile;
   lists: CrmList[];
   members: Member[];
   profiles: Profile[];
+  /* Resolved on the server, so somebody on one of the eleven role
+     templates gets the buttons they actually hold rather than the ones
+     the four value role column implies. Optional: `app/crm-preview`
+     renders this for a made up profile with no server to ask. */
+  caps?: string[];
+  /** What that role is called, for the badge. Null falls back. */
+  roleName?: string | null;
   selectedListId: string;
   initialContacts: CRMContact[];
 }) {
@@ -161,7 +170,10 @@ export function CrmWorkspace({
    * reads from this one set rather than testing role in place, so the
    * panel is a single swap rather than a hunt.
    */
-  const caps: CrmCapabilities = useMemo(() => capabilitiesFor(profile), [profile]);
+  const caps: CrmCapabilities = useMemo(
+    () => (given ? new Set(given) : capabilitiesFor(profile)) as CrmCapabilities,
+    [profile, given],
+  );
   const defaultScope = useMemo(() => defaultScopeKind(caps), [caps]);
 
   const selectedIds = useCallback(
@@ -187,8 +199,8 @@ export function CrmWorkspace({
     try {
       const saved = localStorage.getItem('stc:crmScope');
       if (saved) setScope(scopeFromParam(saved));
-      else setScope({ kind: defaultScopeKind(capabilitiesFor(profile)) });
-    } catch { setScope({ kind: defaultScopeKind(capabilitiesFor(profile)) }); }
+      else setScope({ kind: defaultScopeKind(caps) });
+    } catch { setScope({ kind: defaultScopeKind(caps) }); }
     // Reading the saved scope is a first-load concern only. Re-running it
     // on every URL change would fight the user's own clicks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,7 +240,7 @@ export function CrmWorkspace({
     : isOwner ||
       members.some((m) => m.list_id === selectedListId && m.user_id === profile.id && m.can_edit) ||
       profile.role === 'admin';
-  const canEdit = listWritable && capabilitiesFor(profile).has('crm.edit');
+  const canEdit = listWritable && caps.has('crm.edit');
 
   const myLists = lists.filter((l) => !l.is_global && l.owner_id === profile.id);
   const sharedLists = lists.filter((l) => !l.is_global && l.owner_id !== profile.id);
@@ -963,7 +975,7 @@ export function CrmWorkspace({
           {listIsGlobal
             ? <Badge tone="info" dot>Shared</Badge>
             : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
-          <Badge tone="neutral">{roleLabel(profile.role)}</Badge>
+          <Badge tone="neutral">{roleName ?? roleLabel(profile.role)}</Badge>
         </>}
         sub={<>
           {scope.kind === 'all'
@@ -973,16 +985,22 @@ export function CrmWorkspace({
           {listIsGlobal ? 'Everyone can see this list.' : 'Only the owner and anyone it is shared with.'}
         </>}
         actions={<>
-          {caps.has('crm.import') && (
+          {/* Drawn either way. Hiding these was how a salesperson
+              concluded the CRM cannot export and asked a colleague to
+              email them a spreadsheet, which is the leak the whole
+              restriction exists to stop. */}
+          <Gated may={caps.has('crm.import')} capability="crm.import"
+                 doing="Import into the CRM" label="Import">
             <Button size="sm" variant="secondary" onClick={openImport} disabled={importing}>
               {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
             </Button>
-          )}
-          {caps.has('crm.export') && (
+          </Gated>
+          <Gated may={caps.has('crm.export')} capability="crm.export"
+                 doing="Export the CRM" label="Export">
             <Button size="sm" variant="secondary" onClick={handleExport}>
               <Download size={13} /> Export{selectedCount > 0 ? ` (${selectedCount})` : ''}
             </Button>
-          )}
+          </Gated>
           {caps.has('crm.create') && (
             <Button size="sm" variant="primary" onClick={() => setShowAddContact(true)}>
               <Plus size={13} /> Add contact
