@@ -75,6 +75,7 @@
     "check:avatars": "tsx scripts/avatar-check.ts",
     "check:kit": "tsx scripts/kit-fidelity-check.ts",
     "check:roles-kit": "tsx scripts/roles-kit-fidelity-check.ts",
+    "check:roles-render": "tsx scripts/roles-render-check.ts",
     "kit:extract": "tsx scripts/kit-extract.ts",
     "roles-kit:extract": "tsx scripts/roles-kit-extract.ts",
     "check:invention": "tsx scripts/no-invention-check.ts",

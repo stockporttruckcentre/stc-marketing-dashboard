@@ -76,6 +76,14 @@ type Target = {
   text: string; up?: number; nth?: number; from?: string;
   /** Read the card's first child, which is the division tint bar. */
   tint?: boolean;
+  /** From a word inside the card, the tint bar of that card. */
+  tintOf?: boolean;
+  /** From the count, the hairline beside it in the same row. */
+  dividerOf?: boolean;
+  /** From a legend word, the small filled square beside it. */
+  swatchOf?: boolean;
+  /** From a percentage, the wide short bar beside or above it. */
+  trackOf?: boolean;
   /** The words are a placeholder attribute rather than text in the box. */
   placeholder?: boolean;
 };
@@ -113,8 +121,27 @@ const PARTS: Record<string, Target> = {
   roleName:      { text: 'Depot Manager' },
   roleDivision:  { text: 'STC SERVICE' },
   roleCount:     { text: '88 of 148' },
+  /* ---- The card's own structure, not a guess at it ----
+
+     The first port put the tint, the initials and the words in one
+     row, and the page went live with the circle floating top right and
+     the count line cut off. The kit's card is a COLUMN: a top row of
+     initials beside name and division stacked, and a bottom row of
+     people count, a hairline, and the capability count. These are
+     those rows, found by the words inside them. */
+  nodeTop:       { text: 'DM', up: 1 },
+  nodeWords:     { text: 'Depot Manager', up: 1 },
+  nodeBottom:    { text: '88 of 148', up: 1 },
+  nodePeople:    { text: '7' },
+  nodeTint:      { text: 'DM', tintOf: true },
+  nodeDivider:   { text: '88 of 148', dividerOf: true },
 
   meterLabel:    { text: 'TECHNICIAN 23/148' },
+  /* The bar itself. The first port used the connector length for its
+     height and drew it three times too thick; the track is the wide,
+     short sibling of the percentage, and is read rather than reasoned
+     about. */
+  meterTrack:    { text: '16%', trackOf: true },
   meterLow:      { text: '16%' },
   meterMid:      { text: '59%' },
   meterHigh:     { text: '100%' },
@@ -166,6 +193,12 @@ const PARTS: Record<string, Target> = {
   capRow:     { text: 'Create a job', up: 2 },
   meterRow:   { text: 'Jobs and workshop', up: 2 },
   auditRow:   { text: 'G Sutton · 14 Aug 2026, 09:12', up: 1 },
+
+  /* The legend under the chart: one small square per division beside
+     its name. The square has no words, so it is the sibling of the
+     word that is small and filled. */
+  legendItem:   { text: 'Group' },
+  legendSwatch: { text: 'Group', swatchOf: true },
 
   auditLine:  { text: 'G Sutton · 14 Aug 2026, 09:12' },
   holdersHead: { text: 'Holders' },
@@ -337,7 +370,66 @@ async function main() {
         : exact(t.text);
       if (!hit) { out.missing.push('part:' + k + ' (' + t.text + ')'); return; }
       var el = hit;
-      for (var i = 0; i < (t.up || 0); i++) el = boxOf(el.parentElement || el);
+      if (t.tintOf) {
+        /* Climb to the card, then take the narrow full height child. */
+        var card = el;
+        while (card && card !== document.body && getComputedStyle(card).position !== 'relative') card = card.parentElement;
+        var bar = null;
+        if (card) for (var b = 0; b < card.children.length; b++) {
+          var br = card.children[b].getBoundingClientRect();
+          if (br.width > 0 && br.width <= 6 && br.height >= card.getBoundingClientRect().height - 4) { bar = card.children[b]; break; }
+        }
+        if (!bar) { out.missing.push('part:' + k + ' (tint of ' + t.text + ')'); return; }
+        out.parts[k] = styleOf(bar); return;
+      }
+      if (t.trackOf) {
+        /* The bar is a wide short box in the same block as the number,
+           possibly one level up. */
+        var tpools = [(el.parentElement || el).children, ((el.parentElement || el).parentElement || el).children], tk = null;
+        for (var ti = 0; ti < tpools.length && !tk; ti++) {
+          for (var tq = 0; tq < tpools[ti].length; tq++) {
+            var tc = tpools[ti][tq]; if (tc === el) continue;
+            /* The track measures 0 wide in the demo panel it sits in,
+               so it is known by its height and its ground, never its
+               width. */
+            var trr = tc.getBoundingClientRect(), tcs = getComputedStyle(tc);
+            if (trr.height > 0 && trr.height <= 8 && tcs.backgroundColor !== 'rgba(0, 0, 0, 0)' && !(tc.textContent || '').trim()) { tk = tc; break; }
+          }
+        }
+        if (!tk) { out.missing.push('part:' + k + ' (track by ' + t.text + ')'); return; }
+        out.parts[k] = styleOf(tk); return;
+      }
+      if (t.swatchOf) {
+        /* The word and its square may be siblings, or the square may be
+           inside the element the word is in. Look in both places, and
+           take the small filled box. */
+        var pools = [el.children, (el.parentElement || el).children], sw = null;
+        for (var pi = 0; pi < pools.length && !sw; pi++) {
+          for (var q = 0; q < pools[pi].length; q++) {
+            var cand = pools[pi][q]; if (cand === el) continue;
+            var qr = cand.getBoundingClientRect(), qs = getComputedStyle(cand);
+            if (qr.width > 0 && qr.width <= 14 && qr.height <= 14 && qs.backgroundColor !== 'rgba(0, 0, 0, 0)') { sw = cand; break; }
+          }
+        }
+        if (!sw) { out.missing.push('part:' + k + ' (swatch by ' + t.text + ')'); return; }
+        out.parts[k] = styleOf(sw); return;
+      }
+      if (t.dividerOf) {
+        var row = el.parentElement, div = null;
+        if (row) for (var d = 0; d < row.children.length; d++) {
+          var dr = row.children[d].getBoundingClientRect();
+          if (dr.width > 0 && dr.width <= 2 && dr.height > 4) { div = row.children[d]; break; }
+        }
+        if (!div) { out.missing.push('part:' + k + ' (divider by ' + t.text + ')'); return; }
+        out.parts[k] = styleOf(div); return;
+      }
+      /* Plain parents for the card's rows, which have no border or
+         radius and so are not "boxes". boxOf for everything else. No
+         backticks in here: this sits inside a template literal. */
+      var plain = ['nodeTop', 'nodeWords', 'nodeBottom', 'legendItem'].indexOf(k) >= 0;
+      for (var i = 0; i < (t.up || 0); i++) {
+        el = plain ? (el.parentElement || el) : boxOf(el.parentElement || el);
+      }
       out.parts[k] = styleOf(el);
     });
 
