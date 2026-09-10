@@ -48,11 +48,12 @@ export const FEATURES: Feature[] = [
     ],
   },
   {
-    id: 'crm', title: 'CRM pipeline', path: '/dashboard/crm',
+    id: 'crm', title: 'CRM portfolio', path: '/dashboard/crm',
     /* Not "companies": in this application's own vocabulary a company
        is one we do not have yet, which is the finder. Customers,
        contacts and accounts are this screen. */
-    aliases: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'prospects', 'leads', 'pipeline'],
+    aliases: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'prospects', 'leads',
+      'portfolio', 'pipeline'],
     blurb: 'Shared and personal contact lists',
     actions: [
       { label: 'Add a prospect', phrase: 'add prospect ' },

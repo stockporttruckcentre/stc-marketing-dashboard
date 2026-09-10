@@ -941,6 +941,16 @@ for (const [said, id] of [
   ['missing addresses', 'crm.enrich'],
   ['update the crm from a file', 'crm.enrich'],
   ['add emails from a spreadsheet', 'crm.enrich'],
+
+  /* The CRM tab, renamed from "CRM pipeline" to "CRM portfolio". Both
+     words reach it: a rename that makes the old one stop working breaks
+     a habit for no reason, and everybody in the building has been
+     typing "pipeline" since the tab was built. */
+  ['portfolio', 'nav.crm'],
+  ['crm portfolio', 'nav.crm'],
+  ['pipeline', 'nav.crm'],
+  ['crm pipeline', 'nav.crm'],
+  ['open the portfolio', 'nav.crm'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
@@ -1579,7 +1589,7 @@ for (const role of ROLES) {
   /* A nested route says the screen it sits under, not whichever entry
      happened to be declared last. */
   ok('a nested route says the screen it is under',
-    crumbsFor('/dashboard/crm/12345')[1] === 'CRM pipeline');
+    crumbsFor('/dashboard/crm/12345')[1] === 'CRM portfolio');
 }
 
 /* -------------------------------------------------------------

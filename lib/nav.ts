@@ -104,7 +104,7 @@ export const NAVIGATION: NavSection[] = [
   {
     key: 'sales', label: 'Sales',
     items: [
-      { href: '/dashboard/crm', label: 'CRM pipeline', icon: 'crm', capability: 'crm.view' },
+      { href: '/dashboard/crm', label: 'CRM portfolio', icon: 'crm', capability: 'crm.view' },
       { href: '/dashboard/leads', label: 'Sales tracker', icon: 'tracker', capability: 'tracker.view' },
       { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'finder.view' },
       { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'stock.view' },

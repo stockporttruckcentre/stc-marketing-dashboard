@@ -75,14 +75,19 @@ export const ACTIONS: CommandActionSpec[] = [
     path: '/dashboard', verbs: GO,
     objects: ['dashboard', 'home', 'overview', 'my day', 'workspace', 'front page', 'start', 'today', 'whats on today', 'my morning'] },
 
-  { id: 'nav.crm', label: 'CRM pipeline', blurb: 'Contacts, lists and accounts', kind: 'navigate',
+  { id: 'nav.crm', label: 'CRM portfolio', blurb: 'Contacts, lists and accounts', kind: 'navigate',
     path: '/dashboard/crm', verbs: GO,
     /* NOT "companies". `lib/command/finder.ts` is explicit that a
        company is one we do NOT have: "show me 20 customers near Hyde"
        is this screen and "show me 20 companies near Hyde" is the
        finder, one word apart. Claiming the word here sent every
        prospecting sentence to the account list. */
-    objects: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'pipeline', 'prospects', 'address book'] },
+    /* "pipeline" stays. The tab was called that until today and people
+       will go on typing it for months, and a rename that makes the old
+       word stop working is a rename that breaks somebody's habit for no
+       reason. "portfolio" is what it is called now. */
+    objects: ['crm', 'contacts', 'customers', 'clients', 'accounts', 'portfolio',
+      'crm portfolio', 'pipeline', 'crm pipeline', 'prospects', 'address book'] },
 
   { id: 'nav.tracker', label: 'Sales tracker', blurb: 'Your own deals and commission', kind: 'navigate',
     path: '/dashboard/leads', verbs: GO,
