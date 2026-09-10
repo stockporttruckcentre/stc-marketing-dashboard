@@ -38,9 +38,14 @@ export default async function AdminPage() {
      actually holds, and somebody with neither is still sent away. The
      redirect stays a courtesy rather than the defence: every write on
      this screen is refused by name inside the database. */
-  const [{ data: mayManage }, { data: mayDecide }] = await Promise.all([
+  const [{ data: mayManage }, { data: mayDecide }, { data: mayEditRoles }] = await Promise.all([
     supabase.rpc('command_may', { p_capability: 'admin.users' }),
     supabase.rpc('command_may', { p_capability: 'access.decide' }),
+    /* Reading what a role can do needs only `admin.users`. CHANGING it
+       needs `admin.roles`, which is a different job: putting Dean on Sr
+       Sales is one person, deciding what Sr Sales means is all of
+       them. */
+    supabase.rpc('command_may', { p_capability: 'admin.roles' }),
   ]);
 
   /* The directory is still open to them, so there is somewhere honest
@@ -64,6 +69,7 @@ export default async function AdminPage() {
         selfId={user.id}
         mayManage={mayManage === true}
         mayDecide={mayDecide === true}
+        mayEditRoles={mayEditRoles === true}
         templates={(templates ?? []) as { slug: string; name: string; description: string | null }[]}
       />
     </Suspense>

@@ -8,5 +8,7 @@
   "components/analytics/kit/devices.tsx": 0,
   "components/analytics/kit/controls.tsx": 0,
   "components/analytics/kit/mirror.tsx": 0,
-  "components/analytics/TargetsBoard.tsx": 0
+  "components/analytics/TargetsBoard.tsx": 0,
+  "components/admin/roles-chart.tsx": 0,
+  "lib/admin/roles-kit.ts": 0
 }

@@ -150,6 +150,23 @@ const PARTS: Record<string, Target> = {
   listGroupHead: { text: '4 · STC SERVICE' },
   listRowOn:     { text: 'Depot Manager', up: 1 },
 
+  /* ---- The containers, so the layout is the kit's too ----
+
+     A first version typed the panel padding, the gap between sibling
+     nodes and the row padding by hand, and `npm run check:invention`
+     counted forty six values it had no business holding. Every one of
+     them is IN the kit; they were typed because they are boxes rather
+     than devices and it did not occur to me to read them.
+
+     `up: 1` on a word inside each, so the box is found the same way as
+     a button. */
+  panel:      { text: 'Find a role or a person', placeholder: true, up: 2 },
+  toolbarRow: { text: 'Tree', up: 2 },
+  card:       { text: 'Coverage by group', up: 1 },
+  capRow:     { text: 'Create a job', up: 2 },
+  meterRow:   { text: 'Jobs and workshop', up: 2 },
+  auditRow:   { text: 'G Sutton · 14 Aug 2026, 09:12', up: 1 },
+
   auditLine:  { text: 'G Sutton · 14 Aug 2026, 09:12' },
   holdersHead: { text: 'Holders' },
   systemStrip: { text: 'SYSTEM ROLES' },
