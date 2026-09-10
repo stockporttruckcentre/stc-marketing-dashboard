@@ -1301,8 +1301,20 @@ END
 $$;
 
 -- The last administrator.
-UPDATE profiles SET role = 'sales' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000002';
-UPDATE profiles SET role = 'sales' WHERE id = 'dddddddd-0000-0000-0000-00000000000d';
+--
+-- Every other one, not the two fixtures this file happens to know
+-- about. It named them by id and that held only while the database
+-- contained nothing but this file's own rows. Migration 104 puts real
+-- people in, Wayne Kenny among them, so there were two administrators
+-- where the assertion below assumes one, the guard correctly allowed
+-- the change, and ninety five assertions failed in a cascade from it.
+--
+-- A check that says "the last administrator" has to make that true
+-- rather than assume it. The guard counts `role = 'admin'`, so that is
+-- the column to clear, and it refuses only the removal of the last one,
+-- so clearing them one at a time down to one is allowed.
+UPDATE profiles SET role = 'sales' WHERE role = 'admin'
+   AND id <> 'aaaaaaaa-0000-0000-0000-000000000001';
 
 DO $$
 BEGIN
