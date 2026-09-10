@@ -48,7 +48,7 @@ function missingTable(error: { code?: string } | null | undefined): boolean {
 export default async function SocialPage({
   searchParams,
 }: {
-  searchParams: { tab?: string; needs?: string; new?: string };
+  searchParams: { tab?: string; needs?: string; new?: string; post?: string; status?: string };
 }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -117,6 +117,26 @@ export default async function SocialPage({
   const asked = searchParams?.tab;
   const openTab = (TABS as readonly string[]).includes(asked ?? '') ? (asked as Tab) : null;
 
+  /* ---- `?post=` ----
+
+     Every content notification links to one: "Read it" on a post put up
+     for approval is `/dashboard/social?post=<id>`, written by
+     `notify_on_post_status` in migration 066. This page read `tab`,
+     `needs` and `new` and nothing else, so the id was dropped and the
+     button landed on the planner home. Nothing to do with the post's
+     status: it did that whatever state the post was in.
+
+     ---- and `?status=pending_review` ----
+
+     The "see them all" link on the same notification. `needs=review` is
+     what this page reads and always was, and both are accepted here
+     rather than the link being corrected, because the rows already in
+     `notifications` carry the old one and a migration cannot reach into
+     a notification somebody has already been sent. */
+  const openPostId = searchParams?.post?.trim() || null;
+  const needsReview = searchParams?.needs === 'review'
+    || searchParams?.status === 'pending_review';
+
   return (
     <SocialPlanner
       initialPosts={(postsRes.data ?? []) as unknown as Post[]}
@@ -134,7 +154,8 @@ export default async function SocialPage({
       activity={(activityRes.data ?? []) as ActivityLine[]}
       postTags={(postTagsRes.data ?? []) as { post_id: string; tag_id: string }[]}
       openTab={openTab}
-      needsReview={searchParams?.needs === 'review'}
+      openPostId={openPostId}
+      needsReview={needsReview}
       startComposing={searchParams?.new === '1'}
     />
   );
