@@ -360,13 +360,15 @@ BEGIN
   /* One statement, no scratch table.
 
      The first version built a temp table and cleared it with
-     `DELETE FROM _enrich;`. Supabase runs with `sql_safe_updates` on,
-     which refuses any DELETE or UPDATE without a WHERE clause, so the
-     whole thing failed at the point of pressing Apply with "DELETE
-     requires a WHERE clause". The disposable Postgres this was written
-     against does not have that setting on by default, which is why it
-     passed here and failed there. `enrichment-check.sql` turns it on
-     now so the next one cannot get through.
+     a bare DELETE against it. Supabase preloads `pg_safeupdate`, which
+     refuses any DELETE or UPDATE that does not say which rows and
+     answers "DELETE requires a WHERE clause", so the whole thing failed
+     at the point of pressing Apply. The disposable Postgres this was
+     written against does not have that extension, which is why it
+     passed thirty one assertions here and failed there.
+
+     `enrichment-check.sql` cannot install the extension, so it asserts
+     the rule statically over every plpgsql function instead.
 
      A CTE is the better shape anyway: the plan is computed once, the
      update reads it, and the counts come back out of the same
