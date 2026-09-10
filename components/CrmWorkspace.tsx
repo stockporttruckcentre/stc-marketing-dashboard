@@ -10,9 +10,11 @@ import Papa from 'papaparse';
 import {
   Plus, Upload, Download, Loader, Trash2, X, Mail, Edit2, MoreHorizontal,
   Globe, Users, UserPlus, Send, Star, Search, ChevronDown, SearchX, Tag,
+  Wand2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Gated } from '@/components/permissions/ask';
+import { EnrichDialog } from '@/components/crm/EnrichDialog';
 import type { CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress } from '@/lib/types';
 import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { NextActionPrompt } from '@/components/crm/NextActionPrompt';
@@ -151,6 +153,7 @@ export function CrmWorkspace({
   const [promptProposal, setPromptProposal] = useState<CRMContact | null>(null);
   const [assignMenu, setAssignMenu] = useState<{ x: number; y: number; rowIds: string[] } | null>(null);
   const [showAddContact, setShowAddContact] = useState(false);
+  const [showEnrich, setShowEnrich] = useState(false);
   const [showImport, setShowImport] = useState(false);
   /**
    * Every company in the CRM, for the import to check against.
@@ -995,6 +998,15 @@ export function CrmWorkspace({
               {importing ? <Loader size={13} className="spin" /> : <Upload size={13} />} Import
             </Button>
           </Gated>
+          {/* Filling in blanks from somebody else's file. Next to Import
+              because that is where somebody looks for it, and separate
+              from it because that one creates records and this one must
+              never do that. */}
+          {caps.has('crm.import') && (
+            <Button size="sm" variant="secondary" onClick={() => setShowEnrich(true)}>
+              <Wand2 size={13} /> Fill in blanks
+            </Button>
+          )}
           <Gated may={caps.has('crm.export')} capability="crm.export"
                  doing="Export the CRM" label="Export">
             <Button size="sm" variant="secondary" onClick={handleExport}>
@@ -1231,6 +1243,22 @@ export function CrmWorkspace({
           onClose={() => setShowImport(false)}
         />
       )}
+
+      {showEnrich && (
+
+        <EnrichDialog
+
+          onClose={() => setShowEnrich(false)}
+
+          onDone={async (summary) => {
+              say({ tone: 'success', title: 'Blanks filled in', body: summary });
+              setRows(await reloadList());
+            }}
+
+        />
+
+      )}
+
 
       {showAddContact && (
         <AddContactModal

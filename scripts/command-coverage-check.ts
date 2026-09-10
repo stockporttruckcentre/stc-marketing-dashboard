@@ -932,6 +932,15 @@ for (const [said, id] of [
   ['approve access', 'nav.requests'],
   ['access approvals', 'nav.requests'],
   ['what have i asked for', 'nav.requests'],
+
+  /* Filling blanks in from a file, added with migration 106. Nobody
+     types "enrich": they type the thing that is missing. */
+  ['fill in blanks', 'crm.enrich'],
+  ['missing emails', 'crm.enrich'],
+  ['missing phone numbers', 'crm.enrich'],
+  ['missing addresses', 'crm.enrich'],
+  ['update the crm from a file', 'crm.enrich'],
+  ['add emails from a spreadsheet', 'crm.enrich'],
 ] as [string, string][]) {
   ok(`"${said}" reaches ${id}`,
     suggestActions(said, CAPS.admin, 8).some((h) => h.action.id === id));
@@ -940,6 +949,15 @@ for (const [said, id] of [
 /* And it reaches everybody, because everybody can ask. A screen that
    answers only an administrator is a screen the person who was refused
    cannot use to find out what happened to their asking. */
+/* And it is offered only to somebody who could actually do it. A read
+   only viewer typing "missing emails" must see nothing, because an
+   action that appears and then refuses teaches people the tool is
+   unreliable. */
+ok('filling blanks in is offered to somebody who may import',
+  suggestActions('fill in blanks', CAPS.admin, 8).some((h) => h.action.id === 'crm.enrich'));
+ok('and not to a read only viewer',
+  !suggestActions('fill in blanks', CAPS.viewer, 8).some((h) => h.action.id === 'crm.enrich'));
+
 for (const role of ROLES) {
   ok(`a ${role} can get to the access requests screen by typing`,
     suggestActions('access requests', CAPS[role], 8).some((h) => h.action.id === 'nav.requests'));

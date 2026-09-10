@@ -39,6 +39,7 @@
     "check:role-shape": "tsx scripts/role-shape-check.ts",
     "check:screens": "tsx scripts/screen-capability-check.ts",
     "check:asking": "bash scripts/sql/asking-check.sh",
+    "check:enrichment": "bash scripts/sql/enrichment-check.sh",
     "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh",
     "check:work": "bash scripts/sql/work-check.sh",
     "check:content": "bash scripts/sql/content-check.sh",
