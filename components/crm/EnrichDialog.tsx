@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import Papa from 'papaparse';
 import { Upload, Check, Loader, ArrowLeft } from 'lucide-react';
 import { Button, Badge, Alert } from '@/components/kit/primitives';
 import { Modal, Select } from '@/components/kit/forms';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
+import { readTable, type Sheet } from '@/lib/import/read-table';
 
 /* =============================================================
    Filling in what the CRM is missing, from somebody else's file.
@@ -50,6 +50,10 @@ type Step = 'file' | 'review' | 'done';
 
 type Row = {
   alpha: string; name: string; email: string; phone: string; address: string;
+  /* The person at the customer, as one string. `contact_name` is a
+     single free text field on the record and the drawer edits it as
+     one, so "Alan & Ian Edwards" goes in exactly as Dean typed it. */
+  contact: string;
   /* Worked out here rather than in the database, because
      `extractCityFromAddress` has the list of UK cities in it and a
      second implementation in SQL would disagree with this one the first
@@ -68,6 +72,7 @@ type Plan = {
   verdict: string;
   fill_email: string | null;
   fill_phone: string | null;
+  fill_contact: string | null;
   fill_address: string | null;
 };
 
@@ -82,7 +87,7 @@ const VERDICTS = [
 const EXPLAIN: Record<string, string> = {
   'fill': 'Matched, and there is a blank to fill.',
   'nothing to add': 'Matched, and it already has everything this file offers.',
-  'file has nothing': 'The file has no email, phone or address for this one.',
+  'file has nothing': 'The file has no contact name, email, phone or address for this one.',
   'no match': 'Not in the CRM. Left alone, which is what you asked for.',
   'ambiguous name': 'The name picks out more than one CRM record. Refused rather than guessed.',
   'name twice': 'That name appears more than once in this file, so it cannot identify anybody.',
@@ -104,15 +109,27 @@ const TONE: Record<string, 'neutral' | 'info' | 'warning' | 'accent'> = {
 };
 
 /** The fields that come from a column in the file. `city` is derived. */
-type Mapped = 'alpha' | 'name' | 'email' | 'phone' | 'address';
+type Mapped = 'alpha' | 'name' | 'contact' | 'email' | 'phone' | 'address';
 
 /** Header names we recognise without being told. */
 const GUESS: Record<Mapped, string[]> = {
   alpha: ['alpha', 'account', 'account code', 'code', 'customer code'],
-  name: ['customer name', 'company name', 'customer', 'company', 'name'],
-  email: ['email', 'e-mail', 'email address'],
-  phone: ['phone', 'telephone', 'tel', 'phone number', 'contact number'],
-  address: ['address', 'business address', 'site address', 'postal address'],
+  name: ['customer name', 'company name', 'customer', 'company'],
+  /* Not a bare "Name". Sheet2 of `Dean_Customers.xlsx` is Alpha,
+     FILENAME, Name, and a bare Name there is a company. Guessing it is
+     a person would have written three hundred company names into the
+     Contact field of records that had no contact, which is a write, not
+     a miss. A column headed only "Name" gets mapped by hand or not at
+     all. */
+  contact: ['contact name', 'contact', 'person', 'contact person'],
+  email: ['email', 'e-mail', 'email address', 'contact email'],
+  phone: ['phone', 'telephone', 'tel', 'phone number', 'contact number', 'contact phone'],
+  /* "location" is in here because Dean's workbook calls the column that
+     and puts a full address in it. The CRM's own Location is the city
+     off the primary address and is never typed into, so there is no
+     clash: an address column is an address column whatever its heading
+     says. */
+  address: ['address', 'business address', 'site address', 'postal address', 'location'],
 };
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -127,65 +144,65 @@ export function EnrichDialog({ onClose, onDone }: {
   const [step, setStep] = useState<Step>('file');
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [raw, setRaw] = useState<Record<string, string>[]>([]);
+  const [sheets, setSheets] = useState<Sheet[]>([]);
+  const [sheetAt, setSheetAt] = useState(0);
   const [cols, setCols] = useState<Record<Mapped, string>>({
-    alpha: '', name: '', email: '', phone: '', address: '',
+    alpha: '', name: '', contact: '', email: '', phone: '', address: '',
   });
   const [plan, setPlan] = useState<Plan[] | null>(null);
   const [show, setShow] = useState<string>('fill');
 
-  const take = useCallback((rows: Record<string, string>[]) => {
-    if (rows.length === 0) { setFailed('That file has no rows in it.'); return; }
-    const head = Object.keys(rows[0]);
-    setHeaders(head);
-    setRaw(rows);
-
+  /* Guessing which column is which, for one sheet. Re-run whenever the
+     sheet changes, because the headers change with it. */
+  const guess = useCallback((sheet: Sheet) => {
     const picked: Record<Mapped, string> = {
-      alpha: '', name: '', email: '', phone: '', address: '',
+      alpha: '', name: '', contact: '', email: '', phone: '', address: '',
     };
     for (const field of Object.keys(GUESS) as Mapped[]) {
-      picked[field] = head.find((h) => GUESS[field].includes(norm(h))) ?? '';
+      picked[field] = sheet.headers.find((h) => GUESS[field].includes(norm(h))) ?? '';
     }
     setCols(picked);
   }, []);
 
   const read = useCallback(async (file: File) => {
     setFailed(null);
-
-    /* Read as text ourselves rather than handing the File to Papa,
-       because the encoding has to be decided and Protean's exports are
-       Windows-1252.
-
-       `CustomerSite_Maintenance_Listing_Summary.csv` has three fields
-       with a byte above 0x7F in them: an en dash in a London address, a
-       curly apostrophe in a Hungarian company name, and an accented
-       vowel in a Budapest street. Read as UTF-8 those become the
-       replacement character and the address is quietly damaged.
-
-       UTF-8 first, because that is what most things are now, and
-       Windows-1252 only if the first attempt produced replacement
-       characters, which is the one signal that says it guessed wrong.
-       Nothing valid in UTF-8 contains U+FFFD. */
-    const buffer = await file.arrayBuffer();
-    let text = new TextDecoder('utf-8').decode(buffer);
-    if (text.includes('\uFFFD')) {
-      text = new TextDecoder('windows-1252').decode(buffer);
+    setPlan(null);
+    let read: Sheet[];
+    try {
+      read = await readTable(file);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : 'That file could not be read.');
+      return;
     }
+    if (read.length === 0 || read.every((sh) => sh.rows.length === 0)) {
+      setFailed('That file has no rows in it.');
+      return;
+    }
+    /* The first sheet that actually has rows, rather than the first
+       sheet. A workbook whose front tab is a title page would otherwise
+       open on nothing. */
+    const at = Math.max(0, read.findIndex((sh) => sh.rows.length > 0));
+    setSheets(read);
+    setSheetAt(at);
+    guess(read[at]);
+  }, [guess]);
 
-    const res = Papa.parse<Record<string, string>>(text, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim(),
-    });
-    take((res.data ?? []).filter((r) => Object.values(r).some((v) => v?.trim())));
-  }, [take]);
+  const pickSheet = useCallback((i: number) => {
+    setSheetAt(i);
+    setPlan(null);
+    guess(sheets[i]);
+  }, [guess, sheets]);
+
+  const sheet = sheets[sheetAt] as Sheet | undefined;
+  const headers = sheet?.headers ?? [];
+  const raw = useMemo(() => sheet?.rows ?? [], [sheet]);
 
   const rows: Row[] = useMemo(() => raw.map((r) => {
     const address = (cols.address ? r[cols.address] : '') ?? '';
     return {
       alpha: (cols.alpha ? r[cols.alpha] : '') ?? '',
       name: (cols.name ? r[cols.name] : '') ?? '',
+      contact: (cols.contact ? r[cols.contact] : '') ?? '',
       email: (cols.email ? r[cols.email] : '') ?? '',
       phone: (cols.phone ? r[cols.phone] : '') ?? '',
       address,
@@ -215,7 +232,7 @@ export function EnrichDialog({ onClose, onDone }: {
     setStep('done');
     onDone(`${d.records ?? 0} records filled in: `
       + `${d.emails ?? 0} email addresses, ${d.phones ?? 0} phone numbers, `
-      + `${d.addresses ?? 0} addresses.`);
+      + `${d.people ?? 0} contact names, ${d.addresses ?? 0} addresses.`);
   }, [supabase, rows, onDone]);
 
   const counts = useMemo(() => {
@@ -276,6 +293,8 @@ export function EnrichDialog({ onClose, onDone }: {
             file that is not in the CRM is left alone.
             {' '}An address goes on the customer&rsquo;s Addresses list as the head
             office, so it appears on the map, and not in the old single field.
+            {' '}A contact name goes in exactly as it is written in the file: if a
+            cell names two people, the record ends up naming two people.
           </p>
 
           <div
@@ -294,17 +313,42 @@ export function EnrichDialog({ onClose, onDone }: {
             <Upload size={20} style={{ opacity: 0.6 }} />
             <div style={{ fontSize: 13.5, marginTop: 8 }}>
               {raw.length > 0
-                ? `${raw.length} rows read. Drop another to start again.`
-                : 'Drop a CSV here, or click to choose one'}
+                ? `${raw.length} rows read from ${sheet?.name ?? 'the file'}. `
+                  + 'Drop another to start again.'
+                : 'Drop a CSV or an Excel file here, or click to choose one'}
             </div>
           </div>
           <input
             ref={fileInput}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.xlsx,.xls,text/csv"
             hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); }}
           />
+
+          {/* Which tab. Shown only when there is a choice, because a CSV
+              is one sheet and a picker over it would be noise.
+
+              It is not optional when there is one. `Dean_Customers.xlsx`
+              has a second sheet of Alpha, FILENAME, Name. Take that one
+              and the account code and a name both map themselves, every
+              row matches a real customer, and every one of them reports
+              "file has nothing" because a filename is not a person. */}
+          {sheets.length > 1 && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, width: 130 }}>Sheet</span>
+              <Select
+                value={String(sheetAt)}
+                onChange={(v: string) => pickSheet(Number(v))}
+              >
+                {sheets.map((sh, i) => (
+                  <option key={sh.name} value={String(i)}>
+                    {sh.name} ({sh.rows.length} {sh.rows.length === 1 ? 'row' : 'rows'})
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
 
           {headers.length > 0 && (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -315,7 +359,8 @@ export function EnrichDialog({ onClose, onDone }: {
               {(Object.keys(GUESS) as Mapped[]).map((field) => (
                 <div key={field} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <span style={{ fontSize: 13, width: 130, textTransform: 'capitalize' }}>
-                    {field === 'alpha' ? 'Account code' : field}
+                    {field === 'alpha' ? 'Account code'
+                      : field === 'contact' ? 'Contact name' : field}
                   </span>
                   <Select
                     value={cols[field]}
@@ -390,7 +435,8 @@ export function EnrichDialog({ onClose, onDone }: {
                     <td style={cell}>{p.crm_name ?? <Dash />}</td>
                     <td style={cell}>{p.matched_by ?? <Dash />}</td>
                     <td style={cell}>
-                      {[p.fill_email && 'email', p.fill_phone && 'phone', p.fill_address && 'address']
+                      {[p.fill_contact && 'contact', p.fill_email && 'email',
+                        p.fill_phone && 'phone', p.fill_address && 'address']
                         .filter(Boolean).join(', ') || <Dash />}
                     </td>
                   </tr>
