@@ -28,7 +28,24 @@ import { ROLE_NODES, ROLE_PARTS } from './roles-kit.generated';
 
 type Raw = Record<string, string | number>;
 
-const DROP = new Set(['__w', '__h']);
+/* ---- What is dropped, and the bug that decided it ----
+
+   `__w` and `__h` are the measured box, not a style.
+
+   `width`, `height`, `minWidth`, `maxWidth` and `minHeight` are the
+   COMPUTED box too, which is a layout result and not a declaration: a
+   heading the kit's demo happened to lay out at 216px wide comes back
+   as `width: 216.391px`, and a five line paragraph whose demo text was
+   one line comes back as `height: 14px`. Spread onto a real element,
+   the paragraph is forced to fourteen pixels and its text runs over
+   everything beneath it.
+
+   That is exactly what shipped. The Roles tab went live with every
+   block stamped at the demo's size, the detail panel a stack of
+   overlapping text, and nobody had rendered it before it merged. These
+   five are dropped so a part carries what the kit DECLARED and the
+   content decides how big it is, which is what the kit itself does. */
+const DROP = new Set(['__w', '__h', 'width', 'height', 'minWidth', 'maxWidth', 'minHeight']);
 
 /* A property the browser resolved to nothing. Setting these would
    override something a stylesheet legitimately sets later. */
@@ -60,8 +77,30 @@ function toStyle(raw: Raw): CSSProperties {
 export type NodeName = keyof typeof ROLE_NODES;
 export type PartName = keyof typeof ROLE_PARTS;
 
-export const node = (name: NodeName): CSSProperties => toStyle(ROLE_NODES[name] as Raw);
-export const part = (name: PartName): CSSProperties => toStyle(ROLE_PARTS[name] as Raw);
+/* ---- Where the box IS the declaration ----
+
+   A role card is 218px wide in the kit because the kit made it so,
+   not because its demo text happened to be that long: every card on
+   the page is the same width whatever its name. The initials circle is
+   28 by 28 for the same reason, the tint bar is 3 wide, the hairline
+   is 1 by 10. For those the measured box is the design and is kept.
+
+   For a heading or a paragraph the measured box is the demo's
+   accident, and it is dropped. The caller says which, because only the
+   caller knows what the element is. */
+const withBox = (raw: Raw, keep: 'w' | 'wh' | 'h' | false): CSSProperties => {
+  const out = toStyle(raw) as Record<string, string>;
+  if (keep === 'w' || keep === 'wh') out.width = `${raw.__w}px`;
+  if (keep === 'wh' || keep === 'h') out.height = `${raw.__h}px`;
+  return out as CSSProperties;
+};
+
+/** A card. Fixed width, content height, as the kit lays them out. */
+export const node = (name: NodeName): CSSProperties => withBox(ROLE_NODES[name] as Raw, 'w');
+
+/** A part. Content sized unless told the box is the point. */
+export const part = (name: PartName, keep: 'w' | 'wh' | 'h' | false = false): CSSProperties =>
+  withBox(ROLE_PARTS[name] as Raw, keep);
 
 /** The measured box, for a check to assert against rather than to set. */
 export const box = (name: NodeName | PartName): { w: number; h: number } => {
@@ -90,8 +129,21 @@ export const TINT: Record<string, NodeName> = {
   admin: 'divSystem',
 };
 
-export const tintFor = (department: string | null): CSSProperties =>
-  node(TINT[department ?? ''] ?? 'divSystem');
+/* The tint colour for a department, as the bar the kit draws it on:
+   3 wide, absolutely placed down the left, rounded on the outer
+   corners only. The colour comes from the division card, the shape
+   from the card the kit demonstrates the bar on. */
+/* The legend square for a department: the kit's own swatch, in the
+   department's tint. */
+export const swatchFor = (department: string | null): CSSProperties => ({
+  ...part('legendSwatch', 'wh'),
+  backgroundColor: (ROLE_NODES[TINT[department ?? ''] ?? 'divSystem'] as Raw).backgroundColor as string,
+});
+
+export const tintFor = (department: string | null): CSSProperties => ({
+  ...part('nodeTint', 'w'),
+  backgroundColor: (ROLE_NODES[TINT[department ?? ''] ?? 'divSystem'] as Raw).backgroundColor as string,
+});
 
 /* -------------------------------------------------------------
    The kit's spacing, as custom properties.

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { EmptyState, NotProvisioned, Skeleton, Alert } from '@/components/kit/primitives';
-import { node, part, tintFor, spacing } from '@/lib/admin/roles-kit';
+import { node, part, tintFor, swatchFor, spacing } from '@/lib/admin/roles-kit';
 
 /* =============================================================
    Roles, as the kit draws them.
@@ -98,6 +98,19 @@ const SCOPE: Record<string, string> = {
 const initials = (name: string) => name.split(/\s+/).filter(Boolean)
   .slice(0, 2).map((w) => w[0]!.toUpperCase()).join('');
 
+/* ---- The loader and the screen are two components ----
+
+   `RolesChart` reads the five tables and owns the writes. `RolesView`
+   draws, from props, and knows nothing about Supabase. That split is
+   what lets `app/roles-preview` mount the real screen with fabricated
+   roles and a browser look at it, which is the step that was missing
+   when this tab went live with every block overlapping. A component
+   that can only be rendered behind a login is a component nobody
+   renders before merging. */
+export type RolesData = {
+  roles: Template[]; caps: Cap[]; grants: Grant[]; holders: Holder[]; history: Line[];
+};
+
 export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
   const supabase = createClient();
 
@@ -109,10 +122,6 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
   const [missing, setMissing] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
 
-  const [picked, setPicked] = useState<string | null>(null);
-  const [find, setFind] = useState('');
-  const [open, setOpen] = useState<Set<string>>(new Set());
-  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
 
@@ -146,7 +155,6 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
     /* The history is the newest table, so a database without 108 still
        draws the chart rather than refusing the whole screen. */
     setHistory(hist.error ? [] : ((hist.data ?? []) as Line[]));
-    setPicked((p) => p ?? list[0]?.slug ?? null);
   }, [supabase]);
 
   useEffect(() => { void load(); }, [load]);
@@ -156,82 +164,39 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
     return () => clearTimeout(t);
   }, [said]);
 
-  const held = useMemo(() => {
-    const m = new Map<string, Map<string, string>>();
-    for (const g of grants) {
-      if (!m.has(g.role_template_id)) m.set(g.role_template_id, new Map());
-      m.get(g.role_template_id)!.set(g.capability, g.scope);
-    }
-    return m;
-  }, [grants]);
 
-  const roots: Tree[] = useMemo(() => {
-    if (!roles) return [];
-    const bySlug = new Map(roles.map((r) => [r.slug, { ...r, children: [] as Tree[] }]));
-    const out: Tree[] = [];
-    for (const r of roles) {
-      const n = bySlug.get(r.slug)!;
-      const up = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
-      if (up && up !== n) up.children.push(n); else out.push(n);
-    }
-    return out;
-  }, [roles]);
 
-  const current = roles?.find((r) => r.slug === picked) ?? null;
-  /* Memoised because `toggle` and `rescope` depend on it: a fresh Map
-     every render makes every callback fresh too, which remakes every
-     row's handler on every keystroke in the search box. */
-  const mine = useMemo(
-    () => (current ? (held.get(current.id) ?? new Map<string, string>()) : new Map<string, string>()),
-    [current, held]);
 
-  /* Every capability, grouped the way the catalogue groups itself, with
-     what this role holds marked. Not only what it holds: the kit's
-     coverage meter is a share of the whole set, so the whole set has to
-     be on screen for the share to mean anything. */
-  const areas = useMemo(() => {
-    const needle = find.trim().toLowerCase();
-    const m = new Map<string, Cap[]>();
-    for (const c of caps) {
-      if (needle && !`${c.label} ${c.key} ${c.area} ${c.feature} ${c.description}`
-        .toLowerCase().includes(needle)) continue;
-      if (!m.has(c.area)) m.set(c.area, []);
-      m.get(c.area)!.push(c);
-    }
-    return [...m.entries()];
-  }, [caps, find]);
 
-  const toggle = useCallback(async (cap: Cap, on: boolean) => {
-    if (!current) return;
+  const toggle = useCallback(async (role: Template, cap: Cap, on: boolean, scope: string | null) => {
     setBusy(cap.key);
     setFailed(null);
     const { data, error } = await supabase.rpc('set_role_capability', {
-      p_role: current.id,
+      p_role: role.id,
       p_capability: cap.key,
       p_granted: on,
-      p_scope: on ? (mine.get(cap.key) ?? null) : null,
+      p_scope: on ? scope : null,
     });
     setBusy(null);
     if (error) { setFailed(error.message); return; }
     const d = (data ?? {}) as { people?: number; takenOver?: boolean };
     const n = d.people ?? 0;
-    setSaid(`${on ? 'Given to' : 'Taken off'} ${current.name}. `
+    setSaid(`${on ? 'Given to' : 'Taken off'} ${role.name}. `
       + `${n} ${n === 1 ? 'person is' : 'people are'} on that role, and it applies to `
       + `${n === 1 ? 'them' : 'all of them'} now.`);
     await load();
-  }, [current, mine, supabase, load]);
+  }, [supabase, load]);
 
-  const rescope = useCallback(async (cap: Cap, scope: string) => {
-    if (!current) return;
+  const rescope = useCallback(async (role: Template, cap: Cap, scope: string) => {
     setBusy(cap.key);
     const { error } = await supabase.rpc('set_role_capability', {
-      p_role: current.id, p_capability: cap.key, p_granted: true, p_scope: scope,
+      p_role: role.id, p_capability: cap.key, p_granted: true, p_scope: scope,
     });
     setBusy(null);
     if (error) { setFailed(error.message); return; }
-    setSaid(`${cap.label} on ${current.name} is now ${SCOPE[scope] ?? scope}.`);
+    setSaid(`${cap.label} on ${role.name} is now ${SCOPE[scope] ?? scope}.`);
     await load();
-  }, [current, supabase, load]);
+  }, [supabase, load]);
 
   if (missing) {
     return (
@@ -245,7 +210,7 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
   if (!roles) {
     return (
       <div className="rk-loading" style={spacing() as React.CSSProperties}>
-        <style>{CSS}</style>
+        <style dangerouslySetInnerHTML={{ __html: CSS }} />
         {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} />)}
       </div>
     );
@@ -255,13 +220,82 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
     return <EmptyState what="No roles" why={failed ?? 'Nothing came back from role_templates.'} />;
   }
 
+  return (
+    <RolesView
+      data={{ roles, caps, grants, holders, history }}
+      mayEdit={mayEdit}
+      busy={busy}
+      said={said}
+      failed={failed}
+      onToggle={toggle}
+      onRescope={rescope}
+    />
+  );
+}
+
+/* -------------------------------------------------------------
+   The screen. Props in, nothing fetched.
+   ------------------------------------------------------------- */
+export function RolesView({ data, mayEdit, busy, said, failed, onToggle, onRescope }: {
+  data: RolesData;
+  mayEdit: boolean;
+  busy: string | null;
+  said: string | null;
+  failed: string | null;
+  onToggle: (role: Template, cap: Cap, on: boolean, scope: string | null) => void | Promise<void>;
+  onRescope: (role: Template, cap: Cap, scope: string) => void | Promise<void>;
+}) {
+  const { roles, caps, grants, holders, history } = data;
+  const [picked, setPicked] = useState<string | null>(roles[0]?.slug ?? null);
+  const [find, setFind] = useState('');
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState(false);
+
+  const held = useMemo(() => {
+    const m = new Map<string, Map<string, string>>();
+    for (const g of grants) {
+      if (!m.has(g.role_template_id)) m.set(g.role_template_id, new Map());
+      m.get(g.role_template_id)!.set(g.capability, g.scope);
+    }
+    return m;
+  }, [grants]);
+
+  const roots: Tree[] = useMemo(() => {
+    const bySlug = new Map(roles.map((r) => [r.slug, { ...r, children: [] as Tree[] }]));
+    const out: Tree[] = [];
+    for (const r of roles) {
+      const n = bySlug.get(r.slug)!;
+      const up = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
+      if (up && up !== n) up.children.push(n); else out.push(n);
+    }
+    return out;
+  }, [roles]);
+
+  const current = roles.find((r) => r.slug === picked) ?? null;
+  const mine = useMemo(
+    () => (current ? (held.get(current.id) ?? new Map<string, string>()) : new Map<string, string>()),
+    [current, held]);
+
+  const areas = useMemo(() => {
+    const needle = find.trim().toLowerCase();
+    const m = new Map<string, Cap[]>();
+    for (const c of caps) {
+      if (needle && !`${c.label} ${c.key} ${c.area} ${c.feature} ${c.description}`
+        .toLowerCase().includes(needle)) continue;
+      if (!m.has(c.area)) m.set(c.area, []);
+      m.get(c.area)!.push(c);
+    }
+    return [...m.entries()];
+  }, [caps, find]);
+
+
   const myHolders = current ? holders.filter((h) => h.role_template_id === current.id) : [];
   const myHistory = current ? history.filter((h) => h.role_template_id === current.id) : [];
   const total = caps.length;
 
   return (
     <div className="rk" style={spacing() as React.CSSProperties}>
-      <style>{CSS}</style>
+      <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
       {failed && <Alert tone="danger"><span>{failed}</span></Alert>}
       {said && <Alert tone="success"><span>{said}</span></Alert>}
@@ -279,8 +313,8 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
           </label>
           <div className="rk-legend">
             {Object.entries(DEPT).map(([key, label]) => (
-              <span key={key} className="rk-legend__item" style={part('roleDivision')}>
-                <i style={{ ...tintFor(key), height: 'auto' }} />
+              <span key={key} className="rk-legend__item" style={part('legendItem')}>
+                <i style={swatchFor(key)} />
                 {label}
               </span>
             ))}
@@ -454,7 +488,7 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
                               style={part('scopeOn')}
                               value={mine.get(c.key) ?? 'own'}
                               disabled={busy === c.key}
-                              onChange={(e) => void rescope(c, e.target.value)}
+                              onChange={(e) => current && void onRescope(current, c, e.target.value)}
                             >
                               {Object.entries(SCOPE).map(([k, label]) => (
                                 <option key={k} value={k}>{label}</option>
@@ -475,7 +509,7 @@ export function RolesChart({ mayEdit }: { mayEdit: boolean }) {
                             className="rk-btn"
                             style={on ? part('buttonDanger') : part('buttonPrimary')}
                             disabled={busy === c.key}
-                            onClick={() => void toggle(c, !on)}
+                            onClick={() => current && void onToggle(current, c, !on, mine.get(c.key) ?? null)}
                           >
                             {busy === c.key
                               ? <Loader size={12} className="spin" />
@@ -549,14 +583,21 @@ function Branch({ n, picked, onPick, held, holders, total }: {
         onClick={() => onPick(n.slug)}
         aria-pressed={on}
       >
+        {/* The kit's card, row for row: a tint bar down the left, a top
+            row of initials beside name and division stacked, a bottom
+            row of people, a hairline, and the capability count. */}
         <i className="rk-node__tint" style={tintFor(n.department)} />
-        <span className="rk-node__face" style={part('initials')}>{initials(n.name)}</span>
-        <span className="rk-node__words">
-          <span style={part('roleName')}>{n.name}</span>
-          <span style={part('roleDivision')}>{DEPT[n.department ?? ''] ?? ''}</span>
-          <span style={part('roleCount')}>
-            {people} · {count} of {total}
+        <span style={part('nodeTop')}>
+          <span className="rk-node__face" style={part('initials', 'wh')}>{initials(n.name)}</span>
+          <span style={part('nodeWords')}>
+            <span style={part('roleName')}>{n.name}</span>
+            <span style={part('roleDivision')}>{DEPT[n.department ?? ''] ?? ''}</span>
           </span>
+        </span>
+        <span style={part('nodeBottom')}>
+          <span style={part('nodePeople')}><Users size={12} />{people}</span>
+          <span style={part('nodeDivider', 'wh')} />
+          <span style={part('roleCount')}>{count} of {total}</span>
         </span>
       </button>
 
@@ -589,7 +630,7 @@ function Stat({ n, what, tone }: { n: number; what: string; tone: 'on' | 'off' }
 function Bar({ n, of }: { n: number; of: number }) {
   const pct = of === 0 ? 0 : Math.round((n / of) * 100);
   return (
-    <span className="rk-bar-track">
+    <span className="rk-bar-track" style={part('meterTrack', 'h')}>
       <span
         className="rk-bar-fill"
         style={{ width: `${pct}%`, background: part('verdictAllowed').color }}
@@ -621,25 +662,22 @@ const CSS = `
 .rk-search { display: inline-flex; align-items: center; gap: var(--rk-node-gap); flex: 1 1 auto; min-width: 0; }
 .rk-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; outline: none; }
 .rk-legend { display: flex; gap: var(--rk-row-gap); flex-wrap: wrap; margin-left: auto; }
-.rk-legend__item { display: inline-flex; align-items: center; gap: var(--rk-node-gap); }
-.rk-legend__item i { display: inline-block; align-self: stretch; }
+.rk-legend__item i { flex-shrink: 0; }
 
 .rk-canvas { padding: var(--rk-card-pad) var(--rk-pad-x); overflow-x: auto; }
 .rk-forest { display: flex; gap: var(--rk-card-pad-x); justify-content: center; min-width: min-content; }
 .rk-branch { display: flex; flex-direction: column; align-items: center; position: relative; }
 
-.rk-node { position: relative; display: flex; align-items: center; text-align: left; cursor: pointer; overflow: hidden; z-index: 1; }
+.rk-node { position: relative; text-align: left; cursor: pointer; overflow: hidden; z-index: 1; font: inherit; }
 .rk-node__tint { position: absolute; left: 0; top: 0; bottom: 0; }
-.rk-node__face { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-sunken); aspect-ratio: 1; padding: var(--rk-node-gap); }
-.rk-node__words { display: flex; flex-direction: column; min-width: 0; }
-.rk-node__words > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rk-node__face { flex-shrink: 0; }
 
 .rk-kids { display: flex; gap: var(--rk-card-pad); padding-top: calc(var(--rk-drop) * 2); position: relative; }
 .rk-kids::before { content: ''; position: absolute; top: 0; left: var(--rk-mid); width: var(--rk-rule); height: var(--rk-drop); background: var(--border); }
 .rk-kids::after { content: ''; position: absolute; top: var(--rk-drop); left: 0; right: 0; height: var(--rk-rule); background: var(--border); }
 .rk-kids > .rk-branch::before { content: ''; position: absolute; top: calc(var(--rk-drop) * -1); left: var(--rk-mid); width: var(--rk-rule); height: var(--rk-drop); background: var(--border); }
 .rk-kids > .rk-branch:first-child::after,
-.rk-kids > .rk-branch:last-child::after { content: ''; position: absolute; top: calc(var(--rk-drop) * -1); height: var(--rk-rule); background: var(--surface); }
+.rk-kids > .rk-branch:last-child::after { content: ''; position: absolute; top: calc(var(--rk-drop) * -1); height: var(--rk-rule); background: var(--surface); z-index: 1; }
 .rk-kids > .rk-branch:first-child::after { left: calc(var(--rk-card-pad) * -1); right: var(--rk-mid); }
 .rk-kids > .rk-branch:last-child::after { left: var(--rk-mid); right: calc(var(--rk-card-pad) * -1); }
 .rk-kids > .rk-branch:only-child::after { display: none; }
@@ -665,7 +703,7 @@ const CSS = `
 .rk-meter { display: flex; align-items: center; gap: var(--rk-row-gap); padding: calc(var(--rk-row-pad) / 2) var(--rk-none); }
 .rk-meter > :first-child { flex: 1 1 auto; min-width: 0; }
 .rk-meter .rk-bar-track { flex: var(--rk-track); }
-.rk-bar-track { display: block; height: var(--rk-drop); border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.rk-bar-track { display: block; overflow: hidden; }
 .rk-bar-fill { display: block; height: var(--rk-all); }
 
 .rk-editing { padding: var(--rk-pad) var(--rk-pad-x) var(--rk-none); }
