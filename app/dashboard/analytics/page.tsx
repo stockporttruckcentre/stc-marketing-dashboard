@@ -45,7 +45,11 @@ export default async function AnalyticsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'crm.view' });
+  /* `analytics.view`, not `crm.view`. Analytics and Reports were gated
+     on the same capability, so there was no way to grant one and
+     withhold the other, and the office administrators need exactly
+     that: "run reports ... No analytics tab". Migration 103. */
+  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'analytics.view' });
   if (mayRead !== true) redirect('/dashboard');
 
   return <AnalyticsHub />;

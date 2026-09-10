@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { requirePage } from '@/lib/platform/permissions/page';
 import { IndustryNews } from '@/components/IndustryNews';
 import type { NewsItem, NewsSource, Profile } from '@/lib/types';
 
@@ -8,6 +9,7 @@ export default async function NewsPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
+  await requirePage(supabase, 'news.view', profile as { role?: string | null } | null);
   const [{ data: items }, { data: sources }] = await Promise.all([
     supabase
       .from('news_items')

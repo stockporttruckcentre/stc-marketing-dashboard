@@ -12,7 +12,7 @@ import type { UserRole } from '@/lib/types';
    screens: half the product told you that you were on the Dashboard
    when you were not. One list, so it cannot happen again. */
 
-export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
+export function TopBar({ role = 'viewer', caps }: { role?: UserRole; caps?: string[] }) {
   const path = usePathname();
 
   const crumbs = crumbsFor(path);
@@ -36,7 +36,7 @@ export function TopBar({ role = 'viewer' }: { role?: UserRole }) {
       {/* The command bar is the point of the product, so it gets the
           middle of the screen and the width to look like it. */}
       <div className="topbar__command">
-        <CommandBar variant="bar" role={role} />
+        <CommandBar variant="bar" role={role} caps={caps} />
       </div>
 
       <div className="topbar__right">

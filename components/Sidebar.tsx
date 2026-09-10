@@ -52,18 +52,27 @@ const SETTINGS_HREF = '/dashboard/settings';
 
 
 export function Sidebar({
-  profile, pendingPosts = 0, emblemUrl = null,
+  profile, caps, pendingPosts = 0, emblemUrl = null,
 }: {
   profile: Profile;
+  /* Resolved on the server by `screenCapabilities`, which reads the
+     person's role template and their overrides. Derived from
+     `profile.role` here, this list was four values wide and knew
+     nothing about the eleven roles, so it hid Revenue from the office
+     administrators and the sales tracker from nobody.
+
+     Optional, because `app/diary-preview` renders a sidebar for a
+     made up viewer and has no server to ask. */
+  caps?: string[];
   pendingPosts?: number;
   emblemUrl?: string | null;
 }) {
   const path = usePathname();
 
   const sections = useMemo(() => {
-    const caps = capabilitiesFor(profile);
-    return visibleSections((c) => caps.has(c));
-  }, [profile]);
+    const held: Set<string> = caps ? new Set(caps) : capabilitiesFor(profile);
+    return visibleSections((c) => held.has(c));
+  }, [profile, caps]);
 
   const isActive = (href: string) => (
     href === '/dashboard' ? path === '/dashboard' : path.startsWith(href)

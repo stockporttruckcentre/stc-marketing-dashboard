@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { buildReport } from '@/lib/reports/build';
 import { docxHref, fromParams, slugFromParams } from '@/lib/reports/link';
 import { ReportPage } from '@/components/reports/ReportPage';
@@ -32,7 +32,7 @@ export default async function ReportExportPage({
 
   const { data: profileRow } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
-  const caps = capabilitiesFor((profileRow as Profile | null) ?? { role: 'viewer' });
+  const caps = await screenCapabilities(supabase, profileRow as { role?: string | null } | null);
   if (!caps.has('crm.view')) redirect('/dashboard');
 
   const filters = fromParams(slug, params);

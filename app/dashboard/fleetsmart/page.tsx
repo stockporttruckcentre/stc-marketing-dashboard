@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { FleetSmart, type ContractRow } from '@/components/FleetSmart';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { ACCOUNT_COLUMNS, type PickableAccount } from '@/lib/fleetsmart/account';
 import { SHIPPED_CARD, cardFrom } from '@/lib/fleetsmart/ratecard';
 import type { AmendmentRow } from '@/components/FleetSmart';
@@ -89,7 +89,7 @@ export default async function FleetSmartPage() {
   }));
 
   const profile = (profileRes.data as Profile) ?? null;
-  const capabilities = [...capabilitiesFor(profile ?? { role: 'viewer' } as Profile)];
+  const capabilities = [...await screenCapabilities(supabase, profile as { role?: string | null } | null, user.id)];
 
   /* Migration 061 is pasted into the database by hand like the rest of
      them. Until that has happened the tab has to say so, rather than

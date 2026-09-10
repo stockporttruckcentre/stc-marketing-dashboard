@@ -83,7 +83,7 @@ export const NAVIGATION: NavSection[] = [
     key: 'workspace', label: 'Workspace',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', capability: null },
-      { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', capability: 'crm.view' },
+      { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', capability: 'analytics.view' },
       /* Directly under Analytics, which is where the business put it
          once they had looked at it:
 
@@ -96,7 +96,7 @@ export const NAVIGATION: NavSection[] = [
 
          It was `hidden` while a demonstration was running and it is not
          any more. */
-      { href: '/dashboard/reports', label: 'Reports', icon: 'reports', capability: 'crm.view' },
+      { href: '/dashboard/reports', label: 'Reports', icon: 'reports', capability: 'reports.view' },
       { href: '/dashboard/work', label: 'Work', icon: 'work', capability: 'work.view' },
       { href: '/dashboard/calendar', label: 'Diary', icon: 'diary', capability: null },
     ],
@@ -105,20 +105,20 @@ export const NAVIGATION: NavSection[] = [
     key: 'sales', label: 'Sales',
     items: [
       { href: '/dashboard/crm', label: 'CRM pipeline', icon: 'crm', capability: 'crm.view' },
-      { href: '/dashboard/leads', label: 'Sales tracker', icon: 'tracker', capability: 'crm.view' },
-      { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'crm.view' },
-      { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'crm.view' },
+      { href: '/dashboard/leads', label: 'Sales tracker', icon: 'tracker', capability: 'tracker.view' },
+      { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'finder.view' },
+      { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'stock.view' },
       { href: '/dashboard/fleetsmart', label: 'FleetSmart+', icon: 'fleetsmart', capability: 'fleetsmart.view' },
       {
-        href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'crm.view',
+        href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'revenue.view',
         /* Three divisions, one per row, which is what the business
            asked for and what `divisions` has held since migration 083.
            S&L covered trailer sales and rentals together and could not
            answer either question on its own. */
         children: [
-          { href: '/dashboard/revenue/stc', label: 'STC', icon: 'revenue', capability: 'crm.view', crumb: 'STC revenue' },
-          { href: '/dashboard/revenue/trailer', label: 'Trailer Sales', icon: 'revenue', capability: 'crm.view', crumb: 'Trailer sales revenue' },
-          { href: '/dashboard/revenue/rental', label: 'Rentals', icon: 'revenue', capability: 'crm.view', crumb: 'Rental revenue' },
+          { href: '/dashboard/revenue/stc', label: 'STC', icon: 'revenue', capability: 'revenue.view', crumb: 'STC revenue' },
+          { href: '/dashboard/revenue/trailer', label: 'Trailer Sales', icon: 'revenue', capability: 'revenue.view', crumb: 'Trailer sales revenue' },
+          { href: '/dashboard/revenue/rental', label: 'Rentals', icon: 'revenue', capability: 'revenue.view', crumb: 'Rental revenue' },
         ],
       },
     ],
@@ -127,11 +127,11 @@ export const NAVIGATION: NavSection[] = [
     key: 'marketing', label: 'Marketing',
     items: [
       { href: '/dashboard/social', label: 'Social planner', icon: 'social', capability: 'social.view', badge: 'content' },
-      { href: '/dashboard/brand', label: 'Brand kit', icon: 'brand', capability: 'marketing.edit' },
+      { href: '/dashboard/brand', label: 'Brand kit', icon: 'brand', capability: 'brand.view' },
       /* Moved out of Workspace. What the trade press is saying is
          something marketing reads and acts on, not a thing everybody
          passes on their way to their own work. */
-      { href: '/dashboard/news', label: 'Industry news', icon: 'news', capability: 'crm.view' },
+      { href: '/dashboard/news', label: 'Industry news', icon: 'news', capability: 'news.view' },
     ],
   },
   {

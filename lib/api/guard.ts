@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { capabilitiesFor, type CrmCapabilities, type CrmCapability } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
+import type { CrmCapabilities, CrmCapability } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
-import { CAPABILITY_BY_KEY } from '@/lib/platform/permissions/catalog';
 
 /* =============================================================
    The check every write route was missing.
@@ -102,19 +102,19 @@ export async function requireCapability(capability?: CrmCapability): Promise<Gat
      is decided by the report, because an override has to be able to take
      one away. A capability it does not mention at all is one the
      register has never heard of, so the report holds no opinion on it
-     and the role's answer stands. */
-  let caps: CrmCapabilities = capabilitiesFor({ role });
-  const { data: report } = await supabase.rpc('capability_report', { p_user: user.id });
-  if (Array.isArray(report) && report.length) {
-    const resolved = new Set<CrmCapability>(caps);
-    for (const row of report as { key: string; granted: boolean }[]) {
-      const key = row.key as CrmCapability;
-      if (!CAPABILITY_BY_KEY[key]) continue;
-      if (row.granted) resolved.add(key);
-      else resolved.delete(key);
-    }
-    caps = resolved;
-  }
+     and the role's answer stands.
+
+     ---- One implementation, two callers ----
+
+     That merge used to be written out here and nowhere else, so every
+     SCREEN went on deriving from `profile.role` through
+     `capabilitiesFor` and could disagree with the route behind it. After
+     migration 103 they routinely would: the eleven roles are role
+     TEMPLATES and the role column knows nothing about them.
+     `screenCapabilities` is the merge, and the dashboard layout calls
+     the same function. */
+  const caps: CrmCapabilities =
+    await screenCapabilities(supabase, { role }, user.id) as CrmCapabilities;
 
   if (capability && !caps.has(capability)) {
     return {

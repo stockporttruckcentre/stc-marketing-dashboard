@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { SalesTracker } from '@/components/SalesTracker';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import type { LeadWithAccount, Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -50,7 +50,11 @@ export default async function SalesTrackerPage({
 
   const { data: profileRow } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const profile = profileRow as Profile;
-  const caps = capabilitiesFor(profile ?? { role: 'viewer' });
+  const caps = await screenCapabilities(supabase, profile, user.id);
+  /* `tracker.view` rather than `crm.view`. Marketing "can see leads in
+     crm records" and has no business on the pipeline board, and until
+     migration 103 those were the same permission. */
+  if (!caps.has('tracker.view')) redirect('/dashboard');
   const mayViewOthers = caps.has('crm.viewOthers');
 
   /* Who is being looked at. Nobody by default, and nobody at all

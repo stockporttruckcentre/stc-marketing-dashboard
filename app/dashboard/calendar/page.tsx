@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { TeamCalendar } from '@/components/TeamCalendar';
-import { capabilitiesFor } from '@/lib/crm/permissions';
+import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import type { CalendarEvent, Profile } from '@/lib/types';
 import type { DiaryGuest, DiaryInvite } from '@/lib/calendar/diary';
 import type { Company, Person } from '@/components/calendar/drawer';
@@ -53,6 +53,10 @@ export default async function CalendarPage({
   ]);
 
   const profile = (profileRes.data as Profile) ?? null;
+  /* Resolved rather than derived from the role column, so somebody on
+     one of the eleven role templates, or holding a single capability by
+     override, gets what they actually hold. */
+  const caps = [...await screenCapabilities(supabase, profile, user.id)];
 
   return (
     <TeamCalendar
@@ -67,7 +71,7 @@ export default async function CalendarPage({
       companies={(companyRes.data ?? []) as Company[]}
       userId={user.id}
       myName={profile?.full_name ?? user.email?.split('@')[0] ?? 'Me'}
-      capabilities={[...capabilitiesFor(profile ?? { role: 'viewer' } as Profile)]}
+      capabilities={caps}
       openEventId={searchParams?.event ?? null}
       /* So the command bar can land on the view a sentence asked for:
          "what is on this week" is the week, "what have I got on" is

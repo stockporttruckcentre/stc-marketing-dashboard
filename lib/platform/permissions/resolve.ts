@@ -39,6 +39,8 @@ import {
   type Capabilities, type Capability, type CapabilityScope,
   CAPABILITY_BY_KEY,
 } from './catalog';
+import { capabilitiesFor } from '@/lib/crm/permissions';
+import type { Profile, UserRole } from '@/lib/types';
 
 /** One capability, as the admin screen needs to explain it. */
 export type ResolvedCapability = {
@@ -144,4 +146,65 @@ export function refuse(cap: Capability): Response {
     }),
     { status: 403, headers: { 'content-type': 'application/json' } },
   );
+}
+
+/* =============================================================
+   The set a SCREEN draws from.
+
+   `resolveCapabilities` above asks `capability_report` and takes what
+   it says. That is right for the admin screen, which is showing the
+   report itself. It is not right for an ordinary page, for the reason
+   `lib/api/guard.ts` documents at length:
+
+     A capability the report mentions is decided by the report, because
+     an override has to be able to take one away. A capability it does
+     not mention at all is one the register has never heard of, so the
+     report holds no opinion on it and the role's answer stands.
+
+   Replacing rather than merging shipped a real bug once: the four
+   FleetSmart+ capabilities were in the code and not in
+   `capability_catalog`, so the report returned no row for them, the
+   merge that was not there dropped them, and an administrator pressing
+   Save draft was told they did not have access.
+
+   ---- Why this exists rather than that logic being copied ----
+
+   It WAS copied. `guard.ts` merged properly and every screen went on
+   deriving from `profile.role` through `capabilitiesFor`, so a route
+   and the page in front of it could disagree, and after migration 103
+   they routinely would: the eleven roles live in role TEMPLATES, and
+   the role column knows nothing about them. STC Admin sits on `viewer`
+   in that column and holds `revenue.import` through their template, so
+   the import button was hidden from the one person whose job it is.
+
+   One function, called by both.
+   ============================================================= */
+export async function screenCapabilities(
+  supabase: SupabaseClient,
+  profile: { role?: string | null } | null,
+  userId?: string,
+): Promise<Capabilities> {
+  /* No profile row means no role, and no role means the least access
+     rather than the most. */
+  const role = (profile?.role ?? 'viewer') as UserRole;
+  const caps = new Set<Capability>(capabilitiesFor({ role } as Pick<Profile, 'role'>) as Set<Capability>);
+
+  let id = userId;
+  if (!id) {
+    const { data } = await supabase.auth.getUser();
+    id = data?.user?.id;
+  }
+  if (!id) return caps;
+
+  const { data: report } = await supabase.rpc('capability_report', { p_user: id });
+  if (!Array.isArray(report) || report.length === 0) return caps;
+
+  for (const row of report as { key: string; granted: boolean }[]) {
+    const key = row.key as Capability;
+    /* A capability the database knows and this build does not cannot be
+       named by anything here, so it cannot be used by anything here. */
+    if (!CAPABILITY_BY_KEY[key]) continue;
+    if (row.granted) caps.add(key); else caps.delete(key);
+  }
+  return caps;
 }
