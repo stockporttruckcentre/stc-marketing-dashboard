@@ -107,30 +107,59 @@ const CUT = 'Prices exclude tyres and VAT.';
 ok('the proposal reaches the line the business named',
   proposal.includes(CUT));
 
-/* Everything below that line on the contract, named individually,
-   because "it is shorter" is not the assertion. A proposal that lost
-   the signing page and kept the standard terms would be shorter and
-   would still be wrong. */
-const BELOW_THE_CUT: [string, string][] = [
-  ['the standard terms', TERMS_HEADING],
-  ['the signing page', 'Authorised signatory'],
+/* ---- What a proposal carries, and what it does not ----
+
+   Services and Exclusions are on BOTH, and used to be on the contract
+   alone. From the business:
+
+     on the proposal generator (not the full contract) it needs to show
+     both the services and exclusions sections included below the price.
+     it currently does on the full contract, ensure they load in on the
+     proposal too
+
+   This list still refused them on the proposal, and had been failing
+   ever since that was built. It was the last thing keeping
+   `check:fleetsmart-print` red, and it was asserting the opposite of
+   what was asked for.
+
+   Named individually rather than measuring length, because "it is
+   shorter" is not the assertion: a proposal that lost the signing page
+   and kept the standard terms would be shorter and would still be
+   wrong. */
+const ON_BOTH: [string, string][] = [
   ['the Services block', 'The Services provided shall include'],
   ['the Exclusions block', 'Exclusions'],
+];
+
+const CONTRACT_ONLY: [string, string][] = [
+  ['the standard terms', TERMS_HEADING],
+  ['the signing page', 'Authorised signatory'],
   ['the Charges block', 'Charges'],
   ['the Payment block', 'Payment'],
   ['the Collection and delivery block', 'Collection and delivery'],
 ];
 
-for (const [what, needle] of BELOW_THE_CUT) {
+for (const [what, needle] of ON_BOTH) {
+  ok(`the contract carries ${what}`, contract.includes(needle));
+  ok(`and so does the proposal`, proposal.includes(needle),
+    `the business asked for "${needle}" on the proposal in as many words`);
+}
+
+for (const [what, needle] of CONTRACT_ONLY) {
   ok(`the contract carries ${what}`, contract.includes(needle));
   ok(`and the proposal does not`, !proposal.includes(needle),
     `"${needle}" is below the line the proposal ends at`);
 }
 
-/* The cut is the LAST thing on a proposal, not merely present on it. */
-ok('and nothing follows it but the closing tags',
-  proposal.slice(proposal.lastIndexOf(CUT) + CUT.length).replace(/<[^>]*>/g, '').trim() === '',
-  'a proposal has visible content after the line it is supposed to end at');
+/* The price line is no longer the last thing on a proposal: Services
+   and Exclusions sit under it now, which is what "included below the
+   price" means. So what is asserted is that nothing CONTRACTUAL follows
+   it, which the loop above already does, and that the document ends on
+   the scope rather than trailing into a signing page. */
+const afterCut = proposal.slice(proposal.lastIndexOf(CUT) + CUT.length);
+ok('and what follows it is the scope, not the contract',
+  !CONTRACT_ONLY.some(([, needle]) => afterCut.includes(needle)),
+  'a proposal has contractual content after the line it is supposed to end at');
 
 ok('a proposal says on its face that it is one',
   proposal.includes('Proposal') && !contract.includes('>Proposal<'),

@@ -104,9 +104,17 @@ WITH expected(ord, migration, what_it_adds, marker, kind) AS (
     (53, '090',        'The seven figures finance takes into a meeting',  'trailer_deals',              'function'),
     (54, '091',        'An approved account can actually sign in',        'blank_auth_tokens',          'function'),
     (55, '092',        'Trailer customers reconcile, and can be created', 'make_customer_for_trailer',  'function'),
-    /* 093 only renames a row, so the marker is the row itself. Every
-       function it could name has existed since 083. */
-    (56, '093',        'The rental division is called S&L',               'S&L',                        'division'),
+    /* ---- 093 has no marker, and cannot have one ----
+
+       It renamed the rental division to S&L, and migration 098 renamed
+       it back to Rentals when the tabs were split. So the only trace
+       093 left was undone on purpose five migrations later, and this
+       row searched for a division called S&L on a correct database and
+       reported it missing.
+
+       098 is listed instead. Its rename is the one that stands, and a
+       database that has 098 necessarily ran 093 to get there. */
+    (56, '098',        'Three divisions, three tabs',                     'Trailer Sales',              'division'),
     (57, '094',        'A group says which question it is answering',     'group_members:p_upto',       'signature'),
     /* 095 deletes two rows and adds one index, so the index is the only
        thing in the catalogue it leaves behind. Every function and table

@@ -1549,31 +1549,46 @@ for (const role of ROLES) {
       hrefs(role).includes('/dashboard/team'));
   }
 
-  /* Access sits between Team and Settings and is open to everybody, for
-     the reason `lib/nav.ts` gives: asking for something you cannot do is
-     a right every one of the eleven roles holds, and the screen is also
-     where somebody reads the answer. Gating it on the deciding half
-     would hide it from the people who ask. */
-  ok('Team, Access, Settings and Admin sit under the scroll, in that order',
+  /* ---- Where the access requests screen went ----
+
+     It was a nineteenth sidebar row called Access, and it was a second
+     copy of a tab Admin had carried all along. From the business:
+     "access tab done meaning what. what is access tab. we were already
+     at the sidebar tab limit ... on admin within the Requests tab".
+
+     So the foot is three rows again, and Admin is reachable by two
+     different capabilities rather than one: `admin.users` opens People
+     and Roles, `access.decide` opens Requests. Sr Sales holds the
+     second and not the first, because running a department is not the
+     same as being able to edit accounts, and gating Admin on
+     `admin.users` alone would point their notification at a door they
+     cannot open. */
+  ok('Team, Settings and Admin sit under the scroll, in that order',
     sectionsFor('admin').some((s) => s.atFoot
       && s.items.map((i) => i.href).join(',')
-        === '/dashboard/team,/dashboard/requests,/dashboard/settings,/dashboard/admin'));
+        === '/dashboard/team,/dashboard/settings,/dashboard/admin'));
 
-  /* And the foot section still holds the open rows for somebody with no
-     admin permission, rather than collapsing to Settings on its own or
-     disappearing. */
-  ok('a read only viewer still gets Team, Access and Settings at the foot',
+  ok('a read only viewer still gets Team and Settings at the foot',
     sectionsFor('viewer').some((s) => s.atFoot
       && s.items.map((i) => i.href).join(',')
-        === '/dashboard/team,/dashboard/requests,/dashboard/settings'));
+        === '/dashboard/team,/dashboard/settings'));
 
-  /* And the row is there for every role, not only the ones who decide.
-     The person who was refused is the one who needs to see what happened
-     to their asking. */
+  /* Nobody sees a row that opens a screen they cannot use. The old
+     Access row was drawn for everybody, including on a database where
+     the table behind it did not exist yet, which is how it came to
+     open a raw schema error. */
   for (const role of ROLES) {
-    ok(`a ${role} has the access requests row in the sidebar`,
-      hrefs(role).includes('/dashboard/requests'));
+    ok(`a ${role} has no orphan access requests row`,
+      !hrefs(role).includes('/dashboard/requests'));
   }
+
+  /* Admin appears for either capability, and for neither it does not.
+     `anyOf` in `lib/nav.ts` is the whole mechanism, and it widens who
+     sees the row, never what they can do once inside. */
+  ok('Admin is in the sidebar for somebody who can manage accounts',
+    hrefs('admin').includes('/dashboard/admin'));
+  ok('and not for somebody who can do neither',
+    !hrefs('viewer').includes('/dashboard/admin'));
 
   ok('no section is drawn with nothing in it',
     ROLES.every((r) => sectionsFor(r).every((s) => s.items.length > 0)));

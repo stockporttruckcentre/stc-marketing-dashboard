@@ -119,7 +119,7 @@ ok('"whose tracker is this unit on" asks the join table',
 console.log('\n  Whose tracker\n  -------------');
 
 ok('the capability is checked on the server, where the leads are read',
-  /capabilitiesFor/.test(leadPage) && /crm\.viewOthers/.test(leadPage));
+  /screenCapabilities/.test(leadPage) && /crm\.viewOthers/.test(leadPage));
 
 ok('and the component is keyed on the owner, so its rows cannot outlive the switch',
   /key=\{ownerId\}/.test(leadPage),

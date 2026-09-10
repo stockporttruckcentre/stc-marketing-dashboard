@@ -630,14 +630,18 @@ BEGIN
       row_rental.customers, row_rental.this_year;
   END IF;
   IF row_rental.members <> 3 THEN
-    RAISE EXCEPTION 'the S&L row says the group has % members, and it has 3', row_rental.members;
+    RAISE EXCEPTION 'the Rentals row says the group has % members, and it has 3', row_rental.members;
   END IF;
 
   -- ---- Manage names where each member's money is ----
   SELECT * INTO m FROM group_members(g, '2026-08-01')
    WHERE company_name = 'Close Brothers Vehicle Hire Limited';
-  IF m.divisions IS DISTINCT FROM 'S&L' THEN
-    RAISE EXCEPTION 'Manage says Vehicle Hire bills on %, and it bills on S&L', m.divisions;
+  /* `Rentals`, not `S&L`. Migration 093 named the rental division S&L
+     while one tab covered trailer sales and rentals together, and 098
+     split them and renamed it back. This assertion was written between
+     the two and nothing ran it afterwards. */
+  IF m.divisions IS DISTINCT FROM 'Rentals' THEN
+    RAISE EXCEPTION 'Manage says Vehicle Hire bills on %, and it bills on Rentals', m.divisions;
   END IF;
   IF m.this_year <> 48319 THEN
     RAISE EXCEPTION 'Manage says Vehicle Hire billed % this year, not 48319', m.this_year;

@@ -295,8 +295,13 @@ console.log('\n  Whose tracker\n  -------------');
 
 const page = readFileSync('app/dashboard/leads/page.tsx', 'utf8');
 
+/* `screenCapabilities`, which is what `capabilitiesFor` became when the
+   eleven role templates went in: the role column has four values and
+   knows nothing about them. This assertion still searched for the old
+   name and had been failing quietly ever since, which is what
+   `npm run check:all` now exists to stop. */
 ok('the page decides whose tracker to load, not the browser',
-  /capabilitiesFor/.test(page) && /crm\.viewOthers/.test(page),
+  /screenCapabilities/.test(page) && /crm\.viewOthers/.test(page),
   'the capability is checked on the server, where the leads are actually read');
 
 ok('and the parameter is ignored outright without the capability',
