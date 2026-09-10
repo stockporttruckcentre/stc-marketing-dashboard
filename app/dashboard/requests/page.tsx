@@ -1,37 +1,31 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { AccessRequests } from '@/components/permissions/requests';
-
-export const dynamic = 'force-dynamic';
 
 /* =============================================================
-   Access requests.
+   Where the Access screen went.
 
-   Deliberately not gated on a capability. Everybody who can ask for
-   something can see what they have asked for, and asking is
-   `access.request`, which every one of the eleven roles holds.
+   It was a nineteenth sidebar row, and it was a second copy of a tab
+   Admin had carried all along. From the business:
 
-   Deciding is the part that is gated, and it is gated inside the
-   database: `decide_capability_request` refuses anybody who does not
-   hold `access.decide` and does not run the department the person
-   asking works in. `mayDecide` below only decides whether to draw the
-   panel.
+     access tab done meaning what. what is access tab. we were already
+     at the sidebar tab limit.
 
-   ---- Why this is not part of the Admin screen ----
+     on admin within the Requests tab. Still bound to notifs. All users
+     who can manage a request see Admin with only what they need to
+     access on the non-requests tab(s).
 
-   Sr Sales decides for their own salespeople and holds no
-   administrative capability at all, which is right: running a
-   department is not the same as being able to edit accounts. The Admin
-   tab is gated on `admin.users` and would refuse them, so a
-   notification pointing there would point somewhere the recipient
-   cannot open.
+   So Admin appears for `admin.users` OR `access.decide`, and its tabs
+   are gated one at a time: Sr Sales opens it and finds Requests alone.
+
+   ---- Why this file still exists ----
+
+   Every access notification already sent carries `/dashboard/requests`
+   in its link. Those rows are in the database and a migration cannot
+   reach into a notification somebody has already been handed. Deleting
+   the route would turn each of them into a 404, which is the same fault
+   as the dead links the sweep found, introduced deliberately.
+
+   Migration 105 writes the new link for anything raised from here on.
    ============================================================= */
-export default async function RequestsPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const { data: mayDecide } = await supabase.rpc('command_may', { p_capability: 'access.decide' });
-
-  return <AccessRequests selfId={user.id} mayDecide={mayDecide === true} />;
+export default function RequestsPage() {
+  redirect('/dashboard/admin?tab=requests');
 }

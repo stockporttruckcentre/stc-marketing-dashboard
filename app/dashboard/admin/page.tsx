@@ -28,10 +28,24 @@ export default async function AdminPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: mayManage } = await supabase.rpc('command_may', { p_capability: 'admin.users' });
+  /* ---- Two doors into one screen ----
+
+     `admin.users` opens People. `access.decide` opens Requests. Sr
+     Sales holds the second and not the first, on purpose: running a
+     department is not the same as being able to edit accounts.
+
+     Both are asked here so the panel can draw only the tabs the person
+     actually holds, and somebody with neither is still sent away. The
+     redirect stays a courtesy rather than the defence: every write on
+     this screen is refused by name inside the database. */
+  const [{ data: mayManage }, { data: mayDecide }] = await Promise.all([
+    supabase.rpc('command_may', { p_capability: 'admin.users' }),
+    supabase.rpc('command_may', { p_capability: 'access.decide' }),
+  ]);
+
   /* The directory is still open to them, so there is somewhere honest
-     to send anybody who arrives here without the permission. */
-  if (mayManage !== true) redirect('/dashboard/team');
+     to send anybody who arrives here without either permission. */
+  if (mayManage !== true && mayDecide !== true) redirect('/dashboard/team');
 
   /* The roles somebody can be put on, read here rather than in the
      panel so the list is the same on first paint as it is after. A
@@ -48,6 +62,8 @@ export default async function AdminPage() {
     <Suspense fallback={null}>
       <AdminPanel
         selfId={user.id}
+        mayManage={mayManage === true}
+        mayDecide={mayDecide === true}
         templates={(templates ?? []) as { slug: string; name: string; description: string | null }[]}
       />
     </Suspense>

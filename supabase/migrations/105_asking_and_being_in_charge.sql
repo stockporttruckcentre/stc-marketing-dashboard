@@ -359,7 +359,7 @@ BEGIN
     /* Not the Admin screen. A sales lead decides for their own people
        and holds no administrative capability, so Admin refuses them and
        a notification pointing there points nowhere they can go. */
-    '/dashboard/requests',
+    '/dashboard/admin?tab=requests',
     me, 'request', fresh,
     jsonb_build_object('capability', p_capability, 'reason', p_reason),
     NULL, 'capreq:' || fresh::TEXT)
@@ -457,7 +457,7 @@ BEGIN
     END,
     COALESCE(NULLIF(btrim(COALESCE(p_note, '')), ''),
              CASE WHEN p_grant THEN NULL ELSE 'No reason was given.' END),
-    '/dashboard/requests', me, 'request', req.id,
+    '/dashboard/admin?tab=requests', me, 'request', req.id,
     jsonb_build_object('capability', req.capability, 'granted', p_grant,
                        'expires_at', p_until),
     NULL, 'capreq:' || req.id::TEXT || ':decided')
