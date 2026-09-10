@@ -44,6 +44,12 @@ export type NavItem = {
   icon: NavIcon;
   /** Null means everybody signed in. */
   capability: CrmCapability | null;
+  /**
+   * Any one of these is enough to see the row, instead of `capability`.
+   * For a screen whose tabs are gated separately, so two different jobs
+   * reach it and each finds only their own half.
+   */
+  anyOf?: CrmCapability[];
   /** Which live count sits on the right of the row. */
   badge?: 'content';
   /** Off the sidebar, still routed and still reachable by name. */
@@ -157,14 +163,28 @@ export const NAVIGATION: NavSection[] = [
     key: 'admin', label: 'Admin', atFoot: true,
     items: [
       { href: '/dashboard/team', label: 'Team', icon: 'team', capability: null },
-      /* Not gated, and deliberately so. Everybody can ask for something
-         they cannot do, so everybody can see what they asked for.
-         Deciding is gated inside `decide_capability_request`, which
-         refuses anybody who does not run the asker's department, and the
-         panel for it is only drawn for whoever holds `access.decide`. */
-      { href: '/dashboard/requests', label: 'Access', icon: 'admin', capability: null },
       { href: '/dashboard/settings', label: 'Settings', icon: 'settings', capability: null },
-      { href: '/dashboard/admin', label: 'Admin', icon: 'admin', capability: 'admin.users' },
+      /* ---- Why Admin takes two capabilities rather than one ----
+
+         Admin was `admin.users` alone, and access requests were a
+         nineteenth sidebar row called Access. That row was mine and
+         nobody asked for it: the sidebar was already full, and Admin
+         had carried a Requests tab all along, so it was a second copy
+         of a screen that existed. It is gone.
+
+         What it was solving is real, though. Sr Sales decides for their
+         own salespeople and holds no administrative capability at all,
+         because running a department is not the same as being able to
+         edit accounts. Gated on `admin.users` alone, Admin would refuse
+         them and a notification pointing there would point at a door
+         they cannot open.
+
+         So the row appears for either, and the tabs INSIDE it are gated
+         one at a time: Sr Sales opens Admin and finds Requests and
+         nothing else. `anyOf` is the whole of the mechanism, and it is
+         a widening of who sees the row, never of what they can do. */
+      { href: '/dashboard/admin', label: 'Admin', icon: 'admin',
+        capability: 'admin.users', anyOf: ['admin.users', 'access.decide'] },
     ],
   },
 ];
@@ -182,17 +202,22 @@ export const NAV_ITEMS: NavItem[] = NAVIGATION
  * failed to load.
  */
 export function visibleSections(has: (c: CrmCapability) => boolean): NavSection[] {
+  /* `anyOf` first where a row has one, so Admin appears for whoever
+     runs a department as well as for whoever administers accounts. */
+  const may = (i: { capability: CrmCapability | null; anyOf?: CrmCapability[] }) =>
+    (i.anyOf ? i.anyOf.some(has) : i.capability === null || has(i.capability));
+
   return NAVIGATION
     .map((s) => ({
       ...s,
       items: s.items
-        .filter((i) => !i.hidden && (i.capability === null || has(i.capability)))
+        .filter((i) => !i.hidden && may(i))
         /* A parent whose children are all withheld keeps its own row
            only if it is a real screen in its own right. Revenue is not:
            it redirects to a division, so with no divisions to show
            there is nothing to open. */
         .map((i) => (i.children
-          ? { ...i, children: i.children.filter((c) => !c.hidden && (c.capability === null || has(c.capability))) }
+          ? { ...i, children: i.children.filter((c) => !c.hidden && may(c)) }
           : i))
         .filter((i) => !i.children || i.children.length > 0),
     }))

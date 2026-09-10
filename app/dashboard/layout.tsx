@@ -4,6 +4,8 @@ import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
 import { NotificationsProvider } from '@/components/notifications/provider';
 import { screenCapabilities } from '@/lib/platform/permissions/resolve';
+import { viewingAs } from '@/lib/platform/permissions/view-as';
+import { ViewingAsBanner } from '@/components/admin/view-as';
 import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -50,7 +52,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
      `screenCapabilities` is the same merge `lib/api/guard.ts` performs
      on every write route, so what the sidebar draws and what the route
      behind it allows cannot disagree. */
-  const caps = [...await screenCapabilities(supabase, p, user.id)];
+  /* ---- View as ----
+
+     Null in the ordinary case, and everything below behaves exactly as
+     it did. When it is set, the capabilities are resolved for THEM, so
+     the sidebar, the tabs and every gated button are the ones they
+     would see. `viewingAs` re-asks `admin.users` on every load, so this
+     cannot outlive the permission that allows it.
+
+     The rows stay yours: row level security reads `auth.uid()` and no
+     cookie can move that. The banner says so, on every screen, and
+     writes are refused for as long as it is up. */
+  const asSomeoneElse = await viewingAs(supabase);
+
+  const { data: theirProfile } = asSomeoneElse
+    ? await supabase.from('profiles').select('*').eq('id', asSomeoneElse.userId).single()
+    : { data: null };
+
+  const caps = [...await screenCapabilities(
+    supabase,
+    (theirProfile as Profile) ?? p,
+    asSomeoneElse?.userId ?? user.id,
+  )];
 
   /* And what that role is CALLED. The footer printed `p.role`, which is
      the four value column: a Developer read "admin", an office
@@ -58,7 +81,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: roleRow } = p.role_template_id
     ? await supabase.from('role_templates').select('name').eq('id', p.role_template_id).maybeSingle()
     : { data: null };
-  const roleName = (roleRow as { name?: string } | null)?.name ?? null;
+  const roleName = asSomeoneElse
+    ? asSomeoneElse.roleName
+    : ((roleRow as { name?: string } | null)?.name ?? null);
 
   /* One reading of the bell, above both the sidebar and the top bar.
      Two ways in now, and they must never show different numbers: the
@@ -69,6 +94,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="app">
         <Sidebar profile={p} caps={caps} roleName={roleName} pendingPosts={pendingPosts ?? 0} emblemUrl={emblemUrl} />
         <div className="main">
+          {asSomeoneElse && (
+            <ViewingAsBanner name={asSomeoneElse.fullName} roleName={asSomeoneElse.roleName} />
+          )}
           <TopBar role={p.role} caps={caps} />
           <main className="page">{children}</main>
         </div>

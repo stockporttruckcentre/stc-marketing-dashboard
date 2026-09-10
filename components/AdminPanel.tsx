@@ -15,6 +15,8 @@ import { Field, Select } from '@/components/kit/forms';
 import { Toasts, useToast } from '@/components/kit/toast';
 import { Avatar } from '@/components/kit/avatar';
 import { AccessQueue } from '@/components/admin/access-queue';
+import { RolesChart } from '@/components/admin/roles-chart';
+import { ViewAs } from '@/components/admin/view-as';
 import {
   byArea, loadCapabilitiesFor, loadTeam, overrideState, roleInWords, setActive,
   setCapability, setRoleTemplate, updateTeamMember, whySource,
@@ -66,26 +68,33 @@ import type { UserRole } from '@/lib/types';
 
 const LEGACY_ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
 
-type Area = 'people' | 'requests';
+type Area = 'people' | 'roles' | 'requests';
 
 export function AdminPanel({
-  selfId, templates,
+  selfId, templates, mayManage, mayDecide,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
+  /** `admin.users`: People and Roles. */
+  mayManage: boolean;
+  /** `access.decide`: Requests, which Sr Sales holds and `admin.users` does not imply. */
+  mayDecide: boolean;
 }) {
   return (
     <Toasts>
-      <AdminBody selfId={selfId} templates={templates} />
+      <AdminBody selfId={selfId} templates={templates}
+                 mayManage={mayManage} mayDecide={mayDecide} />
     </Toasts>
   );
 }
 
 function AdminBody({
-  selfId, templates,
+  selfId, templates, mayManage, mayDecide,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
+  mayManage: boolean;
+  mayDecide: boolean;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -100,7 +109,6 @@ function AdminBody({
   /* Which half of the screen: the people who work here, or the people
      asking to. `?tab=requests` so the notification about a new request
      can land on the right one. */
-  const [area, setArea] = useState<Area>(params.get('tab') === 'requests' ? 'requests' : 'people');
   const [waiting, setWaiting] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
@@ -142,6 +150,39 @@ function AdminBody({
     };
   }, [team]);
 
+  /* ---- Which tabs exist for this person ----
+
+     People and Roles need `admin.users`. Requests needs
+     `access.decide`, which Sr Sales holds and `admin.users` does not
+     imply, because running a department is not the same as being able
+     to edit accounts.
+
+     Built as a list rather than three conditions so the default lands
+     on the first tab they actually hold. Sr Sales opens Admin on
+     Requests, not on an empty People. */
+  const tabs = useMemo(() => [
+    ...(mayManage ? [
+      { key: 'people' as Area, label: 'People', count: totals.people },
+      { key: 'roles' as Area, label: 'Roles' },
+    ] : []),
+    ...(mayDecide ? [
+      { key: 'requests' as Area, label: 'Requests', count: waiting ?? undefined },
+    ] : []),
+  ], [mayManage, mayDecide, totals.people, waiting]);
+
+  /* `?tab=requests` so the notification about a new request can land on
+     the right one, and `?tab=roles` so a link to the chart can. Falls
+     back to whatever they can actually open. */
+  const asked = params.get('tab');
+  const [area, setArea] = useState<Area>(
+    asked === 'requests' ? 'requests' : asked === 'roles' ? 'roles' : 'people');
+
+  /* An area they cannot open, because the link named it or because
+     their permissions changed under them. */
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some((t) => t.key === area)) setArea(tabs[0]!.key);
+  }, [tabs, area]);
+
   function open(id: string) {
     setChosen(id);
     /* Kept in the address bar so a link to one person's access can be
@@ -162,17 +203,12 @@ function AdminBody({
       />
 
       <div style={{ marginBottom: 14 }}>
-        <Tabs
-          value={area}
-          onChange={setArea}
-          tabs={[
-            { key: 'people' as Area, label: 'People', count: totals.people },
-            { key: 'requests' as Area, label: 'Requests', count: waiting ?? undefined },
-          ]}
-        />
+        <Tabs value={area} onChange={setArea} tabs={tabs} />
       </div>
 
       {area === 'requests' && <AccessQueue onCount={setWaiting} />}
+
+      {area === 'roles' && <RolesChart />}
 
       {area === 'people' && (<>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -195,7 +231,20 @@ function AdminBody({
         {/* ---- who ---- */}
         <div style={{ flex: '0 0 300px', minWidth: 260, maxWidth: '100%' }}>
           <Card padded={false}>
-            <PanelHead title="Who" count={shown.length} />
+            <PanelHead
+              title="Who"
+              count={shown.length}
+              action={
+                <ViewAs
+                  selfId={selfId}
+                  people={(team ?? []).map((m) => ({
+                    id: m.id,
+                    name: m.full_name ?? m.email ?? 'Somebody',
+                    role: m.role_template ?? m.role,
+                  }))}
+                />
+              }
+            />
             <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <SearchInput value={find} onChange={setFind} placeholder="Find somebody" icon={<Search size={14} />} />
               <Chip

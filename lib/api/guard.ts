@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { screenCapabilities } from '@/lib/platform/permissions/resolve';
+import { viewingAsId } from '@/lib/platform/permissions/view-as';
 import type { CrmCapabilities, CrmCapability } from '@/lib/crm/permissions';
 import type { UserRole } from '@/lib/types';
 
@@ -53,6 +54,32 @@ export async function requireCapability(capability?: CrmCapability): Promise<Gat
         { status: 401 },
       ),
     };
+  }
+
+  /* ---- Nothing is written while "view as" is on ----
+
+     The screen says Dean and the session says Alex, so a write here
+     would be recorded against Alex having been made on a screen that
+     claimed to be Dean's. An audit trail that has to be explained is
+     not an audit trail.
+
+     Refused here rather than by hiding buttons, because the buttons are
+     deliberately the ones the other person would see and some of them
+     write. This is the only place that can tell the difference.
+
+     A read is fine and is the entire point of the feature. */
+  if (capability !== undefined) {
+    const pretending = await viewingAsId(supabase);
+    if (pretending) {
+      return {
+        ok: false,
+        response: NextResponse.json({
+          ok: false,
+          error: 'viewing_as',
+          message: 'You are viewing the app as somebody else. Stop first, then try again.',
+        }, { status: 409 }),
+      };
+    }
   }
 
   const { data: profile } = await supabase
