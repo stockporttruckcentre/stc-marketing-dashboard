@@ -30,7 +30,7 @@ import { Modal, Field, TextInput, Select, OptionCard, Checkbox, Segmented } from
 import {
   applyScope, ownerOptions, ownersAmbiguous, ownerKey, scopeFromParam, scopeToParam, type Scope,
 } from '@/lib/crm/ownership';
-import { capabilitiesFor, defaultScopeKind, roleLabel, type CrmCapabilities } from '@/lib/crm/permissions';
+import { capabilitiesFor, defaultScopeKind, type CrmCapabilities } from '@/lib/crm/permissions';
 import { ukDateShort } from '@/lib/format/date';
 import {
   applyView, clearView, describeView, readView, writeView, type SavedView,
@@ -43,7 +43,7 @@ type Member = { list_id: string; user_id: string; can_edit: boolean };
 
 export function CrmWorkspace({
   profile, lists: initialLists, members: initialMembers, profiles, selectedListId, initialContacts,
-  caps: given, roleName = null,
+  caps: given,
 }: {
   profile: Profile;
   lists: CrmList[];
@@ -54,8 +54,6 @@ export function CrmWorkspace({
      the four value role column implies. Optional: `app/crm-preview`
      renders this for a made up profile with no server to ask. */
   caps?: string[];
-  /** What that role is called, for the badge. Null falls back. */
-  roleName?: string | null;
   selectedListId: string;
   initialContacts: CRMContact[];
 }) {
@@ -983,12 +981,15 @@ export function CrmWorkspace({
       <RecordHead
         icon={<Users size={20} />}
         title={selectedList?.name ?? 'CRM'}
-        badges={<>
-          {listIsGlobal
-            ? <Badge tone="info" dot>Shared</Badge>
-            : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
-          <Badge tone="neutral">{roleName ?? roleLabel(profile.role)}</Badge>
-        </>}
+        /* The list, and nothing else. A badge saying which role the
+           READER holds used to sit here too, and next to "Shared" it
+           read as a property of the list: "Global CRM, Shared,
+           Developer". Your own role is on the sidebar under your name,
+           which is where somebody looks for it and where it cannot be
+           mistaken for a fact about what they are looking at. */
+        badges={listIsGlobal
+          ? <Badge tone="info" dot>Shared</Badge>
+          : <Badge tone="neutral" dot>{listOwnerName === profile.full_name ? 'Yours' : `${listOwnerName ?? 'Unowned'}`}</Badge>}
         sub={<>
           {scope.kind === 'all'
             ? `${rows.length} contacts.`

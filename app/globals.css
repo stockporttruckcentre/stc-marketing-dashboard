@@ -644,6 +644,23 @@ a { color: inherit; text-decoration: none; }
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   flex-shrink: 0;
+  /* ---- Why the bar needs a z-index of its own ----
+
+     The notifications panel hangs off the bell and asks for 1000, which
+     did nothing: `backdrop-filter` above makes this bar a stacking
+     context, so that 1000 is 1000 WITHIN the bar and cannot beat
+     anything outside it. The bar itself had no z-index, so a table
+     header, which is sticky at 2, painted straight over the panel.
+
+     60 puts it above the page, 50 being the highest a dropdown asks
+     for, and below the 80 a modal or a drawer uses and the 90 a context
+     menu uses. Those still have to cover the bar.
+
+     Do not move the 1000 on the panel. Raising a number inside a
+     stacking context is the change that looks like it should work and
+     cannot. */
+  position: relative;
+  z-index: 60;
 }
 .topbar__crumbs {
   display: flex; align-items: center; gap: 8px;

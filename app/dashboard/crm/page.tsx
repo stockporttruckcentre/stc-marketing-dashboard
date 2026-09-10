@@ -12,14 +12,6 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
   const caps = await requirePage(supabase, 'crm.view', profile as { role?: string | null } | null);
 
-  /* What their role is CALLED, for the badge on the header. The workspace
-     printed the legacy role column through `roleLabel`, so a Developer
-     read "Full access" and an office administrator read "Read only". */
-  const templateId = (profile as Profile | null)?.role_template_id ?? null;
-  const { data: roleRow } = templateId
-    ? await supabase.from('role_templates').select('name').eq('id', templateId).maybeSingle()
-    : { data: null };
-
   // Load lists the user can see
   const { data: lists } = await supabase.from('crm_lists').select('*').order('is_global', { ascending: false }).order('created_at', { ascending: true });
 
@@ -119,7 +111,6 @@ export default async function CrmPage({ searchParams }: { searchParams: { list?:
       selectedListId={selectedListId ?? ''}
       initialContacts={contacts}
       caps={[...caps]}
-      roleName={(roleRow as { name?: string } | null)?.name ?? null}
     />
     </>
   );

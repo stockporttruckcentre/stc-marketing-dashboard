@@ -112,7 +112,7 @@ export function SocialPlanner({
   channels: initialChannels, networks, slots: initialSlots, columns,
   variants: initialVariants, templates: initialTemplates, campaigns,
   tags: initialTags, library: initialLibrary, activity, postTags,
-  openTab, needsReview, startComposing,
+  openTab, openPostId = null, needsReview, startComposing,
 }: {
   initialPosts: Post[];
   profile: Profile;
@@ -131,6 +131,10 @@ export function SocialPlanner({
   postTags: { post_id: string; tag_id: string }[];
   /** The `?tab=` the command bar arrived with, already validated. */
   openTab: Tab | null;
+  /* `?post=`, which every content notification carries. Opens that post
+     rather than dropping the person on the planner and leaving them to
+     find it. */
+  openPostId?: string | null;
   /** Whether it arrived asking for the approval queue. */
   needsReview: boolean;
   /* `?new=1`, which is where the command bar's "new post" lands. The
@@ -159,7 +163,12 @@ export function SocialPlanner({
   const [month, setMonth] = useState(() => new Date());
 
   const [composing, setComposing] = useState<Post | null | 'new'>(startComposing ? 'new' : null);
-  const [open, setOpen] = useState<Post | null>(null);
+  /* Opened straight from the link where there is one. A post that is
+     not in `initialPosts` is one row level security did not return, so
+     it is not "missing", it is not theirs to read, and result 2 below
+     says so rather than the screen looking broken. */
+  const [open, setOpen] = useState<Post | null>(
+    () => (openPostId ? initialPosts.find((p) => p.id === openPostId) ?? null : null));
   const [previewing, setPreviewing] = useState<Post | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -402,6 +411,16 @@ export function SocialPlanner({
     const t = setTimeout(() => setNotice(null), 4000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  /* A link to a post that is not here. Said out loud rather than
+     silently landing on the planner, which is what the screen used to
+     do with every `?post=` and is indistinguishable from the link being
+     broken. Deleted, or on a list this person cannot read. */
+  useEffect(() => {
+    if (openPostId && !initialPosts.some((p) => p.id === openPostId)) {
+      setError('That post is not here any more, or it is not one you can open.');
+    }
+  }, [openPostId, initialPosts]);
 
   const TAB_LIST: { key: Tab; label: string; count?: number; show: boolean }[] = [
     { key: 'planner',   label: 'Planner',   count: visible.length, show: true },
