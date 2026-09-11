@@ -168,7 +168,8 @@ async function main() {
     css.replace(/^\\.(r-[0-9a-z]+)\\{position:absolute;left:0;top:0;bottom:0;width:3px;background:#/gm, function (_, c) { DATA.tint.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:4px;align-self:stretch;background:#/gm, function (_, c) { DATA.head.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:8px;height:8px;border-radius:2px;background:#/gm, function (_, c) { DATA.swatch.push(c); return ''; });
-    var SWITCHER = ['vwtab', 'vw', 'vw-chart', 'vw-grid', 'vw-matrix', 'vw-body'];
+    var SWITCHER = ['vwtab', 'vw', 'vw-chart', 'vw-grid', 'vw-matrix', 'vw-body',
+                    'rk-mini-node', 'rk-mini-view', 'is-dragging'];
     var norm = function (tok) {
       if (SWITCHER.indexOf(tok) >= 0) return null;
       if (/^sp-/.test(tok)) return 'sp-ID';
@@ -199,7 +200,7 @@ async function main() {
        The kit draws no disabled state because the kit does not know
        who is looking. Everything NOT on this list still has to match
        the kit exactly. */
-    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'data-vt', 'style', 'class', 'xmlns'];
+    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'data-vt', 'data-tint', 'data-density', 'data-minimap', 'data-balance', 'style', 'class', 'xmlns'];
     var attrs = function (el) {
       var out = [];
       for (var i = 0; i < el.attributes.length; i++) { var a = el.attributes[i]; if (BOUND.indexOf(a.name) < 0) out.push(a.name + '=' + a.value); }
@@ -209,7 +210,10 @@ async function main() {
 
     /* (1) The static shell: everything outside the repeating regions,
        text included, must be identical. */
-    var EMPTY = [ '.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-7j', '.r-7l', '.roles-inspector'];
+    /* Regions whose contents are a loop over the data. The minimap
+       joined them when it stopped being thirteen decorative blocks and
+       started drawing the real chart. */
+    var EMPTY = ['.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-74', '.r-7j', '.r-7l', '.roles-inspector'];
     var BLANK = ['.r-4x', '.r-7p', '.r-7q'];
     var shell = function (root) {
       var c = root.cloneNode(true);
@@ -244,7 +248,7 @@ async function main() {
          disabled and says why. Everything else about the shell, every
          tag, every class, every other attribute and all of the text,
          still has to match the kit exactly. */
-      var STATE = ['disabled', 'title'];
+      var STATE = ['disabled', 'title', 'data-density', 'data-tint', 'data-minimap'];
       var ser = function (el) {
         /* A tab the port turns into a label so it can check a radio.
            Compared as the span the kit draws; that it IS a label
@@ -282,6 +286,10 @@ async function main() {
          the switcher test rather than compared against a file that
          does not use them. */
       if (el.classList.contains('vw-in')) return false;
+      /* The minimap's blocks are the chart, drawn small. There is no
+         kit markup for them because the kit drew a picture of a tree
+         rather than a tree. Its own box is still compared. */
+      if (el.closest('.r-74') && !el.classList.contains('r-74')) return false;
       if (el.closest(SEPARATE)) return false;
       return true;
     }); };
@@ -307,6 +315,12 @@ async function main() {
     var defined = {};
     css.replace(/\\.([a-zA-Z][\\w-]*)/g, function (_, c) { defined[c] = 1; return ''; });
     ${JSON.stringify(readFileSync(`${KIT}/roles-behaviour.css`, 'utf8'))}.replace(/\\.([a-zA-Z][\\w-]*)/g, function (_, c) { defined[c] = 1; return ''; });
+    /* The port's own two stylesheets count as defining a class too. A
+       class in either of them is one this repository has written down
+       with its reason, which is the thing the test is actually about:
+       no class may appear in the markup that nothing anywhere defines. */
+    ${JSON.stringify(readFileSync(`${APP}/overrides.css`, 'utf8'))}.replace(/\\.([a-zA-Z][\\w-]*)/g, function (_, c) { defined[c] = 1; return ''; });
+    ${JSON.stringify(readFileSync(`${APP}/port.css`, 'utf8'))}.replace(/\\.([a-zA-Z][\\w-]*)/g, function (_, c) { defined[c] = 1; return ''; });
     var unknown = {};
     Array.prototype.forEach.call(M.querySelectorAll('*'), function (el) {
       (el.getAttribute('class') || '').split(/\\s+/).filter(Boolean).forEach(function (t) {
@@ -316,6 +330,10 @@ async function main() {
     var styled = [];
     Array.prototype.forEach.call(M.querySelectorAll('[style]'), function (el) {
       if (el.closest(SEPARATE)) return;
+      /* The minimap is geometry: every block and the viewport box are
+         placed from the real chart, as fractions. There is no class
+         that could carry a position that changes as you scroll. */
+      if (el.closest('.r-74')) return;
       var isFill = (el.getAttribute('class') || '').split(/\\s+/).some(function (t) { return DATA.fill.indexOf(t) >= 0; });
       if (!isFill || !/^width:\\s*\\d+%;?$/.test(el.getAttribute('style'))) styled.push(sig(el) + ' style="' + el.getAttribute('style') + '"'); });
 

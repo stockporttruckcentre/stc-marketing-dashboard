@@ -187,24 +187,50 @@ export async function screenCapabilities(
   /* No profile row means no role, and no role means the least access
      rather than the most. */
   const role = (profile?.role ?? 'viewer') as UserRole;
-  const caps = new Set<Capability>(capabilitiesFor({ role } as Pick<Profile, 'role'>) as Set<Capability>);
+  const legacy = new Set<Capability>(capabilitiesFor({ role } as Pick<Profile, 'role'>) as Set<Capability>);
 
   let id = userId;
   if (!id) {
     const { data } = await supabase.auth.getUser();
     id = data?.user?.id;
   }
-  if (!id) return caps;
+  if (!id) return legacy;
 
-  const { data: report } = await supabase.rpc('capability_report', { p_user: id });
-  if (!Array.isArray(report) || report.length === 0) return caps;
+  const { data: report, error } = await supabase.rpc('capability_report', { p_user: id });
 
+  /* ---- The database's answer replaces this one, it does not join it ----
+
+     From the business, of the Revenue tab: "i can't click the dropdown
+     and if i manually type /dashboard/revenue in the url it takes me to
+     /dashboard/ like the page is just gone."
+
+     It was not gone. `revenue/screen.tsx` asks the database
+     `command_may('revenue.view')` and sends you away when the answer is
+     no, while this function was building the sidebar from the LEGACY
+     role seed and then letting the report correct it. The legacy seed
+     grants revenue.view to all four of its roles, so any capability the
+     report failed to speak about stayed granted here and refused there.
+     The sidebar offered a row every page behind it would bounce.
+
+     So where the database answers, its answer is the whole answer, and
+     the two agree by construction. The legacy seed is used only when
+     the database says nothing at all, which is an account that predates
+     role templates. */
+  if (error) {
+    /* Not silent. A sidebar built from the wrong source is the defect
+       above, and it took a bug report to notice. */
+    console.error('capability_report failed, falling back to the legacy role seed:', error.message);
+    return legacy;
+  }
+  if (!Array.isArray(report) || report.length === 0) return legacy;
+
+  const caps = new Set<Capability>();
   for (const row of report as { key: string; granted: boolean }[]) {
     const key = row.key as Capability;
     /* A capability the database knows and this build does not cannot be
        named by anything here, so it cannot be used by anything here. */
     if (!CAPABILITY_BY_KEY[key]) continue;
-    if (row.granted) caps.add(key); else caps.delete(key);
+    if (row.granted) caps.add(key);
   }
   return caps;
 }

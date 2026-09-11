@@ -1,0 +1,161 @@
+/* =============================================================
+   Changes the business asked for on top of the kit.
+
+   The kit's own three stylesheets stay byte for byte what arrived, so a
+   new pack drops in clean. Everything asked for after the pack lives
+   here, each rule carrying the instruction that produced it in the
+   words it was given.
+
+   `npm run check:roles-render` reads this file. For every selector and
+   property in it, the screen is asserted to match THIS rather than
+   preview.html, so an override cannot drift back and cannot be made
+   without being noticed.
+   ============================================================= */
+
+/* ---- "Fill r-62" ----
+
+   The pack's shell is a fixed 1560 by 860 because that is the canvas
+   the design was drawn on. In the application it sits in a tab that is
+   usually wider and often taller, and the difference was blank. It now
+   takes the room it is given. The rail and the inspector keep the
+   widths the handoff fixes; the canvas still takes the remainder, which
+   is what the handoff says it does. */
+.roles-port{display:flex;min-height:0}
+.roles-port>.r-62{flex:1;min-width:0;display:flex}
+.r-62>.roles-shell{width:100%;height:calc(100vh - var(--roles-chrome));min-height:520px}
+
+/* ---- "Make the left sidebar navy with role names white on this one" ----
+
+   The rail, in the same navy the pack gives its own navigation column,
+   and the role names in the same white. Both values are the pack's own:
+   `.roles-nav` is `background:#050D26;color:#fff`, and that is the
+   column this replaced. */
+.roles-rail{background:#050D26;color:#fff;border-right-color:#050D26}
+.roles-rail .r-19{color:#fff}
+.roles-rail .r-18{color:#fff}
+.roles-rail .r-t{color:rgba(255,255,255,.55)}
+.roles-rail .r-4y{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18)}
+.roles-rail .r-36{color:#fff}
+.roles-rail .r-36::placeholder{color:rgba(255,255,255,.45)}
+.roles-rail .r-35{color:rgba(255,255,255,.55)}
+.roles-rail .r-7i{border-bottom-color:rgba(255,255,255,.12)}
+.roles-rail .r-7m{border-top-color:rgba(255,255,255,.12)}
+.roles-rail .r-3l{background:rgba(255,255,255,.10);color:rgba(255,255,255,.75)}
+.roles-rail .r-7n{background:rgba(199,122,6,.18)}
+.roles-rail .r-7o{color:#fff}
+.roles-rail .r-7p{color:rgba(255,255,255,.65)}
+/* The selected row's highlight is drawn by roles-behaviour.css as
+   `var(--bg-subtle)`, a light fill that vanishes on navy. The rule that
+   sets it is more specific than a class, so it is answered at the same
+   specificity with the rail's own white wash. The accent left border
+   and the weight that rule also sets are untouched. */
+.vw-body .roles-rail .sn-row[data-list]{background:rgba(255,255,255,.10)}
+
+/* ---- "Leadership/sales/office etc, these labels need more weight and
+   a font size up" ----
+
+   The rail's division headings. One step up from the 9.5px the kit sets
+   on `.r-1z`, and the weight of the kit's own section label, `.r-4w`,
+   which is the same kind of thing one level out. */
+.roles-rail .r-1z{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.72)}
+
+/* ---- "search box needs more top-bottom padding inside it, the field
+   is only as tall as the pre-text inside it" ----
+
+   The kit's control height is 28px, which every other control on the
+   screen uses. The search field takes the taller of the two heights the
+   kit itself uses for a control, 32px, which is what its own buttons
+   stand at. */
+.roles-rail .r-4y{height:32px}
+
+/* ---- "the pills under the search bar need to load over 2 rows as the
+   office one is hidden" ---- */
+.roles-rail .r-7j{flex-wrap:wrap;row-gap:6px}
+
+/* ---- "The little r-74 svg, make that be a real visual of the tree's
+   current view" ----
+
+   The minimap is drawn from the chart rather than decorated, so it
+   needs to position its own contents. Everything it draws is sized from
+   the real geometry at render time. */
+.r-74{cursor:grab}
+.r-74 .rk-mini-node{position:absolute;border-radius:1px}
+.r-74 .rk-mini-view{position:absolute;border:1.5px solid var(--accent);background:rgba(207,36,23,.07);border-radius:2px;cursor:grab}
+.r-74.is-dragging,.r-74 .rk-mini-view.is-dragging{cursor:grabbing}
+
+/* ---- "Need to be able to drag around the tree" ----
+
+   The behaviour document: "Drag, Canvas background, Pans." A grab
+   cursor while the pointer is over empty canvas, and none over a card,
+   so the two gestures read apart. */
+.roles-canvas-body{cursor:grab}
+.roles-canvas-body.is-panning{cursor:grabbing}
+.roles-canvas-body .sn-lab{cursor:pointer}
+
+/* ---- "I can't switch between compact and comfortable?" ----
+
+   The behaviour document specifies both: "Compact 176px ... The
+   default. Fits a 24-role tree in one canvas." and "Comfortable 218px
+   ... Adds the division label and loosens the rows." Those two widths
+   and that difference are the whole specification, so this is a port of
+   it rather than a choice: compact is the kit's own 176px card with the
+   division line off, comfortable is 218px with it on. */
+.roles-canvas-body[data-density="compact"] .r-29,
+.roles-canvas-body[data-density="compact"] .r-33,
+.roles-canvas-body[data-density="compact"] .r-4s{width:176px}
+.roles-canvas-body[data-density="compact"] .r-12{display:none}
+.roles-canvas-body[data-density="comfortable"] .r-29,
+.roles-canvas-body[data-density="comfortable"] .r-33,
+.roles-canvas-body[data-density="comfortable"] .r-4s{width:218px}
+.roles-canvas-body[data-density="comfortable"] .r-6u{width:238px}
+
+/* ---- "Tree still broken, lines overlap or don't touch or overlap the
+   div they relate to etc" ----
+
+   The connectors themselves measure correct at every width tested, but
+   the band under them did not. `.r-6x`, the DIRECTLY ASSIGNED strip, is
+   an ordinary block inside a scrolling region, so it took the width of
+   what was ON SCREEN rather than of the tree. At 1280 the tree was 961
+   wide and the strip 676: scroll right and its dashed rule stopped dead
+   in the middle of the canvas with cards beyond it.
+
+   The kit already solves this on the tree itself, which is
+   `width:max-content;min-width:100%`. The strip gets the same, so both
+   are as wide as the content and never narrower than the view. */
+.roles-canvas-body>.r-6x{width:max-content;min-width:100%}
+
+/* ---- The hole in the middle of a two-child bar ----
+
+   A branch row draws its bar as a half segment from the first child's
+   centre to that column's right edge, then a half segment from the last
+   column's left edge to its centre. Between the two columns sits the
+   row's own gap, and the bar has nothing there.
+
+   With three or more children the middle column's full width segment
+   covers the centre, so the parent's stem lands on it and nobody
+   notices. With exactly two, the centre IS the gap: the stem comes down
+   into the hole and touches nothing. Both of the kit's own two-child
+   rows have it, and it is what the business reported as lines that do
+   not touch.
+
+   Each segment is extended by half the row's gap on the side that faces
+   a neighbour, so adjacent segments meet exactly in the middle of the
+   gap and the bar is continuous. Nothing moves: the cards, the columns
+   and the gaps are all exactly where the kit puts them. Only the line
+   closes.
+
+   `align-self:stretch` with `width:auto` is what lets a margin do the
+   measuring, because the kit's own 50% resolves against the column's
+   content box and cannot reach past it.
+
+   The 9px and 6.5px are half of the kit's own 18px and 13px row gaps.
+   `npm run check:roles-port` reads those two rules out of the kit and
+   fails if these stop being half of them. */
+.r-6v>.r-1y>.r-4q,.r-6v>.r-1y>.r-3j,.r-6v>.r-1y>.r-4v,
+.r-6w>.r-1y>.r-4q,.r-6w>.r-1y>.r-3j,.r-6w>.r-1y>.r-4v{align-self:stretch;width:auto}
+.r-6v>.r-1y>.r-4q{margin-right:-9px}
+.r-6v>.r-1y>.r-3j{margin-left:-9px;margin-right:-9px}
+.r-6v>.r-1y>.r-4v{margin-left:-9px}
+.r-6w>.r-1y>.r-4q{margin-right:-6.5px}
+.r-6w>.r-1y>.r-3j{margin-left:-6.5px;margin-right:-6.5px}
+.r-6w>.r-1y>.r-4v{margin-left:-6.5px}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Svg, PeopleIcon, AlertIcon, DocIcon, PlusIcon, MinusIcon,
   CheckIcon, CrossIcon, DownIcon, GridIcon, KebabIcon, CopyIcon, PencilIcon, OpenIcon, SearchIcon,
@@ -10,6 +10,7 @@ import { compare } from './model';
 import { RoleMenu, menuFor } from './RoleMenu';
 import { GridView, MatrixView } from './views';
 import { Compare } from './Compare';
+import { Minimap } from './Minimap';
 import { readChoice, writeChoice } from '@/lib/ui/remember';
 
 /* =============================================================
@@ -100,18 +101,34 @@ const VIEW_KEY = 'roles-view';
    chart at a size the buttons could never reach. */
 const ZOOM_KEY = 'roles-zoom';
 
+/* ---- The two densities the behaviour document specifies ----
+
+     Compact 176px ... The default. Fits a 24-role tree in one canvas.
+     Comfortable 218px ... Adds the division label and loosens the rows.
+
+   Those two widths and that one difference are the whole of it, so the
+   stylesheet in `overrides.css` is a port of the sentence rather than a
+   choice. The pack's own markup lights Comfortable, and the markup is
+   what this port is diffed against, so that is what it opens on. The
+   document's "the default" and the file disagree; the file wins. */
+export const DENSITIES = ['comfortable', 'compact'] as const;
+export type Density = typeof DENSITIES[number];
+const DENSITY_KEY = 'roles-density';
+
 /* The kit's three, in its order. The behaviour document: "Default.
    Opens on the question people actually arrive with." */
 const TABS: [Tab, string][] = [
   ['permissions', 'Permissions'], ['people', 'People'], ['history', 'History'],
 ];
 
-export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }: {
+export function RolesScreen({ model, mayEdit = false, whyNotEdit, onEdit, onAssign, openOn }: {
   model: ScreenModel;
   /** A role named in the address bar, so a pasted link opens on it. */
   openOn?: string | null;
   /** `admin.roles`. Without it the editor cannot be opened. */
   mayEdit?: boolean;
+  /** Why not, when not. Shown on the control rather than kept quiet. */
+  whyNotEdit?: string;
   onEdit?: (roleId: string) => void;
   /** Putting somebody on a role is the People tab's job, not this screen's. */
   onAssign?: () => void;
@@ -123,6 +140,7 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
      itself: twenty-three of them, off screen, for one on show. */
   const [pair, setPair] = useState<{ a: string; b: string } | null>(null);
   const [picking, setPicking] = useState(false);
+  const [density, setDensity] = useState<Density>('comfortable');
   const [q, setQ] = useState('');
   const [chip, setChip] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -200,6 +218,8 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
     }
     const z = readChoice(ZOOM_KEY, ZOOM_STEPS);
     if (z) setZoom(Number(z));
+    const d = readChoice(DENSITY_KEY, DENSITIES);
+    if (d) setDensity(d);
   }, []);
 
   /* Written whenever it settles, not on every wheel tick. */
@@ -210,15 +230,128 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
   }, [zoom]);
 
   const clamp = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
-  const fit = () => {
+  /* ---- Fit puts the view back ----
+
+     From the business: "make the fit button reset your view when you do
+     zoom or move around." So it is both halves: a zoom at which the
+     whole tree is visible, and the scroll back to the top left, because
+     a fitted tree you are still scrolled away from is not fitted. The
+     behaviour document is clear it stays a deliberate press and never
+     happens on its own: "The chart never auto-fits on selection,
+     because that moves the ground under you." */
+  const fit = useCallback(() => {
     const b = body.current, t = tree.current;
     if (!b || !t) return;
-    /* The tree's natural width is its drawn width undone by the zoom
-       it is currently drawn at. */
-    const natural = t.getBoundingClientRect().width / (zoom / 100);
+    const r = t.getBoundingClientRect();
+    const natural = r.width / (zoom / 100);
+    const naturalH = r.height / (zoom / 100);
     if (natural <= 0) return;
-    setZoom(clamp(Math.floor((b.clientWidth / natural) * 100 / ZOOM_STEP) * ZOOM_STEP));
-  };
+    const byWidth = (b.clientWidth / natural) * 100;
+    const byHeight = (b.clientHeight / naturalH) * 100;
+    setZoom(clamp(Math.floor(Math.min(byWidth, byHeight) / ZOOM_STEP) * ZOOM_STEP));
+    b.scrollTo({ left: 0, top: 0 });
+  }, [zoom]);
+
+  /* ---- Making every stem land on its bar ----
+
+     From the business: "lines overlap or don't touch or overlap the div
+     they relate to."
+
+     A parent is centred over its whole branch ROW, but the bar the row
+     draws only runs from the first child's centre to the last child's.
+     Where the subtrees either side differ in width those two points are
+     not the same, and the parent's stem comes down into one of the 18px
+     gaps BETWEEN segments and touches nothing. Every segment is correct
+     on its own, which is why measuring them one at a time found
+     nothing.
+
+     The fix pads the row, rather than moving the parent. Moving the
+     parent would satisfy this stem and break the drop pointing AT that
+     parent from the row above it, which is the same defect one level
+     up. Padding is layout, so the tree's own width grows with it and
+     the canvas can still scroll to all of it.
+
+     The arithmetic: with the row's centre at M and the span of child
+     centres at S, padding the short side by twice the difference moves
+     M onto S, because the padding shifts the centre by half of itself
+     and the span by none of it.
+
+     Run after layout and again on every resize, zoom and density
+     change, and asserted by `npm run check:roles-render`. */
+  const balance = useCallback(() => {
+    const t = tree.current;
+    if (!t) return;
+    const rows = Array.from(t.querySelectorAll<HTMLElement>('[data-balance]'));
+    for (const row of rows) { row.style.paddingLeft = ''; row.style.paddingRight = ''; }
+
+    /* ---- Why this repeats ----
+
+       Padding a row widens it, which widens the column it sits in,
+       which re-centres the card ABOVE that column, which moves the stem
+       the row above was aligned to. One pass fixes the deepest row and
+       unsettles its parent. So it runs until nothing moves, innermost
+       first, and gives up after a few turns rather than looping if some
+       layout it has not met refuses to settle. */
+    const mid = (el: Element) => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+    const deepest = [...rows].sort((a, b) =>
+      b.querySelectorAll('[data-balance]').length - a.querySelectorAll('[data-balance]').length);
+    const scale = (zoom / 100) || 1;
+    const pad = new Map<HTMLElement, number>();
+
+    for (let turn = 0; turn < 6; turn += 1) {
+      let moved = false;
+      for (const row of deepest) {
+        const cols = Array.from(row.children) as HTMLElement[];
+        if (cols.length < 2) continue;
+        const box = row.getBoundingClientRect();
+        const M = box.left + box.width / 2;
+        const S = (mid(cols[0]!) + mid(cols[cols.length - 1]!)) / 2;
+        const d = (M - S) / scale;
+        if (Math.abs(d) < 0.5) continue;
+        const next = (pad.get(row) ?? 0) + 2 * d;
+        pad.set(row, next);
+        row.style.paddingLeft = next > 0 ? `${next.toFixed(2)}px` : '';
+        row.style.paddingRight = next < 0 ? `${(-next).toFixed(2)}px` : '';
+        moved = true;
+      }
+      if (!moved) break;
+    }
+  }, [zoom]);
+
+  useLayoutEffect(() => { balance(); }, [balance, density, model]);
+  useEffect(() => {
+    const t = tree.current;
+    if (!t) return;
+    const ro = new ResizeObserver(() => balance());
+    ro.observe(t);
+    return () => ro.disconnect();
+  }, [balance]);
+
+  /* ---- Dragging the canvas pans it ----
+
+     The behaviour document: "Drag, Canvas background, Pans." Started
+     only on the background, so dragging across a card still selects it,
+     and given up the moment the pointer leaves. */
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const onPanDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const el = e.target as HTMLElement;
+    if (el.closest('[data-for]') || el.closest('[data-minimap]')) return;
+    const b = body.current;
+    if (!b) return;
+    pan.current = { x: e.clientX, y: e.clientY, left: b.scrollLeft, top: b.scrollTop };
+    b.classList.add('is-panning');
+  }, []);
+  const onPanMove = useCallback((e: React.PointerEvent) => {
+    const b = body.current, p = pan.current;
+    if (!b || !p) return;
+    b.scrollLeft = p.left - (e.clientX - p.x);
+    b.scrollTop = p.top - (e.clientY - p.y);
+  }, []);
+  const onPanUp = useCallback(() => {
+    pan.current = null;
+    body.current?.classList.remove('is-panning');
+  }, []);
 
   const needle = q.trim().toLowerCase();
   const rowShown = (r: { name: string; people: string[] }) =>
@@ -296,17 +429,16 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
                       </label>
                     ))}
                   </div>
-                  {/* Density is drawn and not wired, and this is why: the
-                      behaviour document specifies Comfortable as a 218px
-                      node that "adds the division label and loosens the
-                      rows", and the stylesheet ships no 218px node and no
-                      second row spacing. Building it would mean choosing
-                      those numbers. */}
                   <div className="r-4i">
-                    <button className="r-6n" disabled
-                      title="The pack documents two densities but ships the styles for one, so there is nothing to switch to yet">Compact</button>
-                    <button className="r-6o" disabled
-                      title="The pack documents two densities but ships the styles for one, so there is nothing to switch to yet">Comfortable</button>
+                    {/* The lit one is whichever is on, so the pair reads
+                        the same way the view tabs do. In the state the
+                        pack's own markup draws, Comfortable is lit. */}
+                    <button className={density === 'compact' ? 'r-6o' : 'r-6n'}
+                      onClick={() => { setDensity('compact'); writeChoice(DENSITY_KEY, 'compact'); }}
+                      title="Narrower cards, no division line. Fits more of the tree in one canvas.">Compact</button>
+                    <button className={density === 'comfortable' ? 'r-6o' : 'r-6n'}
+                      onClick={() => { setDensity('comfortable'); writeChoice(DENSITY_KEY, 'comfortable'); }}
+                      title="Wider cards with the division on each one. For presenting.">Comfortable</button>
                   </div>
                   <span className="r-6p"></span>
                   <div className="r-6q">
@@ -326,7 +458,10 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
                   </button>
                 </div>
                 <div data-canvas-body="1" className="roles-canvas-body" ref={body}
-                  onClickCapture={onCanvasClick}>
+                  data-density={density}
+                  onClickCapture={onCanvasClick}
+                  onPointerDown={onPanDown} onPointerMove={onPanMove}
+                  onPointerUp={onPanUp} onPointerLeave={onPanUp}>
                   <div className="r-6t vw vw-chart" ref={tree} style={zoom === 100 ? undefined : { zoom: zoom / 100 }}>
                     <ChartTree chart={model.chart} />
                   </div>
@@ -344,7 +479,7 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
                 <div className="r-73">
                   <span className="r-4x">{model.chart.footer}</span>
                   <span className="r-k"></span>
-                  <div className="r-74"><span className="r-75"></span><span className="r-76"></span><span className="r-77"></span><span className="r-78"></span><span className="r-79"></span><span className="r-7a"></span><span className="r-7b"></span><span className="r-7c"></span><span className="r-7d"></span><span className="r-7e"></span><span className="r-7f"></span><span className="r-7g"></span><span className="r-7h"></span></div>
+                  <Minimap body={body} tree={tree} zoom={zoom} density={density} />
                 </div>
               </div>
               <div className="roles-rail">
@@ -386,7 +521,7 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
               <div className="roles-inspector">
                 {model.panels.map((p) => (
                   <Inspector key={p.id} panel={p} tab={tab} onTab={setTab}
-                    mayEdit={mayEdit} onEdit={onEdit} onMenu={setMenu}
+                    mayEdit={mayEdit} whyNotEdit={whyNotEdit} onEdit={onEdit} onMenu={setMenu}
                     against={pair && pair.a === p.id ? pair.b : null} raw={model.raw}
                     picking={picking} onPick={() => setPicking(true)}
                     onStopCompare={() => { setPair(null); setPicking(false); }} />
@@ -401,7 +536,7 @@ export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }
         return p ? (
           <RoleMenu at={{ right: menu.right, top: menu.top }} onClose={() => setMenu(null)}
             items={menuFor({
-              role: p.name, holders: p.people.length, mayEdit,
+              role: p.name, holders: p.people.length, mayEdit, whyNotEdit,
               onEdit: () => onEdit?.(p.id), onAssign: () => onAssign?.(),
             })} />
         ) : null;
@@ -440,8 +575,10 @@ function ChartTree({ chart }: { chart: Chart }) {
 
 function Branches({ columns, nested }: { columns: Column[]; nested: boolean }) {
   const last = columns.length - 1;
+  /* `data-balance` marks a row whose padding is computed from the live
+     layout so the parent's stem lands on the bar this row draws. */
   return (
-    <div className={nested ? 'r-6w' : 'r-6v'}>
+    <div className={nested ? 'r-6w' : 'r-6v'} data-balance="1">
       {columns.map((col, i) => (
         <div key={i} className="r-1y">
           {i === 0
@@ -475,7 +612,9 @@ function ColumnView({ column }: { column: Column }) {
 function Node({ node }: { node: NodeView }) {
   return (
     <label htmlFor={`sn-${node.id}`} className="sn-lab">
-      <div data-for={node.id} className={node.boxCls}>
+      {/* `data-tint` is read by the minimap, which draws blocks rather
+          than classes. It is data, like `data-for` beside it. */}
+      <div data-for={node.id} data-tint={node.tint} className={node.boxCls}>
         <span className={node.tintCls}></span>
         <div className="r-z">
           <div className="r-10"><span className="r-11">{node.name}</span><span className="r-12">{node.division}</span></div>
@@ -509,10 +648,10 @@ function Meter({ fill, pct }: { fill: { cls: string; width: string | null }; pct
   );
 }
 
-function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu,
+function Inspector({ panel: p, tab, onTab, mayEdit, whyNotEdit, onEdit, onMenu,
   against, raw, picking, onPick, onStopCompare }: {
   panel: Panel; tab: Tab; onTab: (t: Tab) => void;
-  mayEdit: boolean; onEdit?: (roleId: string) => void;
+  mayEdit: boolean; whyNotEdit?: string; onEdit?: (roleId: string) => void;
   onMenu: (at: { id: string; right: number; top: number } | null) => void;
   /** The other role, while a comparison is up. */
   against: string | null;
@@ -582,7 +721,7 @@ function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu,
             every write inside the database, which teaches people the
             tool is unreliable. Disabled here, and refused there too. */}
         <button className="r-1w" disabled={!mayEdit} onClick={() => onEdit?.(p.id)}
-          title={mayEdit ? undefined : 'Changing what a role can do needs the admin.roles permission'}>
+          title={mayEdit ? undefined : whyNotEdit}>
           <Svg size={14}><PencilIcon /></Svg><span>Edit permissions</span>
         </button>
         {/* A link to this exact role, which is how these conversations

@@ -71,14 +71,14 @@ export function RoleMenu({ items, at, onClose }: {
 }
 
 /** The six the kit draws, in its order, with what each one needs. */
-export function menuFor({ role, holders, mayEdit, onEdit, onAssign }: {
-  role: string; holders: number; mayEdit: boolean;
+export function menuFor({ role, holders, mayEdit, whyNotEdit, onEdit, onAssign }: {
+  role: string; holders: number; mayEdit: boolean; whyNotEdit?: string;
   onEdit: () => void; onAssign: () => void;
 }): MenuItem[] {
   const noBackend = 'Not built yet: this writes to role_templates, which only the seed writes today';
   return [
     { key: 'edit', label: 'Edit permissions', icon: 'edit', onPick: onEdit,
-      disabled: mayEdit ? false : 'Changing what a role can do needs the admin.roles permission' },
+      disabled: mayEdit ? false : (whyNotEdit ?? 'Changing what a role can do needs the admin.roles permission') },
     { key: 'duplicate', label: 'Duplicate role', icon: 'copy', disabled: noBackend },
     { key: 'assign', label: 'Assign people', icon: 'people', onPick: onAssign },
     { key: 'export', label: 'Export definition', icon: 'export', disabled: noBackend },
