@@ -47,7 +47,28 @@ const find = (re: RegExp, what: string) => {
   if (!m) throw new Error(`no class for ${what}`);
   return m[1]!;
 };
-const divisions: Record<string, { label: string; tint: string; node: string; head: string; swatch: string }> = {};
+/* ---- The row bars the grid and the matrix draw ----
+
+   Each is one class per division: a 3 by 15 bar in the grid, a 3 by 14
+   one in the matrix. The kit defines them only for the divisions its
+   own twelve example rows happen to show, so two are missing from the
+   grid and one from the matrix. The geometry is identical inside each
+   family, so the carrier class is whichever of them exists and the
+   colour comes from the division, exactly as a coverage bar's width
+   comes from its percentage. Nothing is chosen here: both halves are
+   read out of the kit. */
+const family = (re: RegExp, what: string) => {
+  const all = [...css.matchAll(re)].map((m) => ({ cls: m[1]!, hex: m[2]! }));
+  if (all.length === 0) throw new Error(`no ${what} classes in roles-components.css`);
+  return (tint: string) => (all.find((a) => a.hex.toUpperCase() === tint.toUpperCase()) ?? all[0]!).cls;
+};
+const gridBar = family(/^\.(r-[0-9a-z]+)\{flex:none;width:3px;height:15px;border-radius:2px;background:(#[0-9A-Fa-f]{6})\}$/gm, 'grid row bar');
+const matrixBar = family(/^\.(r-[0-9a-z]+)\{width:3px;height:14px;border-radius:2px;background:(#[0-9A-Fa-f]{6})\}$/gm, 'matrix row bar');
+
+const divisions: Record<string, {
+  label: string; tint: string; node: string; head: string; swatch: string;
+  gridBar: string; matrixBar: string;
+}> = {};
 for (const [id, d] of Object.entries(data.divisions)) {
   const hex = esc(d.tint);
   divisions[id] = {
@@ -56,8 +77,17 @@ for (const [id, d] of Object.entries(data.divisions)) {
     node:   find(new RegExp(`^\\.(r-[0-9a-z]+)\\{position:absolute;left:0;top:0;bottom:0;width:3px;background:${hex};`, 'm'), `${id} node bar`),
     head:   find(new RegExp(`^\\.(r-[0-9a-z]+)\\{width:4px;align-self:stretch;background:${hex};`, 'm'), `${id} inspector bar`),
     swatch: find(new RegExp(`^\\.(r-[0-9a-z]+)\\{width:8px;height:8px;border-radius:2px;background:${hex}\\}`, 'm'), `${id} swatch`),
+    gridBar: gridBar(d.tint),
+    matrixBar: matrixBar(d.tint),
   };
 }
+
+/* The matrix's column template, as the kit writes it. The port keeps
+   the 186px and the 1fr and drives only the COUNT from the real
+   capability areas, because the kit fixes six and the business has
+   seven. Read here so a changed template is noticed. */
+const matrixCols = css.match(/^\.[a-z0-9-]+\{display:grid;grid-template-columns:(\d+px) repeat\((\d+),(\d+fr)\);border-top/m);
+if (!matrixCols) throw new Error('no matrix row template in roles-components.css');
 
 /* ---- Selection rules ---- */
 const ids = [...new Set([...behaviour.matchAll(/^#sn-([a-z]+):checked/gm)].map((m) => m[1]!))];
@@ -97,6 +127,9 @@ export const BEHAVIOUR_RULES = ${JSON.stringify(rules, null, 2)} as const;
 
 /** The capability total the kit's placeholder data was drawn against. */
 export const KIT_CAPABILITY_TOTAL = ${data.capabilityTotal};
+
+/** The kit's matrix column template: its label width, its count, its unit. */
+export const MATRIX_TEMPLATE = ${JSON.stringify({ label: matrixCols[1], count: Number(matrixCols[2]), unit: matrixCols[3] })} as const;
 `;
 writeFileSync(OUT, out);
 console.log(`  wrote ${OUT}: ${fills.length} bars, ${Object.keys(divisions).length} divisions, ${ids.length} ids`);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Cap, Template } from './model';
 import { Svg, AlertIcon, CheckIcon, CrossIcon, SearchIcon } from './icons';
 
@@ -75,6 +75,17 @@ export function EditPermissions({ role, caps, held, onClose, onSave, saving, fai
 }) {
   const [draft, setDraft] = useState<Map<string, Verdict>>(new Map());
   const [q, setQ] = useState('');
+
+  /* Escape closes it, as it closes every other dialog in this
+     application. Found by `npm run check:roles-drive`, which presses
+     the key and asserts the modal goes: the handler was on the role
+     menu and not here, and nothing that only renders the screen could
+     have noticed. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const now = (key: string): Verdict => draft.get(key) ?? verdictOf(held.get(key));
 

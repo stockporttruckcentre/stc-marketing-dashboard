@@ -1,14 +1,16 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
-import { ICONS } from '@/components/nav-icons';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Svg, PeopleIcon, AlertIcon, DocIcon, PlusIcon, MinusIcon,
   CheckIcon, CrossIcon, DownIcon, GridIcon, KebabIcon, CopyIcon, PencilIcon, OpenIcon, SearchIcon,
 } from './icons';
-import type { NavIcon } from '@/lib/nav';
-import type { Chart, Column, NodeView, Panel, ScreenModel, Verdict } from './model';
+import type { Chart, Column, Input, NodeView, Panel, ScreenModel, Verdict } from './model';
+import { compare } from './model';
 import { RoleMenu, menuFor } from './RoleMenu';
+import { GridView, MatrixView } from './views';
+import { Compare } from './Compare';
+import { readChoice, writeChoice } from '@/lib/ui/remember';
 
 /* =============================================================
    The Roles screen, as `docs/source/roles_hub/roles-page.html` draws it.
@@ -19,6 +21,20 @@ import { RoleMenu, menuFor } from './RoleMenu';
      not rebuild, re-layout, re-name, restructure or improve. If your
      output does not diff cleanly against these files, it is wrong,
      however close it looks.
+
+   ---- The one region deliberately not drawn ----
+
+   The pack's screen opens with a 218px navigation column carrying
+   Dashboard, Jobs, Analytics and a user block. From the business:
+
+     why is there a sidebar on it with crm and tracker etc? That was
+     just claude design's visual mockup of what our dash looks like.
+     It was just guidance.
+
+   So it is chrome around the design rather than part of it, and this
+   screen already sits inside the application's own sidebar. It is not
+   drawn. `npm run check:roles-port` knows it is missing on purpose and
+   fails if anything ELSE goes missing with it.
 
    So this file is that markup, element for element and class for
    class, with a loop in each region the handoff names as repeating:
@@ -51,16 +67,38 @@ import { RoleMenu, menuFor } from './RoleMenu';
    New role and Access review, which are disabled rather than dead.
    ============================================================= */
 
-export type NavRow = { label: string; icon: NavIcon; active: boolean };
-export type NavSectionView = { label: string; items: NavRow[] };
-export type Me = { initials: string; name: string; role: string };
-
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 100 + 50;
 const ZOOM_STEP = 10;
+/* Every zoom the control can reach, as strings, so a remembered one is
+   checked against the set rather than trusted. */
+const ZOOM_STEPS = Array.from(
+  { length: (ZOOM_MAX - ZOOM_MIN) / ZOOM_STEP + 1 },
+  (_, i) => String(ZOOM_MIN + i * ZOOM_STEP),
+);
 
 export type Tab = 'permissions' | 'people' | 'history';
+
+/* ---- The three views ----
+
+   `roles-behaviour.css` switches them from three radios, the same
+   mechanism and for the same reason as role selection. These are the
+   ids it names, so they are read from the generated file rather than
+   written here, and the port check proves the rules and the markup
+   still agree.
+
+   Which view somebody last used is remembered. `lib/ui/remember.ts`
+   says why it is per device rather than per account: how a screen is
+   drawn is a habit of the desk it is looked at from. */
+export const VIEWS = ['chart', 'grid', 'matrix'] as const;
+export type View = typeof VIEWS[number];
+const VIEW_KEY = 'roles-view';
+/* Zoom is remembered too, for the same reason the view is: it is how
+   somebody has this screen set up at their own desk. Stored as one of
+   the steps the control offers, so a hand-edited value cannot put the
+   chart at a size the buttons could never reach. */
+const ZOOM_KEY = 'roles-zoom';
 
 /* The kit's three, in its order. The behaviour document: "Default.
    Opens on the question people actually arrive with." */
@@ -68,8 +106,10 @@ const TABS: [Tab, string][] = [
   ['permissions', 'Permissions'], ['people', 'People'], ['history', 'History'],
 ];
 
-export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign }: {
-  model: ScreenModel; nav: NavSectionView[]; me: Me;
+export function RolesScreen({ model, mayEdit = false, onEdit, onAssign, openOn }: {
+  model: ScreenModel;
+  /** A role named in the address bar, so a pasted link opens on it. */
+  openOn?: string | null;
   /** `admin.roles`. Without it the editor cannot be opened. */
   mayEdit?: boolean;
   onEdit?: (roleId: string) => void;
@@ -78,11 +118,96 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
 }) {
   const [tab, setTab] = useState<Tab>('permissions');
   const [menu, setMenu] = useState<{ id: string; right: number; top: number } | null>(null);
+  /* A comparison names BOTH of its roles. Holding only the second one
+     would mean every hidden panel rendering a comparison against
+     itself: twenty-three of them, off screen, for one on show. */
+  const [pair, setPair] = useState<{ a: string; b: string } | null>(null);
+  const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [chip, setChip] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
   const body = useRef<HTMLDivElement>(null);
   const tree = useRef<HTMLDivElement>(null);
+
+  /* ---- Which role is selected ----
+
+     The radios are the truth, because the stylesheet reads them and
+     nothing here holds a copy. So anything that needs to know asks the
+     document rather than a second state that could disagree with it. */
+  const selected = useCallback(() =>
+    (document.querySelector('input.sn-in:checked') as HTMLInputElement | null)?.id.replace(/^sn-/, '') ?? null, []);
+
+  const select = useCallback((id: string) => {
+    const el = document.getElementById(`sn-${id}`) as HTMLInputElement | null;
+    if (el) el.checked = true;
+  }, []);
+
+  /* Open from the Grid: select the role and put the chart back, which is
+     where the inspector reads as part of a shape rather than a row. */
+  const openRole = useCallback((id: string) => {
+    select(id);
+    const chart = document.getElementById('vw-chart') as HTMLInputElement | null;
+    if (chart) { chart.checked = true; writeChoice(VIEW_KEY, 'chart'); }
+  }, [select]);
+
+  /* ---- Shift-click a second node to compare ----
+
+     From the behaviour document, in those words. Delegated from the
+     canvas rather than threaded through four components, so the chart
+     markup stays exactly what the kit draws. preventDefault stops the
+     label also moving the selection out from under the comparison. */
+  const onCanvasClick = useCallback((e: React.MouseEvent) => {
+    const node = (e.target as HTMLElement).closest('[data-for]') as HTMLElement | null;
+    const id = node?.getAttribute('data-for');
+    if (!id) return;
+    if (e.shiftKey || picking) {
+      e.preventDefault();
+      const from = selected();
+      if (from && id !== from) { setPair({ a: from, b: id }); setTab('permissions'); }
+      setPicking(false);
+    }
+  }, [picking, selected]);
+
+  /* ---- Ctrl and scroll zooms, between 50 and 150 per cent ----
+
+     Bound with `addEventListener` rather than React's `onWheel`,
+     because React registers wheel listeners as PASSIVE and a passive
+     listener may not call `preventDefault`. Through React the browser
+     refuses the call, logs it, and zooms the whole page underneath the
+     canvas as well. `npm run check:roles-drive` is what found it: it
+     holds Control, scrolls, and fails the run on any console error. */
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /* The view and the zoom somebody last used, applied once the browser
+     exists. Read here rather than at first render because local storage
+     is not there on the server, and a value read from it during render
+     is a hydration mismatch. */
+  useEffect(() => {
+    const view = readChoice(VIEW_KEY, VIEWS);
+    if (view && view !== 'chart') {
+      const el = document.getElementById(`vw-${view}`) as HTMLInputElement | null;
+      if (el) el.checked = true;
+    }
+    const z = readChoice(ZOOM_KEY, ZOOM_STEPS);
+    if (z) setZoom(Number(z));
+  }, []);
+
+  /* Written whenever it settles, not on every wheel tick. */
+  useEffect(() => {
+    if (zoom === 100) return;
+    const t = setTimeout(() => writeChoice(ZOOM_KEY, String(zoom)), 400);
+    return () => clearTimeout(t);
+  }, [zoom]);
 
   const clamp = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
   const fit = () => {
@@ -106,17 +231,19 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
       <div className="r-62">
         {model.ids.map((id) => (
           <input key={id} className="sn-in" type="radio" name="stc-screen-role" id={`sn-${id}`}
-            defaultChecked={id === model.defaultId} />
+            defaultChecked={id === (openOn && model.ids.includes(openOn) ? openOn : model.defaultId)} />
         ))}
-        <div className="sn-body roles-shell">
-          <div className="roles-nav">
-            <div className="r-63"><span className="r-64">S</span><span className="r-65">Stockport Truck Centre</span></div>
-            {nav.map((s, i) => (
-              <NavSection key={s.label} section={s} first={i === 0} />
-            ))}
-            <span className="r-k"></span>
-            <div className="r-69"><span className="r-6a">{me.initials}</span><div className="r-6b"><span className="r-2q">{me.name}</span><span className="r-6c">{me.role}</span></div></div>
-          </div>
+        {/* The view switcher. Uncontrolled, like the role radios: the
+            stylesheet reads `:checked` and nothing here holds a
+            "current view". The remembered choice is applied on mount
+            rather than at first render, because local storage does not
+            exist on the server and a value read there would be a
+            hydration mismatch. */}
+        {VIEWS.map((v) => (
+          <input key={v} className="vw-in" type="radio" name="stc-roles-view" id={`vw-${v}`}
+            defaultChecked={v === 'chart'} />
+        ))}
+        <div className="sn-body vw-body roles-shell">
           <div className="r-6d">
             <div className="r-6e">
               <div className="r-6f"><span className="r-6g">ADMINISTRATION</span><span className="r-6h">Roles and permissions</span></div>
@@ -143,8 +270,44 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
             <div className="r-6k">
               <div className="roles-canvas">
                 <div className="r-6l">
-                  <div className="r-4i"><span className="r-6m">Chart</span><span className="r-4j">Grid</span><span className="r-4j">Matrix</span></div>
-                  <div className="r-4i"><span className="r-6n">Compact</span><span className="r-6o">Comfortable</span></div>
+                  <div className="r-4i">
+                    {/* A label is what checks a radio without JavaScript,
+                        which is how every other clickable thing on this
+                        screen works. `vwtab` and `data-vt` are the hooks
+                        `roles-behaviour.css` reads to light the chosen
+                        one and show its panel. */}
+                    {/* ---- Why the write is here and not on the radio ----
+
+                        Remembering the choice from the radio's `onChange`
+                        looks right and silently stops working: React
+                        tracks what it last rendered a radio as, and the
+                        remembered view is applied by setting `.checked`
+                        in an effect, which React never sees. The next
+                        real click then looks like no change to it and no
+                        event fires. The label is clicked either way, so
+                        that is where the write goes.
+
+                        `npm run check:roles-drive` is what caught it: it
+                        chooses a view, reloads, and asserts. */}
+                    {VIEWS.map((v, i) => (
+                      <label key={v} className={`${i === 0 ? 'r-6m' : 'r-4j'} vwtab`} data-vt={v}
+                        htmlFor={`vw-${v}`} onClick={() => writeChoice(VIEW_KEY, v)}>
+                        {v === 'chart' ? 'Chart' : v === 'grid' ? 'Grid' : 'Matrix'}
+                      </label>
+                    ))}
+                  </div>
+                  {/* Density is drawn and not wired, and this is why: the
+                      behaviour document specifies Comfortable as a 218px
+                      node that "adds the division label and loosens the
+                      rows", and the stylesheet ships no 218px node and no
+                      second row spacing. Building it would mean choosing
+                      those numbers. */}
+                  <div className="r-4i">
+                    <button className="r-6n" disabled
+                      title="The pack documents two densities but ships the styles for one, so there is nothing to switch to yet">Compact</button>
+                    <button className="r-6o" disabled
+                      title="The pack documents two densities but ships the styles for one, so there is nothing to switch to yet">Comfortable</button>
+                  </div>
                   <span className="r-6p"></span>
                   <div className="r-6q">
                     {model.legend.map((l) => (
@@ -162,18 +325,21 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
                     <span>Fit</span>
                   </button>
                 </div>
-                <div data-canvas-body="1" className="roles-canvas-body" ref={body}>
-                  <div className="r-6t" ref={tree} style={zoom === 100 ? undefined : { zoom: zoom / 100 }}>
+                <div data-canvas-body="1" className="roles-canvas-body" ref={body}
+                  onClickCapture={onCanvasClick}>
+                  <div className="r-6t vw vw-chart" ref={tree} style={zoom === 100 ? undefined : { zoom: zoom / 100 }}>
                     <ChartTree chart={model.chart} />
                   </div>
                   {model.chart.direct.length > 0 && (
-                    <div className="r-6x">
+                    <div className="r-6x vw vw-chart">
                       <div className="r-6y"><span className="r-6z">DIRECTLY ASSIGNED</span><span className="r-70"></span><span className="r-32">Outside the reporting line</span></div>
                       <div className="r-71">
                         {model.chart.direct.map((n) => <Node key={n.id} node={n} />)}
                       </div>
                     </div>
                   )}
+                  <GridView model={model} onOpen={openRole} />
+                  <MatrixView matrix={model.matrix} />
                 </div>
                 <div className="r-73">
                   <span className="r-4x">{model.chart.footer}</span>
@@ -220,7 +386,10 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
               <div className="roles-inspector">
                 {model.panels.map((p) => (
                   <Inspector key={p.id} panel={p} tab={tab} onTab={setTab}
-                    mayEdit={mayEdit} onEdit={onEdit} onMenu={setMenu} />
+                    mayEdit={mayEdit} onEdit={onEdit} onMenu={setMenu}
+                    against={pair && pair.a === p.id ? pair.b : null} raw={model.raw}
+                    picking={picking} onPick={() => setPicking(true)}
+                    onStopCompare={() => { setPair(null); setPicking(false); }} />
                 ))}
               </div>
             </div>
@@ -237,33 +406,6 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign 
             })} />
         ) : null;
       })()}
-    </>
-  );
-}
-
-/* -------------------------------------------------------------
-   The in-shell navigation.
-
-   The kit draws the application's sidebar inside the screen, at the
-   218px the handoff fixes. Its items and its person are bound to the
-   real ones: the sections and rows this person can reach, and who
-   they are. Every section after the first is preceded by the kit's
-   divider and section label, as its ADMINISTRATION block is.
-   ------------------------------------------------------------- */
-function NavSection({ section, first }: { section: NavSectionView; first: boolean }) {
-  return (
-    <>
-      {!first && <span className="r-66"></span>}
-      {!first && <span className="r-67">{section.label.toUpperCase()}</span>}
-      {section.items.map((i) => {
-        const Icon = ICONS[i.icon];
-        return (
-          <span key={i.label} className={i.active ? 'r-68' : 'r-2g'}>
-            <Icon size={15} className="r-1" />
-            <span className="r-k">{i.label}</span>
-          </span>
-        );
-      })}
     </>
   );
 }
@@ -367,11 +509,23 @@ function Meter({ fill, pct }: { fill: { cls: string; width: string | null }; pct
   );
 }
 
-function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu }: {
+function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu,
+  against, raw, picking, onPick, onStopCompare }: {
   panel: Panel; tab: Tab; onTab: (t: Tab) => void;
   mayEdit: boolean; onEdit?: (roleId: string) => void;
   onMenu: (at: { id: string; right: number; top: number } | null) => void;
+  /** The other role, while a comparison is up. */
+  against: string | null;
+  raw: Input;
+  picking: boolean;
+  onPick: () => void;
+  onStopCompare: () => void;
 }) {
+  /* The comparison is computed for the panel that is actually on show,
+     which is the one the stylesheet has chosen, so the left hand side
+     of it is always the selected role without this file tracking which
+     that is. */
+  const comparison = against ? compare(raw, p.id, against) : null;
   return (
     <div className={`sp sp-${p.id} r-1a`}>
       <div className="r-1b">
@@ -398,18 +552,30 @@ function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu }: {
           </div>
           <span className="r-s">{p.peopleText}</span>
           <span className="r-k"></span>
-          <button className="r-x"><Svg size={14}><CopyIcon /></Svg><span>Compare</span></button>
+          <button className="r-x" onClick={comparison ? onStopCompare : onPick}
+            title={comparison ? 'Stop comparing'
+              : picking ? 'Now click the role to compare against'
+              : 'Compare against another role. Shift-click a second one in the chart, or press this and click it.'}>
+            <Svg size={14}><CopyIcon /></Svg>
+            <span>{comparison ? 'Stop' : picking ? 'Pick one' : 'Compare'}</span>
+          </button>
         </div>
       </div>
-      <div className="r-1m">
-        {TABS.map(([key, label]) => (
-          <span key={key} className={tab === key ? 'r-1n' : 'r-n'} onClick={() => onTab(key)}>{label}</span>
-        ))}
-      </div>
+      {!comparison && (
+        <div className="r-1m">
+          {TABS.map(([key, label]) => (
+            <span key={key} className={tab === key ? 'r-1n' : 'r-n'} onClick={() => onTab(key)}>{label}</span>
+          ))}
+        </div>
+      )}
       <div className="r-1o">
-        {tab === 'permissions' && <Permissions panel={p} />}
-        {tab === 'people' && <People panel={p} />}
-        {tab === 'history' && <HistoryBody panel={p} />}
+        {comparison
+          ? <Compare what={comparison} onClose={onStopCompare} />
+          : <>
+              {tab === 'permissions' && <Permissions panel={p} />}
+              {tab === 'people' && <People panel={p} />}
+              {tab === 'history' && <HistoryBody panel={p} />}
+            </>}
       </div>
       <div className="r-1v">
         {/* Without `admin.roles` the editor would open and then refuse
@@ -419,7 +585,13 @@ function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu }: {
           title={mayEdit ? undefined : 'Changing what a role can do needs the admin.roles permission'}>
           <Svg size={14}><PencilIcon /></Svg><span>Edit permissions</span>
         </button>
-        <button className="r-1x"><Svg size={14}><OpenIcon /></Svg></button>
+        {/* A link to this exact role, which is how these conversations
+            actually travel: somebody pastes it into a message. The tab
+            reads `?role=` on load and opens on it. */}
+        <button className="r-1x" title={`Open ${p.name} in a new tab`}
+          onClick={() => window.open(`/dashboard/admin?tab=roles&role=${p.id}`, '_blank', 'noopener')}>
+          <Svg size={14}><OpenIcon /></Svg>
+        </button>
       </div>
     </div>
   );
@@ -485,15 +657,19 @@ function Permissions({ panel: p }: { panel: Panel }) {
    pressed.
    ------------------------------------------------------------- */
 export function People({ panel: p }: { panel: Panel }) {
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const people = p.people.filter((h) =>
+    needle === '' || h.name.toLowerCase().includes(needle) || h.title.toLowerCase().includes(needle));
   return (<>
     <div className="r-17">
       <div className="r-4y">
         <span className="r-35"><Svg size={14}><SearchIcon /></Svg></span>
-        <input placeholder="Find a holder" className="r-36" />
+        <input placeholder="Find a holder" className="r-36" onChange={(e) => setQ(e.target.value)} />
       </div>
     </div>
     <div className="r-u">
-      {p.people.map((h, i) => (
+      {people.map((h, i) => (
         <div key={h.id} className={i === 0 ? 'r-8b' : 'r-3a'}>
           <span className="r-2w">{h.initials}</span>
           <div className="r-2x"><span className="r-2y">{h.name}</span><span className="r-9">{h.title}</span></div>
@@ -537,6 +713,12 @@ export function HistoryBody({ panel: p }: { panel: Panel }) {
         </div>
       ))}
     </div>
-    <button className="r-8i"><span>Full audit trail</span><Svg size={14}><OpenIcon /></Svg></button>
+    {/* There is no audit screen in this application yet. The rows above
+        are the whole of what `role_capability_history` holds for this
+        role, so the button would open nothing wider. */}
+    <button className="r-8i" disabled
+      title="Not built yet: there is no audit screen to open. Every change to this role is already listed above.">
+      <span>Full audit trail</span><Svg size={14}><OpenIcon /></Svg>
+    </button>
   </>);
 }

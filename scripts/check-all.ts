@@ -43,7 +43,7 @@ import { readFileSync } from 'node:fs';
 type Group = 'plain' | 'sql' | 'browser';
 
 /** The three that drive a browser against `next dev`. */
-const BROWSER = new Set(['check:kit-diff', 'check:tracker-switch', 'check:crm-record', 'check:roles-render']);
+const BROWSER = new Set(['check:kit-diff', 'check:tracker-switch', 'check:crm-record', 'check:roles-render', 'check:roles-drive']);
 
 /** Skipped for a reason that is not a defect, with that reason stated. */
 const KNOWN_SKIP: Record<string, string> = {};

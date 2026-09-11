@@ -16,7 +16,6 @@ import { Toasts, useToast } from '@/components/kit/toast';
 import { Avatar } from '@/components/kit/avatar';
 import { AccessQueue } from '@/components/admin/access-queue';
 import { RolesPage } from '@/components/admin/roles/RolesPage';
-import type { Me, NavSectionView } from '@/components/admin/roles/RolesScreen';
 import { ViewAs } from '@/components/admin/view-as';
 import {
   byArea, loadCapabilitiesFor, loadTeam, overrideState, roleInWords, setActive,
@@ -72,7 +71,7 @@ const LEGACY_ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
 type Area = 'people' | 'roles' | 'requests';
 
 export function AdminPanel({
-  selfId, templates, mayManage, mayDecide, mayEditRoles, nav, me,
+  selfId, templates, mayManage, mayDecide, mayEditRoles,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
@@ -84,28 +83,23 @@ export function AdminPanel({
       what a role can do needs only `admin.users`; changing it is a
       different job, and a different permission. */
   mayEditRoles: boolean;
-  /** What the Roles screen's own navigation region draws: this person's sections, and who they are. */
-  nav: NavSectionView[];
-  me: Me;
 }) {
   return (
     <Toasts>
       <AdminBody selfId={selfId} templates={templates} mayManage={mayManage}
-                 mayDecide={mayDecide} mayEditRoles={mayEditRoles} nav={nav} me={me} />
+                 mayDecide={mayDecide} mayEditRoles={mayEditRoles} />
     </Toasts>
   );
 }
 
 function AdminBody({
-  selfId, templates, mayManage, mayDecide, mayEditRoles, nav, me,
+  selfId, templates, mayManage, mayDecide, mayEditRoles,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
   mayManage: boolean;
   mayDecide: boolean;
   mayEditRoles: boolean;
-  nav: NavSectionView[];
-  me: Me;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -220,7 +214,8 @@ function AdminBody({
       {area === 'requests' && <AccessQueue onCount={setWaiting} />}
 
       {area === 'roles' && (
-        <RolesPage nav={nav} me={me} mayEdit={mayEditRoles} onAssign={() => setArea('people')} />
+        <RolesPage mayEdit={mayEditRoles} onAssign={() => setArea('people')}
+          openOn={params.get('role')} />
       )}
 
       {area === 'people' && (<>

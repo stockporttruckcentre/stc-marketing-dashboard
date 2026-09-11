@@ -282,35 +282,45 @@ export const DIVISIONS = {
     "tint": "#09163A",
     "node": "r-3h",
     "head": "r-3o",
-    "swatch": "r-4l"
+    "swatch": "r-4l",
+    "gridBar": "r-2n",
+    "matrixBar": "r-2p"
   },
   "sales": {
     "label": "Trailer Sales",
     "tint": "#B31F14",
     "node": "r-4t",
     "head": "r-5b",
-    "swatch": "r-4m"
+    "swatch": "r-4m",
+    "gridBar": "r-8s",
+    "matrixBar": "r-5x"
   },
   "hire": {
     "label": "Rentals",
     "tint": "#C77A06",
     "node": "r-4u",
     "head": "r-5f",
-    "swatch": "r-4n"
+    "swatch": "r-4n",
+    "gridBar": "r-2n",
+    "matrixBar": "r-91"
   },
   "grp": {
     "label": "Group",
     "tint": "#2B3F78",
     "node": "r-2c",
     "head": "r-2e",
-    "swatch": "r-4k"
+    "swatch": "r-4k",
+    "gridBar": "r-2z",
+    "matrixBar": "r-30"
   },
   "sys": {
     "label": "System",
     "tint": "#5B5B56",
     "node": "r-34",
     "head": "r-5k",
-    "swatch": "r-4o"
+    "swatch": "r-4o",
+    "gridBar": "r-2n",
+    "matrixBar": "r-2p"
   }
 } as const;
 
@@ -326,3 +336,6 @@ export const BEHAVIOUR_RULES = [
 
 /** The capability total the kit's placeholder data was drawn against. */
 export const KIT_CAPABILITY_TOTAL = 148;
+
+/** The kit's matrix column template: its label width, its count, its unit. */
+export const MATRIX_TEMPLATE = {"label":"186px","count":6,"unit":"1fr"} as const;

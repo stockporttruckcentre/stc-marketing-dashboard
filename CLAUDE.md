@@ -230,6 +230,57 @@ npm run kit:extract       # regenerate after a new kit arrives, and commit the r
 values each governed file still has. The number may fall and may never rise, so
 the migration can proceed while a newly typed value is refused on the spot.
 
+## Nothing half built ever gets handed over
+
+From the business, after a Roles tab arrived with three of its buttons
+drawn and doing nothing:
+
+> You do not ship me a product that is half-built. [...] I can't test or demo
+> something where the buttons don't work because I have no clue what's behind
+> them, and typically you've not even built what's behind them yet. Every
+> single feature, wire, toggle, box, field, setting, click, drag, type is to
+> be fully wired and audited end to end ensuring the DB and permissions and
+> roles and admin systems pick it up, that any settings set remain saved
+> forever if relating to user preference [...] You aren't working for my
+> review, you're my builder and auditor. Things only go live when you say so,
+> not me.
+
+So a screen is finished when every one of these is true, and it is not
+handed over before:
+
+1. **Every control does something, or says why it cannot.** A button with
+   no handler is a defect. A control that is not ready is `disabled` with a
+   `title` naming exactly what is missing. There is no third state.
+2. **Every control is wired end to end.** The click reaches the database,
+   the write is refused by the same capability the button is gated on, and
+   the screen shows what actually happened rather than what was attempted.
+3. **Every preference survives.** Anything somebody sets about how a screen
+   is drawn is remembered through `lib/ui/remember.ts`, and a reload proves
+   it. A preference that does not last the morning is not a preference.
+4. **It has been driven, not just rendered.** Every control is clicked by a
+   browser check that asserts what happened. "It compiles" and "it renders"
+   are not evidence.
+5. **The whole task, not the first slice.** A ported design is done when
+   every component in the pack is built, not when the easy half is.
+
+### The check that enforces the first of those
+
+A rule of this shape cannot be kept by intention, because the person
+writing the dead button is the person judging whether it is dead. So it is
+mechanical:
+
+```bash
+npm run check:dead-controls   # no governed component has a control that does nothing
+```
+
+It parses every governed component and fails on any `<button>` or clickable
+element that carries neither a handler, nor `disabled` with a `title`, nor a
+`htmlFor` binding it to an input. The governed list is at the top of
+`scripts/dead-controls-check.ts` and grows with each screen that is brought
+up to this standard.
+
+---
+
 ## The command bar is never finished
 
 The global command bar is a first class part of this product, not a search

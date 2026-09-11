@@ -106,20 +106,6 @@ const HOLDERS = [
   PERSON('u10', 'office_admin', 'Wayne Kenny', 'Administrator'),
 ];
 
-const NAV = [
-  { label: 'Workspace', items: [
-    { label: 'Dashboard', icon: 'dashboard' as const, active: false },
-    { label: 'Analytics', icon: 'analytics' as const, active: false },
-    { label: 'Reports', icon: 'reports' as const, active: false },
-    { label: 'Work', icon: 'work' as const, active: false },
-  ] },
-  { label: 'Admin', items: [
-    { label: 'Team', icon: 'team' as const, active: false },
-    { label: 'Settings', icon: 'settings' as const, active: false },
-    { label: 'Admin', icon: 'admin' as const, active: true },
-  ] },
-];
-
 const HISTORY = [
   { id: 1, at: '2026-08-14T09:12:00Z', actor_label: 'G Sutton', kind: 'granted',
     role_template_id: 'role-sr_sales', capability_label: 'Export the CRM',
@@ -140,9 +126,7 @@ export default function RolesPreview() {
   const held = new Map(GRANTS.filter((g) => g.role_template_id === role?.id).map((g) => [g.capability, g.scope]));
   return (
     <div className="roles-port">
-      <RolesScreen model={model} nav={NAV} mayEdit
-        me={{ initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' }}
-        onEdit={setEditing} onAssign={() => {}} />
+      <RolesScreen model={model} mayEdit onEdit={setEditing} onAssign={() => {}} />
       {role && (
         <EditPermissions role={role} caps={CAPS} held={held} saving={false} failed={null}
           onClose={() => setEditing(null)} onSave={() => setEditing(null)} />

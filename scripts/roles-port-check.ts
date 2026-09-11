@@ -36,7 +36,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { chromium } from 'playwright';
 import { RolesScreen, People, HistoryBody } from '../components/admin/roles/RolesScreen';
 import { EditPermissions } from '../components/admin/roles/EditPermissions';
-import { buildModel, behaviourFor, DEPARTMENTS, type Input } from '../components/admin/roles/model';
+import { GridView, MatrixView } from '../components/admin/roles/views';
+import { Compare } from '../components/admin/roles/Compare';
+import { buildModel, behaviourFor, compare, DEPARTMENTS, type Input } from '../components/admin/roles/model';
 import { KIT_IDS } from '../components/admin/roles/kit.generated';
 
 const KIT = 'docs/source/roles_hub';
@@ -128,13 +130,9 @@ const input: Input = {
   holders: data.roles.flatMap((r) => Array.from({ length: r.holders }, (_, i) =>
     ({ id: `${r.id}-${i}`, role_template_id: `role-${r.id}`, name: `Person ${r.id} ${i}`, job_title: null }))),
 };
-const nav = [
-  { label: 'Workspace', items: [{ label: 'Dashboard', icon: 'dashboard' as const, active: false }] },
-  { label: 'Admin', items: [{ label: 'Admin', icon: 'admin' as const, active: true }] },
-];
 const model = buildModel(input);
 const mine = renderToStaticMarkup(createElement(RolesScreen, {
-  model, nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
+  model,
 })).replace(/^<style>[\s\S]*?<\/style>/, '');
 const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8')
   .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
@@ -170,15 +168,28 @@ async function main() {
     css.replace(/^\\.(r-[0-9a-z]+)\\{position:absolute;left:0;top:0;bottom:0;width:3px;background:#/gm, function (_, c) { DATA.tint.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:4px;align-self:stretch;background:#/gm, function (_, c) { DATA.head.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:8px;height:8px;border-radius:2px;background:#/gm, function (_, c) { DATA.swatch.push(c); return ''; });
+    var SWITCHER = ['vwtab', 'vw', 'vw-chart', 'vw-grid', 'vw-matrix', 'vw-body'];
     var norm = function (tok) {
+      if (SWITCHER.indexOf(tok) >= 0) return null;
       if (/^sp-/.test(tok)) return 'sp-ID';
       if (/^lucide/.test(tok)) return null;
       for (var k in DATA) if (DATA[k].indexOf(tok) >= 0) return k.toUpperCase();
       return tok;
     };
+    /* ---- span, button and label are compared as one ----
+
+       The kit draws almost every control as a span, because a static
+       page has nothing to bind. A control that has to DO something is a
+       button, and one that has to check a radio is a label, so the port
+       renders those tags where the kit has a span. Nothing else about
+       them may differ: same class, same nesting, same neighbours, same
+       attributes. That every one of them is genuinely wired is what
+       check:dead-controls asserts, and which radio each label
+       points at is asserted by the switcher test. */
+    var TAG = function (t) { return (t === 'button' || t === 'label') ? 'span' : t; };
     var sig = function (el) {
       var cls = (el.getAttribute('class') || '').split(/\\s+/).filter(Boolean).map(norm).filter(Boolean).sort();
-      return el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '');
+      return TAG(el.tagName.toLowerCase()) + (cls.length ? '.' + cls.join('.') : '');
     };
     /* Attributes the port BINDS rather than draws: an id, a label's
        target, a tooltip, a value, and the ones that carry state. The
@@ -188,7 +199,7 @@ async function main() {
        The kit draws no disabled state because the kit does not know
        who is looking. Everything NOT on this list still has to match
        the kit exactly. */
-    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'style', 'class', 'xmlns'];
+    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'data-vt', 'style', 'class', 'xmlns'];
     var attrs = function (el) {
       var out = [];
       for (var i = 0; i < el.attributes.length; i++) { var a = el.attributes[i]; if (BOUND.indexOf(a.name) < 0) out.push(a.name + '=' + a.value); }
@@ -198,10 +209,33 @@ async function main() {
 
     /* (1) The static shell: everything outside the repeating regions,
        text included, must be identical. */
-    var EMPTY = ['.roles-nav', '.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-7j', '.r-7l', '.roles-inspector'];
+    var EMPTY = [ '.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-7j', '.r-7l', '.roles-inspector'];
     var BLANK = ['.r-4x', '.r-7p', '.r-7q'];
     var shell = function (root) {
       var c = root.cloneNode(true);
+      /* The pack's 218px navigation column is chrome around the design,
+         not part of it: this screen sits inside the application's own
+         sidebar. It is removed from BOTH sides here so the rest of the
+         shell is still compared character for character, and its
+         absence from the port is asserted separately below. */
+      Array.prototype.forEach.call(c.querySelectorAll('.roles-nav'), function (n) { n.remove(); });
+      /* The view switcher's own wiring, normalised out of the text
+         comparison and asserted properly below. roles-behaviour.css
+         ships the rules and no file in the pack uses them, so the port
+         supplies the three hooks they need: the radios, the vw-body
+         host, the vw panels, and a data-vt label in place of the
+         static span. Everything else about the toolbar still has to
+         match the kit character for character. */
+      Array.prototype.forEach.call(c.querySelectorAll('.vw-in'), function (n) { n.remove(); });
+      Array.prototype.forEach.call(c.querySelectorAll('.vw-grid,.vw-matrix'), function (n) { n.remove(); });
+      Array.prototype.forEach.call(c.querySelectorAll('.vw-grid,.vw-matrix'), function (n) { n.remove(); });
+      Array.prototype.forEach.call(c.querySelectorAll('[class]'), function (n) {
+        var keep = (n.getAttribute('class') || '').split(/\\s+/)
+          .filter(function (t) { return t !== 'vwtab' && t !== 'vw' && t !== 'vw-chart' && t !== 'vw-body'; });
+        n.setAttribute('class', keep.join(' '));
+        n.removeAttribute('data-vt');
+        n.removeAttribute('for');
+      });
       Array.prototype.forEach.call(c.querySelectorAll(':scope > input'), function (n) { n.remove(); });
       EMPTY.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.innerHTML = ''; }); });
       BLANK.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.textContent = ''; }); });
@@ -212,7 +246,11 @@ async function main() {
          still has to match the kit exactly. */
       var STATE = ['disabled', 'title'];
       var ser = function (el) {
-        var s = '<' + el.tagName.toLowerCase();
+        /* A tab the port turns into a label so it can check a radio.
+           Compared as the span the kit draws; that it IS a label
+           pointing at the right radio is asserted below. */
+        var tag = TAG(el.tagName.toLowerCase());
+        var s = '<' + tag;
         var as = [];
         for (var i = 0; i < el.attributes.length; i++) {
           if (STATE.indexOf(el.attributes[i].name) >= 0) continue;
@@ -222,7 +260,7 @@ async function main() {
         Array.prototype.forEach.call(el.childNodes, function (n) {
           if (n.nodeType === 1) s += ser(n); else if (n.nodeType === 3 && n.textContent.trim()) s += n.textContent.trim();
         });
-        return s + '</' + el.tagName.toLowerCase() + '>';
+        return s + '</' + tag + '>';
       };
       return ser(c);
     };
@@ -234,12 +272,30 @@ async function main() {
        The in-shell navigation is skipped below its own element: its
        rows are this person's real sections in their real order, and
        its icons are the application's, so its insides are data. */
-    var scan = function (root) { return Array.prototype.filter.call(root.querySelectorAll('*'), function (el) { return !el.closest('.roles-nav') || el.classList.contains('roles-nav'); }); };
+    /* The Grid and Matrix are their own files in the pack and are
+       compared against those below, so the screen comparison stops at
+       their roots rather than reading their insides as part of it. */
+    var SEPARATE = '.vw-grid,.vw-matrix';
+    var scan = function (root) { return Array.prototype.filter.call(root.querySelectorAll('*'), function (el) {
+      if (el.closest('.roles-nav') && !el.classList.contains('roles-nav')) return false;
+      /* The view radios are the switcher's wiring, asserted whole by
+         the switcher test rather than compared against a file that
+         does not use them. */
+      if (el.classList.contains('vw-in')) return false;
+      if (el.closest(SEPARATE)) return false;
+      return true;
+    }); };
     var edges = function (root) { var s = {}; scan(root).forEach(function (el) {
       var p = el.parentElement; if (p) s[sig(p) + ' > ' + sig(el)] = 1; }); return s; };
     var pairs = function (root) { var s = {}; scan(root).forEach(function (el) {
       if (el.classList.contains('roles-nav')) return;
-      var ks = kids(el); for (var i = 1; i < ks.length; i++) s[sig(el) + ': ' + sig(ks[i - 1]) + ' + ' + sig(ks[i])] = 1; }); return s; };
+      /* Neighbours of a separately-checked view are not a fact about
+         the screen's markup: the kit has no file in which the chart and
+         the grid are siblings, because it ships them apart. What the
+         screen must get right is that each sits in the canvas body,
+         which the edge test above asserts. */
+      var ks = kids(el).filter(function (k) { return !k.matches(SEPARATE); });
+      for (var i = 1; i < ks.length; i++) s[sig(el) + ': ' + sig(ks[i - 1]) + ' + ' + sig(ks[i])] = 1; }); return s; };
     var elements = function (root) { var s = {}; scan(root).forEach(function (el) {
       s[sig(el) + ' [' + attrs(el) + ']'] = 1; }); return s; };
     var missing = function (mineSet, kitSet) { return Object.keys(mineSet).filter(function (k) { return !kitSet[k]; }); };
@@ -259,6 +315,7 @@ async function main() {
     /* (4) Inline styles: only a bar width the kit has no class for. */
     var styled = [];
     Array.prototype.forEach.call(M.querySelectorAll('[style]'), function (el) {
+      if (el.closest(SEPARATE)) return;
       var isFill = (el.getAttribute('class') || '').split(/\\s+/).some(function (t) { return DATA.fill.indexOf(t) >= 0; });
       if (!isFill || !/^width:\\s*\\d+%;?$/.test(el.getAttribute('style'))) styled.push(sig(el) + ' style="' + el.getAttribute('style') + '"'); });
 
@@ -315,7 +372,66 @@ async function main() {
       what: 'the History tab', file: 'roles-tab-history.html',
       markup: renderToStaticMarkup(createElement(HistoryBody, { panel: model.panels[0]! })),
     },
+    {
+      what: 'the Grid view', file: 'roles-view-grid.html',
+      markup: renderToStaticMarkup(createElement(GridView, { model, onOpen: () => {} })),
+    },
+    {
+      what: 'the Matrix view', file: 'roles-view-matrix.html',
+      markup: renderToStaticMarkup(createElement(MatrixView, { matrix: model.matrix })),
+    },
+    {
+      what: 'the Compare view', file: 'roles-compare.html',
+      markup: renderToStaticMarkup(createElement(Compare, {
+        what: compare(input, input.roles[0]!.slug, input.roles[1]!.slug)!, onClose: () => {},
+      })),
+    },
   ];
+
+  {
+    const navs = await page.evaluate(`(function (h) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      return d.querySelectorAll('.roles-nav').length;
+    })(${JSON.stringify(mine)})`) as number;
+    ok('the pack\'s own navigation column is not drawn, because the application has one', navs === 0,
+      `${navs} found`);
+  }
+
+  /* ---- The view switcher, against the rules that drive it ----
+
+     `roles-behaviour.css` ships the switcher and no file in the pack
+     uses it, so the markup it needs was derived from the rules
+     themselves. This reads those rules back and asserts the port
+     satisfies every one: for each view there is a radio with that id,
+     a `.vw-body` after it, a `.vw` panel carrying the view's class
+     inside it, and a `data-vt` control that a label points at. */
+  {
+    const rules = readFileSync(`${KIT}/roles-behaviour.css`, 'utf8');
+    const views = [...new Set([...rules.matchAll(/^#vw-([a-z]+):checked/gm)].map((m) => m[1]!))];
+    const wiring = await page.evaluate(`(function (h, views) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      var bad = [];
+      var host = d.querySelector('.vw-body');
+      if (!host) bad.push('no .vw-body host for the rules to reach through');
+      views.forEach(function (v) {
+        var radio = d.querySelector('input.vw-in#vw-' + v);
+        if (!radio) bad.push('no input.vw-in#vw-' + v);
+        else if (host && !(radio.compareDocumentPosition(host) & Node.DOCUMENT_POSITION_FOLLOWING))
+          bad.push('#vw-' + v + ' is not before .vw-body, so the sibling rule cannot reach it');
+        var panel = host && host.querySelector('.vw.vw-' + v);
+        if (!panel) bad.push('no .vw.vw-' + v + ' panel inside .vw-body');
+        else if (!panel.closest('.roles-canvas-body'))
+          bad.push('.vw-' + v + ' is not inside the canvas body, so it would not scroll or sit where the kit puts a view');
+        var tab = host && host.querySelector('[data-vt=\"' + v + '\"]');
+        if (!tab) bad.push('no [data-vt=' + v + '] control');
+        else if (tab.tagName !== 'LABEL' || tab.getAttribute('for') !== 'vw-' + v)
+          bad.push('[data-vt=' + v + '] does not point at #vw-' + v);
+      });
+      return bad;
+    })(${JSON.stringify(mine)}, ${JSON.stringify(views)})`) as string[];
+    ok(`the view switcher satisfies every rule roles-behaviour.css writes (${views.join(', ')})`,
+      wiring.length === 0, wiring.join('\n        '));
+  }
 
   console.log('\n  Each component is its own file\'s\n  ------------------------------');
   for (const part of PARTS) {

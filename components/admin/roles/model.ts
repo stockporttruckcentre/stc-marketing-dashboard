@@ -1,4 +1,4 @@
-import { FILLS, DIVISIONS, BEHAVIOUR_RULES } from './kit.generated';
+import { FILLS, DIVISIONS, BEHAVIOUR_RULES, MATRIX_TEMPLATE } from './kit.generated';
 
 /* =============================================================
    The Roles screen's data, in the shape the kit's markup takes.
@@ -174,16 +174,48 @@ export type PersonRow = { id: string; initials: string; name: string; title: str
    those are exactly the three kinds migration 108's view derives. */
 export type HistoryRow = { id: number; dotCls: string; text: string; strong: string; tail: string; who: string };
 
+/* ---- The Grid view ----
+
+   One row per role. The division marker is a 3 by 15 bar, and the kit
+   defines that class only for the divisions its own twelve example rows
+   happen to show, so two of five are missing. The carrier class holds
+   the geometry and the colour is the division's own, the same way a
+   coverage bar carries a percentage the kit had no class for. */
+export type GridRow = {
+  id: string; name: string; barCls: string; tint: string; division: string;
+  reportsTo: string; holders: number; pct: number; fill: Fill; flagged: boolean;
+};
+
+/* ---- The Matrix view ----
+
+   One row per role, one cell per capability area, and a verdict for the
+   pair. A role that holds nothing in an area is denied there, one that
+   holds everything company wide is allowed, and anything between is
+   conditional, because that is exactly what the three chips mean
+   everywhere else on this screen.
+
+   The kit's template fixes six columns. This business has seven areas,
+   so the count comes from the data and the two measurements around it
+   stay the kit's. */
+export type MatrixRow = { id: string; name: string; barCls: string; tint: string; cells: Verdict[] };
+export type Matrix = { areas: string[]; rows: MatrixRow[]; template: string };
+
 export type RailRow = { id: string; name: string; holders: number; people: string[] };
 export type RailGroup = { key: string; label: string; swatchCls: string; rows: RailRow[] };
 
 export type ScreenModel = {
+  /* What the model was built from, so Compare can answer a question
+     about two roles without the screen holding a second copy of the
+     grants. Nothing draws from this directly. */
+  raw: Input;
   ids: string[];
   defaultId: string;
   stats: { roles: number; capabilities: number; flags: number };
   legend: { label: string; swatchCls: string }[];
   chips: { key: string; label: string }[];
   chart: Chart;
+  grid: GridRow[];
+  matrix: Matrix;
   rail: RailGroup[];
   flags: { title: string; text: string };
   panels: Panel[];
@@ -283,6 +315,49 @@ export function buildModel(input: Input): ScreenModel {
     footer: `${roles.length} roles across ${departmentsPresent.length} divisions · ${roles.length} shown, 0 collapsed`,
   };
 
+  /* ---- The Grid ---- */
+  const areas = [...new Set(input.caps.map((c) => c.area))];
+  const pctOf = (r: Template) => {
+    const c = counts(r); const g = c.allowed + c.conditional;
+    return total === 0 ? 0 : Math.round((g / total) * 100);
+  };
+  const grid: GridRow[] = roles.map((r) => {
+    const d = departmentOf(r.department);
+    const up = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
+    const f = flagsOf(r);
+    const p = pctOf(r);
+    return {
+      id: r.slug, name: r.name,
+      barCls: DIVISIONS[d.division].gridBar, tint: DIVISIONS[d.division].tint,
+      division: d.label,
+      reportsTo: up ? up.name : 'Directly assigned',
+      holders: holdersOf.get(r.id)?.length ?? 0,
+      pct: p, fill: fillFor(p),
+      flagged: f.nobody || f.changed,
+    };
+  });
+
+  /* ---- The Matrix ---- */
+  const matrix: Matrix = {
+    areas,
+    template: `${MATRIX_TEMPLATE.label} repeat(${areas.length}, ${MATRIX_TEMPLATE.unit})`,
+    rows: roles.map((r) => {
+      const d = departmentOf(r.department);
+      const mine = grantsOf.get(r.id);
+      return {
+        id: r.slug, name: r.name,
+        barCls: DIVISIONS[d.division].matrixBar, tint: DIVISIONS[d.division].tint,
+        cells: areas.map((area) => {
+          const inArea = input.caps.filter((c) => c.area === area);
+          const held = inArea.filter((c) => mine?.has(c.key));
+          if (held.length === 0) return 'denied' as Verdict;
+          if (held.length === inArea.length && held.every((c) => mine!.get(c.key) === 'company')) return 'allowed' as Verdict;
+          return 'conditional' as Verdict;
+        }),
+      };
+    }),
+  };
+
   /* ---- The rail ---- */
   const rail: RailGroup[] = departmentsPresent.map((d) => ({
     key: d.key, label: d.label.toUpperCase(), swatchCls: DIVISIONS[d.division].swatch,
@@ -298,8 +373,6 @@ export function buildModel(input: Input): ScreenModel {
     .filter((c) => c.danger === 'destructive' || c.danger === 'sensitive')
     .sort((a, b) => (DANGER_RANK[a.danger] ?? 9) - (DANGER_RANK[b.danger] ?? 9) || a.position - b.position)
     .slice(0, 5);
-  const areas = [...new Set(input.caps.map((c) => c.area))];
-
   const panels: Panel[] = roles.map((r) => {
     const dept = departmentOf(r.department);
     const c = counts(r);
@@ -380,6 +453,7 @@ export function buildModel(input: Input): ScreenModel {
 
   const ids = roles.map((r) => r.slug);
   return {
+    raw: input,
     ids,
     defaultId: chartRoot?.slug ?? ids[0] ?? '',
     stats: { roles: roles.length, capabilities: total, flags: flagCount },
@@ -390,6 +464,8 @@ export function buildModel(input: Input): ScreenModel {
     chips: departmentsPresent.filter((d) => d.division !== 'grp' && d.division !== 'sys')
       .map((d) => ({ key: d.key, label: d.label })),
     chart,
+    grid,
+    matrix,
     rail,
     flags: { title: `${flagCount} ${flagCount === 1 ? 'flag' : 'flags'} to review`, text: flagText },
     panels,
@@ -400,4 +476,48 @@ export function buildModel(input: Input): ScreenModel {
 /** The kit's three selection rules, written for these ids. */
 export function behaviourFor(ids: readonly string[]): string {
   return ids.flatMap((id) => BEHAVIOUR_RULES.map((r) => r.split('{id}').join(id))).join('\n');
+}
+
+/* -------------------------------------------------------------
+   Compare, which the behaviour document specifies as:
+
+     Shift-click a second node to compare.
+
+   Two roles, every capability either holds, and a row per capability
+   with both verdicts. Rows where they agree are drawn plainly and rows
+   where they differ are tinted, which is the kit's own distinction: it
+   draws `r-3c` for a matching row and `r-48` for a differing one.
+   ------------------------------------------------------------- */
+export type CompareRow = { key: string; label: string; a: Verdict; b: Verdict; differs: boolean };
+export type Comparison = {
+  a: { id: string; name: string; initials: string };
+  b: { id: string; name: string; initials: string };
+  rows: CompareRow[];
+  differences: number;
+};
+
+export function compare(input: Input, aSlug: string, bSlug: string): Comparison | null {
+  const a = input.roles.find((r) => r.slug === aSlug);
+  const b = input.roles.find((r) => r.slug === bSlug);
+  if (!a || !b || a.id === b.id) return null;
+  const of = (role: Template) => {
+    const m = new Map<string, string>();
+    for (const g of input.grants) if (g.role_template_id === role.id) m.set(g.capability, g.scope);
+    return m;
+  };
+  const ga = of(a), gb = of(b);
+  const verdict = (m: Map<string, string>, key: string): Verdict => {
+    const s = m.get(key);
+    return s == null ? 'denied' : s === 'company' ? 'allowed' : 'conditional';
+  };
+  const rows: CompareRow[] = input.caps.map((c) => {
+    const va = verdict(ga, c.key), vb = verdict(gb, c.key);
+    return { key: c.key, label: c.label, a: va, b: vb, differs: va !== vb };
+  });
+  return {
+    a: { id: a.slug, name: a.name, initials: initials(a.name) },
+    b: { id: b.slug, name: b.name, initials: initials(b.name) },
+    rows,
+    differences: rows.filter((r) => r.differs).length,
+  };
 }
