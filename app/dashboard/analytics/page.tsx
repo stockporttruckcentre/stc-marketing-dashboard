@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { createClient } from '@/lib/supabase/server';
 import { AnalyticsHub } from '@/components/analytics/legacy/AnalyticsHub';
 
@@ -49,8 +51,8 @@ export default async function AnalyticsPage() {
      on the same capability, so there was no way to grant one and
      withhold the other, and the office administrators need exactly
      that: "run reports ... No analytics tab". Migration 103. */
-  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'analytics.view' });
-  if (mayRead !== true) redirect('/dashboard');
+  const verdict = await guardRoute(supabase, '/dashboard/analytics');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="Analytics" />;
 
   return <AnalyticsHub />;
 }

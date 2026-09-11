@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { createClient } from '@/lib/supabase/server';
 import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { ReportsHub } from '@/components/ReportsHub';
@@ -37,7 +39,8 @@ export default async function ReportsPage({
   const profile = profileRow as Profile | null;
   const caps = await screenCapabilities(supabase, profile, user.id);
 
-  if (!caps.has('reports.view')) redirect('/dashboard');
+  const verdict = await guardRoute(supabase, '/dashboard/reports');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="Reports" role={profile?.role ?? null} />;
 
   const { data: people } = caps.has('crm.viewOthers')
     ? await supabase.from('profiles').select('id, full_name, email').order('full_name')

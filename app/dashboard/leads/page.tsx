@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { createClient } from '@/lib/supabase/server';
 import { SalesTracker } from '@/components/SalesTracker';
 import { screenCapabilities } from '@/lib/platform/permissions/resolve';
@@ -54,7 +56,8 @@ export default async function SalesTrackerPage({
   /* `tracker.view` rather than `crm.view`. Marketing "can see leads in
      crm records" and has no business on the pipeline board, and until
      migration 103 those were the same permission. */
-  if (!caps.has('tracker.view')) redirect('/dashboard');
+  const verdict = await guardRoute(supabase, '/dashboard/leads');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="the sales tracker" role={profile?.role ?? null} />;
   const mayViewOthers = caps.has('crm.viewOthers');
 
   /* Who is being looked at. Nobody by default, and nobody at all

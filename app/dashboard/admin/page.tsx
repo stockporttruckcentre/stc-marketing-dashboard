@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { AdminPanel } from '@/components/AdminPanel';
 
 export const dynamic = 'force-dynamic';
@@ -14,13 +16,19 @@ export const dynamic = 'force-dynamic';
    legacy column was bounced off their own screen, and nothing on the
    page could tell them why.
 
-   So the question is asked once, of `command_may('admin.users')`, which
-   resolves an override, then a template, then the legacy role, inside
-   the database, in the same place every write on this screen is
-   checked.
+   Then it asked `command_may` twice itself and sent anybody without
+   either to the directory. That was better, and still wrong in the way
+   that cost an evening: the rule was written down HERE as well as in
+   `lib/nav.ts`, so the menu row and the door were two copies of one
+   sentence and nothing made them agree.
 
-   The redirect is a courtesy rather than the defence. Somebody who got
-   here anyway would find `team_directory()` withholding the permission
+   `guardRoute` reads the requirement out of `lib/nav.ts` by route. The
+   row says `anyOf: ['admin.users', 'access.decide']` and this door asks
+   exactly that, because it is the same list. Nothing is repeated, so
+   nothing can drift.
+
+   The door is a courtesy rather than the defence. Somebody who got here
+   anyway would find `team_directory()` withholding the permission
    counts and every write function refusing them by name.
    ============================================================= */
 export default async function AdminPage() {
@@ -32,12 +40,17 @@ export default async function AdminPage() {
 
      `admin.users` opens People. `access.decide` opens Requests. Sr
      Sales holds the second and not the first, on purpose: running a
-     department is not the same as being able to edit accounts.
+     department is not the same as being able to edit accounts. The nav
+     row carries both, and one of them is enough to be let in. */
+  const verdict = await guardRoute(supabase, '/dashboard/admin');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="the Admin hub" />;
 
-     Both are asked here so the panel can draw only the tabs the person
-     actually holds, and somebody with neither is still sent away. The
-     redirect stays a courtesy rather than the defence: every write on
-     this screen is refused by name inside the database. */
+  /* ---- Held, not gated ----
+
+     These three are read so the panel can draw only the tabs and
+     controls the person actually holds. They decide what is on the
+     screen, never whether the screen opens: that was settled above, in
+     one place, by the declaration the menu reads. */
   const [{ data: mayManage }, { data: mayDecide }, { data: mayEditRoles }] = await Promise.all([
     supabase.rpc('command_may', { p_capability: 'admin.users' }),
     supabase.rpc('command_may', { p_capability: 'access.decide' }),
@@ -46,10 +59,6 @@ export default async function AdminPage() {
        Sales is one person, deciding what Sr Sales means is all of them. */
     supabase.rpc('command_may', { p_capability: 'admin.roles' }),
   ]);
-
-  /* The directory is still open to them, so there is somewhere honest
-     to send anybody who arrives here without either permission. */
-  if (mayManage !== true && mayDecide !== true) redirect('/dashboard/team');
 
   /* The roles somebody can be put on, read here rather than in the
      panel so the list is the same on first paint as it is after. A

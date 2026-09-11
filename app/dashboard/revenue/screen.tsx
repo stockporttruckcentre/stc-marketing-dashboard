@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { createClient } from '@/lib/supabase/server';
 import { RevenuePanel } from '@/components/RevenuePanel';
 import type { Division } from '@/lib/protean/rpc';
@@ -32,8 +34,11 @@ export async function revenueScreen(division: Division, divisionName: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: mayRead } = await supabase.rpc('command_may', { p_capability: 'revenue.view' });
-  if (mayRead !== true) redirect('/dashboard');
+  /* Three outcomes, not two. `data !== true` used to cover both a
+     refusal and a failed lookup, and sent people to the dashboard for
+     either with nothing said. See `lib/platform/permissions/page-guard.ts`. */
+  const verdict = await guardRoute(supabase, '/dashboard/revenue');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="Revenue" />;
 
   const { data: mayImport } = await supabase.rpc('command_may', { p_capability: 'revenue.import' });
 

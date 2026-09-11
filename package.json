@@ -74,6 +74,7 @@
     "check:analytics": "tsx scripts/analytics-check.ts",
     "check:avatars": "tsx scripts/avatar-check.ts",
     "check:kit": "tsx scripts/kit-fidelity-check.ts",
+    "check:permission-wiring": "tsx scripts/permission-wiring-check.ts",
     "check:dead-controls": "tsx scripts/dead-controls-check.ts",
     "check:roles-drive": "tsx scripts/roles-drive-check.ts",
     "check:roles-port": "tsx --tsconfig scripts/tsconfig.react.json scripts/roles-port-check.ts",
