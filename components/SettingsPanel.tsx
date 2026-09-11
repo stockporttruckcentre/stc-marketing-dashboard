@@ -491,6 +491,20 @@ function AccessTab({ profile }: { profile: Profile & Record<string, unknown> }) 
             to you personally is marked, and only an administrator can change either.
           </span>
         </div>
+        {/* This list is what you hold. When the question is "a page will
+            not open and I do not know why", that is a different question
+            and a different screen answers it: who the database thinks
+            you are, which role answered, and what the lookup returned. */}
+        <div style={{ padding: '0 16px 13px', display: 'flex', alignItems: 'center', gap: 11 }}>
+          <ShieldCheck size={16} style={{ color: 'var(--text-subtle)', flex: 'none', visibility: 'hidden' }} />
+          <span style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            If a page refuses to open and this list says you hold it,{' '}
+            <a href="/dashboard/settings/access" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+              the access report
+            </a>{' '}
+            says which part is failing.
+          </span>
+        </div>
       </Card>
 
       {shown.map((area) => (

@@ -1031,6 +1031,10 @@ for (const [said, id] of [
   ['what can i do', 'me.access'],
   ['my permissions', 'me.access'],
   ['why can i not see that', 'me.access'],
+  ['why will a page not open', 'me.access.diagnose'],
+  ['why am i locked out', 'me.access.diagnose'],
+  ['i cannot open anything', 'me.access.diagnose'],
+  ['access denied', 'me.access.diagnose'],
   ['my working hours', 'me.profile'],
   ['my skills', 'me.profile'],
 ] as [string, string][]) {
