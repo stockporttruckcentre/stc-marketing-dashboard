@@ -34,7 +34,10 @@
       at the element rule's own specificity, so it replaces that rule
       and nothing the kit sets on a class.
    ============================================================= */
-.roles-port{overflow-x:auto}
+/* What sits above this screen inside the Admin tab: the page heading
+   and the tab strip. Measured once at runtime rather than guessed, so
+   the shell fills exactly what is left. `overrides.css` uses it. */
+.roles-port{overflow-x:auto;--roles-chrome:260px}
 .r-62{font-family:var(--inter);color:var(--text);letter-spacing:-0.02em;font-size:initial;font-weight:initial;line-height:initial}
 :where(.r-62,.r-62 *){border-style:none;border-color:currentColor}
 :where(.r-62) label{display:inline;margin:0;padding:0;font:inherit;letter-spacing:inherit;color:inherit;text-transform:none;text-align:inherit}

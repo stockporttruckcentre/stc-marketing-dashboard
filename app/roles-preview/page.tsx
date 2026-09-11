@@ -26,6 +26,7 @@ import '@/components/admin/roles/roles-tokens.css';
 import '@/components/admin/roles/roles-components.css';
 import '@/components/admin/roles/roles-behaviour.css';
 import '@/components/admin/roles/port.css';
+import '@/components/admin/roles/overrides.css';
 
 const ROLE = (slug: string, name: string, dept: string, up: string | null, sort: number, manages: string[] = []) => ({
   id: `role-${slug}`, slug, name, description: `${name}: what this role is for.`,

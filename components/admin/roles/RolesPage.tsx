@@ -10,6 +10,7 @@ import './roles-tokens.css';
 import './roles-components.css';
 import './roles-behaviour.css';
 import './port.css';
+import './overrides.css';
 
 /* =============================================================
    The Roles tab: four tables in, the kit's screen out.
@@ -143,6 +144,25 @@ export function RolesPage({ mayEdit, onAssign, openOn }: {
     await load();
   }, [role, supabase, load]);
 
+  /* ---- Why the editor is refused, when it is ----
+
+     From the business, of a role they could not edit: "Why can't i edit
+     permissions on that role?" A disabled button that only says it
+     needs a permission does not answer that, because there are two very
+     different reasons and the fix differs. Either this database has
+     never been given the `admin.roles` capability, in which case NOBODY
+     can edit a role and the answer is a migration, or it has it and
+     this person's role does not, in which case the answer is a grant.
+     The capability catalogue is already loaded, so the screen can tell
+     them apart and say which. */
+  const whyNotEdit = useMemo(() => {
+    if (mayEdit) return undefined;
+    const known = caps.some((c) => c.key === 'admin.roles');
+    return known
+      ? 'Your role does not have the admin.roles permission, which is what changing what a role can do needs. Somebody with it can grant it on this screen.'
+      : 'This database does not have the admin.roles permission yet, so no role can be edited by anybody. It arrives with migration 103.';
+  }, [mayEdit, caps]);
+
   const model = useMemo(
     () => (roles && roles.length > 0 ? buildModel({ roles, caps, grants, holders, history }) : null),
     [roles, caps, grants, holders, history],
@@ -161,7 +181,7 @@ export function RolesPage({ mayEdit, onAssign, openOn }: {
 
   return (
     <div className="roles-port">
-      <RolesScreen model={model} mayEdit={mayEdit} openOn={openOn}
+      <RolesScreen model={model} mayEdit={mayEdit} whyNotEdit={whyNotEdit} openOn={openOn}
         onEdit={(id) => { setRefused(null); setEditing(id); }} onAssign={onAssign} />
       {role && (
         <EditPermissions

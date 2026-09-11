@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { guardRoute } from '@/lib/platform/permissions/route-guard';
+import { NoAccess } from '@/components/platform/NoAccess';
 import { FleetSmart, type ContractRow } from '@/components/FleetSmart';
 import { screenCapabilities } from '@/lib/platform/permissions/resolve';
 import { ACCOUNT_COLUMNS, type PickableAccount } from '@/lib/fleetsmart/account';
@@ -38,6 +40,13 @@ export default async function FleetSmartPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
+
+  /* The address bar is a door too. Until this was added, hiding the row
+     in the sidebar was the only thing between anybody signed in and
+     this screen. The requirement comes from `lib/nav.ts`, the same line
+     the sidebar reads, so the two cannot disagree. */
+  const verdict = await guardRoute(supabase, '/dashboard/fleetsmart');
+  if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="FleetSmart+" />;
 
   const [profileRes, contractRes, accountRes, addressRes, leadRes, cardRes, amendRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),

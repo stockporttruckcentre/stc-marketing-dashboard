@@ -157,23 +157,34 @@ say('\n  Every control on every governed screen is wired or explains itself.\n')
     const src = readFileSync(f, 'utf8');
     /* Each `const NAME = \`(` ... `\`;` block is one such literal. */
     const bad: number[] = [];
-    for (const m of src.matchAll(/const [A-Z_]+ = `\(/g)) {
-      const start = m.index! + m[0].length;
-      const end = src.indexOf('`;', start);
-      if (end < 0) continue;
-      /* A backtick inside a ${...} interpolation is legal: that is a
-         nested template literal and the parser handles it. Only a
-         backtick in the literal's own TEXT ends it early. */
-      let body = src.slice(start, end), out = '', depth = 0;
-      for (let k = 0; k < body.length; k += 1) {
-        if (body.startsWith('${', k)) { depth += 1; k += 1; continue; }
-        if (depth > 0 && body[k] === '}') { depth -= 1; continue; }
-        if (depth === 0) out += body[k];
+    /* Both shapes this repository writes a browser script in: a named
+       constant, and one handed straight to evaluate. The second shape
+       is how the backtick got in the second time. */
+    for (const m of src.matchAll(/(?:const [A-Za-z_]+ = |evaluate\()`/g)) {
+      /* Walk the literal properly rather than hunting for a closing
+         pattern: step over ${...} interpolations, where a backtick is
+         legal, and stop at the first backtick outside one, which is
+         where the literal really ends. Guessing the end by a trailing
+         punctuation mark is what let the second one through. */
+      let k = m.index! + m[0].length, depth = 0, offending = false;
+      for (; k < src.length; k += 1) {
+        if (src.startsWith('\\', k)) { k += 1; continue; }
+        if (src.startsWith('${', k)) { depth += 1; k += 1; continue; }
+        if (depth > 0 && src[k] === '}') { depth -= 1; continue; }
+        if (src[k] === '`') { if (depth === 0) break; continue; }
+        if (depth === 0 && src[k] === '`') { offending = true; break; }
       }
-      body = out;
-      if (body.includes('`')) {
-        bad.push(src.slice(0, start).split('\n').length);
+      /* Everything at depth 0 between the two ends is the literal's own
+         text. A backtick can only be there if it ended the literal
+         early, which is exactly the bug. */
+      const body = src.slice(m.index! + m[0].length, k);
+      let clean = '', d = 0;
+      for (let q = 0; q < body.length; q += 1) {
+        if (body.startsWith('${', q)) { d += 1; q += 1; continue; }
+        if (d > 0 && body[q] === '}') { d -= 1; continue; }
+        if (d === 0) clean += body[q];
       }
+      if (clean.includes('`') || offending) bad.push(src.slice(0, m.index).split('\n').length);
     }
     if (bad.length === 0) { console.log(`  ok    ${f}`); continue; }
     broke += bad.length;

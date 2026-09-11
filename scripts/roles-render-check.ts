@@ -22,7 +22,7 @@
    Needs `npm run dev` on port 3000. Run with `npm run check:roles-render`.
    ============================================================= */
 import { resolve } from 'node:path';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { chromium, type Page } from 'playwright';
 
 const APP = 'http://localhost:3000/roles-preview';
@@ -77,7 +77,7 @@ const READ = `(function (classes, props) {
       return !e.closest('.roles-nav');
     });
     var el = all.filter(visible)[0]; if (!el) { out[c] = null; return; }
-    var cs = getComputedStyle(el), o = {};
+    var cs = getComputedStyle(el), o = { __cls: el.getAttribute('class') || '' };
     props.forEach(function (p) { o[p] = cs.getPropertyValue(p); });
     out[c] = o;
   });
@@ -118,7 +118,7 @@ const READ = `(function (classes, props) {
 })`;
 
 type Read = {
-  styles: Record<string, Record<string, string> | null>;
+  styles: Record<string, (Record<string, string> & { __cls?: string }) | null>;
   bodyBox: { h: number; sh: number; ph: number; ih: number } | null; shell: number[]; nav: number; rail: number;
   inspector: number; canvas: number; overlaps: string[]; texts: number; panelsVisible: number;
 };
@@ -129,29 +129,82 @@ async function read(page: Page): Promise<Read> {
 
 /* ---- Differences the port means ----
 
-   The reference page draws every control live. This port disables the
-   two the handoff puts out of scope, so they are legitimately fainter
-   than the reference. Listed by class and property with what they must
-   be instead, so the difference is asserted rather than skipped: if one
-   of these stops being disabled, or fades by a different amount, this
-   still fails. */
-/* A value the port means to differ on. `is` states it outright; `sameAs`
-   names another class to take it from, so a face is compared against
-   the one the kit itself resolves rather than a string typed here. */
+   The reference page is the kit as it arrived. The screen is the kit
+   plus what the business asked for afterwards, and those changes live
+   in one file, `components/admin/roles/overrides.css`, each carrying
+   the instruction that produced it.
+
+   Rather than keeping a second list here that could drift from that
+   file, this READS it: every class and property it overrides is one the
+   screen is expected to differ from the reference on, and is asserted
+   to actually differ. That catches the failure that matters, an
+   override written and then not in force, and it cannot go stale
+   because there is only one list.
+
+   A handful of properties differ for reasons that are not a stylesheet
+   at all. Those are named below with what they must be instead. */
 type Meant = { is?: string; sameAs?: string; why: string };
 const INTER = { sameAs: 'roles-shell', why: 'the business asked for Inter on these two, not the mono face' };
+const OUT_OF_SCOPE = 'the handoff puts this out of scope, so it is disabled and says why';
 const DELIBERATE: Record<string, Record<string, Meant>> = {
   'r-8': { 'font-family': INTER },
   'r-9': { 'font-family': INTER },
-  'r-6n': { opacity: { is: '0.45', why: 'the pack ships the styles for one density, so both buttons are disabled' } },
-  'r-6o': { opacity: { is: '0.45', why: 'the pack ships the styles for one density, so both buttons are disabled' } },
-  'r-3g': { opacity: { is: '0.45', why: 'Access review is out of scope in the handoff, so it is disabled' } },
-  'r-31': { opacity: { is: '0.45', why: 'New role is out of scope in the handoff, so it is disabled' } },
+  'r-3g': { opacity: { is: '0.45', why: `Access review: ${OUT_OF_SCOPE}` } },
+  'r-31': { opacity: { is: '0.45', why: `New role: ${OUT_OF_SCOPE}` } },
 };
+
+/* Properties written by the layout pass rather than by any stylesheet:
+   a branch row is padded at runtime so the parent's stem lands on the
+   bar it draws. The connector assertions above are what prove that. */
+const COMPUTED: Record<string, string[]> = {
+  'r-6v': ['padding-left', 'padding-right'],
+  'r-6w': ['padding-left', 'padding-right'],
+};
+
+/** Every class and property `overrides.css` changes, read from it. */
+function overridden(): Record<string, Set<string>> {
+  const css = readFileSync('components/admin/roles/overrides.css', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const out: Record<string, Set<string>> = {};
+  const add = (cls: string, p: string) => (out[cls] ?? (out[cls] = new Set())).add(p);
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const props = [...m[2]!.matchAll(/(?:^|;)\s*([a-z-]+)\s*:/g)].map((x) => x[1]!);
+    for (const selector of m[1]!.split(',')) {
+      /* The SUBJECT of the selector, which is the last class in it.
+         `.roles-rail .r-19{color}` changes `.r-19`, not the rail, and
+         attributing it to both is what reported a dozen overrides that
+         were never meant to apply to the ancestor. */
+      const classes = [...selector.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((x) => x[1]!);
+      const subject = classes[classes.length - 1];
+      if (!subject) continue;
+      for (const p of props) {
+        add(subject, p);
+        /* A shorthand settles longhands, and the browser reports the
+           longhands. */
+        if (p === 'background') add(subject, 'background-color');
+        if (p === 'border') for (const side of ['top', 'right', 'bottom', 'left']) {
+          add(subject, `border-${side}-color`); add(subject, `border-${side}-width`);
+        }
+        if (p === 'border-color') for (const side of ['top', 'right', 'bottom', 'left']) {
+          add(subject, `border-${side}-color`);
+        }
+        /* Every border in this screen is `currentColor`, set by the
+           reset in port.css, so changing the text colour changes the
+           border colour the browser reports with it. */
+        if (p === 'color') for (const side of ['top', 'right', 'bottom', 'left']) {
+          add(subject, `border-${side}-color`);
+        }
+      }
+    }
+  }
+  return out;
+}
+const OVERRIDDEN = overridden();
 
 function compare(label: string, app: Read, kit: Read) {
   const diffs: string[] = [];
   let compared = 0;
+  let overrides = 0;
   const skipped: string[] = [];
   for (const c of CLASSES) {
     const a = app.styles[c], k = kit.styles[c];
@@ -159,6 +212,12 @@ function compare(label: string, app: Read, kit: Read) {
     if (!a) { skipped.push(c); continue; }   /* nor does the port, in this state */
     for (const p of PROPS) {
       compared += 1;
+      if (COMPUTED[c]?.includes(p)) { skipped.push(`${c} ${p}`); continue; }
+      /* Any class ON THE ELEMENT may carry the override, not only the
+         one it was looked up by: the rail's selected row is found as
+         `.r-18` and overridden as `.sn-row`. */
+      const carries = [c, ...(a.__cls ?? '').split(/\s+/)].filter(Boolean);
+      if (carries.some((x) => OVERRIDDEN[x]?.has(p))) { overrides += 1; continue; }
       const meant = DELIBERATE[c]?.[p];
       if (meant) {
         const want = meant.is ?? kit.styles[meant.sameAs!]?.[p];
@@ -173,6 +232,7 @@ function compare(label: string, app: Read, kit: Read) {
   if (skipped.length > 0) {
     console.log(`        ${skipped.length} classes were on show in neither, so not compared: ${skipped.slice(0, 10).join(', ')}${skipped.length > 10 ? ' and more' : ''}`);
   }
+  console.log(`        ${overrides} values are not compared because overrides.css deliberately changes them`);
   ok(`${label}: ${compared} computed values agree with preview.html`, diffs.length === 0,
     `${diffs.length} differ, listed in /tmp/roles-diff-${label}.txt\n        ` + diffs.slice(0, 14).join('\n        '));
 }
@@ -256,7 +316,7 @@ async function main() {
     /* Counted as well as checked: a check that examined nothing passes
        for the wrong reason, and this one runs against a view that can
        be hidden. */
-    const out = { drops: [], elbows: [], gaps: [], nDrops: 0, nSegs: 0, nRows: 0 };
+    const out = { drops: [], elbows: [], gaps: [], stems: [], nDrops: 0, nSegs: 0, nRows: 0, nStems: 0 };
     for (const drop of document.querySelectorAll('.roles-canvas-body .r-2d')) {
       const card = drop.parentElement.querySelector(':scope > .sn-lab [data-for], :scope > .r-1y [data-for], :scope > * [data-for]');
       if (!card) continue;
@@ -266,7 +326,6 @@ async function main() {
       if (Math.abs(mid(d) - mid(c)) > 2) out.drops.push(card.getAttribute('data-for') + ': drop at ' + Math.round(mid(d)) + ', card centre ' + Math.round(mid(c)));
     }
     for (const row of document.querySelectorAll('.roles-canvas-body .r-6v, .roles-canvas-body .r-6w')) {
-      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
       const segs = [];
       for (const col of row.children) {
         const bar = col.querySelector(':scope > span');
@@ -277,17 +336,44 @@ async function main() {
         out.nSegs += 1;
       }
       if (segs.length > 0) out.nRows += 1;
+      /* ---- The parent's stem has to land ON the bar ----
+
+         A parent is centred over its whole branch row, but the bar only
+         runs from the first child's centre to the last child's. When the
+         subtrees either side are different widths those two centres are
+         not the same, and the stem comes down into one of the gaps
+         BETWEEN segments and touches nothing. That is the "lines don't
+         touch" the business reported, and no per-segment check could
+         see it because every segment was correct. */
+      const stem = row.previousElementSibling;
+      if (stem && segs.length > 0) {
+        const sr = stem.getBoundingClientRect();
+        if (sr.width > 0) {
+          const m = mid(sr);
+          const covered = segs.some((sg) => m >= sg.l - 1 && m <= sg.r + 1);
+          out.nStems += 1;
+          if (!covered) out.stems.push('a stem lands at ' + Math.round(m) + ', between segments, so it touches nothing');
+        }
+      }
       segs.forEach((sg, i) => {
         const touchesCentre = sg.l <= sg.cm + 1 && sg.r >= sg.cm - 1;
         if (!touchesCentre) out.elbows.push('a segment does not reach its own column centre');
+        /* Adjacent segments must MEET. The kit leaves the row's gap
+           as a hole in the bar, and overrides.css closes it by
+           extending each segment half a gap towards its neighbour.
+           A hole is a line that does not touch. An overlap is a line
+           drawn twice. Neither is wanted, so the join has to be
+           within a pixel of exact. */
         if (i > 0) {
-          const g = Math.round(sg.l - segs[i - 1].r);
-          if (Math.abs(g - gap) > 2) out.gaps.push('gap ' + g + ' between segments where the row gap is ' + Math.round(gap));
+          const j = sg.l - segs[i - 1].r;
+          if (Math.abs(j) > 1) out.gaps.push(
+            (j > 0 ? 'a hole of ' : 'an overlap of ') + Math.abs(j).toFixed(1) + 'px between two segments of a bar');
         }
       });
     }
     return out;
-  })()`) as { drops: string[]; elbows: string[]; gaps: string[]; nDrops: number; nSegs: number; nRows: number };
+  })()`) as { drops: string[]; elbows: string[]; gaps: string[]; stems: string[];
+              nDrops: number; nSegs: number; nRows: number; nStems: number };
 
   console.log('\n  The connectors line up\n  ----------------------');
   ok(`all ${wires.nDrops} drops are centred on the card they point at`,
@@ -296,7 +382,10 @@ async function main() {
   ok(`all ${wires.nSegs} elbows reach their own column centre`,
     wires.nSegs > 0 && wires.elbows.length === 0,
     wires.nSegs === 0 ? 'no elbows were examined, so this proved nothing' : wires.elbows.slice(0, 5).join('\n        '));
-  ok(`the segments of each of the ${wires.nRows} branch rows tile it with only the row gap between them`,
+  ok(`each of the ${wires.nStems} parent stems lands on the bar rather than in a gap`,
+    wires.nStems > 0 && wires.stems.length === 0,
+    wires.nStems === 0 ? 'no stems were examined, so this proved nothing' : wires.stems.slice(0, 5).join('\n        '));
+  ok(`the bar of each of the ${wires.nRows} branch rows is continuous, with no hole and no overlap`,
     wires.nRows > 0 && wires.gaps.length === 0,
     wires.nRows === 0 ? 'no branch rows were examined, so this proved nothing' : wires.gaps.slice(0, 5).join('\n        '));
 

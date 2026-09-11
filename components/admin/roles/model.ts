@@ -123,6 +123,8 @@ export type Verdict = 'allowed' | 'conditional' | 'denied';
 
 export type NodeView = {
   id: string; name: string; division: string; tintCls: string;
+  /** The division's own colour, for the minimap, which draws rather than classes. */
+  tint: string;
   /** The kit's four node boxes: the root, a director, a role, one outside the line. */
   boxCls: 'r-6u' | 'r-4s' | 'r-29' | 'r-33';
   holders: number; capsText: string; elevated: boolean;
@@ -283,7 +285,7 @@ export function buildModel(input: Input): ScreenModel {
     const c = counts(r);
     return {
       id: r.slug, name: r.name, division: dept.label.toUpperCase(),
-      tintCls: DIVISIONS[dept.division].node, boxCls: box,
+      tintCls: DIVISIONS[dept.division].node, tint: DIVISIONS[dept.division].tint, boxCls: box,
       holders: holdersOf.get(r.id)?.length ?? 0,
       capsText: `${c.allowed + c.conditional} of ${total}`,
       elevated: (grantsOf.get(r.id)?.has('admin.roles')) ?? false,
@@ -392,9 +394,17 @@ export function buildModel(input: Input): ScreenModel {
       peopleText: `${people.length} ${people.length === 1 ? 'person' : 'people'}`,
       keys: keyCaps.map((k) => {
         const v = verdictOf(r, k.key);
+        /* ---- The second line says WHERE it applies ----
+
+           It used to print the capability's area on a denied row, so a
+           permission this role does not have read "Admin", which looks
+           like a scope and means nothing. From the business: "what do
+           these permissions mean where they say admin". Nothing: it was
+           the section the capability lives in. A row that is refused
+           says so instead. */
         return {
           label: k.label,
-          scope: v.verdict === 'denied' ? k.area : (SCOPE[v.scope!] ?? v.scope!),
+          scope: v.verdict === 'denied' ? 'Not in this role' : (SCOPE[v.scope!] ?? v.scope!),
           verdict: v.verdict,
         };
       }),
