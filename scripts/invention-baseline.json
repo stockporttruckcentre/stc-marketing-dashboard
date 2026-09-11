@@ -10,5 +10,8 @@
   "components/analytics/kit/devices.tsx": 0,
   "components/analytics/kit/controls.tsx": 0,
   "components/analytics/kit/mirror.tsx": 0,
-  "components/analytics/TargetsBoard.tsx": 0
+  "components/analytics/TargetsBoard.tsx": 0,
+  "components/admin/roles/EditPermissions.tsx": 0,
+  "components/admin/roles/icons.tsx": 0,
+  "components/admin/roles/RoleMenu.tsx": 0
 }

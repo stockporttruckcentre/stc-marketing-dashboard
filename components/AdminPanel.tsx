@@ -72,7 +72,7 @@ const LEGACY_ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
 type Area = 'people' | 'roles' | 'requests';
 
 export function AdminPanel({
-  selfId, templates, mayManage, mayDecide, nav, me,
+  selfId, templates, mayManage, mayDecide, mayEditRoles, nav, me,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
@@ -80,25 +80,30 @@ export function AdminPanel({
   mayManage: boolean;
   /** `access.decide`: Requests, which Sr Sales holds and `admin.users` does not imply. */
   mayDecide: boolean;
+  /** `admin.roles`: the Edit permissions button on the Roles tab. Reading
+      what a role can do needs only `admin.users`; changing it is a
+      different job, and a different permission. */
+  mayEditRoles: boolean;
   /** What the Roles screen's own navigation region draws: this person's sections, and who they are. */
   nav: NavSectionView[];
   me: Me;
 }) {
   return (
     <Toasts>
-      <AdminBody selfId={selfId} templates={templates}
-                 mayManage={mayManage} mayDecide={mayDecide} nav={nav} me={me} />
+      <AdminBody selfId={selfId} templates={templates} mayManage={mayManage}
+                 mayDecide={mayDecide} mayEditRoles={mayEditRoles} nav={nav} me={me} />
     </Toasts>
   );
 }
 
 function AdminBody({
-  selfId, templates, mayManage, mayDecide, nav, me,
+  selfId, templates, mayManage, mayDecide, mayEditRoles, nav, me,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
   mayManage: boolean;
   mayDecide: boolean;
+  mayEditRoles: boolean;
   nav: NavSectionView[];
   me: Me;
 }) {
@@ -214,7 +219,9 @@ function AdminBody({
 
       {area === 'requests' && <AccessQueue onCount={setWaiting} />}
 
-      {area === 'roles' && <RolesPage nav={nav} me={me} />}
+      {area === 'roles' && (
+        <RolesPage nav={nav} me={me} mayEdit={mayEditRoles} onAssign={() => setArea('people')} />
+      )}
 
       {area === 'people' && (<>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>

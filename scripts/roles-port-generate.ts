@@ -25,7 +25,7 @@ const OUT = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]!
   : 'components/admin/roles/kit.generated.ts';
 
-const css = readFileSync(`${KIT}/roles-page.css`, 'utf8');
+const css = readFileSync(`${KIT}/roles-components.css`, 'utf8');
 const behaviour = readFileSync(`${KIT}/roles-behaviour.css`, 'utf8');
 const data = JSON.parse(readFileSync(`${KIT}/roles-data.json`, 'utf8')) as {
   capabilityTotal: number;
@@ -38,7 +38,7 @@ for (const m of css.matchAll(/^\.(r-[0-9a-z]+)\{display:block;width:(\d+)%;heigh
   fills.push({ cls: m[1]!, pct: Number(m[2]), tone: m[3]! });
 }
 fills.sort((a, b) => a.pct - b.pct || a.cls.localeCompare(b.cls));
-if (fills.length === 0) throw new Error('no coverage bar classes found in roles-page.css');
+if (fills.length === 0) throw new Error('no coverage bar classes found in roles-components.css');
 
 /* ---- Division tints ---- */
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

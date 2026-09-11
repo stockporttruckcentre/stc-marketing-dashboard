@@ -1,5 +1,6 @@
 /* Selection behaviour. Radio-driven, no JavaScript: the chart, the rail and the
-   inspector are one control, and this file is what keeps them in sync. */
+   inspector are one control, and this file is what keeps them in sync.
+   The view switcher rules drive Chart / Grid / Matrix. */
 .sn-in{position:absolute;width:0;height:0;opacity:0;pointer-events:none}
 .sn-lab{cursor:pointer;display:block;width:max-content}
 .sn-row{border-left:2px solid transparent;background:transparent}
@@ -53,3 +54,12 @@ details>summary::-webkit-details-marker{display:none}
 #sn-auditor:checked~.sn-body .sp-auditor{display:flex}
 #sn-auditor:checked~.sn-body label[for="sn-auditor"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
 #sn-auditor:checked~.sn-body [data-list="auditor"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+.vw-in{position:absolute;width:0;height:0;opacity:0;pointer-events:none}
+.vw{display:none}
+.vwtab{cursor:pointer;background:var(--surface);color:var(--text-muted)}
+#vw-chart:checked~.vw-body .vw-chart{display:flex}
+#vw-chart:checked~.vw-body [data-vt="chart"]{background:var(--primary);color:var(--primary-fg)}
+#vw-grid:checked~.vw-body .vw-grid{display:flex}
+#vw-grid:checked~.vw-body [data-vt="grid"]{background:var(--primary);color:var(--primary-fg)}
+#vw-matrix:checked~.vw-body .vw-matrix{display:flex}
+#vw-matrix:checked~.vw-body [data-vt="matrix"]{background:var(--primary);color:var(--primary-fg)}

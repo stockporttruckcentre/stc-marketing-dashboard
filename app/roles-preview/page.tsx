@@ -17,11 +17,13 @@
    `notFound()` in production, like the harnesses next door.
    ============================================================= */
 
+import { useState } from 'react';
 import { notFound } from 'next/navigation';
 import { RolesScreen } from '@/components/admin/roles/RolesScreen';
+import { EditPermissions } from '@/components/admin/roles/EditPermissions';
 import { buildModel } from '@/components/admin/roles/model';
 import '@/components/admin/roles/roles-tokens.css';
-import '@/components/admin/roles/roles-page.css';
+import '@/components/admin/roles/roles-components.css';
 import '@/components/admin/roles/roles-behaviour.css';
 import '@/components/admin/roles/port.css';
 
@@ -118,12 +120,33 @@ const NAV = [
   ] },
 ];
 
+const HISTORY = [
+  { id: 1, at: '2026-08-14T09:12:00Z', actor_label: 'G Sutton', kind: 'granted',
+    role_template_id: 'role-sr_sales', capability_label: 'Export the CRM',
+    scope_before: null, scope_after: 'company' },
+  { id: 2, at: '2026-07-02T16:40:00Z', actor_label: 'A Dawson', kind: 'rescoped',
+    role_template_id: 'role-sr_sales', capability_label: 'Decide those requests',
+    scope_before: 'company', scope_after: 'department' },
+  { id: 3, at: '2026-05-19T11:05:00Z', actor_label: 'G Sutton', kind: 'revoked',
+    role_template_id: 'role-sr_sales', capability_label: 'Import into the CRM',
+    scope_before: 'company', scope_after: null },
+];
+
 export default function RolesPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
-  const model = buildModel({ roles: ROLES, caps: CAPS, grants: GRANTS, holders: HOLDERS });
+  const [editing, setEditing] = useState<string | null>(null);
+  const model = buildModel({ roles: ROLES, caps: CAPS, grants: GRANTS, holders: HOLDERS, history: HISTORY });
+  const role = ROLES.find((r) => r.slug === editing) ?? null;
+  const held = new Map(GRANTS.filter((g) => g.role_template_id === role?.id).map((g) => [g.capability, g.scope]));
   return (
     <div className="roles-port">
-      <RolesScreen model={model} nav={NAV} me={{ initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' }} />
+      <RolesScreen model={model} nav={NAV} mayEdit
+        me={{ initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' }}
+        onEdit={setEditing} onAssign={() => {}} />
+      {role && (
+        <EditPermissions role={role} caps={CAPS} held={held} saving={false} failed={null}
+          onClose={() => setEditing(null)} onSave={() => setEditing(null)} />
+      )}
     </div>
   );
 }

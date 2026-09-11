@@ -20,7 +20,7 @@
      4. Is the only inline style the width of a coverage bar the kit
         has no class for?
 
-   And of the files: roles-page.css and roles-behaviour.css are the
+   And of the files: roles-components.css and roles-behaviour.css are the
    kit's byte for byte, roles-tokens.css differs in its two selector
    lines and nowhere else, kit.generated.ts is what the generator says
    now, and the selection rules written for a real role reproduce the
@@ -34,7 +34,8 @@ import { execFileSync } from 'node:child_process';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { chromium } from 'playwright';
-import { RolesScreen } from '../components/admin/roles/RolesScreen';
+import { RolesScreen, People, HistoryBody } from '../components/admin/roles/RolesScreen';
+import { EditPermissions } from '../components/admin/roles/EditPermissions';
 import { buildModel, behaviourFor, DEPARTMENTS, type Input } from '../components/admin/roles/model';
 import { KIT_IDS } from '../components/admin/roles/kit.generated';
 
@@ -50,12 +51,12 @@ const ok = (what: string, held: boolean, why?: string) => {
 /* ---- 1. The files ---- */
 console.log('\n  The files are the kit\'s\n  ----------------------');
 const same = (f: string) => readFileSync(`${KIT}/${f}`, 'utf8') === readFileSync(`${APP}/${f}`, 'utf8');
-ok('roles-page.css is byte for byte the kit\'s', same('roles-page.css'));
+ok('roles-components.css is byte for byte the kit\'s', same('roles-components.css'));
 ok('roles-behaviour.css is byte for byte the kit\'s', same('roles-behaviour.css'));
 {
   const kit = readFileSync(`${KIT}/roles-tokens.css`, 'utf8')
-    .replace(/^:root\{$/m, '.r-3x{')
-    .replace(/^\[data-stc-theme="dark"\]\{$/m, '[data-stc-theme="dark"] .r-3x,[data-theme="dark"] .r-3x{');
+    .replace(/^:root\{$/m, '.r-62{')
+    .replace(/^\[data-stc-theme="dark"\]\{$/m, '[data-stc-theme="dark"] .r-62,[data-theme="dark"] .r-62{');
   const mine = readFileSync(`${APP}/roles-tokens.css`, 'utf8').replace(/^\/\*[\s\S]*?\*\/\n/, '');
   ok('roles-tokens.css differs from the kit\'s in its two selector lines and nowhere else', kit === mine);
 }
@@ -68,6 +69,36 @@ ok('roles-behaviour.css is byte for byte the kit\'s', same('roles-behaviour.css'
 {
   const kit = readFileSync(`${KIT}/roles-behaviour.css`, 'utf8').split('\n').filter((l) => l.startsWith('#sn-')).join('\n');
   ok('the selection rules written for a role are the kit\'s own, for its sixteen', behaviourFor(KIT_IDS) === kit);
+}
+{
+  /* The kit states a disabled opacity once, on its menu's Delete row.
+     The port reuses that number for every disabled control, so it has
+     to stay the kit's number. */
+  const kit = readFileSync(`${APP}/roles-components.css`, 'utf8')
+    .match(/^\.r-9p\{[^}]*opacity:([^;}]*)/m)?.[1];
+  const mine = readFileSync(`${APP}/port.css`, 'utf8')
+    .match(/^\.r-62 button:disabled\{opacity:([^;}]*)\}/m)?.[1];
+  ok('a disabled control fades by the amount the kit states on its own disabled row',
+    kit != null && kit === mine, `kit ${kit} / port ${mine}`);
+}
+{
+  /* ---- The inherited typography is the reference page's, not mine ----
+
+     preview.html sets the font, colour and tracking on its body, and
+     everything the kit's classes do not set comes from there. The port
+     puts those same declarations on `.r-62` because the application's
+     own base would otherwise be inherited instead. So they have to BE
+     the reference's, and this is what says so: the v2 pack changed the
+     tracking and the port kept the old value until a render comparison
+     caught it. */
+  const body = readFileSync(`${KIT}/preview.html`, 'utf8').match(/body\{([^}]*)\}/)?.[1] ?? '';
+  const INHERITED = ['font-family', 'color', 'letter-spacing'];
+  const want = INHERITED.map((p) => body.match(new RegExp(`(?:^|;)${p}:([^;]*)`))?.[1]?.trim());
+  const mine = readFileSync(`${APP}/port.css`, 'utf8').match(/^\.r-62\{([^}]*)\}/m)?.[1] ?? '';
+  const have = INHERITED.map((p) => mine.match(new RegExp(`(?:^|;)${p}:([^;]*)`))?.[1]?.trim());
+  ok('the typography the screen inherits is preview.html\'s own body rule',
+    want.every((v, i) => v != null && v === have[i]),
+    INHERITED.map((p, i) => `${p}: kit ${want[i]} / port ${have[i]}`).join('\n        '));
 }
 
 /* ---- 2. The kit's data, as this screen's input ---- */
@@ -101,10 +132,12 @@ const nav = [
   { label: 'Workspace', items: [{ label: 'Dashboard', icon: 'dashboard' as const, active: false }] },
   { label: 'Admin', items: [{ label: 'Admin', icon: 'admin' as const, active: true }] },
 ];
+const model = buildModel(input);
 const mine = renderToStaticMarkup(createElement(RolesScreen, {
-  model: buildModel(input), nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
+  model, nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
 })).replace(/^<style>[\s\S]*?<\/style>/, '');
-const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8').replace(/<link[^>]*>/g, '');
+const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8')
+  .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
 
 /* ---- 3. In a browser ---- */
 async function main() {
@@ -113,17 +146,26 @@ async function main() {
 
   /* The comparison, run inside the page so the browser does the
      parsing and neither side is read by a regex. */
-  const COMPARE = `(function (kitHtml, mineHtml) {
-    var parse = function (h) { var d = new DOMParser().parseFromString(h, 'text/html'); return d.querySelector('.r-3x'); };
+  const COMPARE = `(function (kitHtml, mineHtml, isPart, rootSel) {
+    /* The screen is rooted at the kit's own outermost element. A
+       component is a fragment, so its root is the document body, or
+       the element named by rootSel where the port legitimately wraps
+       the kit's markup in something of its own. The shell comparison
+       does not apply to a component. */
+    var parse = function (h) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      if (!isPart) return d.querySelector('.r-62');
+      return rootSel ? d.querySelector(rootSel) : d.body;
+    };
     var K = parse(kitHtml), M = parse(mineHtml);
 
     /* A class token that data chooses is normalised so a node's tint
        or a bar's width does not read as a structural difference. */
     var DATA = ${JSON.stringify({
       fill: [] as string[], tint: [] as string[], head: [] as string[], swatch: [] as string[],
-      box: ['r-4r', 'r-3d', 'r-1y', 'r-2f'], verdict: ['r-o', 'r-1p', 'r-62', 'r-s'], chip: ['r-5m', 'r-2n'], avatar: ['r-1i', 'r-p'],
+      box: ['r-6u', 'r-4s', 'r-29', 'r-33'], verdict: ['r-c', 'r-e', 'r-58', 'r-b'], chip: ['r-7k', 'r-3l'], avatar: ['r-1l', 'r-v'],
     })};
-    var css = ${JSON.stringify(readFileSync(`${KIT}/roles-page.css`, 'utf8'))};
+    var css = ${JSON.stringify(readFileSync(`${KIT}/roles-components.css`, 'utf8'))};
     css.replace(/^\\.(r-[0-9a-z]+)\\{display:block;width:\\d+%;height:100%;background:var\\(--(success|warning|danger)\\)\\}$/gm, function (_, c) { DATA.fill.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{position:absolute;left:0;top:0;bottom:0;width:3px;background:#/gm, function (_, c) { DATA.tint.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:4px;align-self:stretch;background:#/gm, function (_, c) { DATA.head.push(c); return ''; });
@@ -138,7 +180,15 @@ async function main() {
       var cls = (el.getAttribute('class') || '').split(/\\s+/).filter(Boolean).map(norm).filter(Boolean).sort();
       return el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '');
     };
-    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'style', 'class', 'xmlns'];
+    /* Attributes the port BINDS rather than draws: an id, a label's
+       target, a tooltip, a value, and the ones that carry state. The
+       disabled attribute is on the list for one reason, stated so it
+       cannot quietly grow: a control the person's permissions do not
+       allow is disabled here and refused again inside the database.
+       The kit draws no disabled state because the kit does not know
+       who is looking. Everything NOT on this list still has to match
+       the kit exactly. */
+    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'style', 'class', 'xmlns'];
     var attrs = function (el) {
       var out = [];
       for (var i = 0; i < el.attributes.length; i++) { var a = el.attributes[i]; if (BOUND.indexOf(a.name) < 0) out.push(a.name + '=' + a.value); }
@@ -148,17 +198,26 @@ async function main() {
 
     /* (1) The static shell: everything outside the repeating regions,
        text included, must be identical. */
-    var EMPTY = ['.roles-nav', '.r-4d', '.r-4n', '.r-4q', '.r-4z', '.r-5l', '.r-5n', '.roles-inspector'];
-    var BLANK = ['.r-52', '.r-5r', '.r-5s'];
+    var EMPTY = ['.roles-nav', '.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-7j', '.r-7l', '.roles-inspector'];
+    var BLANK = ['.r-4x', '.r-7p', '.r-7q'];
     var shell = function (root) {
       var c = root.cloneNode(true);
       Array.prototype.forEach.call(c.querySelectorAll(':scope > input'), function (n) { n.remove(); });
       EMPTY.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.innerHTML = ''; }); });
       BLANK.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.textContent = ''; }); });
+      /* The same two the elements test treats as bound rather than
+         drawn: a control the viewer's permissions do not allow is
+         disabled and says why. Everything else about the shell, every
+         tag, every class, every other attribute and all of the text,
+         still has to match the kit exactly. */
+      var STATE = ['disabled', 'title'];
       var ser = function (el) {
         var s = '<' + el.tagName.toLowerCase();
         var as = [];
-        for (var i = 0; i < el.attributes.length; i++) as.push(el.attributes[i].name + '="' + el.attributes[i].value + '"');
+        for (var i = 0; i < el.attributes.length; i++) {
+          if (STATE.indexOf(el.attributes[i].name) >= 0) continue;
+          as.push(el.attributes[i].name + '="' + el.attributes[i].value + '"');
+        }
         s += as.sort().map(function (a) { return ' ' + a; }).join('') + '>';
         Array.prototype.forEach.call(el.childNodes, function (n) {
           if (n.nodeType === 1) s += ser(n); else if (n.nodeType === 3 && n.textContent.trim()) s += n.textContent.trim();
@@ -167,7 +226,7 @@ async function main() {
       };
       return ser(c);
     };
-    var a = shell(K), b = shell(M), at = 0;
+    var a = isPart ? '' : shell(K), b = isPart ? '' : shell(M), at = 0;
     while (at < a.length && a[at] === b[at]) at++;
     var shellSame = a === b;
 
@@ -225,6 +284,68 @@ async function main() {
   ok('every element the port draws, attributes included, is one the kit draws', r.badElements.length === 0, r.badElements.slice(0, 8).join('\n        '));
   ok('every class the port uses is defined by the kit', r.unknown.length === 0, r.unknown.join(', '));
   ok('the only inline style is a bar width the kit has no class for', r.styled.length === 0, r.styled.slice(0, 5).join('\n        '));
+
+  /* ---- 4. The components the pack ships as their own files ----
+
+     Each is compared to ITS OWN file the same way: every element it
+     draws, attributes included, every parent/child nesting and every
+     class must be one that file draws. The shell test is not applied,
+     because a component is mounted inside the screen rather than
+     standing alone, so its outermost wrapper is legitimately the
+     screen's. What is asserted is that nothing was added, renamed or
+     restructured on the way in. */
+  const PARTS: { what: string; file: string; markup: string; root?: string }[] = [
+    {
+      what: 'the Edit permissions modal', file: 'roles-edit-permissions.html',
+      /* The kit file IS the dialog card. The backdrop around it is the
+         application's own modal chrome, copied from its Modal in
+         components/kit/forms.tsx, and is asserted separately below. */
+      root: '.r-3z',
+      markup: renderToStaticMarkup(createElement(EditPermissions, {
+        role: input.roles[0]!, caps: caps.slice(0, 6),
+        held: new Map([[caps[0]!.key, 'company'], [caps[2]!.key, 'department']]),
+        onClose: () => {}, onSave: () => {}, saving: false, failed: null,
+      })),
+    },
+    {
+      what: 'the People tab', file: 'roles-tab-people.html',
+      markup: renderToStaticMarkup(createElement(People, { panel: model.panels[0]! })),
+    },
+    {
+      what: 'the History tab', file: 'roles-tab-history.html',
+      markup: renderToStaticMarkup(createElement(HistoryBody, { panel: model.panels[0]! })),
+    },
+  ];
+
+  console.log('\n  Each component is its own file\'s\n  ------------------------------');
+  for (const part of PARTS) {
+    const kitPart = readFileSync(`${KIT}/${part.file}`, 'utf8')
+      .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
+    const pr = await page.evaluate(
+      `${COMPARE}(${JSON.stringify(kitPart)}, ${JSON.stringify(part.markup)}, true, ${JSON.stringify(part.root ?? '')})`) as {
+      badEdges: string[]; badElements: string[]; unknown: string[];
+    };
+    ok(`${part.what} draws only what ${part.file} draws`,
+      pr.badEdges.length === 0 && pr.badElements.length === 0 && pr.unknown.length === 0,
+      [...pr.badEdges.slice(0, 4), ...pr.badElements.slice(0, 4),
+       ...(pr.unknown.length ? [`classes not in the kit: ${pr.unknown.join(', ')}`] : [])].join('\n        '));
+  }
+
+  /* The one thing the port adds around a kit component, asserted by
+     name so a second wrapper cannot appear without this failing. */
+  {
+    const shell = await page.evaluate(`(function (h) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      var outer = d.body.firstElementChild;
+      var path = [];
+      for (var el = outer; el && !el.classList.contains('r-3z'); el = el.firstElementChild) {
+        path.push(el.tagName.toLowerCase() + '.' + el.getAttribute('class'));
+      }
+      return path.join(' > ');
+    })(${JSON.stringify(PARTS[0]!.markup)})`) as string;
+    ok('the only thing the port wraps the modal in is its own backdrop',
+      shell === 'div.roles-modal', `found ${shell}`);
+  }
 
   console.log('\n  Every role is drawn\n  ------------------');
   ok(`one radio per role (${r.radios} of ${r.roles})`, r.radios === r.roles);

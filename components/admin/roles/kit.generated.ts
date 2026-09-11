@@ -4,267 +4,272 @@
 /** One class per coverage bar the kit draws: its width and its tone. */
 export const FILLS = [
   {
-    "cls": "r-6a",
+    "cls": "r-83",
     "pct": 11,
     "tone": "success"
   },
   {
-    "cls": "r-67",
+    "cls": "r-5a",
     "pct": 13,
     "tone": "success"
   },
   {
-    "cls": "r-68",
+    "cls": "r-81",
     "pct": 14,
     "tone": "success"
   },
   {
-    "cls": "r-66",
+    "cls": "r-59",
     "pct": 16,
     "tone": "success"
   },
   {
-    "cls": "r-69",
+    "cls": "r-82",
     "pct": 17,
     "tone": "success"
   },
   {
-    "cls": "r-2u",
+    "cls": "r-3t",
     "pct": 18,
     "tone": "success"
   },
   {
-    "cls": "r-2t",
+    "cls": "r-3s",
     "pct": 19,
     "tone": "success"
   },
   {
-    "cls": "r-2e",
+    "cls": "r-2u",
     "pct": 20,
     "tone": "success"
   },
   {
-    "cls": "r-2x",
+    "cls": "r-8r",
+    "pct": 21,
+    "tone": "success"
+  },
+  {
+    "cls": "r-3w",
     "pct": 22,
     "tone": "success"
   },
   {
-    "cls": "r-2w",
+    "cls": "r-3v",
     "pct": 23,
     "tone": "success"
   },
   {
-    "cls": "r-6f",
+    "cls": "r-85",
     "pct": 24,
     "tone": "success"
   },
   {
-    "cls": "r-3s",
+    "cls": "r-5e",
     "pct": 25,
     "tone": "success"
   },
   {
-    "cls": "r-28",
+    "cls": "r-2k",
     "pct": 27,
     "tone": "success"
   },
   {
-    "cls": "r-6c",
+    "cls": "r-5g",
     "pct": 28,
     "tone": "success"
   },
   {
-    "cls": "r-2y",
+    "cls": "r-3x",
     "pct": 29,
     "tone": "success"
   },
   {
-    "cls": "r-2d",
+    "cls": "r-2t",
     "pct": 32,
     "tone": "success"
   },
   {
-    "cls": "r-2r",
+    "cls": "r-3q",
     "pct": 33,
     "tone": "success"
   },
   {
-    "cls": "r-2v",
+    "cls": "r-3u",
     "pct": 35,
     "tone": "success"
   },
   {
-    "cls": "r-3r",
+    "cls": "r-5d",
     "pct": 36,
     "tone": "success"
   },
   {
-    "cls": "r-2c",
+    "cls": "r-2h",
     "pct": 39,
     "tone": "success"
   },
   {
-    "cls": "r-27",
+    "cls": "r-2j",
     "pct": 40,
     "tone": "success"
   },
   {
-    "cls": "r-2h",
+    "cls": "r-37",
     "pct": 41,
     "tone": "success"
   },
   {
-    "cls": "r-2z",
+    "cls": "r-3y",
     "pct": 42,
     "tone": "success"
   },
   {
-    "cls": "r-6b",
+    "cls": "r-5c",
     "pct": 43,
     "tone": "success"
   },
   {
-    "cls": "r-6d",
+    "cls": "r-84",
     "pct": 44,
     "tone": "success"
   },
   {
-    "cls": "r-2s",
+    "cls": "r-3r",
     "pct": 45,
     "tone": "success"
   },
   {
-    "cls": "r-26",
+    "cls": "r-2i",
     "pct": 46,
     "tone": "warning"
   },
   {
-    "cls": "r-6e",
+    "cls": "r-5i",
     "pct": 47,
     "tone": "warning"
   },
   {
-    "cls": "r-25",
+    "cls": "r-2f",
     "pct": 50,
     "tone": "warning"
   },
   {
-    "cls": "r-63",
+    "cls": "r-7y",
     "pct": 52,
     "tone": "warning"
   },
   {
-    "cls": "r-3v",
+    "cls": "r-5j",
     "pct": 54,
     "tone": "warning"
   },
   {
-    "cls": "r-2p",
+    "cls": "r-3n",
     "pct": 55,
     "tone": "warning"
   },
   {
-    "cls": "r-61",
+    "cls": "r-7x",
     "pct": 56,
     "tone": "warning"
   },
   {
-    "cls": "r-3u",
+    "cls": "r-5h",
     "pct": 58,
     "tone": "warning"
   },
   {
-    "cls": "r-3o",
+    "cls": "r-3p",
     "pct": 59,
     "tone": "warning"
   },
   {
-    "cls": "r-2o",
+    "cls": "r-3m",
     "pct": 60,
     "tone": "warning"
   },
   {
-    "cls": "r-5z",
+    "cls": "r-55",
     "pct": 65,
     "tone": "warning"
   },
   {
-    "cls": "r-65",
+    "cls": "r-80",
     "pct": 67,
     "tone": "warning"
   },
   {
-    "cls": "r-3m",
+    "cls": "r-54",
     "pct": 68,
     "tone": "warning"
   },
   {
-    "cls": "r-64",
+    "cls": "r-7z",
     "pct": 69,
     "tone": "warning"
   },
   {
-    "cls": "r-5u",
+    "cls": "r-7r",
     "pct": 71,
     "tone": "warning"
   },
   {
-    "cls": "r-5x",
+    "cls": "r-7u",
     "pct": 72,
     "tone": "warning"
   },
   {
-    "cls": "r-3n",
+    "cls": "r-56",
     "pct": 73,
     "tone": "warning"
   },
   {
-    "cls": "r-60",
+    "cls": "r-7w",
     "pct": 75,
     "tone": "warning"
   },
   {
-    "cls": "r-3l",
+    "cls": "r-52",
     "pct": 80,
     "tone": "warning"
   },
   {
-    "cls": "r-5t",
+    "cls": "r-53",
     "pct": 82,
     "tone": "danger"
   },
   {
-    "cls": "r-3k",
+    "cls": "r-51",
     "pct": 83,
     "tone": "danger"
   },
   {
-    "cls": "r-3i",
+    "cls": "r-4z",
     "pct": 84,
     "tone": "danger"
   },
   {
-    "cls": "r-3j",
+    "cls": "r-50",
     "pct": 86,
     "tone": "danger"
   },
   {
-    "cls": "r-5v",
+    "cls": "r-7s",
     "pct": 92,
     "tone": "danger"
   },
   {
-    "cls": "r-5y",
+    "cls": "r-7v",
     "pct": 95,
     "tone": "danger"
   },
   {
-    "cls": "r-5w",
+    "cls": "r-7t",
     "pct": 96,
     "tone": "danger"
   },
   {
-    "cls": "r-20",
+    "cls": "r-2b",
     "pct": 100,
     "tone": "danger"
   }
@@ -275,37 +280,37 @@ export const DIVISIONS = {
   "stc": {
     "label": "STC Service",
     "tint": "#09163A",
-    "node": "r-2j",
-    "head": "r-2q",
-    "swatch": "r-36"
+    "node": "r-3h",
+    "head": "r-3o",
+    "swatch": "r-4l"
   },
   "sales": {
     "label": "Trailer Sales",
     "tint": "#B31F14",
-    "node": "r-3e",
-    "head": "r-3q",
-    "swatch": "r-37"
+    "node": "r-4t",
+    "head": "r-5b",
+    "swatch": "r-4m"
   },
   "hire": {
     "label": "Rentals",
     "tint": "#C77A06",
-    "node": "r-3f",
-    "head": "r-3t",
-    "swatch": "r-38"
+    "node": "r-4u",
+    "head": "r-5f",
+    "swatch": "r-4n"
   },
   "grp": {
     "label": "Group",
     "tint": "#2B3F78",
-    "node": "r-21",
-    "head": "r-23",
-    "swatch": "r-35"
+    "node": "r-2c",
+    "head": "r-2e",
+    "swatch": "r-4k"
   },
   "sys": {
     "label": "System",
     "tint": "#5B5B56",
-    "node": "r-2g",
-    "head": "r-3w",
-    "swatch": "r-39"
+    "node": "r-34",
+    "head": "r-5k",
+    "swatch": "r-4o"
   }
 } as const;
 

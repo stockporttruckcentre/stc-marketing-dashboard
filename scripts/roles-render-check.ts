@@ -36,18 +36,18 @@ const ok = (what: string, held: boolean, why?: string) => {
 
 /* The classes compared, one visible instance of each. */
 const CLASSES = [
-  'roles-shell', 'roles-nav', 'r-3y', 'r-3z', 'r-40', 'r-24', 'r-43', 'r-42', 'r-44', 'r-45', 'r-31', 'r-47',
-  'r-49', 'r-4b', 'r-4c', 'r-32', 'r-4e', 'r-7', 'r-4f', 'r-4g',
-  'roles-canvas', 'r-4i', 'r-33', 'r-4j', 'r-34', 'r-4k', 'r-4l', 'r-29', 'r-4o', 'r-4p', 'r-t', 'r-12',
-  'roles-canvas-body', 'r-4q', 'r-4r', 'r-3d', 'r-1y', 'r-2f', 'r-w', 'r-x', 'r-z', 'r-10', 'r-11',
-  'r-1x', 'r-3a', 'r-4s', 'r-3b', 'r-3c', 'r-22', 'r-1z', 'r-2l', 'r-2m', 'r-3g', 'r-3h',
-  'r-4u', 'r-4w', 'r-4x', 'r-4y', 'r-4z', 'r-51', 'r-52', 'r-53',
-  'roles-rail', 'r-5h', 'r-5i', 'r-5k', 'r-5l', 'r-5m', 'r-2n', 'r-5n', 'r-q', 'r-2a', 'r-2b', 'r-r', 'r-13', 'r-14',
-  'r-5o', 'r-5p', 'r-5q', 'r-5r', 'r-5s',
-  'roles-inspector', 'r-16', 'r-17', 'r-18', 'r-19', 'r-1a', 'r-1b', 'r-a', 'r-1c', 'r-1d', 'r-1e', 'r-1f', 'r-2', 'r-3', 'r-4',
-  'r-1g', 'r-1h', 'r-1i', 'r-p', 'r-g', 'r-3p', 'r-1j', 'r-1k', 'r-1l', 'r-i', 'r-1m', 'r-j', 'r-b', 'r-1n', 'r-1o', 'r-f',
-  'r-8', 'r-9', 'r-o', 'r-1p', 'r-s', 'r-1q', 'r-5', 'r-6', 'r-c', 'r-d', 'r-k', 'r-l', 'r-m', 'r-n', 'r-e', 'r-1r', 'r-1s', 'r-1t',
-  'r-6g', 'r-6h', 'r-6i', 'r-6j', 'r-1u', 'r-1v', 'r-1w',
+  'roles-shell', 'roles-nav', 'r-63', 'r-64', 'r-65', 'r-2g', 'r-68', 'r-67', 'r-69', 'r-6a', 'r-2q', 'r-6c',
+  'r-6e', 'r-6g', 'r-6h', 'r-4h', 'r-6j', 'r-8', 'r-3g', 'r-31',
+  'roles-canvas', 'r-6l', 'r-4i', 'r-6m', 'r-4j', 'r-6n', 'r-6o', 'r-2r', 'r-6r', 'r-6s', 'r-w', 'r-x',
+  'roles-canvas-body', 'r-6t', 'r-6u', 'r-4s', 'r-29', 'r-33', 'r-11', 'r-12', 'r-14', 'r-15', 'r-16',
+  'r-1y', 'r-4p', 'r-6v', 'r-4q', 'r-4r', 'r-2d', 'r-2a', 'r-3j', 'r-3k', 'r-4v', 'r-4w',
+  'r-6x', 'r-6z', 'r-70', 'r-32', 'r-71', 'r-73', 'r-4x', 'r-74',
+  'roles-rail', 'r-7i', 'r-4y', 'r-36', 'r-7j', 'r-7k', 'r-3l', 'r-7l', 'r-u', 'r-2s', 'r-1z', 'r-t', 'r-18', 'r-19',
+  'r-7m', 'r-7n', 'r-7o', 'r-7p', 'r-7q',
+  'roles-inspector', 'r-1b', 'r-1c', 'r-y', 'r-1d', 'r-1e', 'r-1f', 'r-d', 'r-1g', 'r-1h', 'r-1i', 'r-1j', 'r-2', 'r-3', 'r-4',
+  'r-17', 'r-1k', 'r-1l', 'r-v', 'r-l', 'r-57', 'r-s', 'r-1m', 'r-1n', 'r-n', 'r-1o', 'r-m', 'r-f', 'r-1p', 'r-1q', 'r-j',
+  'r-a', 'r-9', 'r-c', 'r-e', 'r-b', 'r-1r', 'r-5', 'r-6', 'r-g', 'r-h', 'r-o', 'r-p', 'r-q', 'r-r', 'r-i', 'r-1s', 'r-1t', 'r-1u',
+  'r-5l', 'r-5m', 'r-2l', 'r-2v', 'r-1v', 'r-1w', 'r-1x',
 ];
 const PROPS = [
   'font-family', 'font-size', 'font-weight', 'letter-spacing', 'line-height', 'color', 'background-color',
@@ -75,7 +75,7 @@ const READ = `(function (classes, props) {
   /* The holder avatars overlap on purpose: the kit stacks them 7px
      into each other. Everything else must keep to its own box. */
   var leaves = Array.prototype.filter.call(document.querySelectorAll('.roles-shell *'), function (e) {
-    return e.children.length === 0 && (e.textContent || '').trim() && visible(e) && !e.closest('.r-1h'); });
+    return e.children.length === 0 && (e.textContent || '').trim() && visible(e) && !e.closest('.r-1k'); });
   /* A scrolling region clips what runs past it, so a block below the
      fold of the inspector body is not on top of the footer under it.
      Each box is cut down to what its scrolling ancestors let show. */
@@ -97,7 +97,7 @@ const READ = `(function (classes, props) {
     var ix = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), iy = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
     if (ix > 2 && iy > 2) hits.push(a.t + ' <-> ' + c.t);
   }
-  var body = Array.prototype.filter.call(document.querySelectorAll('.r-1m'), visible)[0];
+  var body = Array.prototype.filter.call(document.querySelectorAll('.r-1o'), visible)[0];
   var panel = body ? body.parentElement : null;
   var bodyBox = body ? { h: Math.round(body.getBoundingClientRect().height), sh: body.scrollHeight, ph: Math.round(panel.getBoundingClientRect().height),
     ih: Math.round(document.querySelector('.roles-inspector').getBoundingClientRect().height) } : null;
@@ -116,6 +116,19 @@ async function read(page: Page): Promise<Read> {
   return await page.evaluate(`${READ}(${JSON.stringify(CLASSES)}, ${JSON.stringify(PROPS)})`) as Read;
 }
 
+/* ---- Differences the port means ----
+
+   The reference page draws every control live. This port disables the
+   two the handoff puts out of scope, so they are legitimately fainter
+   than the reference. Listed by class and property with what they must
+   be instead, so the difference is asserted rather than skipped: if one
+   of these stops being disabled, or fades by a different amount, this
+   still fails. */
+const DELIBERATE: Record<string, Record<string, { is: string; why: string }>> = {
+  'r-3g': { opacity: { is: '0.45', why: 'Access review is out of scope in the handoff, so it is disabled' } },
+  'r-31': { opacity: { is: '0.45', why: 'New role is out of scope in the handoff, so it is disabled' } },
+};
+
 function compare(label: string, app: Read, kit: Read) {
   const diffs: string[] = [];
   let compared = 0;
@@ -125,6 +138,11 @@ function compare(label: string, app: Read, kit: Read) {
     if (!a) { diffs.push(`.${c}: not drawn by the application`); continue; }
     for (const p of PROPS) {
       compared += 1;
+      const meant = DELIBERATE[c]?.[p];
+      if (meant) {
+        if (a[p] !== meant.is) diffs.push(`.${c} ${p}: app ${a[p]}, but ${meant.why}, so it must be ${meant.is}`);
+        continue;
+      }
       if (a[p] !== k[p]) diffs.push(`.${c} ${p}: app ${a[p]} / kit ${k[p]}`);
     }
   }
@@ -197,7 +215,7 @@ async function main() {
     var row = document.querySelector('[data-list="' + id + '"]'); row.click();
     var visible = function (el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
     var panel = document.querySelector('.sp-' + id);
-    var node = document.querySelector('.r-4q label[for="sn-' + id + '"], .r-4z label[for="sn-' + id + '"]');
+    var node = document.querySelector('.r-6t label[for="sn-' + id + '"], .r-71 label[for="sn-' + id + '"]');
     var cs = getComputedStyle(node), rs = getComputedStyle(row);
     return { panel: visible(panel), only: Array.prototype.filter.call(document.querySelectorAll('.sp'), visible).length,
       ring: cs.outlineStyle + ' ' + cs.outlineWidth + ' ' + cs.outlineColor, row: rs.borderLeftColor + ' ' + rs.fontWeight };
