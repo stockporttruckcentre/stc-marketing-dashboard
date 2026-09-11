@@ -69,6 +69,25 @@ ok('roles-behaviour.css is byte for byte the kit\'s', same('roles-behaviour.css'
   const kit = readFileSync(`${KIT}/roles-behaviour.css`, 'utf8').split('\n').filter((l) => l.startsWith('#sn-')).join('\n');
   ok('the selection rules written for a role are the kit\'s own, for its sixteen', behaviourFor(KIT_IDS) === kit);
 }
+{
+  /* ---- The inherited typography is the reference page's, not mine ----
+
+     preview.html sets the font, colour and tracking on its body, and
+     everything the kit's classes do not set comes from there. The port
+     puts those same declarations on `.r-62` because the application's
+     own base would otherwise be inherited instead. So they have to BE
+     the reference's, and this is what says so: the v2 pack changed the
+     tracking and the port kept the old value until a render comparison
+     caught it. */
+  const body = readFileSync(`${KIT}/preview.html`, 'utf8').match(/body\{([^}]*)\}/)?.[1] ?? '';
+  const INHERITED = ['font-family', 'color', 'letter-spacing'];
+  const want = INHERITED.map((p) => body.match(new RegExp(`(?:^|;)${p}:([^;]*)`))?.[1]?.trim());
+  const mine = readFileSync(`${APP}/port.css`, 'utf8').match(/^\.r-62\{([^}]*)\}/m)?.[1] ?? '';
+  const have = INHERITED.map((p) => mine.match(new RegExp(`(?:^|;)${p}:([^;]*)`))?.[1]?.trim());
+  ok('the typography the screen inherits is preview.html\'s own body rule',
+    want.every((v, i) => v != null && v === have[i]),
+    INHERITED.map((p, i) => `${p}: kit ${want[i]} / port ${have[i]}`).join('\n        '));
+}
 
 /* ---- 2. The kit's data, as this screen's input ---- */
 type KitData = {
