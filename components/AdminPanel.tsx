@@ -15,7 +15,8 @@ import { Field, Select } from '@/components/kit/forms';
 import { Toasts, useToast } from '@/components/kit/toast';
 import { Avatar } from '@/components/kit/avatar';
 import { AccessQueue } from '@/components/admin/access-queue';
-import { RolesChart } from '@/components/admin/roles-chart';
+import { RolesPage } from '@/components/admin/roles/RolesPage';
+import type { Me, NavSectionView } from '@/components/admin/roles/RolesScreen';
 import { ViewAs } from '@/components/admin/view-as';
 import {
   byArea, loadCapabilitiesFor, loadTeam, overrideState, roleInWords, setActive,
@@ -71,7 +72,7 @@ const LEGACY_ROLES: UserRole[] = ['admin', 'marketer', 'sales', 'viewer'];
 type Area = 'people' | 'roles' | 'requests';
 
 export function AdminPanel({
-  selfId, templates, mayManage, mayDecide, mayEditRoles,
+  selfId, templates, mayManage, mayDecide, nav, me,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
@@ -79,26 +80,27 @@ export function AdminPanel({
   mayManage: boolean;
   /** `access.decide`: Requests, which Sr Sales holds and `admin.users` does not imply. */
   mayDecide: boolean;
-  /** `admin.roles`: the Edit role button on the Roles tab. */
-  mayEditRoles: boolean;
+  /** What the Roles screen's own navigation region draws: this person's sections, and who they are. */
+  nav: NavSectionView[];
+  me: Me;
 }) {
   return (
     <Toasts>
       <AdminBody selfId={selfId} templates={templates}
-                 mayManage={mayManage} mayDecide={mayDecide} mayEditRoles={mayEditRoles} />
+                 mayManage={mayManage} mayDecide={mayDecide} nav={nav} me={me} />
     </Toasts>
   );
 }
 
 function AdminBody({
-  selfId, templates, mayManage, mayDecide, mayEditRoles,
+  selfId, templates, mayManage, mayDecide, nav, me,
 }: {
   selfId: string;
   templates: { slug: string; name: string; description: string | null }[];
   mayManage: boolean;
   mayDecide: boolean;
-  /** `admin.roles`: may change what a role can do, not only read it. */
-  mayEditRoles: boolean;
+  nav: NavSectionView[];
+  me: Me;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -212,7 +214,7 @@ function AdminBody({
 
       {area === 'requests' && <AccessQueue onCount={setWaiting} />}
 
-      {area === 'roles' && <RolesChart mayEdit={mayEditRoles} />}
+      {area === 'roles' && <RolesPage nav={nav} me={me} />}
 
       {area === 'people' && (<>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>

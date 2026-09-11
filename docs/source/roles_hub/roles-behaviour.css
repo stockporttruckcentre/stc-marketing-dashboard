@@ -1,0 +1,55 @@
+/* Selection behaviour. Radio-driven, no JavaScript: the chart, the rail and the
+   inspector are one control, and this file is what keeps them in sync. */
+.sn-in{position:absolute;width:0;height:0;opacity:0;pointer-events:none}
+.sn-lab{cursor:pointer;display:block;width:max-content}
+.sn-row{border-left:2px solid transparent;background:transparent}
+.sp{display:none}
+details>summary::-webkit-details-marker{display:none}
+#sn-md:checked~.sn-body .sp-md{display:flex}
+#sn-md:checked~.sn-body label[for="sn-md"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-md:checked~.sn-body [data-list="md"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-opsdir:checked~.sn-body .sp-opsdir{display:flex}
+#sn-opsdir:checked~.sn-body label[for="sn-opsdir"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-opsdir:checked~.sn-body [data-list="opsdir"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-comdir:checked~.sn-body .sp-comdir{display:flex}
+#sn-comdir:checked~.sn-body label[for="sn-comdir"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-comdir:checked~.sn-body [data-list="comdir"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-depot:checked~.sn-body .sp-depot{display:flex}
+#sn-depot:checked~.sn-body label[for="sn-depot"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-depot:checked~.sn-body [data-list="depot"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-ctrl:checked~.sn-body .sp-ctrl{display:flex}
+#sn-ctrl:checked~.sn-body label[for="sn-ctrl"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-ctrl:checked~.sn-body [data-list="ctrl"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-tech:checked~.sn-body .sp-tech{display:flex}
+#sn-tech:checked~.sn-body label[for="sn-tech"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-tech:checked~.sn-body [data-list="tech"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-salesmgr:checked~.sn-body .sp-salesmgr{display:flex}
+#sn-salesmgr:checked~.sn-body label[for="sn-salesmgr"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-salesmgr:checked~.sn-body [data-list="salesmgr"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-salesex:checked~.sn-body .sp-salesex{display:flex}
+#sn-salesex:checked~.sn-body label[for="sn-salesex"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-salesex:checked~.sn-body [data-list="salesex"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-hiremgr:checked~.sn-body .sp-hiremgr{display:flex}
+#sn-hiremgr:checked~.sn-body label[for="sn-hiremgr"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-hiremgr:checked~.sn-body [data-list="hiremgr"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-hiredesk:checked~.sn-body .sp-hiredesk{display:flex}
+#sn-hiredesk:checked~.sn-body label[for="sn-hiredesk"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-hiredesk:checked~.sn-body [data-list="hiredesk"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-fsam:checked~.sn-body .sp-fsam{display:flex}
+#sn-fsam:checked~.sn-body label[for="sn-fsam"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-fsam:checked~.sn-body [data-list="fsam"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-fin:checked~.sn-body .sp-fin{display:flex}
+#sn-fin:checked~.sn-body label[for="sn-fin"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-fin:checked~.sn-body [data-list="fin"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-comp:checked~.sn-body .sp-comp{display:flex}
+#sn-comp:checked~.sn-body label[for="sn-comp"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-comp:checked~.sn-body [data-list="comp"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-compadm:checked~.sn-body .sp-compadm{display:flex}
+#sn-compadm:checked~.sn-body label[for="sn-compadm"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-compadm:checked~.sn-body [data-list="compadm"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-sysadmin:checked~.sn-body .sp-sysadmin{display:flex}
+#sn-sysadmin:checked~.sn-body label[for="sn-sysadmin"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-sysadmin:checked~.sn-body [data-list="sysadmin"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
+#sn-auditor:checked~.sn-body .sp-auditor{display:flex}
+#sn-auditor:checked~.sn-body label[for="sn-auditor"]{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-md)}
+#sn-auditor:checked~.sn-body [data-list="auditor"]{background:var(--bg-subtle);border-left-color:var(--accent);font-weight:600}
