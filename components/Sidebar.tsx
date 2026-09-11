@@ -14,6 +14,8 @@ import type { Profile } from '@/lib/types';
 
 /** Which parent rows are folded away, remembered per machine. */
 const SHUT_KEY = 'sidebar-shut';
+/* Rows somebody has deliberately OPENED. See the note on `isOpen`. */
+const OPEN_KEY = 'sidebar-open';
 
 /** The one row that is drawn in the footer instead. */
 const SETTINGS_HREF = '/dashboard/settings';
@@ -91,21 +93,55 @@ export function Sidebar({
      the same reason: this component renders on the server too, and
      `localStorage` is not there. See `lib/ui/remember.ts`. */
   const [shut, setShut] = useState<string[]>([]);
-  useEffect(() => { setShut(readChoiceList(SHUT_KEY)); }, []);
+  const [opened, setOpened] = useState<string[]>([]);
+  useEffect(() => {
+    setShut(readChoiceList(SHUT_KEY));
+    setOpened(readChoiceList(OPEN_KEY));
+  }, []);
+
+  /* ---- The chevron has to open as well as close ----
+
+     From the business: "i cant open the physical dropdown in the navbar
+     ... i cant see the 3 pages hidden in a dropdown."
+
+     A parent's children showed only while you were already ON one of
+     them, and the chevron could only fold them away. So the three
+     revenue divisions were reachable only from a revenue page, and the
+     revenue page was bouncing people to the dashboard for a separate
+     reason. Between the two, the rows could not be reached at all.
+
+     Now: explicitly opened wins, explicitly closed comes next, and
+     being in the section is the default when somebody has said neither.
+     Both choices are remembered on the machine, like the tracker's tab
+     order. */
+  const isOpen = useCallback((href: string) => {
+    if (opened.includes(href)) return true;
+    if (shut.includes(href)) return false;
+    /* The same test `isActive` makes, written out because that one is
+       redefined on every render and would pull this hook with it. */
+    return href === '/dashboard' ? path === '/dashboard' : path.startsWith(href);
+  }, [opened, shut, path]);
+
   const toggle = useCallback((href: string) => {
+    const wasOpen = isOpen(href);
+    setOpened((was) => {
+      const next = wasOpen ? was.filter((h) => h !== href) : [...was, href];
+      writeChoiceList(OPEN_KEY, next);
+      return next;
+    });
     setShut((was) => {
-      const next = was.includes(href) ? was.filter((h) => h !== href) : [...was, href];
+      const next = wasOpen ? [...was.filter((h) => h !== href), href] : was.filter((h) => h !== href);
       writeChoiceList(SHUT_KEY, next);
       return next;
     });
-  }, []);
+  }, [isOpen]);
 
   const rows = (items: ReturnType<typeof visibleSections>[number]['items']) => (
     <div className="sidebar__nav">
       {items.map((i) => {
         const Icon = ICONS[i.icon];
         const badge = i.badge === 'content' && pendingPosts > 0 ? String(pendingPosts) : undefined;
-        const open = !!i.children?.length && isActive(i.href) && !shut.includes(i.href);
+        const open = !!i.children?.length && isOpen(i.href);
 
         /* A parent with children is not a link. Revenue redirects to a
            division, so clicking it and landing somewhere the sidebar
