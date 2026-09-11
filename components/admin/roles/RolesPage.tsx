@@ -6,7 +6,7 @@ import { EmptyState, NotProvisioned, Skeleton } from '@/components/kit/primitive
 import { RolesScreen, type Me, type NavSectionView } from './RolesScreen';
 import { buildModel, type Cap, type Grant, type Holder, type Template } from './model';
 import './roles-tokens.css';
-import './roles-page.css';
+import './roles-components.css';
 import './roles-behaviour.css';
 import './port.css';
 

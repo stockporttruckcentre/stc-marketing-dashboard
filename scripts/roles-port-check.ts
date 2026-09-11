@@ -20,7 +20,7 @@
      4. Is the only inline style the width of a coverage bar the kit
         has no class for?
 
-   And of the files: roles-page.css and roles-behaviour.css are the
+   And of the files: roles-components.css and roles-behaviour.css are the
    kit's byte for byte, roles-tokens.css differs in its two selector
    lines and nowhere else, kit.generated.ts is what the generator says
    now, and the selection rules written for a real role reproduce the
@@ -50,12 +50,12 @@ const ok = (what: string, held: boolean, why?: string) => {
 /* ---- 1. The files ---- */
 console.log('\n  The files are the kit\'s\n  ----------------------');
 const same = (f: string) => readFileSync(`${KIT}/${f}`, 'utf8') === readFileSync(`${APP}/${f}`, 'utf8');
-ok('roles-page.css is byte for byte the kit\'s', same('roles-page.css'));
+ok('roles-components.css is byte for byte the kit\'s', same('roles-components.css'));
 ok('roles-behaviour.css is byte for byte the kit\'s', same('roles-behaviour.css'));
 {
   const kit = readFileSync(`${KIT}/roles-tokens.css`, 'utf8')
-    .replace(/^:root\{$/m, '.r-3x{')
-    .replace(/^\[data-stc-theme="dark"\]\{$/m, '[data-stc-theme="dark"] .r-3x,[data-theme="dark"] .r-3x{');
+    .replace(/^:root\{$/m, '.r-62{')
+    .replace(/^\[data-stc-theme="dark"\]\{$/m, '[data-stc-theme="dark"] .r-62,[data-theme="dark"] .r-62{');
   const mine = readFileSync(`${APP}/roles-tokens.css`, 'utf8').replace(/^\/\*[\s\S]*?\*\/\n/, '');
   ok('roles-tokens.css differs from the kit\'s in its two selector lines and nowhere else', kit === mine);
 }
@@ -104,7 +104,8 @@ const nav = [
 const mine = renderToStaticMarkup(createElement(RolesScreen, {
   model: buildModel(input), nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
 })).replace(/^<style>[\s\S]*?<\/style>/, '');
-const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8').replace(/<link[^>]*>/g, '');
+const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8')
+  .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
 
 /* ---- 3. In a browser ---- */
 async function main() {
@@ -114,16 +115,16 @@ async function main() {
   /* The comparison, run inside the page so the browser does the
      parsing and neither side is read by a regex. */
   const COMPARE = `(function (kitHtml, mineHtml) {
-    var parse = function (h) { var d = new DOMParser().parseFromString(h, 'text/html'); return d.querySelector('.r-3x'); };
+    var parse = function (h) { var d = new DOMParser().parseFromString(h, 'text/html'); return d.querySelector('.r-62'); };
     var K = parse(kitHtml), M = parse(mineHtml);
 
     /* A class token that data chooses is normalised so a node's tint
        or a bar's width does not read as a structural difference. */
     var DATA = ${JSON.stringify({
       fill: [] as string[], tint: [] as string[], head: [] as string[], swatch: [] as string[],
-      box: ['r-4r', 'r-3d', 'r-1y', 'r-2f'], verdict: ['r-o', 'r-1p', 'r-62', 'r-s'], chip: ['r-5m', 'r-2n'], avatar: ['r-1i', 'r-p'],
+      box: ['r-6u', 'r-4s', 'r-29', 'r-33'], verdict: ['r-c', 'r-e', 'r-58', 'r-b'], chip: ['r-7k', 'r-3l'], avatar: ['r-1l', 'r-v'],
     })};
-    var css = ${JSON.stringify(readFileSync(`${KIT}/roles-page.css`, 'utf8'))};
+    var css = ${JSON.stringify(readFileSync(`${KIT}/roles-components.css`, 'utf8'))};
     css.replace(/^\\.(r-[0-9a-z]+)\\{display:block;width:\\d+%;height:100%;background:var\\(--(success|warning|danger)\\)\\}$/gm, function (_, c) { DATA.fill.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{position:absolute;left:0;top:0;bottom:0;width:3px;background:#/gm, function (_, c) { DATA.tint.push(c); return ''; });
     css.replace(/^\\.(r-[0-9a-z]+)\\{width:4px;align-self:stretch;background:#/gm, function (_, c) { DATA.head.push(c); return ''; });
@@ -148,8 +149,8 @@ async function main() {
 
     /* (1) The static shell: everything outside the repeating regions,
        text included, must be identical. */
-    var EMPTY = ['.roles-nav', '.r-4d', '.r-4n', '.r-4q', '.r-4z', '.r-5l', '.r-5n', '.roles-inspector'];
-    var BLANK = ['.r-52', '.r-5r', '.r-5s'];
+    var EMPTY = ['.roles-nav', '.r-6i', '.r-6q', '.r-6t', '.r-71', '.r-7j', '.r-7l', '.roles-inspector'];
+    var BLANK = ['.r-4x', '.r-7p', '.r-7q'];
     var shell = function (root) {
       var c = root.cloneNode(true);
       Array.prototype.forEach.call(c.querySelectorAll(':scope > input'), function (n) { n.remove(); });

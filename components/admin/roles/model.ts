@@ -114,7 +114,7 @@ export type Verdict = 'allowed' | 'conditional' | 'denied';
 export type NodeView = {
   id: string; name: string; division: string; tintCls: string;
   /** The kit's four node boxes: the root, a director, a role, one outside the line. */
-  boxCls: 'r-4r' | 'r-3d' | 'r-1y' | 'r-2f';
+  boxCls: 'r-6u' | 'r-4s' | 'r-29' | 'r-33';
   holders: number; capsText: string; elevated: boolean;
 };
 
@@ -216,7 +216,7 @@ export function buildModel(input: Input): ScreenModel {
     };
   };
   const boxFor = (r: Template): NodeView['boxCls'] =>
-    (r === chartRoot ? 'r-4r' : r.department === 'exec' ? 'r-3d' : 'r-1y');
+    (r === chartRoot ? 'r-6u' : r.department === 'exec' ? 'r-4s' : 'r-29');
 
   /* A column is a role and what hangs beneath it. One report continues
      the column with a short rule between, as the kit chains Depot
@@ -235,9 +235,9 @@ export function buildModel(input: Input): ScreenModel {
 
   const departmentsPresent = DEPARTMENTS.filter((d) => roles.some((r) => departmentOf(r.department) === d));
   const chart: Chart = {
-    root: chartRoot ? nodeOf(chartRoot, 'r-4r') : null,
+    root: chartRoot ? nodeOf(chartRoot, 'r-6u') : null,
     branches,
-    direct: direct.map((r) => nodeOf(r, 'r-2f')),
+    direct: direct.map((r) => nodeOf(r, 'r-33')),
     footer: `${roles.length} roles across ${departmentsPresent.length} divisions · ${roles.length} shown, 0 collapsed`,
   };
 

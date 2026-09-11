@@ -21,7 +21,7 @@ import { notFound } from 'next/navigation';
 import { RolesScreen } from '@/components/admin/roles/RolesScreen';
 import { buildModel } from '@/components/admin/roles/model';
 import '@/components/admin/roles/roles-tokens.css';
-import '@/components/admin/roles/roles-page.css';
+import '@/components/admin/roles/roles-components.css';
 import '@/components/admin/roles/roles-behaviour.css';
 import '@/components/admin/roles/port.css';
 
