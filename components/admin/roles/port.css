@@ -80,3 +80,23 @@
    than hidden: it says what is missing.
    ------------------------------------------------------------- */
 .r-62 button:disabled{opacity:.45}
+
+/* -------------------------------------------------------------
+   The two small labels, in Inter.
+
+   From the business, looking at the shipped screen:
+
+     the small full caps font in .r-8, .r-9 ensure it's inter instead.
+
+   `.r-8` is the kit's small caps label: ROLES, CAPABILITIES, ALLOWED,
+   OF 90. It is set in the mono face in `roles-components.css`, and this
+   overrides that one property and nothing else. `.r-9` is the grey
+   second line under a permission; it sets no face of its own, so this
+   states the one it should inherit rather than leaving it to whatever
+   the surrounding page happens to set.
+
+   The kit's own file is untouched, so a new pack drops in clean and
+   this override survives it. `npm run check:roles-render` knows both
+   are meant to differ from the reference and asserts the value.
+   ------------------------------------------------------------- */
+.r-62 .r-8,.r-62 .r-9{font-family:var(--inter)}

@@ -36,7 +36,10 @@ const ok = (what: string, held: boolean, why?: string) => {
 
 /* The classes compared, one visible instance of each. */
 const CLASSES = [
-  'roles-shell', 'roles-nav', 'r-63', 'r-64', 'r-65', 'r-2g', 'r-68', 'r-67', 'r-69', 'r-6a', 'r-2q', 'r-6c',
+  /* The pack's own 218px navigation column is not drawn: this screen
+     sits inside the application's sidebar. check:roles-port asserts it
+     is absent, so there is nothing to compare here. */
+  'roles-shell', 'r-2q',
   'r-6e', 'r-6g', 'r-6h', 'r-4h', 'r-6j', 'r-8', 'r-3g', 'r-31',
   'roles-canvas', 'r-6l', 'r-4i', 'r-6m', 'r-4j', 'r-6n', 'r-6o', 'r-2r', 'r-6r', 'r-6s', 'r-w', 'r-x',
   'roles-canvas-body', 'r-6t', 'r-6u', 'r-4s', 'r-29', 'r-33', 'r-11', 'r-12', 'r-14', 'r-15', 'r-16',
@@ -60,12 +63,20 @@ const READ = `(function (classes, props) {
   var visible = function (el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   var out = {};
   classes.forEach(function (c) {
-    /* A visible instance first. Failing that, one in a panel not on
-       show: the text and colour rules of a verdict chip compute the
-       same whether its panel is the one selected or not. */
-    var all = document.querySelectorAll('.' + c);
-    var els = Array.prototype.filter.call(all, visible);
-    var el = els[0] || all[0]; if (!el) { out[c] = null; return; }
+    /* ---- Only ever a VISIBLE instance, on both sides ----
+
+       Falling back to a hidden one compares two different places. A
+       verdict chip inside the matrix legend is a flex item, and CSS
+       blockifies a flex item, so its inline-flex computes as flex.
+       The same chip in a table cell does not. Neither is wrong, and
+       comparing one against the other reports a defect that is not
+       there. Where a side has none on show the class is skipped, and
+       the count of skips is printed so the coverage is never quietly
+       smaller than it looks. */
+    var all = Array.prototype.filter.call(document.querySelectorAll('.' + c), function (e) {
+      return !e.closest('.roles-nav');
+    });
+    var el = all.filter(visible)[0]; if (!el) { out[c] = null; return; }
     var cs = getComputedStyle(el), o = {};
     props.forEach(function (p) { o[p] = cs.getPropertyValue(p); });
     out[c] = o;
@@ -124,7 +135,16 @@ async function read(page: Page): Promise<Read> {
    be instead, so the difference is asserted rather than skipped: if one
    of these stops being disabled, or fades by a different amount, this
    still fails. */
-const DELIBERATE: Record<string, Record<string, { is: string; why: string }>> = {
+/* A value the port means to differ on. `is` states it outright; `sameAs`
+   names another class to take it from, so a face is compared against
+   the one the kit itself resolves rather than a string typed here. */
+type Meant = { is?: string; sameAs?: string; why: string };
+const INTER = { sameAs: 'roles-shell', why: 'the business asked for Inter on these two, not the mono face' };
+const DELIBERATE: Record<string, Record<string, Meant>> = {
+  'r-8': { 'font-family': INTER },
+  'r-9': { 'font-family': INTER },
+  'r-6n': { opacity: { is: '0.45', why: 'the pack ships the styles for one density, so both buttons are disabled' } },
+  'r-6o': { opacity: { is: '0.45', why: 'the pack ships the styles for one density, so both buttons are disabled' } },
   'r-3g': { opacity: { is: '0.45', why: 'Access review is out of scope in the handoff, so it is disabled' } },
   'r-31': { opacity: { is: '0.45', why: 'New role is out of scope in the handoff, so it is disabled' } },
 };
@@ -132,21 +152,27 @@ const DELIBERATE: Record<string, Record<string, { is: string; why: string }>> = 
 function compare(label: string, app: Read, kit: Read) {
   const diffs: string[] = [];
   let compared = 0;
+  const skipped: string[] = [];
   for (const c of CLASSES) {
     const a = app.styles[c], k = kit.styles[c];
-    if (!k) continue;                       /* the kit's data does not draw it */
-    if (!a) { diffs.push(`.${c}: not drawn by the application`); continue; }
+    if (!k) { skipped.push(c); continue; }   /* the kit's data does not draw it here */
+    if (!a) { skipped.push(c); continue; }   /* nor does the port, in this state */
     for (const p of PROPS) {
       compared += 1;
       const meant = DELIBERATE[c]?.[p];
       if (meant) {
-        if (a[p] !== meant.is) diffs.push(`.${c} ${p}: app ${a[p]}, but ${meant.why}, so it must be ${meant.is}`);
+        const want = meant.is ?? kit.styles[meant.sameAs!]?.[p];
+        if (want == null) diffs.push(`.${c} ${p}: nothing to compare against (.${meant.sameAs} was not drawn)`);
+        else if (a[p] !== want) diffs.push(`.${c} ${p}: app ${a[p]}, but ${meant.why}, so it must be ${want}`);
         continue;
       }
       if (a[p] !== k[p]) diffs.push(`.${c} ${p}: app ${a[p]} / kit ${k[p]}`);
     }
   }
   writeFileSync(`/tmp/roles-diff-${label}.txt`, diffs.join('\n'));
+  if (skipped.length > 0) {
+    console.log(`        ${skipped.length} classes were on show in neither, so not compared: ${skipped.slice(0, 10).join(', ')}${skipped.length > 10 ? ' and more' : ''}`);
+  }
   ok(`${label}: ${compared} computed values agree with preview.html`, diffs.length === 0,
     `${diffs.length} differ, listed in /tmp/roles-diff-${label}.txt\n        ` + diffs.slice(0, 14).join('\n        '));
 }
@@ -195,17 +221,84 @@ async function main() {
 
   console.log('\n  The regions the handoff fixes\n  ----------------------------');
   ok(`the shell is 1560 by 860 (${a.shell.join(' by ')})`, a.shell[0] === 1560 && a.shell[1] === 860);
-  ok(`the navigation is 218 wide (${a.nav})`, a.nav === 218);
+  /* The pack's own navigation column is not drawn. check:roles-port
+     asserts it is absent from the markup; this asserts the layout does
+     not leave a gap where it was. */
+  ok('the pack\'s navigation column is not on screen', a.nav === -1, `found one ${a.nav} wide`);
   ok(`the rail is 250 wide (${a.rail})`, a.rail === 250);
   ok(`the inspector is 352 wide (${a.inspector})`, a.inspector === 352);
-  ok(`the canvas takes the remainder, as it does in the kit (${a.canvas} / ${k.canvas})`, a.canvas === k.canvas,
-    `kit: nav ${k.nav}, rail ${k.rail}, inspector ${k.inspector}, shell ${k.shell.join(' by ')}`);
+  /* The handoff: "The three fixed regions stay at 218px, 250px and
+     352px. The canvas takes the remainder." Two of those three are
+     still here, the third is the navigation the business removed, so
+     the canvas takes what is left of the shell after the rail and the
+     inspector and their two hairlines. */
+  const remainder = a.shell[0]! - a.rail - a.inspector;
+  ok(`the canvas takes the remainder (${a.canvas} of ${remainder})`,
+    Math.abs(a.canvas - remainder) <= 2,
+    `shell ${a.shell[0]}, rail ${a.rail}, inspector ${a.inspector}`);
   ok('the canvas body scrolls rather than clips', a.styles['roles-canvas-body']?.['overflow-y'] === 'auto');
   ok(`exactly one inspector panel shows (${a.panelsVisible})`, a.panelsVisible === 1);
   ok(`${a.texts} text blocks and none of them overlap`, a.overlaps.length === 0, a.overlaps.join('\n        '));
   ok('the inspector body scrolls its overflow, as the kit\'s does',
     !!a.bodyBox && !!k.bodyBox && a.bodyBox.h === k.bodyBox.h && a.bodyBox.sh > a.bodyBox.h,
     `app ${JSON.stringify(a.bodyBox)} / kit ${JSON.stringify(k.bodyBox)}`);
+
+  /* ---- The connectors land where they should ----
+
+     From the business, of an earlier build: "the lines connecting the
+     tree are all broken and overlapped." A screenshot cannot be
+     asserted, so the property behind it is: every drop must be centred
+     on the card it points at, every elbow must reach its own column's
+     centre, and the segments of one branch row must tile that row left
+     to right with nothing but the row's own gap between them. */
+  const wires = await app.evaluate(`(() => {
+    const mid = (r) => r.left + r.width / 2;
+    /* Counted as well as checked: a check that examined nothing passes
+       for the wrong reason, and this one runs against a view that can
+       be hidden. */
+    const out = { drops: [], elbows: [], gaps: [], nDrops: 0, nSegs: 0, nRows: 0 };
+    for (const drop of document.querySelectorAll('.roles-canvas-body .r-2d')) {
+      const card = drop.parentElement.querySelector(':scope > .sn-lab [data-for], :scope > .r-1y [data-for], :scope > * [data-for]');
+      if (!card) continue;
+      const d = drop.getBoundingClientRect(), c = card.getBoundingClientRect();
+      if (d.width === 0 || c.width === 0) continue;
+      out.nDrops += 1;
+      if (Math.abs(mid(d) - mid(c)) > 2) out.drops.push(card.getAttribute('data-for') + ': drop at ' + Math.round(mid(d)) + ', card centre ' + Math.round(mid(c)));
+    }
+    for (const row of document.querySelectorAll('.roles-canvas-body .r-6v, .roles-canvas-body .r-6w')) {
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      const segs = [];
+      for (const col of row.children) {
+        const bar = col.querySelector(':scope > span');
+        if (!bar) continue;
+        const b = bar.getBoundingClientRect(), c = col.getBoundingClientRect();
+        if (b.width === 0) continue;
+        segs.push({ l: b.left, r: b.right, cl: c.left, cr: c.right, cm: mid(c) });
+        out.nSegs += 1;
+      }
+      if (segs.length > 0) out.nRows += 1;
+      segs.forEach((sg, i) => {
+        const touchesCentre = sg.l <= sg.cm + 1 && sg.r >= sg.cm - 1;
+        if (!touchesCentre) out.elbows.push('a segment does not reach its own column centre');
+        if (i > 0) {
+          const g = Math.round(sg.l - segs[i - 1].r);
+          if (Math.abs(g - gap) > 2) out.gaps.push('gap ' + g + ' between segments where the row gap is ' + Math.round(gap));
+        }
+      });
+    }
+    return out;
+  })()`) as { drops: string[]; elbows: string[]; gaps: string[]; nDrops: number; nSegs: number; nRows: number };
+
+  console.log('\n  The connectors line up\n  ----------------------');
+  ok(`all ${wires.nDrops} drops are centred on the card they point at`,
+    wires.nDrops > 0 && wires.drops.length === 0,
+    wires.nDrops === 0 ? 'no drops were examined, so this proved nothing' : wires.drops.slice(0, 5).join('\n        '));
+  ok(`all ${wires.nSegs} elbows reach their own column centre`,
+    wires.nSegs > 0 && wires.elbows.length === 0,
+    wires.nSegs === 0 ? 'no elbows were examined, so this proved nothing' : wires.elbows.slice(0, 5).join('\n        '));
+  ok(`the segments of each of the ${wires.nRows} branch rows tile it with only the row gap between them`,
+    wires.nRows > 0 && wires.gaps.length === 0,
+    wires.nRows === 0 ? 'no branch rows were examined, so this proved nothing' : wires.gaps.slice(0, 5).join('\n        '));
 
   console.log('\n  It looks the same\n  -----------------');
   compare('light', a, k);

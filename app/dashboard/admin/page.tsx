@@ -2,11 +2,6 @@ import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { AdminPanel } from '@/components/AdminPanel';
-import { visibleSections } from '@/lib/nav';
-import { screenCapabilities } from '@/lib/platform/permissions/resolve';
-import { viewingAs } from '@/lib/platform/permissions/view-as';
-import { initials } from '@/components/admin/roles/model';
-import type { Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,32 +60,6 @@ export default async function AdminPage() {
     .eq('is_active', true)
     .order('sort_order');
 
-  /* ---- The Roles screen draws its own navigation ----
-
-     The kit for that tab draws the application's sidebar inside the
-     screen, and the handoff fixes it at 218px. Its rows are bound to
-     the real ones: the sections this person can reach, resolved the
-     same way the sidebar resolves them (for the person being viewed
-     as, when somebody is), and the name and role of whoever that is. */
-  const asSomeoneElse = await viewingAs(supabase);
-  const whoId = asSomeoneElse?.userId ?? user.id;
-  const { data: profile } = await supabase.from('profiles').select('*').eq('id', whoId).maybeSingle();
-  const caps = await screenCapabilities(supabase, (profile as Profile | null), whoId);
-  const nav = visibleSections((c) => caps.has(c)).map((s) => ({
-    label: s.label,
-    items: s.items.map((i) => ({ label: i.label, icon: i.icon, active: i.href === '/dashboard/admin' })),
-  }));
-  const meName = (profile as { full_name?: string | null } | null)?.full_name ?? user.email ?? 'Somebody';
-  const { data: myRole } = (profile as { role_template_id?: string | null } | null)?.role_template_id
-    ? await supabase.from('role_templates').select('name')
-        .eq('id', (profile as { role_template_id: string }).role_template_id).maybeSingle()
-    : { data: null };
-  const me = {
-    initials: initials(meName),
-    name: meName,
-    role: asSomeoneElse?.roleName ?? (myRole as { name?: string } | null)?.name ?? '',
-  };
-
   return (
     /* `useSearchParams` inside the panel reads `?person=`, and Next
        requires a boundary around a client component that does. */
@@ -100,8 +69,6 @@ export default async function AdminPage() {
         mayManage={mayManage === true}
         mayDecide={mayDecide === true}
         mayEditRoles={mayEditRoles === true}
-        nav={nav}
-        me={me}
         templates={(templates ?? []) as { slug: string; name: string; description: string | null }[]}
       />
     </Suspense>

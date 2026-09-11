@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { EmptyState, NotProvisioned, Skeleton } from '@/components/kit/primitives';
-import { RolesScreen, type Me, type NavSectionView } from './RolesScreen';
+import { RolesScreen } from './RolesScreen';
 import { buildModel, type Cap, type Grant, type Holder, type Line, type Template } from './model';
 import { EditPermissions, type Change } from './EditPermissions';
 import './roles-tokens.css';
@@ -46,8 +46,9 @@ import './port.css';
    than a copy. That is the point of the screen, and the modal says so
    before saving.
    ============================================================= */
-export function RolesPage({ nav, me, mayEdit, onAssign }: {
-  nav: NavSectionView[]; me: Me;
+export function RolesPage({ mayEdit, onAssign, openOn }: {
+  /** `?role=` from the address bar. */
+  openOn?: string | null;
   /** `admin.roles`: may change what a role can do, not only read it. */
   mayEdit: boolean;
   /** The role menu's Assign people: that job belongs to the People tab. */
@@ -160,7 +161,7 @@ export function RolesPage({ nav, me, mayEdit, onAssign }: {
 
   return (
     <div className="roles-port">
-      <RolesScreen model={model} nav={nav} me={me} mayEdit={mayEdit}
+      <RolesScreen model={model} mayEdit={mayEdit} openOn={openOn}
         onEdit={(id) => { setRefused(null); setEditing(id); }} onAssign={onAssign} />
       {role && (
         <EditPermissions
