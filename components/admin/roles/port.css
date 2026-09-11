@@ -1,0 +1,33 @@
+/* =============================================================
+   What the application adds around the kit's screen. Two rules.
+
+   1. The kit's screen is a fixed 1560 by 860, by design, and the Admin
+      tab it sits in is narrower on most screens. preview.html answers
+      this with `overflow-x:auto` on its body; this is the same answer
+      on the one wrapper the application adds.
+
+   2. preview.html renders the screen inside a body that sets Inter and
+      the text colour and nothing else, so everything the kit's classes
+      do not set comes from the browser: a 16px size, normal spacing,
+      no borders. This application's own stylesheet sets a 14px base,
+      tight letter spacing, a line height and Tailwind's border reset
+      on every element, and the kit's screen would inherit all of it.
+      So `.r-3x`, the kit's outermost element, is put back to what the
+      reference render gives it: the body rule from preview.html, and
+      `initial` for the rest, which is the browser's own value and not
+      one chosen here. `:where()` keeps the border reset at zero
+      specificity so any border the kit does draw wins over it.
+
+      `npm run check:roles-render` compares the computed styles of
+      every class on both sides and is what says this is enough.
+   ============================================================= */
+.roles-port{overflow-x:auto}
+.r-3x{font-family:var(--inter);color:var(--text);font-size:initial;font-weight:initial;letter-spacing:initial;line-height:initial}
+:where(.r-3x,.r-3x *){border-style:none;border-color:currentColor}
+/* The application styles every <label> as a form caption: small, medium
+   weight, muted. The kit's nodes and rail rows are labels, because a
+   label is what selects a radio, and they must read as the kit's classes
+   say and not as a caption. `:where(.r-3x)` keeps this at the element
+   rule's own specificity, so it replaces that rule and nothing the kit
+   sets on the class. */
+:where(.r-3x) label{display:inline;margin:0;padding:0;font:inherit;letter-spacing:inherit;color:inherit;text-transform:none;text-align:inherit}

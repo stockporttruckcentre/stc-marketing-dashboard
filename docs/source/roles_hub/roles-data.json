@@ -1,0 +1,244 @@
+{
+  "note": "Placeholder permission model. Replace with the real role list; markup and CSS need no changes.",
+  "capabilityTotal": 148,
+  "divisions": {
+    "stc": {
+      "label": "STC Service",
+      "tint": "#09163A"
+    },
+    "sales": {
+      "label": "Trailer Sales",
+      "tint": "#B31F14"
+    },
+    "hire": {
+      "label": "Rentals",
+      "tint": "#C77A06"
+    },
+    "grp": {
+      "label": "Group",
+      "tint": "#2B3F78"
+    },
+    "sys": {
+      "label": "System",
+      "tint": "#5B5B56"
+    }
+  },
+  "roles": [
+    {
+      "id": "md",
+      "label": "Managing Director",
+      "division": "grp",
+      "holders": 1,
+      "capabilities": "148 of 148",
+      "reportsTo": null,
+      "kind": "exec"
+    },
+    {
+      "id": "opsdir",
+      "label": "Operations Director",
+      "division": "grp",
+      "holders": 1,
+      "capabilities": "121 of 148",
+      "reportsTo": "md",
+      "kind": "exec"
+    },
+    {
+      "id": "comdir",
+      "label": "Commercial Director",
+      "division": "grp",
+      "holders": 1,
+      "capabilities": "96 of 148",
+      "reportsTo": "md",
+      "kind": "exec"
+    },
+    {
+      "id": "fin",
+      "label": "Finance Manager",
+      "division": "grp",
+      "holders": 1,
+      "capabilities": "74 of 148",
+      "reportsTo": "md",
+      "kind": "mgr"
+    },
+    {
+      "id": "comp",
+      "label": "Compliance Manager",
+      "division": "grp",
+      "holders": 1,
+      "capabilities": "69 of 148",
+      "reportsTo": "md",
+      "kind": "mgr"
+    },
+    {
+      "id": "depot",
+      "label": "Depot Manager",
+      "division": "stc",
+      "holders": 7,
+      "capabilities": "88 of 148",
+      "reportsTo": "opsdir",
+      "kind": "mgr"
+    },
+    {
+      "id": "parts",
+      "label": "Parts Manager",
+      "division": "stc",
+      "holders": 2,
+      "capabilities": "41 of 148",
+      "reportsTo": "opsdir",
+      "kind": "mgr"
+    },
+    {
+      "id": "ctrl",
+      "label": "Workshop Controller",
+      "division": "stc",
+      "holders": 9,
+      "capabilities": "57 of 148",
+      "reportsTo": "depot",
+      "kind": "staff"
+    },
+    {
+      "id": "tech",
+      "label": "Technician",
+      "division": "stc",
+      "holders": 62,
+      "capabilities": "23 of 148",
+      "reportsTo": "ctrl",
+      "kind": "staff"
+    },
+    {
+      "id": "tester",
+      "label": "MOT Tester",
+      "division": "stc",
+      "holders": 11,
+      "capabilities": "31 of 148",
+      "reportsTo": "ctrl",
+      "kind": "staff"
+    },
+    {
+      "id": "padv",
+      "label": "Parts Advisor",
+      "division": "stc",
+      "holders": 8,
+      "capabilities": "19 of 148",
+      "reportsTo": "parts",
+      "kind": "staff"
+    },
+    {
+      "id": "salesmgr",
+      "label": "Trailer Sales Manager",
+      "division": "sales",
+      "holders": 1,
+      "capabilities": "63 of 148",
+      "reportsTo": "comdir",
+      "kind": "mgr"
+    },
+    {
+      "id": "salesex",
+      "label": "Sales Executive",
+      "division": "sales",
+      "holders": 4,
+      "capabilities": "34 of 148",
+      "reportsTo": "salesmgr",
+      "kind": "staff"
+    },
+    {
+      "id": "hiremgr",
+      "label": "Rentals Manager",
+      "division": "hire",
+      "holders": 1,
+      "capabilities": "58 of 148",
+      "reportsTo": "comdir",
+      "kind": "mgr"
+    },
+    {
+      "id": "hiredesk",
+      "label": "Hire Desk Controller",
+      "division": "hire",
+      "holders": 5,
+      "capabilities": "37 of 148",
+      "reportsTo": "hiremgr",
+      "kind": "staff"
+    },
+    {
+      "id": "driver",
+      "label": "Delivery Driver",
+      "division": "hire",
+      "holders": 6,
+      "capabilities": "9 of 148",
+      "reportsTo": "hiremgr",
+      "kind": "staff"
+    },
+    {
+      "id": "fsam",
+      "label": "FleetSmart+ Account Mgr",
+      "division": "grp",
+      "holders": 2,
+      "capabilities": "52 of 148",
+      "reportsTo": "comdir",
+      "kind": "mgr"
+    },
+    {
+      "id": "credit",
+      "label": "Credit Control",
+      "division": "grp",
+      "holders": 3,
+      "capabilities": "28 of 148",
+      "reportsTo": "fin",
+      "kind": "staff"
+    },
+    {
+      "id": "ledger",
+      "label": "Purchase Ledger",
+      "division": "grp",
+      "holders": 2,
+      "capabilities": "22 of 148",
+      "reportsTo": "fin",
+      "kind": "staff"
+    },
+    {
+      "id": "compadm",
+      "label": "Compliance Administrator",
+      "division": "grp",
+      "holders": 2,
+      "capabilities": "35 of 148",
+      "reportsTo": "comp",
+      "kind": "staff"
+    },
+    {
+      "id": "sysadmin",
+      "label": "System Administrator",
+      "division": "sys",
+      "holders": 2,
+      "capabilities": "148 of 148",
+      "reportsTo": null,
+      "kind": "sys"
+    },
+    {
+      "id": "auditor",
+      "label": "Read Only Auditor",
+      "division": "sys",
+      "holders": 3,
+      "capabilities": "61 of 148",
+      "reportsTo": null,
+      "kind": "sys"
+    },
+    {
+      "id": "api",
+      "label": "API Service Account",
+      "division": "sys",
+      "holders": 4,
+      "capabilities": "17 of 148",
+      "reportsTo": null,
+      "kind": "sys"
+    },
+    {
+      "id": "portal",
+      "label": "Customer Portal User",
+      "division": "sys",
+      "holders": 0,
+      "capabilities": "11 of 148",
+      "reportsTo": null,
+      "kind": "sys"
+    }
+  ]
+}

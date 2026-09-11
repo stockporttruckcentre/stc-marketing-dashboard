@@ -24,7 +24,7 @@ path=$(printf '%s' "$payload" | python3 -c \
   'import json,sys;d=json.load(sys.stdin);print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)
 
 case "$path" in
-  *AnalyticsHub.tsx|*components/analytics/*|*ReportsHub.tsx|*kit-tokens.css|*kit.generated.ts) ;;
+  *AnalyticsHub.tsx|*components/analytics/*|*ReportsHub.tsx|*kit-tokens.css|*kit.generated.ts|*components/admin/roles/*) ;;
   *) exit 0 ;;
 esac
 

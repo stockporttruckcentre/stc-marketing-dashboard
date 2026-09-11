@@ -35,18 +35,12 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 const GOVERNED = [
   /* ---- The Roles tab ----
 
-     A second kit arrived for one screen, so it goes through the same
-     machine: `roles-kit.generated.ts` is read off
-     `docs/source/STCUIRoles.html` by a browser, and these two files
-     spread it. They should hold NOTHING, which is what the baseline
-     says, and watching them from nought is the whole point: a file that
-     starts empty and is not watched is a file somebody types a 3 into.
-
-     `roles-kit.ts` is the adapter between the generated record and a
-     React style object. It contains no design value either, only the
-     rule for collapsing four border sides into one. */
-  'components/admin/roles-chart.tsx',
-  'lib/admin/roles-kit.ts',
+     Ported from `docs/source/roles_hub`, whose stylesheets ship as
+     written. The screen and its model carry class names, which are the
+     kit's, and no value: not a length, not a colour, not a weight.
+     Watched from nought so that stays true. */
+  'components/admin/roles/RolesScreen.tsx',
+  'components/admin/roles/model.ts',
   'components/AnalyticsHub.tsx',
   'components/analytics/kit/charts.tsx',
   'components/analytics/kit/frame.tsx',

@@ -1,0 +1,5 @@
+/* Panton. Copy the four font files alongside this file. */
+@font-face{font-family:'Panton';src:url('fonts/Panton-Regular.otf') format('opentype');font-weight:400;font-display:swap}
+@font-face{font-family:'Panton';src:url('fonts/Panton-SemiBold.otf') format('opentype');font-weight:600;font-display:swap}
+@font-face{font-family:'Panton';src:url('fonts/Panton-Bold.ttf') format('truetype');font-weight:700;font-display:swap}
+@font-face{font-family:'Panton';src:url('fonts/Panton-ExtraBold.otf') format('opentype');font-weight:800;font-display:swap}

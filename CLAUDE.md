@@ -194,6 +194,21 @@ So:
 - **"Would look better" is not a reason.** It is the exact thought that
   produced every one of the nineteen.
 
+### The Roles tab came as a handoff, not a kit
+
+`docs/source/roles_hub/` is different again: `HANDOFF.md` says its
+stylesheets and markup are the implementation, to be copied as they are and
+bound to real data inside the repeating regions only. So `components/admin/roles/`
+holds the kit's three stylesheets (two byte for byte, the tokens with two
+selector lines rescoped and nothing else), `RolesScreen.tsx` is its markup with
+loops where the handoff names them, and `kit.generated.ts` is what
+`npm run roles-port:generate` reads out of the kit's files. Two checks say so:
+
+```bash
+npm run check:roles-port     # the handoff's own step 4: diff the render against roles-page.html
+npm run check:roles-render   # the app beside preview.html in one browser, every computed value compared
+```
+
 ### The guards
 
 A rule of the form "does this match the kit" cannot be enforced, because

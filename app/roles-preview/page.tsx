@@ -1,35 +1,33 @@
 'use client';
 
 /* =============================================================
-   The Roles tab, with fabricated roles, for looking at. Dev only.
-
-   ---- Why this exists ----
+   The Roles screen, with fabricated roles, for looking at. Dev only.
 
    From the business, with two screenshots of the live tab:
 
      It's built the roles page and the whole UI is broken. Look at it.
      This is because it didn't bother to look at what it created.
 
-   That is exactly what happened. The component read five tables behind
-   a login, so nothing rendered it before it merged, and it went live
-   with every block stamped at the kit demo's own width and height: a
-   five line paragraph forced to fourteen pixels, running over the card
-   under it.
-
-   So the screen is split from its loader, and this mounts the real
-   screen with the eleven roles, a handful of capabilities and two
-   holders. `scripts/roles-render-check.ts` opens it in a browser,
-   screenshots it, and fails if any two text blocks overlap.
+   The screen reads four tables behind a login, so nothing rendered it
+   before it merged. This mounts the same screen with the eleven roles,
+   a handful of capabilities and a few holders, and
+   `scripts/roles-render-check.ts` opens it beside the kit's own
+   `preview.html` in one browser and compares what each one drew.
 
    `notFound()` in production, like the harnesses next door.
    ============================================================= */
 
 import { notFound } from 'next/navigation';
-import { RolesView } from '@/components/admin/roles-chart';
+import { RolesScreen } from '@/components/admin/roles/RolesScreen';
+import { buildModel } from '@/components/admin/roles/model';
+import '@/components/admin/roles/roles-tokens.css';
+import '@/components/admin/roles/roles-page.css';
+import '@/components/admin/roles/roles-behaviour.css';
+import '@/components/admin/roles/port.css';
 
 const ROLE = (slug: string, name: string, dept: string, up: string | null, sort: number, manages: string[] = []) => ({
-  id: `role-${slug}`, slug, name, description: `${name}: what this role is for, in a sentence long enough to wrap across several lines so the layout has to cope with it.`,
-  department: dept, manages, escalates_to: up, sort_order: sort, customised_at: null,
+  id: `role-${slug}`, slug, name, description: `${name}: what this role is for.`,
+  department: dept, manages, escalates_to: up, sort_order: sort, customised_at: null as string | null,
 });
 
 const ROLES = [
@@ -45,6 +43,8 @@ const ROLES = [
   ROLE('sr_office_admin', 'Sr Admin', 'admin', 'managing_director', 10, ['admin']),
   ROLE('office_admin', 'Admin', 'admin', 'sr_office_admin', 11),
 ];
+/* One role changed from its template, so the flag block has something to draw. */
+ROLES[3]!.customised_at = '2026-09-01T09:00:00Z';
 
 const CAP = (key: string, label: string, area: string, feature: string, danger = 'routine', position = 10) => ({
   key, label, area, feature, danger, position,
@@ -66,8 +66,13 @@ const CAPS = [
   CAP('work.assign', 'Give somebody a task', 'Work', 'Tasks', 'routine', 20),
 ];
 
+/* Sr Sales exports within their department only, so one key
+   permission on the screen reads Conditional rather than Allowed. */
 const HOLD = (role: string, ...keys: string[]) =>
-  keys.map((k) => ({ role_template_id: `role-${role}`, capability: k, scope: k === 'crm.view' ? 'own' : 'company' }));
+  keys.map((k) => ({
+    role_template_id: `role-${role}`, capability: k,
+    scope: k === 'crm.view' ? 'own' : k === 'crm.export' && role === 'sr_sales' ? 'department' : 'company',
+  }));
 
 const GRANTS = [
   ...HOLD('developer', ...CAPS.map((c) => c.key)),
@@ -79,34 +84,46 @@ const GRANTS = [
   ...HOLD('marketing_exec', 'crm.view', 'access.request', 'work.view'),
   ...HOLD('sr_finance', 'crm.view', 'crm.export', 'stock.view', 'admin.users', 'admin.roles', 'access.request', 'access.decide', 'work.view', 'work.assign'),
   ...HOLD('finance', 'crm.view', 'stock.view', 'access.request', 'work.view'),
-  ...HOLD('sr_office_admin', 'crm.view', 'crm.import', 'access.request', 'access.decide', 'work.view'),
-  ...HOLD('office_admin', 'crm.view', 'access.request', 'work.view'),
+  ...HOLD('sr_office_admin', 'crm.view', 'crm.edit', 'crm.import', 'admin.users', 'access.request', 'access.decide', 'work.view', 'work.assign'),
+  ...HOLD('office_admin', 'crm.view', 'crm.edit', 'access.request', 'work.view'),
 ];
+
+const PERSON = (id: string, role: string, name: string, job: string) =>
+  ({ id, role_template_id: `role-${role}`, name, job_title: job });
 
 const HOLDERS = [
-  { id: 'u-alex', role_template_id: 'role-developer', name: 'Alex Ellis', job_title: 'Marketing & Development' },
-  { id: 'u-dean', role_template_id: 'role-sales_rep', name: 'Dean Mann', job_title: 'Sales' },
-  { id: 'u-wayne', role_template_id: 'role-sr_finance', name: 'Wayne Kenny', job_title: 'Finance Director' },
+  PERSON('u1', 'managing_director', 'Gary Sutton', 'Managing Director'),
+  PERSON('u2', 'sr_sales', 'Dean Whitfield', 'Head of Sales'),
+  PERSON('u3', 'sales_rep', 'Sam Gill', 'Sales'),
+  PERSON('u4', 'sales_rep', 'Marcus Hale', 'Sales'),
+  PERSON('u5', 'sales_rep', 'Rob Price', 'Sales'),
+  PERSON('u6', 'sales_rep', 'Dan Clarke', 'Sales'),
+  PERSON('u7', 'sales_rep', 'Alan Booth', 'Sales'),
+  PERSON('u8', 'sales_rep', 'Priya Nair', 'Sales'),
+  PERSON('u9', 'developer', 'Alex Dawson', 'Developer'),
+  PERSON('u10', 'office_admin', 'Wayne Kenny', 'Administrator'),
 ];
 
-const HISTORY = [
-  { id: 1, at: '2026-09-10T09:12:00Z', actor_label: 'Alex Ellis', kind: 'granted', role_template_id: 'role-sales_rep', capability_label: 'Export the CRM', scope_before: null, scope_after: 'company' },
-  { id: 2, at: '2026-09-09T16:40:00Z', actor_label: 'Alex Ellis', kind: 'revoked', role_template_id: 'role-sales_rep', capability_label: 'Export the CRM', scope_before: 'company', scope_after: null },
+const NAV = [
+  { label: 'Workspace', items: [
+    { label: 'Dashboard', icon: 'dashboard' as const, active: false },
+    { label: 'Analytics', icon: 'analytics' as const, active: false },
+    { label: 'Reports', icon: 'reports' as const, active: false },
+    { label: 'Work', icon: 'work' as const, active: false },
+  ] },
+  { label: 'Admin', items: [
+    { label: 'Team', icon: 'team' as const, active: false },
+    { label: 'Settings', icon: 'settings' as const, active: false },
+    { label: 'Admin', icon: 'admin' as const, active: true },
+  ] },
 ];
 
 export default function RolesPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
+  const model = buildModel({ roles: ROLES, caps: CAPS, grants: GRANTS, holders: HOLDERS });
   return (
-    <div className="kit" style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      <RolesView
-        data={{ roles: ROLES, caps: CAPS, grants: GRANTS, holders: HOLDERS, history: HISTORY }}
-        mayEdit
-        busy={null}
-        said={null}
-        failed={null}
-        onToggle={() => undefined}
-        onRescope={() => undefined}
-      />
+    <div className="roles-port">
+      <RolesScreen model={model} nav={NAV} me={{ initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' }} />
     </div>
   );
 }
