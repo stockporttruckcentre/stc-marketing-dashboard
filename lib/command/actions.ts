@@ -359,6 +359,25 @@ export const ACTIONS: CommandActionSpec[] = [
       'what am i allowed to do', 'why can i not', 'my role', 'what my role gives me'],
     phrases: ['what can i do', 'what am i allowed', 'why can i not see that', 'what does my role let me do'] },
 
+  /* The same question asked when the answer is "nothing works". No
+     capability either, and for a stronger reason than the tab above:
+     this is the screen somebody is sent to when a page has just
+     refused them, so gating it on a permission could shut the only
+     thing that explains why the others are shut.
+
+     It is separate from the settings tab because it answers a
+     different question. The tab lists what you hold. This says who the
+     database thinks you are, which role answered, and what the lookup
+     actually returned, which on the evening of the lockout was the one
+     thing nobody could see. */
+  { id: 'me.access.diagnose', label: 'Why will a page not open', blurb: 'What the database answers, and which part is failing', kind: 'session',
+    path: '/dashboard/settings/access', verbs: [...GO, 'check', 'see', 'fix', 'diagnose'],
+    objects: ['why can i not open', 'why is a page not opening', 'locked out', 'access denied',
+      'permission denied', 'page will not open', 'why am i blocked', 'access problem',
+      'permissions broken', 'why does it say no access', 'access report', 'permission report'],
+    phrases: ['why will a page not open', 'why am i locked out', 'why does it say i have no access',
+      'my permissions are broken', 'i cannot open anything', 'diagnose my access'] },
+
   /* ---------- other people ----------
      Everything here is invisible without admin.users, which is the case
      the requirement named: "elevate dave to admin" works for one person
