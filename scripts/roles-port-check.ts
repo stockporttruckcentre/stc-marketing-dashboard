@@ -34,7 +34,8 @@ import { execFileSync } from 'node:child_process';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { chromium } from 'playwright';
-import { RolesScreen } from '../components/admin/roles/RolesScreen';
+import { RolesScreen, People, HistoryBody } from '../components/admin/roles/RolesScreen';
+import { EditPermissions } from '../components/admin/roles/EditPermissions';
 import { buildModel, behaviourFor, DEPARTMENTS, type Input } from '../components/admin/roles/model';
 import { KIT_IDS } from '../components/admin/roles/kit.generated';
 
@@ -120,8 +121,9 @@ const nav = [
   { label: 'Workspace', items: [{ label: 'Dashboard', icon: 'dashboard' as const, active: false }] },
   { label: 'Admin', items: [{ label: 'Admin', icon: 'admin' as const, active: true }] },
 ];
+const model = buildModel(input);
 const mine = renderToStaticMarkup(createElement(RolesScreen, {
-  model: buildModel(input), nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
+  model, nav, me: { initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' },
 })).replace(/^<style>[\s\S]*?<\/style>/, '');
 const kitHtml = readFileSync(`${KIT}/roles-page.html`, 'utf8')
   .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
@@ -133,8 +135,17 @@ async function main() {
 
   /* The comparison, run inside the page so the browser does the
      parsing and neither side is read by a regex. */
-  const COMPARE = `(function (kitHtml, mineHtml) {
-    var parse = function (h) { var d = new DOMParser().parseFromString(h, 'text/html'); return d.querySelector('.r-62'); };
+  const COMPARE = `(function (kitHtml, mineHtml, isPart, rootSel) {
+    /* The screen is rooted at the kit's own outermost element. A
+       component is a fragment, so its root is the document body, or
+       the element named by rootSel where the port legitimately wraps
+       the kit's markup in something of its own. The shell comparison
+       does not apply to a component. */
+    var parse = function (h) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      if (!isPart) return d.querySelector('.r-62');
+      return rootSel ? d.querySelector(rootSel) : d.body;
+    };
     var K = parse(kitHtml), M = parse(mineHtml);
 
     /* A class token that data chooses is normalised so a node's tint
@@ -158,7 +169,15 @@ async function main() {
       var cls = (el.getAttribute('class') || '').split(/\\s+/).filter(Boolean).map(norm).filter(Boolean).sort();
       return el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '');
     };
-    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'style', 'class', 'xmlns'];
+    /* Attributes the port BINDS rather than draws: an id, a label's
+       target, a tooltip, a value, and the ones that carry state. The
+       disabled attribute is on the list for one reason, stated so it
+       cannot quietly grow: a control the person's permissions do not
+       allow is disabled here and refused again inside the database.
+       The kit draws no disabled state because the kit does not know
+       who is looking. Everything NOT on this list still has to match
+       the kit exactly. */
+    var BOUND = ['for', 'id', 'data-list', 'data-for', 'title', 'placeholder', 'value', 'checked', 'hidden', 'disabled', 'style', 'class', 'xmlns'];
     var attrs = function (el) {
       var out = [];
       for (var i = 0; i < el.attributes.length; i++) { var a = el.attributes[i]; if (BOUND.indexOf(a.name) < 0) out.push(a.name + '=' + a.value); }
@@ -187,7 +206,7 @@ async function main() {
       };
       return ser(c);
     };
-    var a = shell(K), b = shell(M), at = 0;
+    var a = isPart ? '' : shell(K), b = isPart ? '' : shell(M), at = 0;
     while (at < a.length && a[at] === b[at]) at++;
     var shellSame = a === b;
 
@@ -245,6 +264,68 @@ async function main() {
   ok('every element the port draws, attributes included, is one the kit draws', r.badElements.length === 0, r.badElements.slice(0, 8).join('\n        '));
   ok('every class the port uses is defined by the kit', r.unknown.length === 0, r.unknown.join(', '));
   ok('the only inline style is a bar width the kit has no class for', r.styled.length === 0, r.styled.slice(0, 5).join('\n        '));
+
+  /* ---- 4. The components the pack ships as their own files ----
+
+     Each is compared to ITS OWN file the same way: every element it
+     draws, attributes included, every parent/child nesting and every
+     class must be one that file draws. The shell test is not applied,
+     because a component is mounted inside the screen rather than
+     standing alone, so its outermost wrapper is legitimately the
+     screen's. What is asserted is that nothing was added, renamed or
+     restructured on the way in. */
+  const PARTS: { what: string; file: string; markup: string; root?: string }[] = [
+    {
+      what: 'the Edit permissions modal', file: 'roles-edit-permissions.html',
+      /* The kit file IS the dialog card. The backdrop around it is the
+         application's own modal chrome, copied from its Modal in
+         components/kit/forms.tsx, and is asserted separately below. */
+      root: '.r-3z',
+      markup: renderToStaticMarkup(createElement(EditPermissions, {
+        role: input.roles[0]!, caps: caps.slice(0, 6),
+        held: new Map([[caps[0]!.key, 'company'], [caps[2]!.key, 'department']]),
+        onClose: () => {}, onSave: () => {}, saving: false, failed: null,
+      })),
+    },
+    {
+      what: 'the People tab', file: 'roles-tab-people.html',
+      markup: renderToStaticMarkup(createElement(People, { panel: model.panels[0]! })),
+    },
+    {
+      what: 'the History tab', file: 'roles-tab-history.html',
+      markup: renderToStaticMarkup(createElement(HistoryBody, { panel: model.panels[0]! })),
+    },
+  ];
+
+  console.log('\n  Each component is its own file\'s\n  ------------------------------');
+  for (const part of PARTS) {
+    const kitPart = readFileSync(`${KIT}/${part.file}`, 'utf8')
+      .replace(/<!--[\s\S]*?-->/g, '').replace(/<link[^>]*>/g, '');
+    const pr = await page.evaluate(
+      `${COMPARE}(${JSON.stringify(kitPart)}, ${JSON.stringify(part.markup)}, true, ${JSON.stringify(part.root ?? '')})`) as {
+      badEdges: string[]; badElements: string[]; unknown: string[];
+    };
+    ok(`${part.what} draws only what ${part.file} draws`,
+      pr.badEdges.length === 0 && pr.badElements.length === 0 && pr.unknown.length === 0,
+      [...pr.badEdges.slice(0, 4), ...pr.badElements.slice(0, 4),
+       ...(pr.unknown.length ? [`classes not in the kit: ${pr.unknown.join(', ')}`] : [])].join('\n        '));
+  }
+
+  /* The one thing the port adds around a kit component, asserted by
+     name so a second wrapper cannot appear without this failing. */
+  {
+    const shell = await page.evaluate(`(function (h) {
+      var d = new DOMParser().parseFromString(h, 'text/html');
+      var outer = d.body.firstElementChild;
+      var path = [];
+      for (var el = outer; el && !el.classList.contains('r-3z'); el = el.firstElementChild) {
+        path.push(el.tagName.toLowerCase() + '.' + el.getAttribute('class'));
+      }
+      return path.join(' > ');
+    })(${JSON.stringify(PARTS[0]!.markup)})`) as string;
+    ok('the only thing the port wraps the modal in is its own backdrop',
+      shell === 'div.roles-modal', `found ${shell}`);
+  }
 
   console.log('\n  Every role is drawn\n  ------------------');
   ok(`one radio per role (${r.radios} of ${r.roles})`, r.radios === r.roles);

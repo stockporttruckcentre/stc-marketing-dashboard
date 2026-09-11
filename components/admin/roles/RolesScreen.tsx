@@ -2,6 +2,10 @@
 
 import { useRef, useState, type ReactNode } from 'react';
 import { ICONS } from '@/components/nav-icons';
+import {
+  Svg, PeopleIcon, AlertIcon, DocIcon, PlusIcon, MinusIcon,
+  CheckIcon, CrossIcon, DownIcon, GridIcon, KebabIcon, CopyIcon, PencilIcon, OpenIcon, SearchIcon,
+} from './icons';
 import type { NavIcon } from '@/lib/nav';
 import type { Chart, Column, NodeView, Panel, ScreenModel, Verdict } from './model';
 
@@ -35,57 +39,41 @@ import type { Chart, Column, NodeView, Panel, ScreenModel, Verdict } from './mod
 
    ---- What is ----
 
-   Three things the kit draws as controls and leaves to the build:
-   the search box and the division chips narrow the rail, and the zoom
+   The search box and the division chips narrow the rail. The zoom
    buttons scale the chart between 50 and 150 per cent, which is the
-   range the behaviour document names. Each one sets a `hidden`
-   attribute or the chart's zoom and touches nothing else. Every other
-   button on the screen (the views, the density, Access review, New
-   role, Compare, the tabs, Edit permissions) is drawn as the kit draws
-   it and opens nothing, because what each one opens is a further
-   design that has not been handed over in this form. That is stated
-   in the recap rather than filled in.
+   range the behaviour document names, and Fit sets it once. The
+   inspector tabs switch its body. Edit permissions opens the modal the
+   pack ships, which writes through `set_role_capability`.
+
+   Still drawn and not wired, each for a reason given where it sits:
+   the density pair, Compare, and the two the pack puts out of scope,
+   New role and Access review, which are disabled rather than dead.
    ============================================================= */
 
 export type NavRow = { label: string; icon: NavIcon; active: boolean };
 export type NavSectionView = { label: string; items: NavRow[] };
 export type Me = { initials: string; name: string; role: string };
 
-/* The kit's icon frame: every inline svg in the file carries these
-   attributes and the class `r-1`. Paths are copied from the file. */
-function Svg({ size, title, children }: { size: number; title?: string; children: ReactNode }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="r-1">
-      {title ? <title>{title}</title> : null}
-      {children}
-    </svg>
-  );
-}
-const PeopleIcon = ({ size }: { size: number }) => (
-  <Svg size={size}>
-    <circle cx="9" cy="8" r="3.5" />
-    <path d="M2 20v-.5A6.5 6.5 0 0 1 8.5 13h1A6.5 6.5 0 0 1 16 19.5v.5" />
-    <path d="M17 8.5a3 3 0 1 0 0-5" />
-  </Svg>
-);
-const AlertIcon = ({ size }: { size: number }) => (
-  <Svg size={size}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></Svg>
-);
-const DocIcon = ({ size }: { size: number }) => (
-  <Svg size={size}>
-    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-    <path d="M14 3v5h5" />
-  </Svg>
-);
-const PlusIcon = ({ size }: { size: number }) => <Svg size={size}><path d="M12 5v14M5 12h14" /></Svg>;
-const MinusIcon = ({ size }: { size: number }) => <Svg size={size}><path d="M5 12h14" /></Svg>;
 
 const ZOOM_MIN = 50;
 const ZOOM_MAX = 100 + 50;
 const ZOOM_STEP = 10;
 
-export function RolesScreen({ model, nav, me }: { model: ScreenModel; nav: NavSectionView[]; me: Me }) {
+export type Tab = 'permissions' | 'people' | 'history';
+
+/* The kit's three, in its order. The behaviour document: "Default.
+   Opens on the question people actually arrive with." */
+const TABS: [Tab, string][] = [
+  ['permissions', 'Permissions'], ['people', 'People'], ['history', 'History'],
+];
+
+export function RolesScreen({ model, nav, me, mayEdit = false, onEdit }: {
+  model: ScreenModel; nav: NavSectionView[]; me: Me;
+  /** `admin.roles`. Without it the editor cannot be opened. */
+  mayEdit?: boolean;
+  onEdit?: (roleId: string) => void;
+}) {
+  const [tab, setTab] = useState<Tab>('permissions');
   const [q, setQ] = useState('');
   const [chip, setChip] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -134,8 +122,8 @@ export function RolesScreen({ model, nav, me }: { model: ScreenModel; nav: NavSe
                 <div className="r-3f"><span className="r-4h">{model.stats.capabilities}</span><span className="r-8">CAPABILITIES</span></div>
                 <div className="r-3f"><span className="r-6j">{model.stats.flags}</span><span className="r-8">FLAGS</span></div>
               </div>
-              <button className="r-3g"><DocIcon size={14} /><span>Access review</span></button>
-              <button className="r-31"><PlusIcon size={14} /><span>New role</span></button>
+              <button className="r-3g"><Svg size={14}><DocIcon /></Svg><span>Access review</span></button>
+              <button className="r-31"><Svg size={14}><PlusIcon /></Svg><span>New role</span></button>
             </div>
             <div className="r-6k">
               <div className="roles-canvas">
@@ -150,15 +138,12 @@ export function RolesScreen({ model, nav, me }: { model: ScreenModel; nav: NavSe
                   </div>
                   <span className="r-k"></span>
                   <div className="r-6r">
-                    <button className="r-w" onClick={() => setZoom((z) => clamp(z - ZOOM_STEP))}><MinusIcon size={14} /></button>
+                    <button className="r-w" onClick={() => setZoom((z) => clamp(z - ZOOM_STEP))}><Svg size={14}><MinusIcon /></Svg></button>
                     <span className="r-6s">{zoom}%</span>
-                    <button className="r-w" onClick={() => setZoom((z) => clamp(z + ZOOM_STEP))}><PlusIcon size={14} /></button>
+                    <button className="r-w" onClick={() => setZoom((z) => clamp(z + ZOOM_STEP))}><Svg size={14}><PlusIcon /></Svg></button>
                   </div>
                   <button className="r-x" onClick={fit}>
-                    <Svg size={14}>
-                      <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-                      <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-                    </Svg>
+                    <Svg size={14}><GridIcon /></Svg>
                     <span>Fit</span>
                   </button>
                 </div>
@@ -184,7 +169,7 @@ export function RolesScreen({ model, nav, me }: { model: ScreenModel; nav: NavSe
               <div className="roles-rail">
                 <div className="r-7i">
                   <div className="r-4y">
-                    <span className="r-35"><Svg size={14}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></Svg></span>
+                    <span className="r-35"><Svg size={14}><SearchIcon /></Svg></span>
                     <input placeholder="Find a role or person" className="r-36" onChange={(e) => setQ(e.target.value)} />
                   </div>
                   <div className="r-7j">
@@ -212,13 +197,16 @@ export function RolesScreen({ model, nav, me }: { model: ScreenModel; nav: NavSe
                 </div>
                 <div className="r-7m">
                   <div className="r-7n">
-                    <span className="r-7o"><AlertIcon size={14} /></span>
+                    <span className="r-7o"><Svg size={14}><AlertIcon /></Svg></span>
                     <div className="r-d"><span className="r-7p">{model.flags.title}</span><span className="r-7q">{model.flags.text}</span></div>
                   </div>
                 </div>
               </div>
               <div className="roles-inspector">
-                {model.panels.map((p) => <Inspector key={p.id} panel={p} />)}
+                {model.panels.map((p) => (
+                  <Inspector key={p.id} panel={p} tab={tab} onTab={setTab}
+                    mayEdit={mayEdit} onEdit={onEdit} />
+                ))}
               </div>
             </div>
           </div>
@@ -324,10 +312,10 @@ function Node({ node }: { node: NodeView }) {
         <span className={node.tintCls}></span>
         <div className="r-z">
           <div className="r-10"><span className="r-11">{node.name}</span><span className="r-12">{node.division}</span></div>
-          {node.elevated && <span title="Elevated" className="r-72"><AlertIcon size={14} /></span>}
+          {node.elevated && <span title="Elevated" className="r-72"><Svg size={14}><AlertIcon /></Svg></span>}
         </div>
         <div className="r-13">
-          <span className="r-14"><PeopleIcon size={12} />{node.holders}</span>
+          <span className="r-14"><Svg size={12}><PeopleIcon /></Svg>{node.holders}</span>
           <span className="r-15"></span>
           <span className="r-16">{node.capsText}</span>
         </div>
@@ -340,9 +328,9 @@ function Node({ node }: { node: NodeView }) {
    The inspector. One panel per role; the radio decides which shows.
    ------------------------------------------------------------- */
 const VERDICT: Record<Verdict, { cls: string; label: string; icon: ReactNode }> = {
-  allowed:     { cls: 'r-c',  label: 'Allowed',     icon: <path d="M20 6L9 17l-5-5" /> },
-  conditional: { cls: 'r-e', label: 'Conditional', icon: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></> },
-  denied:      { cls: 'r-b',  label: 'Denied',      icon: <path d="M18 6L6 18M6 6l12 12" /> },
+  allowed:     { cls: 'r-c', label: 'Allowed',     icon: <CheckIcon /> },
+  conditional: { cls: 'r-e', label: 'Conditional', icon: <AlertIcon /> },
+  denied:      { cls: 'r-b', label: 'Denied',      icon: <CrossIcon /> },
 };
 
 function Meter({ fill, pct }: { fill: { cls: string; width: string | null }; pct: number }) {
@@ -354,14 +342,17 @@ function Meter({ fill, pct }: { fill: { cls: string; width: string | null }; pct
   );
 }
 
-function Inspector({ panel: p }: { panel: Panel }) {
+function Inspector({ panel: p, tab, onTab, mayEdit, onEdit }: {
+  panel: Panel; tab: Tab; onTab: (t: Tab) => void;
+  mayEdit: boolean; onEdit?: (roleId: string) => void;
+}) {
   return (
     <div className={`sp sp-${p.id} r-1a`}>
       <div className="r-1b">
         <div className="r-1c">
           <span className={p.headCls}></span>
           <div className="r-y"><span className="r-1d">{p.division}</span><span className="r-1e">{p.name}</span></div>
-          <button className="r-w"><Svg size={14}><circle cx="12" cy="5" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="12" cy="19" r="1.4" /></Svg></button>
+          <button className="r-w"><Svg size={14}><KebabIcon /></Svg></button>
         </div>
         <div className="r-1f">
           <div className="r-d"><span className="r-1g">{p.allowed}</span><span className="r-8">ALLOWED</span></div>
@@ -378,11 +369,47 @@ function Inspector({ panel: p }: { panel: Panel }) {
           </div>
           <span className="r-s">{p.peopleText}</span>
           <span className="r-k"></span>
-          <button className="r-x"><Svg size={14}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></Svg><span>Compare</span></button>
+          <button className="r-x"><Svg size={14}><CopyIcon /></Svg><span>Compare</span></button>
         </div>
       </div>
-      <div className="r-1m"><span className="r-1n">Permissions</span><span className="r-n">People</span><span className="r-n">History</span></div>
+      <div className="r-1m">
+        {TABS.map(([key, label]) => (
+          <span key={key} className={tab === key ? 'r-1n' : 'r-n'} onClick={() => onTab(key)}>{label}</span>
+        ))}
+      </div>
       <div className="r-1o">
+        {tab === 'permissions' && <Permissions panel={p} />}
+        {tab === 'people' && <People panel={p} />}
+        {tab === 'history' && <HistoryBody panel={p} />}
+      </div>
+      <div className="r-1v">
+        {/* Without `admin.roles` the editor would open and then refuse
+            every write inside the database, which teaches people the
+            tool is unreliable. Disabled here, and refused there too. */}
+        <button className="r-1w" disabled={!mayEdit} onClick={() => onEdit?.(p.id)}
+          title={mayEdit ? undefined : 'Changing what a role can do needs the admin.roles permission'}>
+          <Svg size={14}><PencilIcon /></Svg><span>Edit permissions</span>
+        </button>
+        <button className="r-1x"><Svg size={14}><OpenIcon /></Svg></button>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------
+   The Permissions tab.
+
+   This body is the one the screen itself carries, in
+   `roles-page.html`. The pack also ships it standalone as
+   `roles-tab-permissions.html`, at very slightly different metrics:
+   a 10px gap and 9px by 11px padding where the screen has 11 and
+   9 by 12. Two files in the same pack describe the same region and
+   disagree, so one had to win, and the screen does: it is the thing
+   being built, and `check:roles-port` diffs against it. Named in the
+   recap, because only the designer knows which of the two is stale.
+   ------------------------------------------------------------- */
+function Permissions({ panel: p }: { panel: Panel }) {
+  return (<>
         <div className="r-m">
           <span className="r-f">Key permissions</span>
           <div className="r-1p">
@@ -413,15 +440,74 @@ function Inspector({ panel: p }: { panel: Panel }) {
         </div>
         {p.flag && (
           <div className="r-5l">
-            <span className="r-5m"><AlertIcon size={15} /></span>
+            <span className="r-5m"><Svg size={15}><AlertIcon /></Svg></span>
             <div className="r-2l"><span className="r-2q">{p.flag.title}</span><span className="r-2v">{p.flag.text}</span></div>
           </div>
         )}
-      </div>
-      <div className="r-1v">
-        <button className="r-1w"><Svg size={14}><path d="M4 20h4L20 8l-4-4L4 16z" /></Svg><span>Edit permissions</span></button>
-        <button className="r-1x"><Svg size={14}><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></Svg></button>
+  </>);
+}
+
+/* -------------------------------------------------------------
+   The People tab, from `roles-tab-people.html`.
+
+   Read only, which the pack allows in as many words: "People can ship
+   read only. The list is the valuable half." So Assign someone is
+   disabled and says where the job is done instead of failing when
+   pressed.
+   ------------------------------------------------------------- */
+export function People({ panel: p }: { panel: Panel }) {
+  return (<>
+    <div className="r-17">
+      <div className="r-4y">
+        <span className="r-35"><Svg size={14}><SearchIcon /></Svg></span>
+        <input placeholder="Find a holder" className="r-36" />
       </div>
     </div>
-  );
+    <div className="r-u">
+      {p.people.map((h, i) => (
+        <div key={h.id} className={i === 0 ? 'r-8b' : 'r-3a'}>
+          <span className="r-2w">{h.initials}</span>
+          <div className="r-2x"><span className="r-2y">{h.name}</span><span className="r-9">{h.title}</span></div>
+          {/* Nothing records when somebody went onto a role, so this is
+              the placeholder glyph rather than a date lifted from the
+              nearest column that happens to hold one. */}
+          <span className="r-t">{h.since ?? '\u2014'}</span>
+        </div>
+      ))}
+    </div>
+    <button className="r-8c" disabled
+      title="Putting somebody on a role is done from the People tab of Admin">
+      <Svg size={14}><PlusIcon /></Svg><span>Assign someone</span>
+    </button>
+  </>);
+}
+
+/* -------------------------------------------------------------
+   The History tab, from `roles-tab-history.html`.
+
+   Reads `role_capability_history`, the view migration 108 defines,
+   which derives its kind from what actually changed: granted, revoked
+   or rescoped. The dot colour IS that kind, which is why the model
+   picks the class and this file only places it.
+   ------------------------------------------------------------- */
+export function HistoryBody({ panel: p }: { panel: Panel }) {
+  return (<>
+    <div className="r-8d">
+      <span className="r-8e">All</span>
+      <span className="r-5v">Grants</span>
+      <span className="r-5v">Revokes</span>
+    </div>
+    <div className="r-u">
+      {p.history.map((h) => (
+        <div key={h.id} className="r-44">
+          <span className={h.dotCls}></span>
+          <div className="r-y">
+            <span className="r-45">{h.text}<strong>{h.strong}</strong>{h.tail}</span>
+            <span className="r-32">{h.who}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+    <button className="r-8i"><span>Full audit trail</span><Svg size={14}><OpenIcon /></Svg></button>
+  </>);
 }

@@ -38,3 +38,16 @@
 .r-62{font-family:var(--inter);color:var(--text);letter-spacing:-0.02em;font-size:initial;font-weight:initial;line-height:initial}
 :where(.r-62,.r-62 *){border-style:none;border-color:currentColor}
 :where(.r-62) label{display:inline;margin:0;padding:0;font:inherit;letter-spacing:inherit;color:inherit;text-transform:none;text-align:inherit}
+
+/* -------------------------------------------------------------
+   The modal backdrop.
+
+   `roles-edit-permissions.html` is the dialog CARD and nothing else:
+   the kit draws no backdrop, because a backdrop is not part of the
+   design of the thing, it is how this application presents any dialog.
+   So these values are copied from the app's own `Modal` in
+   `components/kit/forms.tsx` rather than picked here, and the kit's
+   card sits inside untouched.
+   ------------------------------------------------------------- */
+.roles-modal{position:fixed;inset:0;z-index:100;background:rgba(9,22,58,0.46);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
+.roles-modal>*{width:100%;max-width:760px;margin:auto}

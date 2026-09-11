@@ -45,7 +45,17 @@ export type Cap = {
 export type Grant = { role_template_id: string; capability: string; scope: string };
 export type Holder = { id: string; role_template_id: string; name: string; job_title: string | null };
 
-export type Input = { roles: Template[]; caps: Cap[]; grants: Grant[]; holders: Holder[] };
+/** One row of `role_capability_history`, which migration 108 defines. */
+export type Line = {
+  id: number; at: string; actor_label: string | null; kind: string;
+  role_template_id: string; capability_label: string;
+  scope_before: string | null; scope_after: string | null;
+};
+
+export type Input = {
+  roles: Template[]; caps: Cap[]; grants: Grant[]; holders: Holder[];
+  history?: Line[];
+};
 
 /* ---- Departments onto the kit's five divisions ----
 
@@ -141,7 +151,28 @@ export type Panel = {
   line: { title: string; text: string };
   scope: { title: string; text: string };
   flag: { title: string; text: string } | null;
+  people: PersonRow[];
+  history: HistoryRow[];
 };
+
+/* ---- The People tab ----
+
+   The kit's row is an avatar, a name, a second line and a date. The
+   second line is the person's job title. The date is when they went
+   onto this role, and NOTHING RECORDS THAT: `role_holders` is a view
+   over `profiles`, whose `created_at` is when the account was made,
+   which is a different fact and would be a wrong one to print. So the
+   date shows the placeholder glyph until a role assignment writes a
+   date somewhere, and that is named in the recap rather than filled
+   with the nearest number to hand. */
+export type PersonRow = { id: string; initials: string; name: string; title: string; since: string | null };
+
+/* ---- The History tab ----
+
+   The kit colours the dot by what the change was. Its three dots are
+   success, info and danger, which are grant, rescope and revoke, and
+   those are exactly the three kinds migration 108's view derives. */
+export type HistoryRow = { id: number; dotCls: string; text: string; strong: string; tail: string; who: string };
 
 export type RailRow = { id: string; name: string; holders: number; people: string[] };
 export type RailGroup = { key: string; label: string; swatchCls: string; rows: RailRow[] };
@@ -160,6 +191,17 @@ export type ScreenModel = {
 };
 
 const DANGER_RANK: Record<string, number> = { destructive: 0, sensitive: 1, routine: 2 };
+
+/* The kit's three dots, by what the change was. */
+const DOT: Record<string, string> = { granted: 'r-8f', rescoped: 'r-8g', revoked: 'r-8h' };
+
+const when = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).replace(',', '');
+};
 
 export function buildModel(input: Input): ScreenModel {
   const roles = [...input.roles].sort((a, b) => a.sort_order - b.sort_order);
@@ -267,6 +309,7 @@ export function buildModel(input: Input): ScreenModel {
     const shown = people.slice(0, 4);
     const parent = r.escalates_to ? bySlug.get(r.escalates_to) : undefined;
     const f = flagsOf(r);
+    const lines = (input.history ?? []).filter((h) => h.role_template_id === r.id);
     return {
       id: r.slug, name: r.name, division: dept.label.toUpperCase(),
       headCls: DIVISIONS[dept.division].head,
@@ -304,6 +347,18 @@ export function buildModel(input: Input): ScreenModel {
           ? `${c.conditional} ${c.conditional === 1 ? 'capability is' : 'capabilities are'} narrowed to the person's own records or department.`
           : 'Every capability applies company wide.',
       },
+      people: people.map((h) => ({
+        id: h.id, initials: initials(h.name), name: h.name,
+        title: h.job_title ?? dept.label, since: null,
+      })),
+      history: lines.map((h) => ({
+        id: h.id,
+        dotCls: DOT[h.kind] ?? DOT.rescoped!,
+        text: h.kind === 'granted' ? 'Granted ' : h.kind === 'revoked' ? 'Revoked ' : 'Narrowed ',
+        strong: h.capability_label,
+        tail: h.kind === 'rescoped' && h.scope_after ? ` to ${SCOPE[h.scope_after] ?? h.scope_after}` : '',
+        who: `${h.actor_label ?? 'Somebody'} · ${when(h.at)}`,
+      })),
       flag: f.nobody
         ? { title: 'Nobody on this role', text: 'No active person holds it, so nothing it grants is in use. Put somebody on it or retire it.' }
         : f.changed
