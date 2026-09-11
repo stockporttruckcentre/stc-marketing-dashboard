@@ -46,10 +46,12 @@ import './port.css';
    than a copy. That is the point of the screen, and the modal says so
    before saving.
    ============================================================= */
-export function RolesPage({ nav, me, mayEdit }: {
+export function RolesPage({ nav, me, mayEdit, onAssign }: {
   nav: NavSectionView[]; me: Me;
   /** `admin.roles`: may change what a role can do, not only read it. */
   mayEdit: boolean;
+  /** The role menu's Assign people: that job belongs to the People tab. */
+  onAssign: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [roles, setRoles] = useState<Template[] | null>(null);
@@ -159,7 +161,7 @@ export function RolesPage({ nav, me, mayEdit }: {
   return (
     <div className="roles-port">
       <RolesScreen model={model} nav={nav} me={me} mayEdit={mayEdit}
-        onEdit={(id) => { setRefused(null); setEditing(id); }} />
+        onEdit={(id) => { setRefused(null); setEditing(id); }} onAssign={onAssign} />
       {role && (
         <EditPermissions
           role={role} caps={caps} held={held} saving={saving} failed={refused}

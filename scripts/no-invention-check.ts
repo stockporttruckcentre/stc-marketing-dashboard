@@ -43,6 +43,7 @@ const GOVERNED = [
   'components/admin/roles/model.ts',
   'components/admin/roles/EditPermissions.tsx',
   'components/admin/roles/icons.tsx',
+  'components/admin/roles/RoleMenu.tsx',
   'components/AnalyticsHub.tsx',
   'components/analytics/kit/charts.tsx',
   'components/analytics/kit/frame.tsx',

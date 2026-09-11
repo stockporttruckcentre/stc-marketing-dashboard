@@ -142,7 +142,7 @@ export default function RolesPreview() {
     <div className="roles-port">
       <RolesScreen model={model} nav={NAV} mayEdit
         me={{ initials: 'GS', name: 'Gary Sutton', role: 'Managing Director' }}
-        onEdit={setEditing} />
+        onEdit={setEditing} onAssign={() => {}} />
       {role && (
         <EditPermissions role={role} caps={CAPS} held={held} saving={false} failed={null}
           onClose={() => setEditing(null)} onSave={() => setEditing(null)} />

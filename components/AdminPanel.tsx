@@ -219,7 +219,9 @@ function AdminBody({
 
       {area === 'requests' && <AccessQueue onCount={setWaiting} />}
 
-      {area === 'roles' && <RolesPage nav={nav} me={me} mayEdit={mayEditRoles} />}
+      {area === 'roles' && (
+        <RolesPage nav={nav} me={me} mayEdit={mayEditRoles} onAssign={() => setArea('people')} />
+      )}
 
       {area === 'people' && (<>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>

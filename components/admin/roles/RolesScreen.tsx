@@ -8,6 +8,7 @@ import {
 } from './icons';
 import type { NavIcon } from '@/lib/nav';
 import type { Chart, Column, NodeView, Panel, ScreenModel, Verdict } from './model';
+import { RoleMenu, menuFor } from './RoleMenu';
 
 /* =============================================================
    The Roles screen, as `docs/source/roles_hub/roles-page.html` draws it.
@@ -67,13 +68,16 @@ const TABS: [Tab, string][] = [
   ['permissions', 'Permissions'], ['people', 'People'], ['history', 'History'],
 ];
 
-export function RolesScreen({ model, nav, me, mayEdit = false, onEdit }: {
+export function RolesScreen({ model, nav, me, mayEdit = false, onEdit, onAssign }: {
   model: ScreenModel; nav: NavSectionView[]; me: Me;
   /** `admin.roles`. Without it the editor cannot be opened. */
   mayEdit?: boolean;
   onEdit?: (roleId: string) => void;
+  /** Putting somebody on a role is the People tab's job, not this screen's. */
+  onAssign?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('permissions');
+  const [menu, setMenu] = useState<{ id: string; right: number; top: number } | null>(null);
   const [q, setQ] = useState('');
   const [chip, setChip] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
@@ -122,8 +126,19 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit }: {
                 <div className="r-3f"><span className="r-4h">{model.stats.capabilities}</span><span className="r-8">CAPABILITIES</span></div>
                 <div className="r-3f"><span className="r-6j">{model.stats.flags}</span><span className="r-8">FLAGS</span></div>
               </div>
-              <button className="r-3g"><Svg size={14}><DocIcon /></Svg><span>Access review</span></button>
-              <button className="r-31"><Svg size={14}><PlusIcon /></Svg><span>New role</span></button>
+              {/* Both are drawn and both are out of scope, in the pack's
+                  own words: "New role and Access review are out of scope
+                  for now ... neither should be wired yet." Disabled with
+                  the reason rather than dead, so pressing one says what is
+                  missing instead of doing nothing at all. */}
+              <button className="r-3g" disabled
+                title="Out of scope in the handoff: an access review needs a definition of what the review pack contains before the export means anything">
+                <Svg size={14}><DocIcon /></Svg><span>Access review</span>
+              </button>
+              <button className="r-31" disabled
+                title="Out of scope in the handoff: creating a role needs a role template create endpoint, and the seed owns that table today">
+                <Svg size={14}><PlusIcon /></Svg><span>New role</span>
+              </button>
             </div>
             <div className="r-6k">
               <div className="roles-canvas">
@@ -205,13 +220,23 @@ export function RolesScreen({ model, nav, me, mayEdit = false, onEdit }: {
               <div className="roles-inspector">
                 {model.panels.map((p) => (
                   <Inspector key={p.id} panel={p} tab={tab} onTab={setTab}
-                    mayEdit={mayEdit} onEdit={onEdit} />
+                    mayEdit={mayEdit} onEdit={onEdit} onMenu={setMenu} />
                 ))}
               </div>
             </div>
           </div>
         </div>
       </div>
+      {menu && (() => {
+        const p = model.panels.find((x) => x.id === menu.id);
+        return p ? (
+          <RoleMenu at={{ right: menu.right, top: menu.top }} onClose={() => setMenu(null)}
+            items={menuFor({
+              role: p.name, holders: p.people.length, mayEdit,
+              onEdit: () => onEdit?.(p.id), onAssign: () => onAssign?.(),
+            })} />
+        ) : null;
+      })()}
     </>
   );
 }
@@ -342,9 +367,10 @@ function Meter({ fill, pct }: { fill: { cls: string; width: string | null }; pct
   );
 }
 
-function Inspector({ panel: p, tab, onTab, mayEdit, onEdit }: {
+function Inspector({ panel: p, tab, onTab, mayEdit, onEdit, onMenu }: {
   panel: Panel; tab: Tab; onTab: (t: Tab) => void;
   mayEdit: boolean; onEdit?: (roleId: string) => void;
+  onMenu: (at: { id: string; right: number; top: number } | null) => void;
 }) {
   return (
     <div className={`sp sp-${p.id} r-1a`}>
@@ -352,7 +378,10 @@ function Inspector({ panel: p, tab, onTab, mayEdit, onEdit }: {
         <div className="r-1c">
           <span className={p.headCls}></span>
           <div className="r-y"><span className="r-1d">{p.division}</span><span className="r-1e">{p.name}</span></div>
-          <button className="r-w"><Svg size={14}><KebabIcon /></Svg></button>
+          <button className="r-w" onClick={(e) => {
+            const b = e.currentTarget.getBoundingClientRect();
+            onMenu({ id: p.id, right: window.innerWidth - b.right, top: b.bottom + 4 });
+          }}><Svg size={14}><KebabIcon /></Svg></button>
         </div>
         <div className="r-1f">
           <div className="r-d"><span className="r-1g">{p.allowed}</span><span className="r-8">ALLOWED</span></div>

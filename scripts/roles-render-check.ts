@@ -116,6 +116,19 @@ async function read(page: Page): Promise<Read> {
   return await page.evaluate(`${READ}(${JSON.stringify(CLASSES)}, ${JSON.stringify(PROPS)})`) as Read;
 }
 
+/* ---- Differences the port means ----
+
+   The reference page draws every control live. This port disables the
+   two the handoff puts out of scope, so they are legitimately fainter
+   than the reference. Listed by class and property with what they must
+   be instead, so the difference is asserted rather than skipped: if one
+   of these stops being disabled, or fades by a different amount, this
+   still fails. */
+const DELIBERATE: Record<string, Record<string, { is: string; why: string }>> = {
+  'r-3g': { opacity: { is: '0.45', why: 'Access review is out of scope in the handoff, so it is disabled' } },
+  'r-31': { opacity: { is: '0.45', why: 'New role is out of scope in the handoff, so it is disabled' } },
+};
+
 function compare(label: string, app: Read, kit: Read) {
   const diffs: string[] = [];
   let compared = 0;
@@ -125,6 +138,11 @@ function compare(label: string, app: Read, kit: Read) {
     if (!a) { diffs.push(`.${c}: not drawn by the application`); continue; }
     for (const p of PROPS) {
       compared += 1;
+      const meant = DELIBERATE[c]?.[p];
+      if (meant) {
+        if (a[p] !== meant.is) diffs.push(`.${c} ${p}: app ${a[p]}, but ${meant.why}, so it must be ${meant.is}`);
+        continue;
+      }
       if (a[p] !== k[p]) diffs.push(`.${c} ${p}: app ${a[p]} / kit ${k[p]}`);
     }
   }

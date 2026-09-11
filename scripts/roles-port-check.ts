@@ -71,6 +71,17 @@ ok('roles-behaviour.css is byte for byte the kit\'s', same('roles-behaviour.css'
   ok('the selection rules written for a role are the kit\'s own, for its sixteen', behaviourFor(KIT_IDS) === kit);
 }
 {
+  /* The kit states a disabled opacity once, on its menu's Delete row.
+     The port reuses that number for every disabled control, so it has
+     to stay the kit's number. */
+  const kit = readFileSync(`${APP}/roles-components.css`, 'utf8')
+    .match(/^\.r-9p\{[^}]*opacity:([^;}]*)/m)?.[1];
+  const mine = readFileSync(`${APP}/port.css`, 'utf8')
+    .match(/^\.r-62 button:disabled\{opacity:([^;}]*)\}/m)?.[1];
+  ok('a disabled control fades by the amount the kit states on its own disabled row',
+    kit != null && kit === mine, `kit ${kit} / port ${mine}`);
+}
+{
   /* ---- The inherited typography is the reference page's, not mine ----
 
      preview.html sets the font, colour and tracking on its body, and
@@ -194,10 +205,19 @@ async function main() {
       Array.prototype.forEach.call(c.querySelectorAll(':scope > input'), function (n) { n.remove(); });
       EMPTY.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.innerHTML = ''; }); });
       BLANK.forEach(function (s) { Array.prototype.forEach.call(c.querySelectorAll(s), function (n) { n.textContent = ''; }); });
+      /* The same two the elements test treats as bound rather than
+         drawn: a control the viewer's permissions do not allow is
+         disabled and says why. Everything else about the shell, every
+         tag, every class, every other attribute and all of the text,
+         still has to match the kit exactly. */
+      var STATE = ['disabled', 'title'];
       var ser = function (el) {
         var s = '<' + el.tagName.toLowerCase();
         var as = [];
-        for (var i = 0; i < el.attributes.length; i++) as.push(el.attributes[i].name + '="' + el.attributes[i].value + '"');
+        for (var i = 0; i < el.attributes.length; i++) {
+          if (STATE.indexOf(el.attributes[i].name) >= 0) continue;
+          as.push(el.attributes[i].name + '="' + el.attributes[i].value + '"');
+        }
         s += as.sort().map(function (a) { return ' ' + a; }).join('') + '>';
         Array.prototype.forEach.call(el.childNodes, function (n) {
           if (n.nodeType === 1) s += ser(n); else if (n.nodeType === 3 && n.textContent.trim()) s += n.textContent.trim();
