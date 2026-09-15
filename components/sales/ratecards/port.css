@@ -8,41 +8,66 @@
    the kit sits and what the application around it must not do to it.
    ============================================================= */
 
-/* ---- The shell, with the mock sidebar taken out ----
+/* ---- The shell ----
 
    From the business:
 
-     Attached is the UI for this rate builder hub - follow it directly,
-     do not add in the navy sidebar.
+     The whole ui needs looking at, you ported it in weirdly with 0
+     respect for the remainder of the app and UI.
 
-   So `.rc-6b`, the kit's own navy rail, is never rendered. The kit's
-   shell is `display:flex` with the rail first and the body second, and
-   with one child the body simply fills it. The kit's fixed 560px height
-   is a prototype fixture: on a real screen it fills what the dashboard
-   chrome leaves. */
+   Correct, and this was the cause. The kit's `.rc-6a` is a PROTOTYPE
+   FRAME: `height:560px`, a border, a radius and its own background,
+   because the reference page had to draw a picture of an application
+   around it. The first port kept all of that and only took the navy
+   rail out, so the screen arrived as a bordered box sitting inside the
+   dashboard's own page, with a second background behind it and its own
+   scrollbar. Every other screen in this application is simply the page.
+
+   So the frame is dropped and the class becomes what the kit was
+   drawing a picture OF: the page area, filled.
+
+     do not add in the navy sidebar
+
+   `.rc-6b`, the kit's own rail, is never rendered. The application has
+   a sidebar and the kit's is a drawing of one. */
 .rc-6a {
-  height: calc(100vh - var(--rc-chrome, 168px));
-  min-height: 520px;
+  /* `.page` is `flex:1; min-height:0; overflow:auto` with 24px 28px 56px
+     of padding. The screen fills it and takes its own scrolling back,
+     because the rate table is the only thing that scrolls. */
+  height: 100%;
+  min-height: 0;
   width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
   /* The kit paints on its own tokens rather than the application's, so
      the two theme systems cannot bleed into each other. */
   font-family: var(--inter);
   color: var(--text);
-  background: var(--bg);
   letter-spacing: -0.01em;
+}
+
+/* The page gives this screen its whole area and stops scrolling itself,
+   because the rate table scrolls and two scrollbars down one edge is
+   the thing that made it read as a box within a box. */
+.page:has(> .rc-6a) {
+  display: flex;
+  overflow: hidden;
+  padding-bottom: 24px;
 }
 
 /* The three rules the kit put on `body` and `a`, which would have
    reached every other screen in the application. Reapplied here, where
    they reach this screen only. */
-.rc-6a, .rc-6a * { box-sizing: border-box; }
-.rc-6a a { color: var(--accent); text-decoration: none; }
-.rc-6a a:hover { color: var(--accent-hover); }
+.rc-6a, .rc-6a *, .rc-tokens, .rc-tokens * { box-sizing: border-box; }
+.rc-6a a, .rc-tokens a { color: var(--accent); text-decoration: none; }
+.rc-6a a:hover, .rc-tokens a:hover { color: var(--accent-hover); }
 
 /* The application's own reset gives buttons a border and a background.
    The kit's buttons declare their own, and the ones that declare none
    are meant to have none. */
-.rc-6a button {
+.rc-6a button, .rc-tokens button {
   font: inherit;
   letter-spacing: inherit;
   background: none;
@@ -50,8 +75,11 @@
   cursor: pointer;
   color: inherit;
 }
-.rc-6a button:disabled { cursor: not-allowed; opacity: .45; }
-.rc-6a input, .rc-6a select, .rc-6a textarea { font: inherit; letter-spacing: inherit; }
+.rc-6a button:disabled, .rc-tokens button:disabled { cursor: not-allowed; opacity: .45; }
+.rc-6a input, .rc-6a select, .rc-6a textarea,
+.rc-tokens input, .rc-tokens select, .rc-tokens textarea {
+  font: inherit; letter-spacing: inherit;
+}
 
 
 /* ---- Deviation 1: the thick borders ----
@@ -61,20 +89,110 @@
      It's included some overly-thick borders ... those are to be avoided
      and fall back to how you've been designing.
 
-   Five rules carry a 3px accent rail and one a 2px underline. Every one
-   of them becomes 1px. The colour is untouched, so the rail still says
-   which kind of message it is; it just stops shouting.
+   And, after the first pass missed one:
 
-   This is a deliberate, named departure from the kit, which is why it
-   is here with the instruction above it rather than edited into
-   `rate-card-components.css`. `npm run check:rate-card-port` counts it
-   as a change rather than reporting it as drift. */
+     i verbatim said don't include the thick borders and many elements
+     have 2px solid var(--border-emphasis) instead of 1px lighter
+     border.
+
+   Correct, and it was the most visible one of the lot: `.rate-section-bar`
+   is the heading above every group of rates in the table, so the rule
+   appears eight times down one screen. The first pass fixed the five
+   accent rails and the keycap and stopped there, because it went looking
+   for 3px rails rather than for every border heavier than 1px.
+
+   So this list is now derived rather than noticed: `check:rate-card-port`
+   sweeps the kit's stylesheet for any border over 1px or any border in
+   the emphasis colour, and fails unless every one of them is overridden
+   here. A heavier border arriving in a future pack is caught on the day
+   it arrives.
+
+   Every one becomes 1px. Where the kit reached for the emphasis colour
+   it becomes the ordinary border colour, which is what "1px lighter
+   border" asks for. The coloured rails keep their colour, because that
+   is what says which kind of message it is; they just stop shouting. */
+.rc-6a .rate-section-bar { border-top: 1px solid var(--border); }
 .rc-6a .rc-2s { border-left-width: 1px; }
 .rc-6a .rc-8l, .rc-6a .rc-8n, .rc-6a .rc-8p { border-left-width: 1px; }
 .rc-6a .rc-2h { border-bottom-width: 1px; }
+/* The six checkbox and radio faces, at 1.5px, for the same reason: this
+   application draws a control's edge at 1px everywhere else. Six rather
+   than the three that were obvious on screen, because the check sweeps
+   the stylesheet rather than the screenshots. */
+.rc-6a .rc-2z, .rc-6a .rc-30, .rc-6a .rc-4r,
+.rc-6a .rc-5p, .rc-6a .rc-5u, .rc-6a .rc-83 { border-width: 1px; }
 
 
-/* ---- Deviation 2: typing fields the height of their own text ----
+/* ---- Deviation 2: the labels ----
+
+   From the business, of the column headings and the labels above each
+   labour rate:
+
+     text messy on these cards, improper formatting. wrong font, size
+     too small.
+
+   and
+
+     rc-2e text too small, wrong font, wrong colour.
+
+   The kit sets every one of these at 9.5px in the monospace face. This
+   application's own `Label` has been Panton 700 at 11px with 0.16em of
+   tracking since it was written, and CLAUDE.md's fourth rule says
+   plainly: "Panton for headings, numbers and labels with authority ...
+   Never Panton below 11px."
+
+   So they fall back to how this application has been designing: the
+   `Label` primitive's own values, with the colour lifted one token from
+   `--text-subtle` to `--text-muted`, which is the part that was called
+   wrong. Nothing here is a number somebody picked: 11px, 700 and 0.16em
+   are `components/kit/primitives.tsx`, and both colours are the kit's
+   own tokens. */
+.rc-6a .rc-s,
+.rc-6a .rc-2e,
+.rc-6a .rc-53,
+.rc-6a .rc-1j,
+.rc-6a .rc-o {
+  font-family: var(--panton);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--text-muted);
+}
+
+/* The count beside a labour rate sits on the same line as its label, so
+   it matches rather than staying 10px monospace next to 11px Panton. */
+.rc-6a .rc-t {
+  font-family: var(--panton);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+/* A label is one line. The kit's own labels are short, and the card is
+   sized for them; a long one wrapping is what "messy" was describing. */
+.rc-6a .rc-r { gap: 10px; }
+.rc-6a .rc-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+
+/* ---- Deviation 3: prices that do not line up ----
+
+   From the business, of the price column:
+
+     in image 2, ensure prices are in line and not randomly scattered.
+
+   A rate priced per axle puts its figure in one of four columns, each
+   right aligned. A rate with a single price spans all four, and the kit
+   leaves that span aligned to its start, so single prices sit at the
+   left of the block and axle prices at the right of their column. Down
+   a table of forty-five rows the figures land in two different places
+   and read as scattered.
+
+   Right aligning the span puts every figure on the same edge, which is
+   also how a column of money is read: by its last digit. */
+.rc-6a .rc-j { justify-content: flex-end; }
+
+
+/* ---- Deviation 4: typing fields the height of their own text ----
 
    From the business:
 
@@ -121,23 +239,45 @@
 .rc-6a .rc-3f { overflow-x: auto; }
 
 
-/* ---- Dialogs and popovers ----
+/* ---- Dialogs, popovers and toasts ----
 
-   The kit draws them as flat blocks on its reference page, because a
-   reference page has nowhere to float them to. */
+   From the business:
+
+     toasts are loading under the sidebar when you create one.
+
+   `.main` is `position:relative; z-index:1` and the sidebar is its
+   sibling at `z-index:2`. That is a stacking context: NOTHING rendered
+   inside the page can rise above the sidebar, whatever z-index it is
+   given. A toast at z-index 80 inside `.main` still sits under a
+   sidebar at 2.
+
+   So every floating thing is rendered through a portal to `document.body`,
+   which is what `components/crm/AddressMap.tsx` already does and is the
+   only thing that works. The z-index then matters, and it matches the
+   application's own: 950 for a dialog over a shaded page.
+
+   They carry `.rc-tokens` rather than `.rc-6a`, so they get the kit's
+   colours without the screen's layout. Carrying `.rc-6a` is what gave
+   the toast container the screen's full height and opaque background. */
 .rc-scrim {
-  position: fixed; inset: 0; z-index: 70;
-  background: rgba(5, 13, 38, .42);
+  position: fixed; inset: 0; z-index: 950;
+  background: rgba(5, 13, 38, .55);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
 }
 .rc-scrim > * { max-height: calc(100vh - 48px); overflow-y: auto; }
-.rc-pop-scrim { position: fixed; inset: 0; z-index: 60; }
-.rc-pop { position: absolute; z-index: 61; }
+
+.rc-pop { position: absolute; z-index: 20; }
+
 .rc-toasts {
-  position: fixed; z-index: 80; right: 18px; bottom: 18px;
+  position: fixed; z-index: 960;
+  right: 18px; bottom: 18px;
   display: flex; flex-direction: column; gap: 9px;
+  /* The container is a rail for the toasts, not a panel: anything not
+     on a toast passes through to the page underneath. */
+  pointer-events: none;
 }
+.rc-toasts > * { pointer-events: auto; }
 
 /* Nothing in the rate table animates position, per the pack. Colour and
    opacity only, and only for somebody who has not asked for stillness. */

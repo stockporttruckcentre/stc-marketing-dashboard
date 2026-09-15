@@ -187,6 +187,27 @@ BEGIN
   IF n < 1 THEN RAISE EXCEPTION 'a tier change told no card about it'; END IF;
   RAISE NOTICE 'a contract brings a card with it, and a tier change tells every card';
 
+  -- ---- A card finds a contract the customer already had ----
+  --
+  -- The other direction from the trigger in 113. Reported from the live
+  -- screen: a customer with an accepted contract whose card was made on
+  -- the hub drew "This customer is not on FleetSmart+", which is a lie
+  -- about that customer.
+  INSERT INTO fleetsmart_contracts (account_id, customer_name, plan, term_months,
+                                    starts_on, status, sent_at, owner_id, created_by)
+  VALUES (cust2, 'Check Logistics', 'Silver', 24, '2026-02-01', 'accepted', NOW(), boss, boss);
+
+  card := rate_card_create(cust2, NULL, TRUE);   -- no contract passed, as the hub does
+  SELECT contract_id IS NOT NULL INTO failed FROM rate_cards WHERE id = card;
+  IF NOT failed THEN
+    RAISE EXCEPTION 'a new card did not find the contract its customer already holds';
+  END IF;
+  SELECT rate_card_read(card)->'fleetsmart'->'contract'->>'plan' INTO txt;
+  IF txt <> 'Silver' THEN
+    RAISE EXCEPTION 'the inclusions panel reads % rather than the contract''s tier', COALESCE(txt, 'no contract');
+  END IF;
+  RAISE NOTICE 'a card finds the contract its customer already holds, whichever was made first';
+
   -- ---- Reset clears what somebody set, deliberately ----
   PERFORM rate_card_set_rate(card, 'r25', 0, 500);
   SELECT overrides_cleared INTO n FROM rate_card_reset(card);

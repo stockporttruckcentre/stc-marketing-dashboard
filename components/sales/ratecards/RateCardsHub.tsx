@@ -55,6 +55,10 @@ export function RateCardsHub({ onOpen, onToast, caps, onDefaults }: {
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [customers, setCustomers] = useState<{ id: string; company_name: string; contact_name: string | null }[]>([]);
+  const [sources, setSources] = useState<{
+    card_id: string; card_ref: string; customer_name: string;
+    effective_from: string; overrides: number; same_customer: boolean;
+  }[]>([]);
 
   const load = async () => {
     const got = await api.listCards();
@@ -128,7 +132,11 @@ export function RateCardsHub({ onOpen, onToast, caps, onDefaults }: {
               className="rc-16"
               disabled={!caps.build}
               title={caps.build ? 'Make a rate card for a customer' : 'You do not have the right to build a rate card'}
-              onClick={() => { setShowNew(true); void api.customers('').then((r) => { if (r.ok) setCustomers(r.value); }); }}
+              onClick={() => {
+                setShowNew(true);
+                void api.customers('').then((r) => { if (r.ok) setCustomers(r.value); });
+                void api.cardSources(null).then((r) => { if (r.ok) setSources(r.value); });
+              }}
             >
               <IPlus /><span>New rate card</span>
             </button>
@@ -143,7 +151,16 @@ export function RateCardsHub({ onOpen, onToast, caps, onDefaults }: {
             ['awaiting', 'Awaiting approval', counts.awaiting],
             ['expiring', 'Expiring', counts.expiring],
           ] as [Chip, string, number][]).map(([k, label, n]) => (
-            <button key={k} className={chip === k ? 'rc-6l' : 'rc-2d'} onClick={() => setChip(k)}>
+            <button
+              key={k}
+              className={chip === k ? 'rc-6l' : 'rc-2d'}
+              /* Which filter is on, said in the markup as well as in the
+                 colour. A screen reader needs it, and so does anything
+                 checking that pressing a control does something: a chip
+                 that is already selected is allowed to do nothing. */
+              aria-pressed={chip === k}
+              onClick={() => setChip(k)}
+            >
               {label}<span className="rc-1w">{n}</span>
             </button>
           ))}
@@ -152,7 +169,16 @@ export function RateCardsHub({ onOpen, onToast, caps, onDefaults }: {
             ['contract', 'On FleetSmart+', counts.contract],
             ['overrides', 'Has overrides', counts.overrides],
           ] as [Chip, string, number][]).map(([k, label, n]) => (
-            <button key={k} className={chip === k ? 'rc-6l' : 'rc-2d'} onClick={() => setChip(k)}>
+            <button
+              key={k}
+              className={chip === k ? 'rc-6l' : 'rc-2d'}
+              /* Which filter is on, said in the markup as well as in the
+                 colour. A screen reader needs it, and so does anything
+                 checking that pressing a control does something: a chip
+                 that is already selected is allowed to do nothing. */
+              aria-pressed={chip === k}
+              onClick={() => setChip(k)}
+            >
               {label}<span className="rc-1w">{n}</span>
             </button>
           ))}
@@ -258,20 +284,29 @@ export function RateCardsHub({ onOpen, onToast, caps, onDefaults }: {
       {showNew && (
         <NewCardModal
           customers={customers}
+          sources={sources}
           busy={busy}
           onSearch={(q) => { void api.customers(q).then((r) => { if (r.ok) setCustomers(r.value); }); }}
           onClose={() => setShowNew(false)}
           onCheck={async (id) => {
+            /* The cards worth copying are re-read against this
+               customer, so their own previous ones come to the top. */
+            void api.cardSources(id).then((r) => { if (r.ok) setSources(r.value); });
             const got = await api.checkCustomer(id);
             return got.ok ? got.value : null;
           }}
-          onCreate={async ({ contactId, effective, supersede }) => {
+          onCreate={async ({ contactId, effective, supersede, copyFrom }) => {
             setBusy(true);
-            const made = await api.createCard({ contactId, effective, supersede });
+            const made = await api.createCard({ contactId, effective, supersede, copyFrom });
             setBusy(false);
             if (!made.ok) { onToast({ tone: 'error', text: made.why }); return; }
             setShowNew(false);
-            onToast({ tone: 'success', text: 'Rate card created from the current defaults.' });
+            onToast({
+              tone: 'success',
+              text: copyFrom
+                ? `Rate card created from ${sources.find((s) => s.card_id === copyFrom)?.card_ref ?? 'another card'}.`
+                : 'Rate card created from the current defaults.',
+            });
             onOpen(made.value);
           }}
         />

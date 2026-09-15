@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { IClose, ITick, IWarn, IInfo } from './icons';
 import { money, shortDate } from '@/lib/ratecards/format';
 import type { DuplicateVerdict } from '@/lib/ratecards/types';
@@ -18,10 +19,41 @@ export function Scrim({ onClose, children, label }: {
   onClose: () => void; children: React.ReactNode; label: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  /* Rendered into the body rather than into the page.
+
+     `.main` is a stacking context at z-index 1 and the sidebar is its
+     sibling at 2, so a dialog rendered inside the page cannot rise
+     above the sidebar however high its own z-index. The same portal
+     `components/crm/AddressMap.tsx` uses, for the same reason. */
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  /* ---- Focus is taken once, and never taken again ----
+
+     From the business:
+
+       when i type a letter in the rate card creator wizard, the cursor
+       disappears after typing one letter - if you type another letter
+       it closes the wizard.
+
+     Two faults in four lines. The effect listed `onClose` in its
+     dependencies, and every caller passes an inline arrow, so a new one
+     arrives on every render: typing a letter re-rendered the dialog,
+     which re-ran the effect, which moved focus. And what it moved focus
+     TO was `querySelector('input, button')`, which returns the first
+     match in DOCUMENT order rather than the first listed: the close
+     button in the header sits above the field, so focus landed on it
+     and the next key press closed the dialog.
+
+     So the effect runs once, on mount, and `onClose` is read through a
+     ref rather than watched. Focus goes to the first field, and only to
+     a button when there is no field. */
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (e.key === 'Escape') { e.stopPropagation(); close.current(); }
       if (e.key !== 'Tab') return;
       /* Focus stays inside a dialog. Without this, tabbing walks into
          the page behind it, which for a modal over a rate table means
@@ -36,21 +68,35 @@ export function Scrim({ onClose, children, label }: {
     };
     document.addEventListener('keydown', onKey, true);
     const id = window.requestAnimationFrame(() => {
-      box.current?.querySelector<HTMLElement>('input, button')?.focus();
+      const field = box.current?.querySelector<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled])');
+      (field ?? box.current?.querySelector<HTMLElement>('button:not([disabled])'))?.focus();
     });
-    return () => { document.removeEventListener('keydown', onKey, true); window.cancelAnimationFrame(id); };
-  }, [onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      window.cancelAnimationFrame(id);
+    };
+    /* Deliberately empty: taking focus is something a dialog does when
+       it opens, not something it does again because it re-rendered. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
-      className="rc-scrim rc-6a"
+      className="rc-scrim rc-tokens"
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      /* Only a press that BEGINS on the backdrop closes it. A drag that
+         starts on the dialog and releases outside it is somebody
+         selecting text, not somebody dismissing the dialog. */
+      onMouseDown={(e) => { if (e.target === e.currentTarget) close.current(); }}
     >
       <div ref={box}>{children}</div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -68,13 +114,20 @@ export function Scrim({ onClose, children, label }: {
    in migration 110 for why each one says what it says.
    ------------------------------------------------------------- */
 export function NewCardModal({
-  customers, onSearch, onClose, onCheck, onCreate, busy,
+  customers, sources, onSearch, onClose, onCheck, onCreate, busy,
 }: {
   customers: { id: string; company_name: string; contact_name: string | null }[];
+  /** Cards this one could be copied from, that customer's own first. */
+  sources: {
+    card_id: string; card_ref: string; customer_name: string;
+    effective_from: string; overrides: number; same_customer: boolean;
+  }[];
   onSearch: (q: string) => void;
   onClose: () => void;
   onCheck: (contactId: string) => Promise<DuplicateVerdict | null>;
-  onCreate: (args: { contactId: string; effective: string; supersede: boolean }) => Promise<void>;
+  onCreate: (args: {
+    contactId: string; effective: string; supersede: boolean; copyFrom: string | null;
+  }) => Promise<void>;
   busy: boolean;
 }) {
   const [query, setQuery] = useState('');
@@ -82,6 +135,7 @@ export function NewCardModal({
   const [verdict, setVerdict] = useState<DuplicateVerdict | null>(null);
   const [effective, setEffective] = useState(() => new Date().toISOString().slice(0, 10));
   const [checking, setChecking] = useState(false);
+  const [copyFrom, setCopyFrom] = useState<string | null>(null);
 
   const pick = async (c: { id: string; company_name: string }) => {
     setPicked(c);
@@ -193,23 +247,42 @@ export function NewCardModal({
                 </div>
                 <span className="rc-y">Rates are good for a year from this date.</span>
               </div>
+              {/* START FROM.
+
+                  The kit's own dialog has this field and the line
+                  "Or copy an existing card" under it. The first build
+                  only offered the defaults and disabled the field, which
+                  the business queried: "in the creation wizard it says
+                  start from and the only option is The current default
+                  rates - is that correct?" It was not. */}
               <div className="rc-28">
                 <span className="rc-z">Start from</span>
                 <div className="rc-29">
-                  {/* Disabled with a title rather than read only: a field
-                      somebody can put a cursor in but not change reads as
-                      broken. This says where it IS changed. */}
-                  <input
+                  <select
                     className="rc-1b"
-                    value="The current default rates"
-                    disabled
                     aria-label="Start from"
-                    title="Every card starts from the default rates. Change them on the Default rates tab."
-                    onChange={() => { /* Disabled, so this never fires. */ }}
-                  />
+                    value={copyFrom ?? ''}
+                    style={{ width: '100%' }}
+                    onChange={(e) => setCopyFrom(e.target.value || null)}
+                  >
+                    <option value="">The current default rates</option>
+                    {sources.length > 0 && (
+                      <optgroup label="Or copy an existing card">
+                        {sources.map((c) => (
+                          <option key={c.card_id} value={c.card_id}>
+                            {c.customer_name}
+                            {' '}({c.card_ref}, {shortDate(c.effective_from)}
+                            {c.overrides > 0 ? `, ${c.overrides} set by hand` : ''})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
                 </div>
                 <span className="rc-y">
-                  Change the defaults on the Default rates tab, and every new card starts from them.
+                  {copyFrom
+                    ? 'Its rates, its labour band and anything set by hand on it come across. The customer, the dates and its history do not.'
+                    : 'Change the defaults on the Default rates tab, and every new card starts from them.'}
                 </span>
               </div>
             </div>
@@ -226,7 +299,7 @@ export function NewCardModal({
             title={!picked ? 'Pick a customer first' : undefined}
             onClick={() => {
               if (!picked) return;
-              void onCreate({ contactId: picked.id, effective, supersede: !!blocking });
+              void onCreate({ contactId: picked.id, effective, supersede: !!blocking, copyFrom });
             }}
           >
             <span>
@@ -595,10 +668,15 @@ export type Toast = {
 export function Toasts({ toasts, onDismiss }: {
   toasts: Toast[]; onDismiss: (id: number) => void;
 }) {
-  if (toasts.length === 0) return null;
+  /* Into the body, for the reason the scrim is: nothing inside `.main`
+     can rise above the sidebar. This is the one the business saw. */
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted || toasts.length === 0) return null;
   const cls = { success: 'rc-8l', info: 'rc-8n', error: 'rc-8p' } as const;
-  return (
-    <div className="rc-toasts rc-6a" role="status" aria-live="polite">
+  return createPortal(
+    <div className="rc-toasts rc-tokens" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={cls[t.tone]}>
           {t.tone === 'success' ? <ITick size={15} /> : <IWarn size={15} />}
@@ -616,6 +694,7 @@ export function Toasts({ toasts, onDismiss }: {
           </button>
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }

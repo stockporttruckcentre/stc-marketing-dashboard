@@ -119,3 +119,5 @@
 111_rate_card_template_seed
 112_rate_card_defaults
 113_rate_card_from_contract
+114_rate_card_copy_from
+115_rate_card_finds_the_contract
