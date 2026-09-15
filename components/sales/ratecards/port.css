@@ -222,6 +222,28 @@
 .rc-6a textarea { min-height: 72px; padding: 8px 10px; }
 
 
+/* ---- Deviation 5: the tab row on a narrow window ----
+
+   `.rc-46` is one flex row: six tabs, then the basis filter pushed to
+   the right with `margin-left:auto`. At 1280 it fits. At 1024, which is
+   a laptop with the sidebar open, the last two filter chips are pushed
+   off the right hand edge and cannot be reached at all.
+
+   The kit could not have known: its reference page is 1240px wide and
+   has no sidebar beside it. So the row wraps, and the filter group
+   keeps its own line when it has to take one.
+
+   Found by the drive check measuring element positions at 1024 rather
+   than by looking at it. */
+.rc-6a .rc-46 { flex-wrap: wrap; }
+.rc-6a .rc-4a { flex-wrap: wrap; padding-bottom: 8px; }
+@media (max-width: 1180px) {
+  /* Below this the filter cannot share the line at all, so it takes its
+     own rather than being pushed off the end of the one above. */
+  .rc-6a .rc-4a { margin-left: 0; width: 100%; padding-top: 2px; }
+}
+
+
 /* ---- The scrollers ----
 
    From the pack: "The labour band never scrolls away. The rate table is

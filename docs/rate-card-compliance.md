@@ -69,3 +69,38 @@ maintained as part of the work.
 | 44 | The cursor vanishes after one letter | the focus effect re-ran on every render | drive check types a whole word |
 | 45 | No contract shown for a customer who holds one | nothing looked from the card to the contract | `check:rate-card` |
 | 46 | Ported with no respect for the rest of the app | the kit's prototype frame was kept | the harness now renders the app shell |
+
+---
+
+## The audits, and what each one cannot see
+
+| Check | What it holds | What it is blind to |
+|---|---|---|
+| `check:rate-card-port` | The kit's stylesheet byte for byte, 334 classes, every departure declared and quoted, no border over 1px | Anything about behaviour |
+| `check:rate-card-export` | The workbook against the master: merges, widths, heights, the logo, every cell's format, font, fill, border and alignment, every priced cell on the signed figure, 58 Wingdings ticks | Whether the route returns it |
+| `check:rate-card-routes` | Both ways a card leaves the application, over HTTP, including that a signed out request gets the login screen and not a workbook | Whether the file is right |
+| `check:rate-card` | Fifteen rules against real PostgreSQL, including all three ways a log row could be removed | Anything on screen |
+| `check:rate-cards-drive` | 65 assertions in a browser, including both themes, two viewport widths, and every fault reported from the live screen | Only the controls somebody listed |
+| `check:rate-cards-sweep` | Every interactive element on nine screens found and pressed, 147 of them, each having to change something or be disabled with a reason | Whether what it changed was the RIGHT thing |
+
+The last two are deliberately different shapes. The drive check knows
+what each control should do; the sweep does not care, and only asks
+whether it does anything at all. A control added tomorrow and left
+unwired fails the sweep without anybody adding it to a list.
+
+## Faults the audits found in themselves
+
+Worth recording, because an audit that has never been wrong about
+anything has probably never been tested.
+
+- The harness drew no sidebar, so the toast stacking fault could not
+  have been caught. It renders the application's own shell now.
+- The sweep stopped at the first press that navigated, reporting "1
+  element" on a screen with seventeen.
+- The sweep compared markup LENGTH, so swapping one five character class
+  for another looked like nothing happening.
+- The export check compared style objects with `JSON.stringify`, which
+  is key-order sensitive, and reported 774 font differences where there
+  were none.
+- The routes check followed redirects, so a correctly protected route
+  answering 307 looked like an open one answering 200.
