@@ -159,6 +159,8 @@ head('Every departure from the kit is declared and quoted');
     'rc-j',
     /* Deviation 4: typing fields the height of their own text. */
     'rc-29', 'rc-5x', 'rc-6j', 'rc-6o', 'rc-7s',
+    /* Deviation 5: the tab row wrapping on a narrow window. */
+    'rc-46', 'rc-4a',
     /* Layout, which is where the kit sits rather than how it looks. */
     'rc-3z', 'rc-42', 'rc-46', 'rc-4d', 'rc-3f', 'rc-6x', 'rc-6z', 'rc-6g',
   ];
@@ -181,6 +183,8 @@ head('Every departure from the kit is declared and quoted');
     port.includes('respect for the remainder of the app'));
   ok('and the toasts do too',
     port.includes('toasts are loading under the sidebar'));
+  ok('the wrapping tab row says which width it was found at',
+    port.includes('At 1024, which is'));
   ok('the removed sidebar quotes the instruction that caused it',
     port.includes('do not add in the navy sidebar'));
 

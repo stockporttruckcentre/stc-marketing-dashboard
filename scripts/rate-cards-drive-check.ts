@@ -496,6 +496,100 @@ async function main() {
     ok('no control on the screen is unlabelled and untitled',
       unexplained.length === 0, unexplained.slice(0, 6).join(', '));
 
+    /* ---------------------------------------------------------
+       The dark theme, which this screen had never been rendered in.
+
+       The kit switches on `data-stc-theme` and this application on
+       `data-theme`. The token file is rescoped to answer both, and
+       nothing had ever checked that it does.
+       --------------------------------------------------------- */
+    head('Both themes resolve, and are legible in each');
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(`document.documentElement.setAttribute('data-theme', '${theme}')`);
+      await page.waitForTimeout(250);
+
+      const read = await page.evaluate(`(() => {
+        const root = getComputedStyle(document.querySelector('.rc-6a'));
+        const lum = (c) => {
+          const m = String(c).match(/\\d+(\\.\\d+)?/g).map(Number);
+          const f = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+          return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+        };
+        const worst = [];
+        for (const sel of ['.rate-row .rc-2', '.rc-40', '.rc-s', '.rc-4', '.rc-2g']) {
+          const el = document.querySelector(sel);
+          if (!el) continue;
+          let p = el, bg = 'rgba(0, 0, 0, 0)';
+          while (p) {
+            const c = getComputedStyle(p).backgroundColor;
+            if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') { bg = c; break; }
+            p = p.parentElement;
+          }
+          const a = lum(getComputedStyle(el).color), b = lum(bg);
+          worst.push({ sel, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) });
+        }
+        return {
+          bg: root.getPropertyValue('--bg').trim(),
+          text: root.getPropertyValue('--text').trim(),
+          worst: worst.sort((x, y) => x.ratio - y.ratio)[0] || null,
+        };
+      })()`) as { bg: string; text: string; worst: { sel: string; ratio: number } | null };
+
+      ok(`the ${theme} theme resolves its tokens`,
+        read.bg !== '' && read.text !== '', JSON.stringify(read));
+      ok(`and the faintest text on the ${theme} screen is still readable`,
+        (read.worst?.ratio ?? 0) >= 4.5,
+        `${read.worst?.sel} is at ${read.worst?.ratio.toFixed(2)}:1, and 4.5:1 is the floor`);
+    }
+    await page.evaluate("document.documentElement.setAttribute('data-theme', 'light')");
+
+    /* ---------------------------------------------------------
+       A narrow window. The dashboard is used on laptops.
+       --------------------------------------------------------- */
+    head('It holds together on a laptop');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(400);
+
+    const sideways = await page.evaluate(`(() => ({
+      body: document.documentElement.scrollWidth > window.innerWidth + 1,
+      table: (() => {
+        const el = document.querySelector('.rc-3f');
+        return el ? el.scrollWidth > el.clientWidth : false;
+      })(),
+    }))()`) as { body: boolean; table: boolean };
+
+    ok('the page itself never scrolls sideways at 1280', !sideways.body);
+    ok('and the rate table still fits at 1280 without scrolling', !sideways.table,
+      'the table is scrolling at a width it should fit in');
+
+    /* Narrower than the table can fit. The columns must not be crushed:
+       the table takes its own scrollbar and the page does not. */
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.waitForTimeout(400);
+    const tight = await page.evaluate(`(() => ({
+      body: document.documentElement.scrollWidth > window.innerWidth + 1,
+      table: (() => {
+        const el = document.querySelector('.rc-3f');
+        return el ? el.scrollWidth > el.clientWidth : false;
+      })(),
+    }))()`) as { body: boolean; table: boolean };
+    ok('at 1024 the page still never scrolls sideways', !tight.body);
+    ok('and the rate table takes its own scrollbar rather than crushing the columns',
+      tight.table);
+
+    const offscreen = await page.evaluate(`(() => {
+      const out = [];
+      for (const el of Array.from(document.querySelectorAll('.rc-42 .rc-11, .rc-46 button'))) {
+        const b = el.getBoundingClientRect();
+        if (b.right > window.innerWidth + 1 || b.left < -1) out.push(el.className);
+      }
+      return out;
+    })()`) as string[];
+    ok('no labour card or tab is pushed off the side of the window',
+      offscreen.length === 0, offscreen.slice(0, 5).join(', '));
+
+    await page.setViewportSize({ width: 1700, height: 1080 });
+
     head('Nothing threw while any of that happened');
     ok('no page errors', errors.length === 0, errors.slice(0, 4).join('\n        '));
   } finally {
