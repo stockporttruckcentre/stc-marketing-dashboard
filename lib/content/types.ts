@@ -315,22 +315,76 @@ export function bodyFor(post: Pick<Post, 'content'>, variant?: Pick<Variant, 'co
    Time
    ------------------------------------------------------------- */
 
-/** "Tue 14 Oct, 9:00 AM", in the reader's own zone. */
+/* -------------------------------------------------------------
+   A date that reads the same on both sides of hydration.
+
+   These two used to call `toLocaleDateString('en-GB', { weekday:
+   'short', ... })` and let the platform choose the punctuation. The
+   platforms disagree:
+
+     Node 22   Tue 15 Sept
+     Chromium  Tue, 15 Sept
+
+   So every post card on the planner was rendered one way on the server
+   and the other way in the browser, React reported a hydration
+   mismatch, and it threw away the server's markup for that subtree and
+   drew it again. It was found by the sweep check, which listens for
+   console errors while it presses things, and not by looking: both
+   spellings are correct English and nothing on screen looks wrong.
+
+   The fix is to stop asking the platform for a phrase. The parts are
+   read as NUMBERS, which no ICU version spells differently, and the
+   words come from the two arrays below. The reader's zone still
+   decides which day it is, because that part was never the problem.
+   ------------------------------------------------------------- */
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec',
+];
+
+/** Year, month, day, hour and minute in one zone, as numbers. */
+function clockParts(d: Date, timezone?: string) {
+  const got: Record<string, string> = {};
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    ...(timezone ? { timeZone: timezone } : {}),
+  });
+  for (const part of fmt.formatToParts(d)) {
+    if (part.type !== 'literal') got[part.type] = part.value;
+  }
+  const year = Number(got.year);
+  const month = Number(got.month);
+  const day = Number(got.day);
+  /* Which weekday that calendar date is, worked out rather than asked
+     for, so no locale gets a say in it. */
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return {
+    year, month, day, weekday,
+    /* 24 rolls to 0 in some builds at midnight. Both mean the same
+       hour and only one of them reads like a time. */
+    hour: got.hour === '24' ? '00' : (got.hour ?? '00'),
+    minute: got.minute ?? '00',
+  };
+}
+
+/** "Tue 15 Sept, 14:30", in the reader's own zone. */
 export function whenLabel(iso: string | null, timezone?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
-  return d.toLocaleString('en-GB', {
-    weekday: 'short', day: 'numeric', month: 'short',
-    hour: 'numeric', minute: '2-digit',
-    ...(timezone ? { timeZone: timezone } : {}),
-  });
+  if (Number.isNaN(d.getTime())) return '';
+  const p = clockParts(d, timezone);
+  return `${DAY_NAMES[p.weekday]} ${p.day} ${MONTH_NAMES[p.month - 1]}, ${p.hour}:${p.minute}`;
 }
 
+/** "Tue 15 Sept". */
 export function dayLabel(iso: string | null): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-GB', {
-    weekday: 'short', day: 'numeric', month: 'short',
-  });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = clockParts(d);
+  return `${DAY_NAMES[p.weekday]} ${p.day} ${MONTH_NAMES[p.month - 1]}`;
 }
 
 /** Local YYYY-MM-DD, which is what a calendar cell is keyed by. */
