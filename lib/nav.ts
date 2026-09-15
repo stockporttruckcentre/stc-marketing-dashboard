@@ -34,7 +34,7 @@ import type { CrmCapability } from '@/lib/crm/permissions';
 
 export type NavIcon =
   | 'dashboard' | 'analytics' | 'work' | 'diary' | 'news' | 'reports'
-  | 'crm' | 'tracker' | 'finder' | 'stock' | 'fleetsmart'
+  | 'crm' | 'tracker' | 'finder' | 'stock' | 'fleetsmart' | 'ratecard'
   | 'social' | 'brand' | 'revenue'
   | 'team' | 'settings' | 'admin';
 
@@ -115,6 +115,11 @@ export const NAVIGATION: NavSection[] = [
       { href: '/dashboard/finder', label: 'Company finder', icon: 'finder', capability: 'finder.view' },
       { href: '/dashboard/sales', label: 'Trailer sales', icon: 'stock', capability: 'stock.view' },
       { href: '/dashboard/fleetsmart', label: 'FleetSmart+', icon: 'fleetsmart', capability: 'fleetsmart.view' },
+      /* The rate card is what a customer is charged per hour and per
+         job; the FleetSmart+ contract is what they pay monthly. Two
+         documents and two screens, and the rate card is the one the
+         admin team bills against every day. */
+      { href: '/dashboard/rate-cards', label: 'Rate Card Builder', icon: 'ratecard', capability: 'ratecard.view' },
       {
         href: '/dashboard/revenue', label: 'Revenue', icon: 'revenue', capability: 'revenue.view',
         /* Three divisions, one per row, which is what the business

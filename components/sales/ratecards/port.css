@@ -1,0 +1,146 @@
+/* =============================================================
+   The wrapper rules. Everything the kit assumed about the page it
+   would live on, restated so it holds inside this application, plus
+   the two changes the business asked for by name.
+
+   Nothing here restyles a component. `rate-card-components.css` is the
+   kit's, byte for byte, and stays that way; this file only says where
+   the kit sits and what the application around it must not do to it.
+   ============================================================= */
+
+/* ---- The shell, with the mock sidebar taken out ----
+
+   From the business:
+
+     Attached is the UI for this rate builder hub - follow it directly,
+     do not add in the navy sidebar.
+
+   So `.rc-6b`, the kit's own navy rail, is never rendered. The kit's
+   shell is `display:flex` with the rail first and the body second, and
+   with one child the body simply fills it. The kit's fixed 560px height
+   is a prototype fixture: on a real screen it fills what the dashboard
+   chrome leaves. */
+.rc-6a {
+  height: calc(100vh - var(--rc-chrome, 168px));
+  min-height: 520px;
+  width: 100%;
+  /* The kit paints on its own tokens rather than the application's, so
+     the two theme systems cannot bleed into each other. */
+  font-family: var(--inter);
+  color: var(--text);
+  background: var(--bg);
+  letter-spacing: -0.01em;
+}
+
+/* The three rules the kit put on `body` and `a`, which would have
+   reached every other screen in the application. Reapplied here, where
+   they reach this screen only. */
+.rc-6a, .rc-6a * { box-sizing: border-box; }
+.rc-6a a { color: var(--accent); text-decoration: none; }
+.rc-6a a:hover { color: var(--accent-hover); }
+
+/* The application's own reset gives buttons a border and a background.
+   The kit's buttons declare their own, and the ones that declare none
+   are meant to have none. */
+.rc-6a button {
+  font: inherit;
+  letter-spacing: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.rc-6a button:disabled { cursor: not-allowed; opacity: .45; }
+.rc-6a input, .rc-6a select, .rc-6a textarea { font: inherit; letter-spacing: inherit; }
+
+
+/* ---- Deviation 1: the thick borders ----
+
+   From the business:
+
+     It's included some overly-thick borders ... those are to be avoided
+     and fall back to how you've been designing.
+
+   Five rules carry a 3px accent rail and one a 2px underline. Every one
+   of them becomes 1px. The colour is untouched, so the rail still says
+   which kind of message it is; it just stops shouting.
+
+   This is a deliberate, named departure from the kit, which is why it
+   is here with the instruction above it rather than edited into
+   `rate-card-components.css`. `npm run check:rate-card-port` counts it
+   as a change rather than reporting it as drift. */
+.rc-6a .rc-2s { border-left-width: 1px; }
+.rc-6a .rc-8l, .rc-6a .rc-8n, .rc-6a .rc-8p { border-left-width: 1px; }
+.rc-6a .rc-2h { border-bottom-width: 1px; }
+
+
+/* ---- Deviation 2: typing fields the height of their own text ----
+
+   From the business:
+
+     and typing fields where the box height is the same as the text,
+     those are to be avoided.
+
+   Every wrapper that holds an `<input>` gets the same 32px the rest of
+   this application uses for a control, and the input inside it fills
+   that rather than sizing to its line box. The kit's sort field was
+   28px, which is where this reads worst. */
+.rc-6a .rc-29,
+.rc-6a .rc-5x,
+.rc-6a .rc-6j,
+.rc-6a .rc-6o,
+.rc-6a .rc-7s { min-height: 32px; height: 32px; }
+
+.rc-6a input,
+.rc-6a textarea {
+  min-height: 0;
+  line-height: 1.45;
+}
+/* An input that is its own box rather than sitting in a wrapper. */
+.rc-6a input:not([type='checkbox']):not([type='radio']):where(:not(.rc-1b):not(.rc-3y):not(.rc-6p)) {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+.rc-6a textarea { min-height: 72px; padding: 8px 10px; }
+
+
+/* ---- The scrollers ----
+
+   From the pack: "The labour band never scrolls away. The rate table is
+   the only scroller." Stated here because it is a property of the
+   layout rather than of any component, and it is the first thing a
+   careless flex change breaks. */
+.rc-6a .rc-3z, .rc-6a .rc-42, .rc-6a .rc-46, .rc-6a .rc-4d { flex: none; }
+.rc-6a .rc-3f { flex: 1; min-height: 0; overflow-y: auto; }
+.rc-6a .rc-6x, .rc-6a .rc-6z { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.rc-6a .rc-6g { min-width: 0; }
+
+/* A narrow screen scrolls the table sideways rather than crushing the
+   axle columns. The page itself never scrolls sideways. */
+.rc-6a .rc-3f > * { min-width: 940px; }
+.rc-6a .rc-3f { overflow-x: auto; }
+
+
+/* ---- Dialogs and popovers ----
+
+   The kit draws them as flat blocks on its reference page, because a
+   reference page has nowhere to float them to. */
+.rc-scrim {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(5, 13, 38, .42);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.rc-scrim > * { max-height: calc(100vh - 48px); overflow-y: auto; }
+.rc-pop-scrim { position: fixed; inset: 0; z-index: 60; }
+.rc-pop { position: absolute; z-index: 61; }
+.rc-toasts {
+  position: fixed; z-index: 80; right: 18px; bottom: 18px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+
+/* Nothing in the rate table animates position, per the pack. Colour and
+   opacity only, and only for somebody who has not asked for stillness. */
+@media (prefers-reduced-motion: reduce) {
+  .rc-6a *, .rc-scrim * { transition: none !important; animation: none !important; }
+}

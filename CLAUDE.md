@@ -194,6 +194,43 @@ So:
 - **"Would look better" is not a reason.** It is the exact thought that
   produced every one of the nineteen.
 
+### The Rate Card Builder came as a handoff too
+
+`docs/source/rate_cards/` is the pack, stored untouched, and its own
+`HANDOFF.md` says the files are the implementation: "Reproduce each
+`.html` file and the stylesheets **exactly**." So
+`components/sales/ratecards/` holds the kit's component stylesheet byte
+for byte, the tokens with two selectors rescoped and the three global
+rules moved, and every screen built from the kit's own classes.
+
+Two departures were asked for by name and live in `port.css` with the
+instruction quoted above each: the 3px accent rails become 1px, and
+every typing field is at least 32px. The kit's navy rail is never
+rendered, also by instruction.
+
+**The pack's own data contract is wrong about one thing, and the fix is
+mechanical rather than chosen.** `HANDOFF.md` says `hours x labour`
+reproduces the signed KNDS figures. It does not: 3 of the 19 derived
+rates reproduce theirs, 14 miss by up to 40p, and 2 cannot be reproduced
+at all because one `hours` is asked to produce two per-axle prices. The
+pack also says the hours "were back-calculated from it; they are the
+starting point, not gospel", so `scripts/rate-card-generate.ts` divides
+the signed figure by its pool at full precision, per axle. Nothing is
+invented: both numbers were already in the kit. The generator throws if
+any derived rate stops reproducing its signed figure.
+
+Four checks hold it:
+
+```bash
+npm run check:rate-card-port     # the port is the kit, and every departure was asked for
+npm run check:rate-card-export   # the workbook is the master with new values in it
+npm run check:rate-card          # fourteen rules, driven against real PostgreSQL
+npm run check:rate-cards-drive   # forty assertions in a browser, needs npm run dev
+```
+
+After a new pack arrives, run `python3 scripts/rate-card-sheet-map.py`
+and `npm run rate-card:generate`, and commit both results.
+
 ### The Roles tab came as a handoff, not a kit
 
 `docs/source/roles_hub/` is different again: `HANDOFF.md` says its

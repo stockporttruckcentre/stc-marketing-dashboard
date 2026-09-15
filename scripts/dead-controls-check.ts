@@ -44,6 +44,15 @@ const GOVERNED = [
   'components/admin/roles/RoleMenu.tsx',
   'components/admin/roles/views.tsx',
   'components/admin/roles/Compare.tsx',
+  'components/sales/ratecards/RateCardsHub.tsx',
+  'components/sales/ratecards/RateBuilder.tsx',
+  'components/sales/ratecards/RateRow.tsx',
+  'components/sales/ratecards/modals.tsx',
+  'components/sales/ratecards/Defaults.tsx',
+  'components/sales/ratecards/FleetsmartPanel.tsx',
+  'components/sales/ratecards/builder-tabs.tsx',
+  'components/sales/ratecards/SheetPreview.tsx',
+  'components/sales/ratecards/RateCardFromContract.tsx',
 ];
 
 let bad = 0;

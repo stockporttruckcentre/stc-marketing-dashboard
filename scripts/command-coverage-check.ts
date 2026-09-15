@@ -1027,6 +1027,16 @@ for (const [said, id] of [
   ['new starter needs a login', 'admin.addUser'],
   ['set somebody up', 'admin.addUser'],
 
+  // Rate cards.
+  ['rate cards', 'ratecard.hub'],
+  ['what do we charge', 'ratecard.hub'],
+  ['customer rates', 'ratecard.hub'],
+  ['rate card builder', 'ratecard.hub'],
+  ['new rate card', 'ratecard.new'],
+  ['create a rate card', 'ratecard.new'],
+  ['default rates', 'ratecard.defaults'],
+  ['change the default rates', 'ratecard.defaults'],
+
   // Your own account.
   ['what can i do', 'me.access'],
   ['my permissions', 'me.access'],

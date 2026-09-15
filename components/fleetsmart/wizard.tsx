@@ -24,6 +24,7 @@ import {
   STEPS, STEP_COACH, canOpen, furthestOpen, stepDone, whatIsMissing, type Step,
 } from '@/lib/fleetsmart/steps';
 import { StepCoach } from './coach';
+import { RateCardFromContract } from '@/components/sales/ratecards/RateCardFromContract';
 import { DatePicker } from './date-picker';
 import {
   ContractDocument, ContractPrintRules, printContract, type DocumentVariant,
@@ -635,6 +636,7 @@ export function ContractWizard({
           input={input} priced={priced} extras={extras} reference={reference}
           variant={variant}
           onPrint={setPrintReminder}
+          contractId={savedId}
         />
       )}
     </Drawer>
@@ -1424,13 +1426,17 @@ function WordingStep({
 /* ---------------- 6. review ---------------- */
 
 function ReviewStep({
-  input, priced, extras, reference, variant, onPrint,
+  input, priced, extras, reference, variant, onPrint, contractId,
 }: {
   input: ContractInput;
   priced: ReturnType<typeof priceContract>;
   extras: ContractExtras;
   reference: string | null;
   variant: DocumentVariant;
+  /* Null until the contract has been saved. The rate card is made by a
+     trigger when the contract row lands, so there is nothing to offer
+     before that, and the button says so rather than being absent. */
+  contractId: string | null;
   /* The wizard's, not `window.print` directly, so printing something
      that has not been saved says so first. Printing does not save, and
      a PDF in somebody's downloads with no record behind it is the
@@ -1462,6 +1468,17 @@ function ReviewStep({
           <Printer size={13} /> Save contract as PDF
         </Button>
       </div>
+
+      {/* THE RATE CARD, FROM HERE.
+
+          From the business: "Ensure in the fs+ builder when presented
+          with options to download the contract you can
+          generate/download the rate card."
+
+          The card itself is made by a trigger the moment the contract
+          row lands, so this never creates anything: it finds the card
+          that already exists and hands it over. */}
+      <RateCardFromContract contractId={contractId} customer={input.customerName} />
 
       {/* Which one is on screen, because the two are identical for the
           first page and a half and the difference is off the bottom. */}

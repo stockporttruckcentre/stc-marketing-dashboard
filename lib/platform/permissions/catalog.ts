@@ -106,6 +106,8 @@ export type Capability =
   | 'compliance.sensitive'
   // ---- FleetSmart+ ----
   | 'fleetsmart.view' | 'fleetsmart.build' | 'fleetsmart.discount' | 'fleetsmart.send'
+  // ---- Rate cards ----
+  | 'ratecard.view' | 'ratecard.build' | 'ratecard.labour' | 'ratecard.approve'
   // ---- Administration ----
   | 'admin.users' | 'admin.roles' | 'admin.usersDepartment' | 'admin.settings' | 'admin.audit';
 
@@ -202,6 +204,12 @@ export const CAPABILITY_CATALOG = [
   { key: 'fleetsmart.build', label: 'Build a contract', description: 'Price a fleet and save the result as a draft. The price comes off the rate card, so this is not the right to set a price.', area: 'FleetSmart+', feature: 'Contracts', danger: 'routine', requires: ['fleetsmart.view'], scoped: false, position: 20 },
   { key: 'fleetsmart.discount', label: 'Apply a manager\'s discount', description: 'Take a percentage off the whole contract before the promotional discount. The one number on the document that comes out of somebody else\'s margin.', area: 'FleetSmart+', feature: 'Contracts', danger: 'sensitive', requires: ['fleetsmart.build'], scoped: false, position: 30 },
   { key: 'fleetsmart.send', label: 'Send a contract to a customer', description: 'Mark a contract sent and record what went out. A price a customer has seen is a price they will hold you to.', area: 'FleetSmart+', feature: 'Contracts', danger: 'sensitive', requires: ['fleetsmart.build'], scoped: false, position: 40 },
+
+  // ---- Rate cards ----
+  { key: 'ratecard.view', label: 'See rate cards', description: 'Open the Rate Card Builder and read the cards on it, whoever built them.', area: 'Rate cards', feature: 'Rate cards', danger: 'routine', requires: [], scoped: false, position: 10 },
+  { key: 'ratecard.build', label: 'Build and amend a rate card', description: 'Create a card for a customer and override individual rates on it. Not the right to move the labour rate every other rate follows.', area: 'Rate cards', feature: 'Rate cards', danger: 'routine', requires: ['ratecard.view'], scoped: false, position: 20 },
+  { key: 'ratecard.labour', label: 'Set a labour rate', description: 'Change an hourly rate, which moves every rate derived from it. Nineteen rows on a card follow the five labour rates, so this is the one edit that is reviewed before it commits.', area: 'Rate cards', feature: 'Rate cards', danger: 'sensitive', requires: ['ratecard.build'], scoped: false, position: 30 },
+  { key: 'ratecard.approve', label: 'Approve a rate card', description: 'Make a card the live one for a customer. What the admin team bills against until it is replaced.', area: 'Rate cards', feature: 'Rate cards', danger: 'sensitive', requires: ['ratecard.build'], scoped: false, position: 40 },
 
   { key: 'admin.audit', label: 'Read the audit trail', description: 'Read the permanent record of who changed what, and generate insider lists from it.', area: 'Admin', feature: 'Compliance', danger: 'sensitive', requires: [], scoped: false, position: 30 },
 
