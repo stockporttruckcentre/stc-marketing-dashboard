@@ -80,13 +80,17 @@ export async function checkCustomer(contactId: string): Promise<Result<Duplicate
 /* ---- Writing ---- */
 
 export async function createCard(args: {
-  contactId: string; effective?: string | null; supersede?: boolean; contractId?: string | null;
+  contactId: string; effective?: string | null; supersede?: boolean;
+  contractId?: string | null;
+  /** Another card to start from. Null means the current defaults. */
+  copyFrom?: string | null;
 }): Promise<Result<string>> {
   const { data, error } = await db().rpc('rate_card_create', {
     p_contact: args.contactId,
     p_effective: args.effective ?? null,
     p_supersede: args.supersede ?? false,
     p_contract: args.contractId ?? null,
+    p_copy_from: args.copyFrom ?? null,
   });
   if (error) return fail(error, 'The rate card could not be created.');
   return { ok: true, value: data as string };
@@ -171,6 +175,16 @@ export async function resetToDefaults(
   if (error) return fail(error, 'The card could not be reset.');
   const row = Array.isArray(data) ? data[0] : data;
   return { ok: true, value: row ?? { rates_moved: 0, overrides_cleared: 0 } };
+}
+
+/** What a new card can start from: the defaults, or another card. */
+export async function cardSources(contactId?: string | null): Promise<Result<{
+  card_id: string; card_ref: string; customer_name: string; card_status: string;
+  effective_from: string; overrides: number; same_customer: boolean;
+}[]>> {
+  const { data, error } = await db().rpc('rate_card_sources', { p_contact: contactId ?? null });
+  if (error) return fail(error, 'The cards you could copy could not be listed.');
+  return { ok: true, value: data ?? [] };
 }
 
 /* ---- The defaults ---- */

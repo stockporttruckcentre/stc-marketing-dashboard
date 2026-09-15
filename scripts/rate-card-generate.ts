@@ -80,6 +80,22 @@ const SHEET_MAP = JSON.parse(
   readFileSync('docs/source/rate_cards/sheet-map.json', 'utf8'),
 ) as { rows: Record<string, number>; columns: { single: string; axle: string[] } };
 
+/* ---- The short label the kit puts above each labour rate ----
+
+   The card in the builder is sized for "HGV / LCV · in hours", which is
+   what the kit's own `rate-builder.html` writes there. The template's
+   label, "Hourly Rate - HGVs/LCV's, in hours", is what PRINTS on the
+   customer's sheet and is far too long for the card: it wraps to two
+   lines and the count beside it wraps with it. From the business,
+   looking at exactly that: "text messy on these cards, improper
+   formatting."
+
+   So the screen label is read out of the kit's own component file
+   rather than typed here, in the order the cards appear. */
+const BUILDER = readFileSync(`${KIT.replace('/rate-model.json', '')}/rate-builder.html`, 'utf8');
+const shortLabels = [...BUILDER.matchAll(/<span class="rc-s">([^<]*)<\/span>/g)]
+  .map((m) => m[1]!.trim());
+
 const model = JSON.parse(readFileSync(KIT, 'utf8')) as Model;
 const pools = model.labourPools;
 
@@ -195,6 +211,15 @@ export const FS_INCLUSIONS = ${JSON.stringify(model.fleetsmartInclusions, null, 
 export const ROW_OF: Record<string, number> = ${JSON.stringify(SHEET_MAP.rows, null, 2)};
 
 export const SHEET_COLUMNS = ${JSON.stringify(SHEET_MAP.columns, null, 2)};
+
+/* ---- What the builder calls each labour rate ----
+
+   The kit's own words, from \`rate-builder.html\`, in the order the kit
+   draws the cards. The long label in \`LABOUR_POOLS\`' template row is
+   what prints on the customer's sheet; this is what fits on the card. */
+export const POOL_LABELS: Record<string, string> = ${JSON.stringify(
+  Object.fromEntries(['hgv', 'hgvO', 'trl', 'trlO', 'body']
+    .map((pool, i) => [pool, shortLabels[i] ?? pool])), null, 2)};
 `;
 
 writeFileSync(OUT, body);

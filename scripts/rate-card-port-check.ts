@@ -73,9 +73,10 @@ head('The tokens differ from the kit only where the port says so');
      comes out is the port. Deriving it this way means an undeclared
      fourth change cannot pass. */
   let derived = kit
-    .replace(':root{', '.rc-6a{')
+    .replace(':root{', '.rc-6a,.rc-tokens{')
     .replace('[data-stc-theme="dark"]{',
-      '.rc-6a[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-6a,[data-theme="dark"] .rc-6a{');
+      '.rc-6a[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-6a,[data-theme="dark"] .rc-6a,'
+      + '.rc-tokens[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-tokens,[data-theme="dark"] .rc-tokens{');
   for (const rule of [
     '*{box-sizing:border-box}\n',
     'body{margin:0;background:var(--bg);color:var(--text);font-family:var(--inter);letter-spacing:-0.01em}\n',
@@ -107,7 +108,7 @@ head('Every class the screens use is the kit’s');
   /* The port's own wrapper classes, declared in port.css and named here
      so they are a short list somebody can read rather than a pattern
      that would let anything through. */
-  const MINE = new Set(['rc-scrim', 'rc-pop-scrim', 'rc-pop', 'rc-toasts', 'sheet', 'noprint']);
+  const MINE = new Set(['rc-scrim', 'rc-pop', 'rc-toasts', 'rc-tokens', 'sheet', 'noprint']);
 
   const files = tsxFiles();
   const strays: string[] = [];
@@ -144,13 +145,19 @@ head('Every departure from the kit is declared and quoted');
      the kit inside the application, the wrapper classes and the reset
      are not departures: they say where the kit sits, not what it looks
      like. */
-  const departures = [...port.matchAll(/^\.rc-6a \.(rc-[0-9a-z]+)[^{]*\{([^}]*)\}/gm)]
+  const departures = [...port.matchAll(/^\.rc-6a \.((?:rc-[0-9a-z]+)|(?:rate-[a-z-]+))[^{]*\{([^}]*)\}/gm)]
     .map((m) => m[1]!);
 
   const DECLARED = [
     /* Deviation 1: the thick borders. */
-    'rc-2s', 'rc-8l', 'rc-8n', 'rc-8p', 'rc-2h',
-    /* Deviation 2: typing fields the height of their own text. */
+    'rate-section-bar', 'rc-2s', 'rc-8l', 'rc-8n', 'rc-8p', 'rc-2h',
+    /* Deviation 1 again: every control face the kit draws at 1.5px. */
+    'rc-2z', 'rc-30', 'rc-4r', 'rc-5p', 'rc-5u', 'rc-83',
+    /* Deviation 2: the labels, which were 9.5px monospace. */
+    'rc-s', 'rc-t', 'rc-r', 'rc-2e', 'rc-53', 'rc-1j', 'rc-o',
+    /* Deviation 3: prices that did not line up. */
+    'rc-j',
+    /* Deviation 4: typing fields the height of their own text. */
     'rc-29', 'rc-5x', 'rc-6j', 'rc-6o', 'rc-7s',
     /* Layout, which is where the kit sits rather than how it looks. */
     'rc-3z', 'rc-42', 'rc-46', 'rc-4d', 'rc-3f', 'rc-6x', 'rc-6z', 'rc-6g',
@@ -165,9 +172,67 @@ head('Every departure from the kit is declared and quoted');
   ok('deviation 1 quotes the instruction that caused it',
     port.includes('overly-thick borders'));
   ok('deviation 2 quotes the instruction that caused it',
+    port.includes('rc-2e text too small, wrong font, wrong colour'));
+  ok('deviation 3 quotes the instruction that caused it',
+    port.includes('ensure prices are in line and not randomly scattered'));
+  ok('deviation 4 quotes the instruction that caused it',
     port.includes('the box height is the same as the text'));
+  ok('the reworked shell quotes the instruction that caused it',
+    port.includes('respect for the remainder of the app'));
+  ok('and the toasts do too',
+    port.includes('toasts are loading under the sidebar'));
   ok('the removed sidebar quotes the instruction that caused it',
     port.includes('do not add in the navy sidebar'));
+
+  /* ---- No border heavier than 1px survives ----
+
+     From the business, after the first pass fixed five heavy borders
+     and missed the sixth:
+
+       i verbatim said don't include the thick borders and many elements
+       have 2px solid var(--border-emphasis) instead of 1px lighter
+       border.
+
+     The first pass went looking for the 3px rails it had noticed. This
+     goes looking for the RULE: every border declaration in the kit that
+     is over 1px, or that uses the emphasis colour, has to be overridden
+     in port.css. Derived from the kit rather than from a list somebody
+     maintains, so a heavier border in a future pack fails on the day it
+     arrives rather than on the day somebody spots it. */
+  {
+    const kitCss = read(`${PORT}/rate-card-components.css`);
+    const heavy: { cls: string; decl: string }[] = [];
+    for (const rule of kitCss.matchAll(/\.([A-Za-z0-9_-]+)\{([^}]*)\}/g)) {
+      const cls = rule[1]!;
+      for (const decl of rule[2]!.split(';')) {
+        const d = decl.trim();
+        if (!d.startsWith('border') || d.includes('radius')) continue;
+        const width = /(\d+(?:\.\d+)?)px/.exec(d.split(':')[1] ?? '');
+        const tooThick = width !== null && Number(width[1]) > 1;
+        if (tooThick || d.includes('border-emphasis')) heavy.push({ cls, decl: d });
+      }
+    }
+
+    const notOverridden = heavy.filter(({ cls }) =>
+      !new RegExp(`\\.rc-6a [^{]*\\.${cls}\\b`).test(port));
+
+    ok(`all ${heavy.length} borders the kit draws heavier than 1px are brought back to 1px`,
+      notOverridden.length === 0,
+      notOverridden.map((h) => `.${h.cls} still has "${h.decl}" and nothing in port.css answers it`)
+        .join('\n        '));
+
+    /* And the override really is 1px, rather than merely present. */
+    const stillHeavy = [...port.matchAll(/^\.rc-6a [^{]*\{([^}]*)\}/gm)]
+      .flatMap((m) => m[1]!.split(';'))
+      .map((d) => d.trim())
+      .filter((d) => d.startsWith('border') && !d.includes('radius'))
+      .filter((d) => {
+        const w = /(\d+(?:\.\d+)?)px/.exec(d.split(':')[1] ?? '');
+        return w !== null && Number(w[1]) > 1;
+      });
+    ok('and port.css does not introduce a heavy border of its own',
+      stillHeavy.length === 0, stillHeavy.join(', '));
+  }
 
   /* And the kit's own rail is never rendered.
 

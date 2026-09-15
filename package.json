@@ -108,7 +108,8 @@
     "check:rate-cards-drive": "tsx scripts/rate-cards-drive-check.ts",
     "check:rate-card-port": "tsx scripts/rate-card-port-check.ts",
     "check:rate-card-export": "tsx scripts/rate-card-export-check.ts",
-    "check:rate-card": "bash scripts/sql/rate-card-check.sh"
+    "check:rate-card": "bash scripts/sql/rate-card-check.sh",
+    "check:rate-cards-sweep": "tsx scripts/rate-cards-sweep-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

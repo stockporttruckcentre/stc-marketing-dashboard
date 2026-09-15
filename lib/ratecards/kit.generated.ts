@@ -1157,3 +1157,16 @@ export const SHEET_COLUMNS = {
     "G"
   ]
 };
+
+/* ---- What the builder calls each labour rate ----
+
+   The kit's own words, from `rate-builder.html`, in the order the kit
+   draws the cards. The long label in `LABOUR_POOLS`' template row is
+   what prints on the customer's sheet; this is what fits on the card. */
+export const POOL_LABELS: Record<string, string> = {
+  "hgv": "HGV / LCV · in hours",
+  "hgvO": "HGV / LCV · out of hours",
+  "trl": "Trailers · in hours",
+  "trlO": "Trailers · out of hours",
+  "body": "Bodyshop"
+};

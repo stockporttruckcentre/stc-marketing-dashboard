@@ -13,6 +13,7 @@ import { FleetsmartPanel } from './FleetsmartPanel';
 import { HeaderTab, PartsTab, InstructionsTab, HistoryTab } from './builder-tabs';
 import { SheetPreview } from './SheetPreview';
 import * as api from '@/lib/ratecards/client';
+import { POOL_LABELS } from '@/lib/ratecards/kit.generated';
 import { money, ago, round2, STATUS_WORDS, MISSING_WORDS, shortDate } from '@/lib/ratecards/format';
 import type { FullCard, Rate, ChangeRow } from '@/lib/ratecards/types';
 
@@ -81,6 +82,25 @@ export function RateBuilder({
   }, [cardId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* The card menu closes on a click anywhere else, and on Escape. */
+  useEffect(() => {
+    if (!menu) return;
+    const shut = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      setMenu(false);
+    };
+    /* Deferred a frame, or the click that opened it closes it again. */
+    const id = window.requestAnimationFrame(() => {
+      document.addEventListener('mousedown', shut);
+      document.addEventListener('keydown', shut);
+    });
+    return () => {
+      window.cancelAnimationFrame(id);
+      document.removeEventListener('mousedown', shut);
+      document.removeEventListener('keydown', shut);
+    };
+  }, [menu]);
 
   const loadHistory = useCallback(async () => {
     const got = await api.history(cardId);
@@ -373,7 +393,12 @@ export function RateBuilder({
                 </button>
                 {menu && (
                   <>
-                    <div className="rc-pop-scrim" onClick={() => setMenu(false)} />
+                    {/* No scrim. A full screen catcher rendered inside
+                        `.main` cannot cover the sidebar, and one
+                        portalled to the body would cover the menu it is
+                        meant to sit behind. A document listener closes
+                        on a click anywhere, including the sidebar, and
+                        has neither problem. */}
                     <div className="rc-7w rc-pop" style={{ right: 0, top: 30, minWidth: 210 }}>
                       <button
                         className="rc-7x"
@@ -439,7 +464,11 @@ export function RateBuilder({
               {card.labour.map((l) => (
                 <LabourCard
                   key={l.id}
-                  label={l.label}
+                  /* The kit's own short label for a pool it ships, and
+                     whatever somebody typed for a custom one. The
+                     template's long label is what prints on the
+                     customer's sheet, not what fits on this card. */
+                  label={POOL_LABELS[l.pool] ?? l.label}
                   chargeTo={l.charge_to}
                   drives={drives(l.pool)}
                   rate={Number(l.rate)}

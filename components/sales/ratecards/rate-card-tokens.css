@@ -7,8 +7,19 @@
    with different values, for every screen that has not been rebranded.
    Loaded as written, whichever file came last would recolour the other
    one's screens. So the light block sits on `.rc-6a`, the kit's own
-   outermost element, and the dark block answers to the application's
-   `data-theme` as well as the kit's `data-stc-theme`.
+   outermost element, and on `.rc-tokens`, and the dark block answers to
+   the application's `data-theme` as well as the kit's `data-stc-theme`.
+
+   ---- Why there are two names ----
+
+   `.rc-6a` is the kit's screen: it carries the tokens AND it is the
+   frame the kit drew around them. A dialog, a popover and a toast need
+   the tokens without the frame, because they float over the whole
+   application rather than sitting inside the screen. Giving them
+   `.rc-6a` gave the toast container the screen's own full height and
+   opaque background, which is what put a toast behind the sidebar.
+
+   `.rc-tokens` is the tokens and nothing else, for anything that floats.
 
    The third change is a deletion, not a rescope: the kit's bare `body`
    and `a` rules are dropped, because this is a screen inside an
@@ -21,7 +32,7 @@
    ============================================================= */
 /* 69 design tokens, light and dark. The only place a colour is defined.
    Never replace a token with a literal: dark mode works only through these. */
-.rc-6a{
+.rc-6a,.rc-tokens{
 --navy-950:#050D26;--navy-900:#09163A;--navy-800:#13224F;--navy-700:#1E2F63;--navy-600:#2B3F78;--navy-500:#3D5290;--navy-400:#5A6DA8;--navy-300:#8492C0;--navy-200:#B4BDD8;--navy-100:#D9DEEC;--navy-50:#EFF2F8;
 --red-900:#7A150D;--red-800:#9C1B11;--red-700:#B31F14;--red-600:#CF2417;--red-500:#E03B2E;--red-400:#EC6055;--red-300:#F49189;--red-200:#F9C3BE;--red-100:#FCE3E1;--red-50:#FDF2F1;
 --n-0:#FFFFFF;--n-25:#FBFBFA;--n-50:#F7F7F5;--n-100:#EFEFEC;--n-200:#E2E2DE;--n-300:#CBCBC6;--n-400:#A3A39D;--n-500:#7A7A74;--n-600:#5B5B56;--n-700:#43433F;--n-800:#2B2B28;--n-900:#1A1A18;
@@ -37,7 +48,7 @@
 --panton:'Panton',sans-serif;--inter:'Inter',system-ui,sans-serif;
 --mono:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
 }
-.rc-6a[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-6a,[data-theme="dark"] .rc-6a{
+.rc-6a[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-6a,[data-theme="dark"] .rc-6a,.rc-tokens[data-stc-theme="dark"],[data-stc-theme="dark"] .rc-tokens,[data-theme="dark"] .rc-tokens{
 --bg:#050D26;--bg-subtle:#13224F;--surface:#09163A;--surface-raised:#1E2F63;--surface-sunken:#050D26;--surface-inverse:#FFFFFF;
 --border:#1E2F63;--border-strong:#2B3F78;--border-emphasis:#5A6DA8;
 --text:#FFFFFF;--text-muted:#B4BDD8;--text-subtle:#8492C0;--text-inverse:#09163A;

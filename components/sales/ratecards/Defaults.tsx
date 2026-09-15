@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { IChevronL, IWarn, ITick, IInfo } from './icons';
 import { ConfirmModal, type Toast } from './modals';
 import * as api from '@/lib/ratecards/client';
+import { POOL_LABELS } from '@/lib/ratecards/kit.generated';
 import { money, hours as fmtHours, round2, shortDate } from '@/lib/ratecards/format';
 import type { TemplateRead, TemplateRate, ResyncCandidate, TemplateChange } from '@/lib/ratecards/types';
 
@@ -146,7 +147,7 @@ export function DefaultRates({ onBack, onToast, caps }: {
               {data.labour.map((l) => (
                 <DefaultLabour
                   key={l.pool}
-                  label={l.label}
+                  label={POOL_LABELS[l.pool] ?? l.label}
                   rate={Number(l.rate)}
                   drives={data.rates.filter((r) => r.basis === 'derived' && r.pool === l.pool).length}
                   editable={caps.labour}
@@ -163,14 +164,26 @@ export function DefaultRates({ onBack, onToast, caps }: {
           </div>
 
           <div className="rc-46">
-            <button className={tab === 'rates' ? 'rc-47' : 'rc-x'} onClick={() => setTab('rates')}>
+            <button
+              className={tab === 'rates' ? 'rc-47' : 'rc-x'}
+              aria-current={tab === 'rates' ? 'page' : undefined}
+              onClick={() => setTab('rates')}
+            >
               Every default rate
             </button>
-            <button className={tab === 'cards' ? 'rc-47' : 'rc-x'} onClick={() => setTab('cards')}>
+            <button
+              className={tab === 'cards' ? 'rc-47' : 'rc-x'}
+              aria-current={tab === 'cards' ? 'page' : undefined}
+              onClick={() => setTab('cards')}
+            >
               Existing cards
               {untouched.length > 0 && <span className="rc-49">{untouched.length}</span>}
             </button>
-            <button className={tab === 'history' ? 'rc-47' : 'rc-x'} onClick={() => setTab('history')}>
+            <button
+              className={tab === 'history' ? 'rc-47' : 'rc-x'}
+              aria-current={tab === 'history' ? 'page' : undefined}
+              onClick={() => setTab('history')}
+            >
               History
             </button>
           </div>
