@@ -53,20 +53,70 @@ const GOVERNED = [
   'components/sales/ratecards/builder-tabs.tsx',
   'components/sales/ratecards/SheetPreview.tsx',
   'components/sales/ratecards/RateCardFromContract.tsx',
+  'components/SocialPlanner.tsx',
+  'components/social/composer.tsx',
+  'components/social/workspace.tsx',
+  'components/social/planner.tsx',
+  'components/social/detail.tsx',
+  'components/social/previews.tsx',
 ];
 
 let bad = 0;
 const say = (s: string) => console.log(s);
 
-/** Comments out, so an example in a banner is not read as code. */
-const code = (src: string) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-     .split('\n').map((l) => l.replace(/\/\/.*$/, ''));
+/**
+ * Comments out, so an example in a banner is not read as code.
+ *
+ * A COMMENT IS ONLY A COMMENT OUTSIDE A STRING, and the naive version
+ * of this, two regular expressions, was wrong in both directions on
+ * this codebase's own files:
+ *
+ *   accept="image/*"        opened a block comment that swallowed the
+ *                           hidden file input on the next line, and the
+ *                           upload button above it was reported dead
+ *   placeholder="https://"  opened a line comment that swallowed the
+ *                           rest of the line
+ *
+ * So this walks the source instead, tracking which quote it is inside,
+ * and blanks a comment only when it starts outside one. Blanking rather
+ * than deleting keeps every line number the same as the file's.
+ */
+function code(src: string): string[] {
+  const out = src.split('');
+  let quote = '';
+  for (let i = 0; i < src.length; i += 1) {
+    const c = src[i]!;
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+    if (c === '/' && src[i + 1] === '*') {
+      const shut = src.indexOf('*/', i + 2);
+      const end = shut === -1 ? src.length : shut + 2;
+      for (let k = i; k < end; k += 1) if (out[k] !== '\n') out[k] = ' ';
+      i = end - 1;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '/') {
+      let k = i;
+      while (k < src.length && src[k] !== '\n') { out[k] = ' '; k += 1; }
+      i = k;
+      continue;
+    }
+  }
+  return out.join('').split('\n');
+}
 
-/* An opening tag, across however many lines it is written on. */
-function tags(lines: string[]): { tag: string; line: number; text: string }[] {
+/* An opening tag, across however many lines it is written on.
+
+   `after` is where the opening tag ends, which is what lets a `<label>`
+   be judged on what it WRAPS rather than only on its own attributes.
+   See the label rule below for why that matters. */
+function tags(lines: string[]): { tag: string; line: number; text: string; after: number }[] {
   const src = lines.join('\n');
-  const out: { tag: string; line: number; text: string }[] = [];
+  const out: { tag: string; line: number; text: string; after: number }[] = [];
   const re = /<(button|input|select|textarea|label|a)\b/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src))) {
@@ -82,7 +132,7 @@ function tags(lines: string[]): { tag: string; line: number; text: string }[] {
       else if (c === '>' && depth === 0) break;
     }
     out.push({
-      tag: m[1]!, text: src.slice(m.index, i + 1),
+      tag: m[1]!, text: src.slice(m.index, i + 1), after: i + 1,
       line: src.slice(0, m.index).split('\n').length,
     });
   }
@@ -98,19 +148,53 @@ const FOR = /\bhtmlFor\s*=/;
    counts, and so does a form input bound to a value the parent owns. */
 const FROM_PROPS = /\{\.\.\.|on[A-Z]\w*\s*=\s*\{\s*(?:props\.|on[A-Z])/;
 
-say('\n  Every control does something, or says why not\n  --------------------------------------------');
-
-for (const file of GOVERNED) {
-  if (!existsSync(file)) { say(`  skip  ${file} does not exist yet`); continue; }
-  const lines = code(readFileSync(file, 'utf8'));
+/**
+ * Every control in one piece of source that does nothing.
+ *
+ * Separated from the file loop so the rules can be run against a
+ * fixture as well as against the codebase. See the self test at the
+ * bottom: a check whose rules were loosened to stop it crying wolf is
+ * a check that has to prove it still catches the wolf.
+ */
+function deadIn(source: string): string[] {
+  const lines = code(source);
+  const src = lines.join('\n');
   const dead: string[] = [];
 
   for (const t of tags(lines)) {
-    /* A closing or self-describing element with no interactive intent. */
-    if (t.tag === 'a' && !/\bhref\s*=/.test(t.text)) continue;
+    /* ---- An anchor is alive because of where it goes ----
+
+       An `<a>` with no `href` is not a control at all. An `<a>` WITH one
+       navigates, and the href is the behaviour: demanding an onClick as
+       well would have called the "open the published post" link on the
+       post detail screen dead when pressing it does exactly what it
+       says. What is dead is the placeholder href, `#` or empty, which
+       is a link drawn before anything was behind it. */
+    if (t.tag === 'a') {
+      if (!/\bhref\s*=/.test(t.text)) continue;
+      if (/\bhref\s*=\s*(["'])#?\1/.test(t.text)) {
+        dead.push(`${t.line}: <a> points at nothing, so pressing it does nothing`);
+        continue;
+      }
+      continue;
+    }
+
+    /* ---- A label is alive when it WRAPS its input ----
+
+       `htmlFor` is one of the two ways HTML associates a label with a
+       control. The other is containment, and it is the one this
+       codebase uses for every file picker: a styled `<label>` with a
+       hidden `<input type="file">` inside it, because a file input
+       cannot be styled and this is the standard way round that.
+
+       Reading only the label's own attributes called three working
+       upload buttons dead. So the rule reads what the label contains. */
     if (t.tag === 'label') {
       if (FOR.test(t.text) || HANDLER.test(t.text)) continue;
-      dead.push(`${t.line}: <label> with no htmlFor and no handler`);
+      const shut = src.indexOf('</label>', t.after);
+      const inside = shut === -1 ? '' : src.slice(t.after, shut);
+      if (/<(input|select|textarea)\b/.test(inside)) continue;
+      dead.push(`${t.line}: <label> with no htmlFor, no handler and no control inside it`);
       continue;
     }
     /* ---- A radio nothing listens to is still alive ----
@@ -130,12 +214,86 @@ for (const file of GOVERNED) {
     dead.push(`${t.line}: <${t.tag}> has no handler and is not disabled`);
   }
 
+  return dead;
+}
+
+say('\n  Every control does something, or says why not\n  --------------------------------------------');
+
+for (const file of GOVERNED) {
+  if (!existsSync(file)) { say(`  skip  ${file} does not exist yet`); continue; }
+  const dead = deadIn(readFileSync(file, 'utf8'));
+
   if (dead.length === 0) {
     say(`  ok    ${file}`);
   } else {
     bad += dead.length;
     say(`  FAIL  ${file}`);
     for (const d of dead) say(`          ${d}`);
+  }
+}
+
+/* =============================================================
+   THE CHECK, CHECKED.
+
+   Three of the rules above were loosened after this file reported two
+   working upload buttons and one working link as dead. Loosening a rule
+   to stop false alarms is exactly how a check quietly stops catching
+   anything, and the person doing the loosening is the person judging
+   whether it still works. So it is not a judgement: the rules are run
+   against a fixture that contains one of each, and the verdicts are
+   asserted.
+
+   The last two fixtures are the comment stripper. Both are real lines
+   out of `components/social/composer.tsx`, and both used to blank the
+   code that followed them, which is why a wired control looked dead.
+   ============================================================= */
+say('\n  And the rules still catch what they are for\n  ------------------------------------------');
+
+const FIXTURES: { what: string; src: string; dead: boolean }[] = [
+  { what: 'a button with no handler',
+    dead: true, src: '<button>Press me</button>' },
+  { what: 'a button disabled with no reason given',
+    dead: true, src: '<button disabled>Press me</button>' },
+  { what: 'a link that points at nothing',
+    dead: true, src: '<a href="#">Open it</a>' },
+  { what: 'a link with an empty address',
+    dead: true, src: '<a href="">Open it</a>' },
+  { what: 'a label wrapping nothing',
+    dead: true, src: '<label>Upload image<span /></label>' },
+
+  { what: 'a button with a handler',
+    dead: false, src: '<button onClick={go}>Press me</button>' },
+  { what: 'a button disabled and saying why',
+    dead: false, src: '<button disabled title="No contract yet">Press me</button>' },
+  { what: 'a label pointing at its control',
+    dead: false, src: '<label htmlFor="x">Name</label>' },
+  { what: 'a label wrapping a hidden file input',
+    dead: false,
+    src: '<label>Upload<input type="file" hidden onChange={pick} /></label>' },
+  { what: 'a link that goes somewhere',
+    dead: false, src: '<a href={v.permalink} target="_blank">Open it</a>' },
+  { what: 'a radio a stylesheet reads',
+    dead: false, src: '<input type="radio" id="tab-1" name="tab" />' },
+
+  { what: 'a dead button after an image/* attribute is still found',
+    dead: true,
+    src: '<input accept="image/*" onChange={pick} />\n<button>Press me</button>' },
+  { what: 'a dead button after an https:// placeholder is still found',
+    dead: true,
+    src: '<input placeholder="https://" onChange={set} /><button>Press me</button>' },
+  { what: 'a real block comment is still ignored',
+    dead: false, src: '/* <button>Press me</button> */' },
+  { what: 'a real line comment is still ignored',
+    dead: false, src: '// <button>Press me</button>' },
+];
+
+for (const f of FIXTURES) {
+  const found = deadIn(f.src).length > 0;
+  const right = found === f.dead;
+  say(`  ${right ? 'ok  ' : 'FAIL'}  ${f.what}`);
+  if (!right) {
+    bad += 1;
+    say(`          expected ${f.dead ? 'dead' : 'alive'}, read as ${found ? 'dead' : 'alive'}`);
   }
 }
 

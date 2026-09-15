@@ -232,7 +232,13 @@ export function Segmented<T extends string>({ value, onChange, options }: {
   value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[];
 }) {
   return (
-    <div style={{
+    /* `aria-pressed` says which one is on. It used to be said only in
+       the colour, which leaves a screen reader with three identical
+       buttons, and left the sweep check unable to tell the difference
+       between "this is already the chosen one, so pressing it correctly
+       does nothing" and "this button does nothing". Both of those are
+       the same fix. */
+    <div role="group" style={{
       display: 'inline-flex', alignItems: 'center', width: '100%',
       border: '1px solid var(--border-strong)', borderRadius: 'var(--r)',
       background: 'var(--surface)', overflow: 'hidden',
@@ -242,6 +248,7 @@ export function Segmented<T extends string>({ value, onChange, options }: {
         return (
           <button
             key={o.value} type="button" onClick={() => onChange(o.value)}
+            aria-pressed={on}
             style={{
               flex: 1, height: 30, border: 'none', cursor: 'pointer',
               borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
