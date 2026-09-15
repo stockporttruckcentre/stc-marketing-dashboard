@@ -15,7 +15,7 @@ import {
   type Slot, type Tag, type Template, type Variant,
 } from '@/lib/content/types';
 import type { Capability } from '@/lib/platform/permissions/catalog';
-import { bucketStore, storeImage } from '@/lib/social/media';
+import { BUCKET, bucketStore, storeImage } from '@/lib/social/media';
 import { stagingKey } from '@/lib/command/files';
 import { fileDigest } from '@/lib/command/context';
 import {
@@ -388,9 +388,35 @@ export function SocialPlanner({
     const stored = await storeImage(bucketStore(supabase), {
       key, name: file.name, mime: file.type, bytes,
     });
-    return stored.ok
-      ? { ok: true as const, url: stored.url }
-      : { ok: false as const, why: stored.why };
+    if (!stored.ok) return { ok: false as const, why: stored.why };
+
+    /* ---- And a row saying where it went ----
+
+       The object is in the bucket, which is enough for a post: it holds
+       the public URL. The LIBRARY holds a `file_id` that references
+       `files`, and nothing in this application had ever written a row
+       to that table, so adding a picture to the library failed on the
+       foreign key every time. Migration 116 adds `file_register`, and
+       this is the one place that calls it.
+
+       A failure here does not fail the upload. The picture is already
+       stored and a post can use it; only the library entry needs the
+       id, and the caller that needs one says so. */
+    const { data: fileId } = await supabase.rpc('file_register', {
+      p_bucket: BUCKET,
+      p_object_key: key,
+      p_filename: file.name,
+      p_mime: file.type,
+      p_size: bytes.byteLength,
+      p_checksum: null,
+      p_title: null,
+    });
+
+    return {
+      ok: true as const,
+      url: stored.url,
+      fileId: (fileId as string | null) ?? null,
+    };
   }, [supabase, profile.id]);
 
   const post = async (url: string, body: unknown) => {
@@ -689,7 +715,14 @@ export function SocialPlanner({
             onUpload={async (file, name) => {
               const up = await uploadImage(file);
               if (!up.ok) return up.why;
-              const json = await post('/api/content/library', { file_id: up.url, name });
+              /* The file's id, not its URL. `social_library.file_id`
+                 references `files`, and the URL was being sent instead,
+                 which is a string where a UUID is expected: the library
+                 refused every picture it was ever offered. */
+              if (!up.fileId) {
+                return 'The picture was stored but could not be registered, so it cannot go in the library.';
+              }
+              const json = await post('/api/content/library', { file_id: up.fileId, name });
               if (!json.ok) return json.message ?? 'That could not be added.';
               setLibrary((l) => [json.item as LibraryItem, ...l]);
               return null;

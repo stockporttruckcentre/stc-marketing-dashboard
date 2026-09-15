@@ -33,6 +33,20 @@ type Body = {
   internal_note?: string | null;
   tag_ids?: string[];
   media?: { file_id: string; alt_text?: string | null }[];
+  /* The picture on the post.
+
+     From the business: "make it so images uploaded to social posts
+     actually save". They did not. The composer uploaded the file to the
+     bucket, held the URL in its own state and drew it in the preview,
+     and then never sent it: this type had no `image_url` and the insert
+     below never wrote one. So every new post lost its picture between
+     the composer showing it and the row being written, and nothing
+     anywhere said so.
+
+     The PATCH route next door already accepted it, which is why editing
+     a post and saving again looked like it should have worked and did
+     not: the composer was not sending it to either. */
+  image_url?: string | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -70,6 +84,7 @@ export async function POST(req: NextRequest) {
       template_id: body.template_id ?? null,
       link_url: body.link_url?.trim() || null,
       internal_note: body.internal_note?.trim() || null,
+      image_url: body.image_url?.trim() || null,
     })
     .select('id')
     .single();

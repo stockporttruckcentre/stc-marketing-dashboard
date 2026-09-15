@@ -1027,6 +1027,11 @@ for (const [said, id] of [
   ['new starter needs a login', 'admin.addUser'],
   ['set somebody up', 'admin.addUser'],
 
+  // The content library.
+  ['content library', 'social.library'],
+  ['image library', 'social.library'],
+  ['add a picture to the library', 'social.library'],
+
   // Rate cards.
   ['rate cards', 'ratecard.hub'],
   ['what do we charge', 'ratecard.hub'],
