@@ -1,7 +1,8 @@
 import {
   LayoutDashboard, BarChart3, TrendingUp, Users, Search, Container, Calendar,
   Image as ImageIcon, ShieldCheck, Settings, CalendarDays, ListChecks,
-  UserCog, Receipt, Newspaper, Contact, ClipboardList, type LucideIcon,
+  UserCog, Receipt, Newspaper, Contact, ClipboardList, PoundSterling,
+  type LucideIcon,
 } from 'lucide-react';
 import type { NavIcon } from '@/lib/nav';
 
@@ -26,6 +27,7 @@ export const ICONS: Record<NavIcon, LucideIcon> = {
   finder: Search,
   stock: Container,
   fleetsmart: ShieldCheck,
+  ratecard: PoundSterling,
   revenue: Receipt,
   social: Calendar,
   brand: ImageIcon,

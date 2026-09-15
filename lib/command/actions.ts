@@ -382,6 +382,38 @@ export const ACTIONS: CommandActionSpec[] = [
      Everything here is invisible without admin.users, which is the case
      the requirement named: "elevate dave to admin" works for one person
      and does not exist for anybody else. */
+  /* ---------- rate cards ----------
+
+     What a customer is charged per hour and per job, which is the other
+     document from the FleetSmart+ contract and the one the admin team
+     bills against every day. Every role holds these, so nothing here is
+     hidden from anybody; the actions still name their capability
+     because the bar filters on it before scoring and a screen that
+     narrowed later would otherwise keep being offered. */
+  { id: 'ratecard.hub', label: 'Rate cards', blurb: 'Every customer\u2019s hourly and job rates', kind: 'navigate',
+    capability: 'ratecard.view', path: '/dashboard/rate-cards', verbs: GO,
+    objects: ['rate card', 'rate cards', 'rate card builder', 'customer rates', 'rates',
+      'hourly rates', 'labour rates', 'charge out rates', 'price list', 'pricing',
+      'costing', 'costing info', 'rate sheet', 'rate builder'],
+    phrases: ['open the rate cards', 'what do we charge', 'customer rate card',
+      'show me the rates', 'rate card builder'] },
+
+  { id: 'ratecard.new', label: 'New rate card', blurb: 'Build one for a customer from the current defaults', kind: 'create',
+    capability: 'ratecard.build', path: '/dashboard/rate-cards?new=1', seed: 'rate card for ',
+    verbs: ['new', 'create', 'add', 'make', 'build', 'start', 'raise', 'draw up'],
+    objects: ['rate card', 'rate cards', 'customer rates', 'rate sheet', 'price list'],
+    phrases: ['new rate card', 'create a rate card', 'make a rate card for a customer',
+      'build a rate card', 'draw up a rate card'] },
+
+  { id: 'ratecard.defaults', label: 'Default rates', blurb: 'The rates every new card starts from', kind: 'navigate',
+    capability: 'ratecard.view', path: '/dashboard/rate-cards?view=defaults',
+    verbs: [...GO, ...CHANGE],
+    objects: ['default rates', 'defaults', 'template rates', 'standard rates', 'base rates',
+      'rate template', 'default labour rate', 'default prices', 'generic rates',
+      'the template', 'standard pricing'],
+    phrases: ['change the default rates', 'edit the rate template', 'what are the standard rates',
+      'put the labour rate up', 'amend the defaults'] },
+
   { id: 'admin.role', label: 'Change somebody’s role', blurb: 'Admin, sales, restricted or read only', kind: 'admin',
     capability: 'admin.users', path: '/dashboard/admin', seed: 'make ',
     verbs: ['make', 'set', 'change', 'elevate', 'promote', 'demote', 'upgrade', 'downgrade', 'grant', 'give'],

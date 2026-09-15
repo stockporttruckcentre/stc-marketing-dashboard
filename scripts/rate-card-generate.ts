@@ -68,6 +68,18 @@ type Model = {
   rates: KitRate[];
 };
 
+/* ---- Where each rate sits in the master workbook ----
+
+   The export writes values into a copy of the master rather than
+   generating a sheet, so it needs to know which row each rate is on.
+   That map is read out of the master itself by
+   `scripts/rate-card-sheet-map.py` and lives in `sheet-map.json`, so a
+   row moving in a new master is picked up by rerunning the script
+   rather than by somebody noticing. */
+const SHEET_MAP = JSON.parse(
+  readFileSync('docs/source/rate_cards/sheet-map.json', 'utf8'),
+) as { rows: Record<string, number>; columns: { single: string; axle: string[] } };
+
 const model = JSON.parse(readFileSync(KIT, 'utf8')) as Model;
 const pools = model.labourPools;
 
@@ -173,6 +185,16 @@ export const PARTS_MARKUP = ${JSON.stringify(model.partsMarkup, null, 2)};
 
 /** The ${model.fleetsmartInclusions.length} FleetSmart+ inclusions, by tier. */
 export const FS_INCLUSIONS = ${JSON.stringify(model.fleetsmartInclusions, null, 2)};
+
+/* ---- The master workbook's own layout ----
+
+   Read out of \`master/KNDS UK - Customer Rates 2026.xlsx\`, not typed.
+   \`ROW_OF[rateId]\` is the 1-based row a rate prints on; a rate with a
+   single price column writes to \`SHEET_COLUMNS.single\` and an axled one
+   to \`SHEET_COLUMNS.axle[axle - 1]\`. */
+export const ROW_OF: Record<string, number> = ${JSON.stringify(SHEET_MAP.rows, null, 2)};
+
+export const SHEET_COLUMNS = ${JSON.stringify(SHEET_MAP.columns, null, 2)};
 `;
 
 writeFileSync(OUT, body);
@@ -186,6 +208,7 @@ writeFileSync(OUT, body);
    Generated rather than hand written for the reason migration 016 is:
    two lists of 45 rates drift within a month of being written twice. */
 const SEED = 'supabase/migrations/111_rate_card_template_seed.sql';
+
 
 const sq = (v: string | null) => (v === null ? 'NULL' : `'${v.replace(/'/g, "''")}'`);
 const nq = (v: number | null) => (v === null ? 'NULL' : String(v));

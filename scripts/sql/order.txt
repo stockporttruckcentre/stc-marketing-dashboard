@@ -117,3 +117,5 @@
 109_put_the_real_permission_check_back
 110_rate_cards
 111_rate_card_template_seed
+112_rate_card_defaults
+113_rate_card_from_contract

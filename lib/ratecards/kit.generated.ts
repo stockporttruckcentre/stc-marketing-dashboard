@@ -1093,3 +1093,67 @@ export const FS_INCLUSIONS = [
     "platinum": true
   }
 ];
+
+/* ---- The master workbook's own layout ----
+
+   Read out of `master/KNDS UK - Customer Rates 2026.xlsx`, not typed.
+   `ROW_OF[rateId]` is the 1-based row a rate prints on; a rate with a
+   single price column writes to `SHEET_COLUMNS.single` and an axled one
+   to `SHEET_COLUMNS.axle[axle - 1]`. */
+export const ROW_OF: Record<string, number> = {
+  "r01": 11,
+  "r02": 12,
+  "r03": 11,
+  "r04": 12,
+  "r05": 11,
+  "r06": 11,
+  "r07": 12,
+  "r08": 18,
+  "r09": 19,
+  "r10": 21,
+  "r11": 22,
+  "r12": 23,
+  "r13": 24,
+  "r14": 25,
+  "r15": 26,
+  "r16": 27,
+  "r17": 28,
+  "r18": 29,
+  "r19": 30,
+  "r20": 31,
+  "r21": 32,
+  "r22": 33,
+  "r23": 34,
+  "r24": 36,
+  "r25": 37,
+  "r26": 38,
+  "r27": 39,
+  "r28": 40,
+  "r29": 41,
+  "r30": 42,
+  "r31": 43,
+  "r32": 44,
+  "r33": 45,
+  "r34": 46,
+  "r35": 47,
+  "r36": 48,
+  "r37": 49,
+  "r38": 50,
+  "r39": 51,
+  "r40": 52,
+  "r41": 53,
+  "r42": 54,
+  "r43": 56,
+  "r44": 57,
+  "r45": 58
+};
+
+export const SHEET_COLUMNS = {
+  "single": "C",
+  "axle": [
+    "D",
+    "E",
+    "F",
+    "G"
+  ]
+};

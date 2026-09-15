@@ -244,6 +244,15 @@ CREATE TABLE IF NOT EXISTS rate_card_labour (
   -- Custom pools can be deleted; kit pools cannot, because 19 rates
   -- point at them.
   is_custom    BOOLEAN NOT NULL DEFAULT FALSE,
+
+  -- Did a PERSON set this rate for this customer, as against it being
+  -- whatever the template said on the day the card was made.
+  --
+  -- This is the flag that decides whether a later change to the default
+  -- rates may bring this card into line. Comparing the rate against the
+  -- template instead is wrong in exactly the case that matters, and
+  -- migration 112 sets out why at length.
+  set_by_hand  BOOLEAN NOT NULL DEFAULT FALSE,
   note         TEXT,
   position     INT NOT NULL DEFAULT 0,
 
@@ -674,9 +683,12 @@ LANGUAGE plpgsql
 SET search_path = public
 AS $fn$
 BEGIN
+  /* TG_TABLE_NAME rather than a literal: migration 112 hangs the same
+     trigger on the defaults log, and a message naming the wrong table
+     sends whoever hit it to the wrong place. */
   RAISE EXCEPTION
-    'The rate card change log is permanent. A % on rate_card_changes is refused for everybody, including this function''s owner. Correct a mistake by recording what actually happened, not by removing the record of it.',
-    TG_OP;
+    'The rate card change log is permanent. A % on % is refused for everybody, including this function''s owner. Correct a mistake by recording what actually happened, not by removing the record of it.',
+    TG_OP, TG_TABLE_NAME;
 END;
 $fn$;
 
@@ -945,8 +957,12 @@ BEGIN
     RAISE EXCEPTION 'That card has no % labour rate called %.', p_charge_to, p_pool;
   END IF;
 
+  /* `set_by_hand` is what marks this card as one somebody decided for
+     this customer, and it is why a later change to the DEFAULTS leaves
+     it alone. Migration 112 adds the column and explains why the
+     alternative, comparing against the template, is wrong. */
   UPDATE rate_card_labour
-     SET rate = p_rate, updated_at = NOW()
+     SET rate = p_rate, set_by_hand = TRUE, updated_at = NOW()
    WHERE card_id = p_card AND pool = p_pool AND charge_to = p_charge_to;
 
   /* How many rates follow this pool and are not overridden. An
