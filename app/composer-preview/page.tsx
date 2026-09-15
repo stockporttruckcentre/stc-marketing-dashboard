@@ -1,0 +1,79 @@
+'use client';
+
+import { useState } from 'react';
+import { notFound } from 'next/navigation';
+import { Composer } from '@/components/social/composer';
+import type {
+  Channel, Network, Template, Campaign, Tag, LibraryItem, Post, Variant,
+} from '@/lib/content/types';
+import type { CrmCapability } from '@/lib/crm/permissions';
+
+/* =============================================================
+   The post composer, for driving. Dev only.
+
+   From the business, about the planner going into use today:
+
+     make it so images uploaded to social posts actually save and the
+     whole thing is wired end to end
+
+   The image did not save, and nothing could have found that: the
+   composer uploaded the picture, held it, drew it in its own preview
+   and then left `image_url` out of the body it sent. Every screen
+   looked right. Only the request was wrong.
+
+   So this harness exists to let a browser check WATCH THE REQUEST, which
+   is the only place that fault is visible.
+
+   `notFound()` in production, like the harnesses next door.
+   ============================================================= */
+
+const NETWORKS: Network[] = [
+  {
+    key: 'linkedin', label: 'LinkedIn', char_limit: 3000, media_max: 9,
+    video_max_seconds: 600, requires_media: false, supports_first_comment: true,
+    supports_thread: false, supports_alt_text: true, supports_link_preview: true,
+    position: 0, is_active: true,
+  },
+];
+
+const CHANNELS: Channel[] = [
+  {
+    id: 'chan-1', network_key: 'linkedin', handle: 'stc',
+    display_name: 'STC LinkedIn', avatar_file_id: null, profile_url: null,
+    entity_id: null, timezone: 'Europe/London', state: 'connected',
+    last_error: null, position: 0, is_active: true,
+  } as Channel,
+];
+
+export default function ComposerPreview() {
+  if (process.env.NODE_ENV === 'production') notFound();
+  const [open, setOpen] = useState(true);
+
+  if (!open) return <div data-closed>Closed</div>;
+
+  return (
+    <div className="kit" style={{ padding: 20 }}>
+      <Composer
+        post={null}
+        variants={[] as Variant[]}
+        channels={CHANNELS}
+        networks={NETWORKS}
+        templates={[] as Template[]}
+        campaigns={[] as Campaign[]}
+        tags={[] as Tag[]}
+        library={[] as LibraryItem[]}
+        caps={new Set<CrmCapability>(['social.draft', 'social.approve', 'social.schedule'])}
+        canApprove
+        onClose={() => setOpen(false)}
+        onSaved={() => setOpen(false)}
+        /* The real upload is a bucket write. Here it answers the way the
+           planner's does, because what is being driven is what the
+           COMPOSER does with the answer. */
+        uploadImage={async (file) => ({
+          ok: true as const,
+          url: `https://example.test/uploaded/${encodeURIComponent(file.name)}`,
+        })}
+      />
+    </div>
+  );
+}

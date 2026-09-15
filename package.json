@@ -110,7 +110,9 @@
     "check:rate-card-export": "tsx scripts/rate-card-export-check.ts",
     "check:rate-card": "bash scripts/sql/rate-card-check.sh",
     "check:rate-cards-sweep": "tsx scripts/rate-cards-sweep-check.ts",
-    "check:rate-card-routes": "tsx scripts/rate-card-routes-check.ts"
+    "check:rate-card-routes": "tsx scripts/rate-card-routes-check.ts",
+    "check:social-approval": "bash scripts/sql/social-approval-check.sh",
+    "check:social-composer": "tsx scripts/social-composer-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

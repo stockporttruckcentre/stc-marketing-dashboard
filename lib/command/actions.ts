@@ -382,6 +382,13 @@ export const ACTIONS: CommandActionSpec[] = [
      Everything here is invisible without admin.users, which is the case
      the requirement named: "elevate dave to admin" works for one person
      and does not exist for anybody else. */
+  { id: 'social.library', label: 'Content library', blurb: 'Pictures that can go on a post', kind: 'navigate',
+    capability: 'social.view', path: '/dashboard/social?view=library', verbs: [...GO, 'add', 'upload'],
+    objects: ['content library', 'image library', 'media library', 'picture library',
+      'photos', 'images', 'pictures', 'assets', 'media', 'library'],
+    phrases: ['open the content library', 'add a picture to the library',
+      'where are the images', 'upload an image for a post'] },
+
   /* ---------- rate cards ----------
 
      What a customer is charged per hour and per job, which is the other

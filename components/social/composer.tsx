@@ -260,6 +260,12 @@ export function Composer({
       link_url: link || null,
       internal_note: draft.internalNote.trim() || null,
       tag_ids: draft.tagIds,
+      /* The picture, which this body did not carry.
+
+         It was uploaded, held in `draft.imageUrl`, drawn in the preview
+         and then dropped on the floor at exactly this line. Both routes
+         write it; neither was ever sent it. */
+      image_url: draft.imageUrl,
     };
 
     try {
