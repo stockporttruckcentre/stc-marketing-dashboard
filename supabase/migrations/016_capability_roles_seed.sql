@@ -11,7 +11,7 @@
 -- a capability it loses here too. A seed that only ever grows is how a
 -- revoked permission survives in the database.
 --
--- 194 pairs.
+-- 211 pairs.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS command_capability_roles (
@@ -103,6 +103,7 @@ INSERT INTO command_capability_roles (capability, role) VALUES
   ('access.request', 'sales'),
   ('access.request', 'viewer'),
   ('admin.audit', 'admin'),
+  ('admin.roles', 'admin'),
   ('admin.settings', 'admin'),
   ('admin.users', 'admin'),
   ('admin.usersDepartment', 'admin'),
@@ -179,6 +180,22 @@ INSERT INTO command_capability_roles (capability, role) VALUES
   ('news.view', 'marketer'),
   ('news.view', 'sales'),
   ('news.view', 'viewer'),
+  ('ratecard.approve', 'admin'),
+  ('ratecard.approve', 'marketer'),
+  ('ratecard.approve', 'sales'),
+  ('ratecard.approve', 'viewer'),
+  ('ratecard.build', 'admin'),
+  ('ratecard.build', 'marketer'),
+  ('ratecard.build', 'sales'),
+  ('ratecard.build', 'viewer'),
+  ('ratecard.labour', 'admin'),
+  ('ratecard.labour', 'marketer'),
+  ('ratecard.labour', 'sales'),
+  ('ratecard.labour', 'viewer'),
+  ('ratecard.view', 'admin'),
+  ('ratecard.view', 'marketer'),
+  ('ratecard.view', 'sales'),
+  ('ratecard.view', 'viewer'),
   ('reports.export', 'admin'),
   ('reports.export', 'marketer'),
   ('reports.export', 'sales'),

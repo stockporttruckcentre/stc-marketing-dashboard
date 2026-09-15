@@ -1,0 +1,649 @@
+{
+  "_comment": "The data contract. hours x POOLS[pool] reproduces value2026 exactly at the 2026 labour rates, so the generic template matches the signed-off KNDS card. Store hours, never the derived price.",
+  "labourPools": {
+    "hgv": 85,
+    "hgvO": 96,
+    "trl": 70,
+    "trlO": 83,
+    "body": 70
+  },
+  "basisTypes": {
+    "derived": "hours × labour",
+    "labour": "the driver",
+    "fixed": "flat charge",
+    "statutory": "DVSA, never derives",
+    "tbc": "not yet priced",
+    "blank": "no rate set"
+  },
+  "partsMarkup": [
+    {
+      "category": "Mechanical Parts",
+      "suppliedByCustomer": "%",
+      "suppliedBySTC": "£ + %"
+    },
+    {
+      "category": "Tail lift Parts",
+      "suppliedByCustomer": "%",
+      "suppliedBySTC": "£ + %"
+    },
+    {
+      "category": "Bodywork Parts",
+      "suppliedByCustomer": "%",
+      "suppliedBySTC": "£ + %"
+    }
+  ],
+  "fleetsmartInclusions": [
+    {
+      "inclusion": "MOT Inspection",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Laden RBT (vehicles 4/yr, trailers 1/yr, vans n/a)",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Steamclean",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Submission",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Brake Test",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Smoke Test",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Test Fee",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "MOT Lane Fee",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Headlamp Alignment",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Weight Hire",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "2 Year Tacho",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Digital compliance storage",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Defect Reporting",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Maintenance Scheduling",
+      "silver": true,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "A Service every inspection",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "C Service, Annually",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Fluid Level Checks",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Grease and Lube",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Engine Oil Top Up",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Bulb Replacement (up to 3 bulbs, excl. H/L & DRL)",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Customer compliance portal access",
+      "silver": false,
+      "gold": true,
+      "platinum": true
+    },
+    {
+      "inclusion": "Tail Lift LOLER, Weight Test & Servicing",
+      "silver": false,
+      "gold": false,
+      "platinum": true
+    },
+    {
+      "inclusion": "Brakes & suspension R&M inc",
+      "silver": false,
+      "gold": false,
+      "platinum": true
+    }
+  ],
+  "rates": [
+    {
+      "section": "Hourly Rate - Trailers",
+      "item": "In hours",
+      "basis": "labour",
+      "pool": "trl",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        70,
+        70,
+        70,
+        70
+      ]
+    },
+    {
+      "section": "Hourly Rate - Trailers",
+      "item": "Out of Hours",
+      "basis": "labour",
+      "pool": "trlO",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        83,
+        83,
+        83,
+        83
+      ]
+    },
+    {
+      "section": "Hourly Rate - HGVs/LCV's",
+      "item": "In hours",
+      "basis": "labour",
+      "pool": "hgv",
+      "value2026": 85
+    },
+    {
+      "section": "Hourly Rate - HGVs/LCV's",
+      "item": "Out of Hours",
+      "basis": "labour",
+      "pool": "hgvO",
+      "value2026": 96
+    },
+    {
+      "section": "Hourly Rate - Bodyshop",
+      "item": "In hours",
+      "basis": "labour",
+      "pool": "body",
+      "value2026": 70
+    },
+    {
+      "section": "Callout/Travel Rates",
+      "item": "In hours",
+      "basis": "fixed",
+      "value2026": "n/a"
+    },
+    {
+      "section": "Callout/Travel Rates",
+      "item": "Out of Hours",
+      "basis": "fixed",
+      "value2026": 50
+    },
+    {
+      "section": "Callout/Travel Rates",
+      "item": "Mileage Charge",
+      "basis": "fixed",
+      "unit": "/mile",
+      "value2026": 1.5
+    },
+    {
+      "section": "Callout/Travel Rates",
+      "item": "C&D",
+      "basis": "tbc",
+      "value2026": null
+    },
+    {
+      "section": "Service Rates",
+      "item": "Trailer Service/Inspection",
+      "basis": "derived",
+      "pool": "trl",
+      "hours": 1.2,
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        84,
+        84,
+        84,
+        84
+      ]
+    },
+    {
+      "section": "Service Rates",
+      "item": "Van Engine Service (up to 3.5 ton)",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.45,
+      "value2026": 123
+    },
+    {
+      "section": "Service Rates",
+      "item": "Van A Service & Inspection (up to 3.5 ton)",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.85,
+      "axles": [
+        2
+      ],
+      "value2026": 157.5
+    },
+    {
+      "section": "Service Rates",
+      "item": "Van B Service & Inspection (up to 3.5 ton)",
+      "basis": "tbc",
+      "axles": [
+        2
+      ],
+      "value2026": null
+    },
+    {
+      "section": "Service Rates",
+      "item": "HGV 7.5 ton+ A Service & Inspection",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.85,
+      "axles": [
+        2,
+        3
+      ],
+      "value2026": [
+        157.5,
+        190.5
+      ]
+    },
+    {
+      "section": "Service Rates",
+      "item": "HGV 7.5 ton+ B Service & Inspection",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 3.13,
+      "axles": [
+        2,
+        3
+      ],
+      "value2026": [
+        266,
+        287
+      ]
+    },
+    {
+      "section": "Service Rates",
+      "item": "HGV 7.5 ton+ C Service & Inspection",
+      "basis": "tbc",
+      "axles": [
+        2,
+        3
+      ],
+      "value2026": null
+    },
+    {
+      "section": "Service Rates",
+      "item": "Digital Tacho",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.36,
+      "value2026": 115.82
+    },
+    {
+      "section": "Service Rates",
+      "item": "Smart Tacho",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.61,
+      "value2026": 137.07
+    },
+    {
+      "section": "Service Rates",
+      "item": "Tail Lift LOLER & Weight Test (Vehicle)",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 2.07,
+      "value2026": 176
+    },
+    {
+      "section": "Service Rates",
+      "item": "Tail Lift LOLER (Vehicle)",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.02,
+      "value2026": 87
+    },
+    {
+      "section": "Service Rates",
+      "item": "Weights",
+      "basis": "fixed",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        100,
+        100,
+        100,
+        100
+      ]
+    },
+    {
+      "section": "Service Rates",
+      "item": "Consumables",
+      "basis": "fixed",
+      "unit": "per job",
+      "value2026": 7.9
+    },
+    {
+      "section": "Service Rates",
+      "item": "Grease & Lubricants",
+      "basis": "fixed",
+      "unit": "per job",
+      "value2026": 4.9
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Submit for MOT at Hyde",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.65,
+      "value2026": 140
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Submit for MOT elsewhere",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.65,
+      "value2026": 140
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Van Steam Clean",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 0.76,
+      "value2026": 65
+    },
+    {
+      "section": "MOT Fees",
+      "item": "HGV Steam Clean",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1,
+      "axles": [
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        85,
+        85,
+        85
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Trailer Steam Clean",
+      "basis": "derived",
+      "pool": "trl",
+      "hours": 1.07,
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        75,
+        75,
+        75,
+        75
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Brake Test",
+      "basis": "fixed",
+      "perAxle": 18,
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        18,
+        36,
+        54,
+        72
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Headlamp Test",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 0.53,
+      "value2026": 45
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Trailer Test Fee",
+      "basis": "statutory",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        41,
+        54,
+        64,
+        64
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Trailer Retest Fee (within 14 days)",
+      "basis": "statutory",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        18,
+        25,
+        33,
+        33
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Trailer Lane Fee",
+      "basis": "statutory",
+      "cap": 50,
+      "capBy": "DVSA",
+      "value2026": 50
+    },
+    {
+      "section": "MOT Fees",
+      "item": "HGV Test Fee",
+      "basis": "statutory",
+      "axles": [
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        91,
+        113,
+        137
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "HGV Retest Fee (within 14 days)",
+      "basis": "statutory",
+      "axles": [
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        35,
+        49,
+        65
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "HGV Lane Fee",
+      "basis": "statutory",
+      "cap": 70,
+      "capBy": "DVSA",
+      "value2026": 70
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Loaded blocks – Trailers",
+      "basis": "blank",
+      "value2026": null
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Loaded Weight trailer – Vehicles",
+      "basis": "fixed",
+      "note": "Tractors only",
+      "value2026": 50
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Hire of Weights",
+      "basis": "fixed",
+      "axles": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "value2026": [
+        100,
+        100,
+        100,
+        100
+      ]
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Out of area submit for MOT",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 2.82,
+      "value2026": 240
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Warm brakes for MOT",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 0.5,
+      "value2026": 42.5
+    },
+    {
+      "section": "MOT Fees",
+      "item": "Smoke Test",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 0.59,
+      "value2026": 50
+    },
+    {
+      "section": "Tacho Costs",
+      "item": "DTCO Calibration",
+      "basis": "derived",
+      "pool": "hgv",
+      "hours": 1.36,
+      "value2026": 115.82
+    },
+    {
+      "section": "Tacho Costs",
+      "item": "Buffer Battery",
+      "basis": "fixed",
+      "value2026": 15.82
+    },
+    {
+      "section": "Tacho Costs",
+      "item": "Submit for Tacho",
+      "basis": "blank",
+      "value2026": null
+    }
+  ]
+}

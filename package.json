@@ -103,7 +103,8 @@
     "check:tracker-switch": "tsx scripts/tracker-switch-check.ts",
     "check:crm-record": "tsx scripts/crm-record-check.ts",
     "check:fleetsmart-print": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-print-check.tsx",
-    "check:fleetsmart-dynamic": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-dynamic-check.tsx"
+    "check:fleetsmart-dynamic": "tsx --tsconfig scripts/tsconfig.check.json scripts/fleetsmart-dynamic-check.tsx",
+    "rate-card:generate": "tsx scripts/rate-card-generate.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

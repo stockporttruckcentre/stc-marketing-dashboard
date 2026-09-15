@@ -219,6 +219,29 @@ export type CrmCapability =
   /** Send a contract to the customer, which is the point of no quiet undo. */
   | 'fleetsmart.send'
 
+  /* ---- Rate cards ----
+
+     The rate card is what the customer is charged per hour and per job,
+     and the FleetSmart+ contract is what they pay monthly. Two documents
+     and two jobs, so two sets of capabilities: somebody who prices a
+     maintenance contract is not automatically somebody who sets the
+     labour rate the whole depot bills at.
+
+     Four verbs for the same reason FleetSmart+ has four. Reading a card,
+     amending one, moving the labour rate every derived rate follows, and
+     approving a card for a customer are four different amounts of
+     authority, and the third is the one that moves nineteen rows at
+     once. */
+
+  /** See the Rate Card Builder tab and the cards on it. */
+  | 'ratecard.view'
+  /** Create a card and amend the rates on it. */
+  | 'ratecard.build'
+  /** Move a labour rate, which moves every rate derived from it. */
+  | 'ratecard.labour'
+  /** Approve a card, which is what makes it the live one for a customer. */
+  | 'ratecard.approve'
+
   /* ---- One capability per screen, and the verbs kept apart ----
 
      Analytics, Reports, the sales tracker, the finder, trailer sales,
@@ -363,6 +386,7 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'work.schedule', 'work.rollback', 'work.analytics', 'work.analyticsAll',
     'entity.viewAll', 'entity.setOwn', 'entity.setOthers', 'compliance.sensitive',
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.discount', 'fleetsmart.send',
+    'ratecard.view', 'ratecard.build', 'ratecard.labour', 'ratecard.approve',
     /* The screens and the buttons that had no capability of their own
        until the eleven roles needed to tell them apart. See the note
        above BY_ROLE: an administrator holds every one of them. */
@@ -390,6 +414,12 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
        manager's discount, which is the one number on the document that
        comes out of somebody else's margin. */
     'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.send',
+    /* Every role holds all four. From the business: "all roles have
+       full access to rate cards." The four stay separate because the
+       change log records which act was performed, not because anybody
+       is currently withheld one. What stops a rate moving quietly is
+       the log, which nobody can edit or delete. */
+    'ratecard.view', 'ratecard.build', 'ratecard.labour', 'ratecard.approve',
     /* The seven screens crm.view opened, kept open. Plus the buttons
        Sales already held the equivalent of: they can export the CRM, so
        they can export a report and the stock list; they can import to
@@ -401,6 +431,10 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'leads.create', 'access.request',
   ],
   marketer: [
+    /* Rate cards, in full. From the business: "all roles have full
+       access to rate cards." */
+    'ratecard.view', 'ratecard.build', 'ratecard.labour', 'ratecard.approve',
+
     /* `crm.health` is here deliberately. Rama takes the call when a
        customer rings about a trailer that has not arrived, and the
        whole point of the system is that whoever hears the complaint can
@@ -433,6 +467,10 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'access.request',
   ],
   viewer: [
+    /* Rate cards, in full. From the business: "all roles have full
+       access to rate cards." */
+    'ratecard.view', 'ratecard.build', 'ratecard.labour', 'ratecard.approve',
+
     'crm.view', 'crm.viewGlobal', 'crm.export',
     /* The old planner policy was `auth.role() = 'authenticated'`: every
        signed in person could read every post. Reading stays open. */
