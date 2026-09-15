@@ -26,29 +26,49 @@ def main() -> int:
     ws = load_workbook(MASTER)['Costing Info']
     model = json.load(open(MODEL))
 
-    # Column B carries the item name on every priced row.
-    by_name = {}
+    # ---- Section AND item, never item alone ----
+    #
+    # Seven rates are called "In hours" or "Out of Hours": trailers, HGVs
+    # and the bodyshop each have one, and so does callout. Matching on the
+    # label alone puts all of them on the first row that carries it, which
+    # writes the callout rate into the trailer row and leaves five rates
+    # unwritten. It looked right until the export was compared against the
+    # master cell by cell.
+    #
+    # Column A carries the section, set on the first row of each one and
+    # blank afterwards, so it is carried down as the sheet is read.
+    by_key = {}
+    section = ''
     for r in range(10, 70):
+        head = ws.cell(r, 1).value
+        if head and str(head).strip():
+            section = str(head).strip()
         label = ws.cell(r, 2).value
         if label and str(label).strip():
-            by_name.setdefault(str(label).strip(), r)
+            by_key.setdefault((section, str(label).strip()), r)
 
-    def row_for(item: str):
-        if item in by_name:
-            return by_name[item]
+    def row_for(sec: str, item: str):
+        if (sec, item) in by_key:
+            return by_key[(sec, item)]
         # The master qualifies four labels the kit shortens, for example
-        # 'HGV Lane Fee (Max per DVSA £70)'. A prefix is the match.
-        for name, row in by_name.items():
-            if name.startswith(item):
+        # 'HGV Lane Fee (Max per DVSA £70)'. A prefix is the match, and it
+        # is still looked for inside the right section.
+        for (s2, name), row in by_key.items():
+            if s2 == sec and name.startswith(item):
                 return row
-        return None
+        # A section the kit names differently from the workbook. Fall back
+        # to a unique label anywhere, and only when it IS unique, so a
+        # collision is reported rather than guessed at.
+        hits = [row for (_, name), row in by_key.items()
+                if name == item or name.startswith(item)]
+        return hits[0] if len(set(hits)) == 1 else None
 
     rows, missing = {}, []
     for i, rate in enumerate(model['rates']):
         rid = f'r{i + 1:02d}'
-        row = row_for(rate['item'].strip())
+        row = row_for(rate['section'].strip(), rate['item'].strip())
         if row is None:
-            missing.append((rid, rate['item']))
+            missing.append((rid, f"{rate['section']} / {rate['item']}"))
         else:
             rows[rid] = row
 

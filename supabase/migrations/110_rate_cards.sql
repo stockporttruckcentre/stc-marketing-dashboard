@@ -754,6 +754,11 @@ REVOKE ALL ON FUNCTION rate_card_log(UUID, TEXT, TEXT, TEXT, TEXT, INT, BOOLEAN)
 
 /* Reading it. Open to anybody who can see the card, because a log only
    some people can read is a log the rest have to take on trust. */
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_history(UUID);
 CREATE OR REPLACE FUNCTION rate_card_history(p_card UUID)
 RETURNS TABLE (
   id UUID, kind TEXT, what TEXT, was TEXT, now_is TEXT,
@@ -831,7 +836,7 @@ BEGIN
    WHERE contact_id = p_contact AND status IN ('awaiting', 'approved')
    ORDER BY effective_from DESC LIMIT 1;
 
-  IF FOUND AND NOT p_supersede THEN
+  IF existing.id IS NOT NULL AND NOT p_supersede THEN
     RAISE EXCEPTION
       'A rate card already exists for % (%, effective %). Say so explicitly to replace it.',
       cust.company_name, existing.ref, existing.effective_from;
@@ -896,7 +901,14 @@ BEGIN
     VALUES (new_id, mgr, TRUE, 0) ON CONFLICT DO NOTHING;
   END IF;
 
-  IF FOUND AND existing.id IS NOT NULL AND p_supersede THEN
+  /* `existing.id`, not `FOUND`.
+
+     `FOUND` reports on the LAST statement, and by this point that is
+     the account manager lookup rather than the search for a live card
+     thirty lines above. The first version tested it here and so never
+     superseded anything: the old card stayed live beside the new one.
+     Caught by `npm run check:rate-card` driving a replacement. */
+  IF existing.id IS NOT NULL AND p_supersede THEN
     UPDATE rate_cards SET status = 'superseded' WHERE id = existing.id;
     PERFORM rate_card_log(existing.id, 'status', 'Superseded by a new card',
                           existing.status, 'superseded', 0, p_system);
@@ -1021,6 +1033,11 @@ REVOKE ALL ON FUNCTION rate_card_must_be_open(UUID) FROM PUBLIC;
 -- manual price alongside the original hours so revert is always
 -- available and always exact."
 -- -------------------------------------------------------------
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_set_rate(UUID, TEXT, INT, NUMERIC);
 CREATE OR REPLACE FUNCTION rate_card_set_rate(
   p_card UUID, p_rate_id TEXT, p_axle INT, p_value NUMERIC
 )
@@ -1409,6 +1426,11 @@ GRANT EXECUTE ON FUNCTION rate_card_uplift(UUID, NUMERIC) TO authenticated;
 -- It is safe to call at any frequency, because `stale_warned_at` stamps
 -- the card and the next sweep skips it.
 -- -------------------------------------------------------------
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_sweep_stale(BOOLEAN);
 CREATE OR REPLACE FUNCTION rate_card_sweep_stale(p_dry_run BOOLEAN DEFAULT FALSE)
 RETURNS TABLE (card_id UUID, ref TEXT, customer TEXT, told UUID, months_old NUMERIC)
 LANGUAGE plpgsql
@@ -1595,6 +1617,11 @@ GRANT EXECUTE ON FUNCTION rate_card_read(UUID) TO authenticated;
 -- -------------------------------------------------------------
 -- 23. The hub's list.
 -- -------------------------------------------------------------
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_cards_list(TEXT);
 CREATE OR REPLACE FUNCTION rate_cards_list(p_status TEXT DEFAULT NULL)
 RETURNS TABLE (
   id UUID, ref TEXT, contact_id UUID, customer_name TEXT,

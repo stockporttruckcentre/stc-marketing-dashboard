@@ -141,6 +141,11 @@ GRANT EXECUTE ON FUNCTION rate_card_is_untouched(UUID) TO authenticated;
    Only cards that can still be edited: an approved card is what the
    admin team bills against and does not change underneath them, so it
    is not offered at all rather than offered and then refused. */
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_resync_candidates();
 CREATE OR REPLACE FUNCTION rate_card_resync_candidates()
 RETURNS TABLE (
   card_id UUID, card_ref TEXT, customer_name TEXT, card_status TEXT,
@@ -429,6 +434,11 @@ GRANT EXECUTE ON FUNCTION rate_card_resync_all() TO authenticated;
    "reset to default rates" is what somebody pressed. It is logged with
    how many rows moved and how many decisions were undone, so the person
    whose override it was can see what happened to it. */
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_reset(UUID);
 CREATE OR REPLACE FUNCTION rate_card_reset(p_card UUID)
 RETURNS TABLE (rates_moved INT, overrides_cleared INT)
 LANGUAGE plpgsql
@@ -503,6 +513,11 @@ $fn$;
 REVOKE ALL ON FUNCTION rate_card_template_read() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION rate_card_template_read() TO authenticated;
 
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_template_history();
 CREATE OR REPLACE FUNCTION rate_card_template_history()
 RETURNS TABLE (id UUID, kind TEXT, what TEXT, was TEXT, now_is TEXT,
                cards_moved INT, actor_name TEXT, at TIMESTAMPTZ)

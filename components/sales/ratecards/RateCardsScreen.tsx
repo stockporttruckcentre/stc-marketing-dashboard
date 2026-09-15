@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { RateCardsHub } from './RateCardsHub';
 import { RateBuilder } from './RateBuilder';
 import { DefaultRates } from './Defaults';
@@ -37,6 +37,14 @@ export function RateCardsScreen({ caps }: {
 }) {
   const router = useRouter();
   const params = useSearchParams();
+  /* Where this screen is mounted, rather than where it usually is.
+
+     Every move it makes is a query string on its OWN path, so the same
+     component works at /dashboard/rate-cards and at the preview harness
+     the drive check opens. The first version pushed the dashboard path
+     by name, and pressing a card in the harness navigated to the real
+     gated route and landed on the login screen. Found by driving it. */
+  const here = usePathname();
   const card = params.get('card');
   const view = params.get('view');
 
@@ -50,9 +58,9 @@ export function RateCardsScreen({ caps }: {
     window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), t.undo ? 10_000 : 4_500);
   }, []);
 
-  const go = useCallback((to: string) => {
-    router.push(to, { scroll: false });
-  }, [router]);
+  const go = useCallback((query: string) => {
+    router.push(query ? `${here}?${query}` : here, { scroll: false });
+  }, [router, here]);
 
   /* The theme. The kit switches on `data-stc-theme`; this application
      uses `data-theme`, and `rate-card-tokens.css` is rescoped to answer
@@ -68,7 +76,7 @@ export function RateCardsScreen({ caps }: {
         <DefaultRates
           caps={caps}
           onToast={toast}
-          onBack={() => go('/dashboard/rate-cards')}
+          onBack={() => go('')}
         />
         <Toasts toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
       </>
@@ -83,7 +91,7 @@ export function RateCardsScreen({ caps }: {
           cardId={card}
           caps={caps}
           onToast={toast}
-          onBack={() => go('/dashboard/rate-cards')}
+          onBack={() => go('')}
         />
         <Toasts toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
       </>
@@ -95,8 +103,8 @@ export function RateCardsScreen({ caps }: {
       <RateCardsHub
         caps={caps}
         onToast={toast}
-        onOpen={(id) => go(`/dashboard/rate-cards?card=${id}`)}
-        onDefaults={() => go('/dashboard/rate-cards?view=defaults')}
+        onOpen={(id) => go(`card=${id}`)}
+        onDefaults={() => go('view=defaults')}
       />
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
     </>

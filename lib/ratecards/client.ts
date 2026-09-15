@@ -39,6 +39,27 @@ export async function readCard(id: string): Promise<Result<FullCard>> {
   const { data, error } = await db().rpc('rate_card_read', { p_card: id });
   if (error) return fail(error, 'That rate card could not be loaded.');
   if (!data) return { ok: false, why: 'That rate card no longer exists.' };
+
+  /* ---- The shape is checked rather than asserted ----
+
+     `rate_card_read` returns one JSON object and the screen reads five
+     lists out of it. A cast alone means a response that is not that
+     object throws inside a render, which is a white screen with the
+     reason only in the console. Found by pointing the screen at a
+     stubbed endpoint that answered with an empty array.
+
+     A shape that is wrong is a fault worth naming, so it is named. */
+  const shaped = data as Partial<FullCard>;
+  const missing = (['card', 'labour', 'rates', 'managers', 'fleetsmart', 'parts', 'missing'] as const)
+    .filter((k) => shaped[k] === undefined || shaped[k] === null);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      why: `The database answered with something this screen cannot read: ${missing.join(', ')} `
+         + `${missing.length === 1 ? 'is' : 'are'} missing. That is a fault in rate_card_read rather than in this card.`,
+    };
+  }
+
   return { ok: true, value: data as FullCard };
 }
 

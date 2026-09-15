@@ -218,6 +218,11 @@ CREATE TRIGGER trg_rate_card_follow_contract
 --   Ensure in the fs+ builder when presented with options to download
 --   the contract you can generate/download the rate card.
 -- -------------------------------------------------------------
+/* Dropped first. `CREATE OR REPLACE` cannot change a function's row
+   type, so the day a column is added to what this returns it fails on a
+   live database with 42P13 while passing every check here, because the
+   test server is built from nothing each time. */
+DROP FUNCTION IF EXISTS rate_card_of_contract(UUID);
 CREATE OR REPLACE FUNCTION rate_card_of_contract(p_contract UUID)
 RETURNS TABLE (card_id UUID, card_ref TEXT, card_status TEXT, effective_from DATE)
 LANGUAGE plpgsql
