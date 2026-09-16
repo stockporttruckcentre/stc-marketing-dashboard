@@ -82,6 +82,15 @@ AS $fn$
         somebody's parent has its children re-parented, and a duplicate
         whose parent is the canonical record simply stops existing. */
      AND c.conrelid <> 'crm_contacts'::regclass
+     /* ---- And the record of the merges themselves is not moved ----
+
+        `crm_merges.canonical_id` points at a customer, so finding the
+        references generically picks it up. Moving it would rewrite
+        history: if B was merged into A and A is later merged into C,
+        rewriting the first record makes it say B was merged into C,
+        which never happened. An audit trail that gets tidied up by
+        later events is not an audit trail. */
+     AND c.conrelid <> 'crm_merges'::regclass
    ORDER BY 1, 2;
 $fn$;
 
@@ -377,3 +386,102 @@ REVOKE ALL ON FUNCTION crm_merge_leftovers(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION crm_merge_leftovers(UUID) TO authenticated;
 
 DO $$ BEGIN RAISE NOTICE 'a merge moves everything, records itself, and deletes nothing'; END $$;
+
+-- -------------------------------------------------------------
+-- Merging a pair without having to work out which one to keep.
+--
+-- From the business, about the ones they confirmed:
+--
+--   needs merging into the account with the most action
+--
+-- and from the scope:
+--
+--   Where the match is proven, the Protean-bound CRM company should
+--   normally be the canonical record.
+--
+-- Those two can disagree, so the order between them is written down
+-- here rather than decided case by case:
+--
+--   1. The one Protean is bound to. If only one of the pair has a
+--      binding, that is the record the money arrives against and it
+--      wins, whatever else is on the other one. Nothing is lost by
+--      this: everything on the other record moves across.
+--   2. Otherwise the one with more hanging off it, counted across
+--      every relationship there is.
+--   3. Otherwise the older record, because it is the one other people
+--      have had longer to link things to.
+--
+-- It returns which it chose and why, so the choice is reviewable
+-- afterwards rather than buried.
+-- -------------------------------------------------------------
+CREATE OR REPLACE FUNCTION crm_merge_pair(p_one UUID, p_other UUID, p_force BOOLEAN DEFAULT FALSE)
+RETURNS TABLE (kept TEXT, merged TEXT, because TEXT, moved JSONB, warnings TEXT[])
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $fn$
+DECLARE
+  r           RECORD;
+  one_bound   INT;
+  other_bound INT;
+  one_weight  INT;
+  other_weight INT;
+  one_made    TIMESTAMPTZ;
+  other_made  TIMESTAMPTZ;
+  keep_id     UUID;
+  drop_id     UUID;
+  why         TEXT;
+  done        crm_merges;
+BEGIN
+  SELECT COUNT(*) INTO one_bound   FROM protean_accounts WHERE contact_id = p_one   AND NOT ignored;
+  SELECT COUNT(*) INTO other_bound FROM protean_accounts WHERE contact_id = p_other AND NOT ignored;
+
+  SELECT COALESCE(SUM(c), 0) INTO one_weight FROM (
+    SELECT (SELECT COUNT(*) FROM crm_leads WHERE contact_id = p_one) AS c
+    UNION ALL SELECT (SELECT COUNT(*) FROM contact_notes     WHERE contact_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM contact_addresses WHERE contact_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM calendar_events   WHERE contact_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM tasks             WHERE organisation_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM fleetsmart_contracts WHERE account_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM rate_cards        WHERE contact_id = p_one)
+    UNION ALL SELECT (SELECT COUNT(*) FROM stock_trailers    WHERE contact_id = p_one)
+  ) x;
+
+  SELECT COALESCE(SUM(c), 0) INTO other_weight FROM (
+    SELECT (SELECT COUNT(*) FROM crm_leads WHERE contact_id = p_other) AS c
+    UNION ALL SELECT (SELECT COUNT(*) FROM contact_notes     WHERE contact_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM contact_addresses WHERE contact_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM calendar_events   WHERE contact_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM tasks             WHERE organisation_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM fleetsmart_contracts WHERE account_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM rate_cards        WHERE contact_id = p_other)
+    UNION ALL SELECT (SELECT COUNT(*) FROM stock_trailers    WHERE contact_id = p_other)
+  ) x;
+
+  SELECT created_at INTO one_made   FROM crm_contacts WHERE id = p_one;
+  SELECT created_at INTO other_made FROM crm_contacts WHERE id = p_other;
+
+  IF one_bound > 0 AND other_bound = 0 THEN
+    keep_id := p_one; drop_id := p_other; why := 'Protean is bound to it and not to the other';
+  ELSIF other_bound > 0 AND one_bound = 0 THEN
+    keep_id := p_other; drop_id := p_one; why := 'Protean is bound to it and not to the other';
+  ELSIF one_weight <> other_weight THEN
+    IF one_weight > other_weight THEN keep_id := p_one; drop_id := p_other;
+    ELSE keep_id := p_other; drop_id := p_one; END IF;
+    why := format('more on it: %s against %s', GREATEST(one_weight, other_weight),
+                  LEAST(one_weight, other_weight));
+  ELSE
+    IF COALESCE(one_made, NOW()) <= COALESCE(other_made, NOW()) THEN
+      keep_id := p_one; drop_id := p_other;
+    ELSE keep_id := p_other; drop_id := p_one; END IF;
+    why := 'nothing to choose between them, so the older record';
+  END IF;
+
+  SELECT * INTO done FROM crm_merge(keep_id, drop_id, p_force);
+
+  RETURN QUERY SELECT done.canonical_name, done.merged_name, why, done.moved, done.warnings;
+END;
+$fn$;
+
+REVOKE ALL ON FUNCTION crm_merge_pair(UUID, UUID, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION crm_merge_pair(UUID, UUID, BOOLEAN) TO authenticated;

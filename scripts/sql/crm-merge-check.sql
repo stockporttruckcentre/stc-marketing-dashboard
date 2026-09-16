@@ -222,6 +222,92 @@ BEGIN
   END;
   RAISE NOTICE 'a customer cannot be merged into itself, nor merged twice';
 
+  -- =============================================================
+  -- Choosing which of a pair to keep.
+  --
+  -- From the business: "needs merging into the account with the most
+  -- action". From the scope: the Protean bound record is normally
+  -- canonical. Those two can disagree, so the order is asserted rather
+  -- than left to whoever reads the function.
+  -- =============================================================
+  PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
+
+  -- Protean beats weight: the thin record is bound, the fat one is not.
+  INSERT INTO crm_contacts (id, company_name, status) VALUES
+    ('eeeeeeee-2222-0000-0000-000000000001', 'Thin But Bound', 'customer'),
+    ('eeeeeeee-2222-0000-0000-000000000002', 'Fat But Unbound', 'customer')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO protean_accounts (alpha, protean_name, division, contact_id, ignored)
+  VALUES ('THIN01', 'Thin But Bound', 'stc', 'eeeeeeee-2222-0000-0000-000000000001', FALSE)
+  ON CONFLICT DO NOTHING;
+  INSERT INTO contact_notes (contact_id, text) VALUES
+    ('eeeeeeee-2222-0000-0000-000000000002', 'one'),
+    ('eeeeeeee-2222-0000-0000-000000000002', 'two'),
+    ('eeeeeeee-2222-0000-0000-000000000002', 'three');
+
+  SELECT kept, because INTO txt, txt FROM crm_merge_pair(
+    'eeeeeeee-2222-0000-0000-000000000002'::UUID,
+    'eeeeeeee-2222-0000-0000-000000000001'::UUID);
+  IF (SELECT company_name FROM crm_contacts
+       WHERE id = 'eeeeeeee-2222-0000-0000-000000000001' AND deleted_at IS NULL) IS NULL THEN
+    RAISE EXCEPTION 'the Protean bound record was the one thrown away';
+  END IF;
+  SELECT COUNT(*) INTO n FROM contact_notes
+   WHERE contact_id = 'eeeeeeee-2222-0000-0000-000000000001';
+  IF n <> 3 THEN
+    RAISE EXCEPTION 'the three notes did not follow onto the bound record, % found', n;
+  END IF;
+  RAISE NOTICE 'the Protean bound record is kept even when the other one has more on it';
+
+  -- Neither bound: the one with more on it wins.
+  INSERT INTO crm_contacts (id, company_name, status) VALUES
+    ('eeeeeeee-3333-0000-0000-000000000001', 'Quiet One', 'lead'),
+    ('eeeeeeee-3333-0000-0000-000000000002', 'Busy One', 'lead')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO contact_notes (contact_id, text) VALUES
+    ('eeeeeeee-3333-0000-0000-000000000002', 'a'),
+    ('eeeeeeee-3333-0000-0000-000000000002', 'b');
+
+  PERFORM crm_merge_pair(
+    'eeeeeeee-3333-0000-0000-000000000001'::UUID,
+    'eeeeeeee-3333-0000-0000-000000000002'::UUID);
+  IF (SELECT company_name FROM crm_contacts
+       WHERE id = 'eeeeeeee-3333-0000-0000-000000000002' AND deleted_at IS NULL) IS NULL THEN
+    RAISE EXCEPTION 'with neither bound, the busier record was thrown away';
+  END IF;
+  RAISE NOTICE 'and with neither bound, the one with more action on it is kept';
+
+  -- ---- A later merge does not rewrite an earlier merge's record ----
+  --
+  -- `crm_merges.canonical_id` points at a customer, so a generic sweep
+  -- of everything that points at a customer would move it. If B was
+  -- merged into A, and A is later merged into C, rewriting that first
+  -- record makes it say B was merged into C, which never happened.
+  INSERT INTO crm_contacts (id, company_name, status) VALUES
+    ('eeeeeeee-4444-0000-0000-000000000001', 'Absorber', 'customer'),
+    ('eeeeeeee-4444-0000-0000-000000000002', 'Absorbed', 'lead'),
+    ('eeeeeeee-4444-0000-0000-000000000003', 'Final Home', 'customer')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO contact_notes (contact_id, text) VALUES
+    ('eeeeeeee-4444-0000-0000-000000000001', 'x'),
+    ('eeeeeeee-4444-0000-0000-000000000003', 'y'),
+    ('eeeeeeee-4444-0000-0000-000000000003', 'z');
+
+  PERFORM crm_merge('eeeeeeee-4444-0000-0000-000000000001'::UUID,
+                    'eeeeeeee-4444-0000-0000-000000000002'::UUID);
+  PERFORM crm_merge('eeeeeeee-4444-0000-0000-000000000003'::UUID,
+                    'eeeeeeee-4444-0000-0000-000000000001'::UUID);
+
+  SELECT COUNT(*) INTO n FROM crm_merges
+   WHERE merged_id = 'eeeeeeee-4444-0000-0000-000000000002'
+     AND canonical_id = 'eeeeeeee-4444-0000-0000-000000000001';
+  IF n <> 1 THEN
+    RAISE EXCEPTION
+      'the first merge record no longer says Absorbed went into Absorber. A later merge '
+      'rewrote it, and that is history being tidied up by something that happened after it.';
+  END IF;
+  RAISE NOTICE 'and merging a record that had absorbed another does not rewrite the first record';
+
   RAISE NOTICE 'a merge moves everything, keeps the contract intact, and destroys nothing';
 END
 $check$;

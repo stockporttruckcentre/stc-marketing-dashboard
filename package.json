@@ -122,7 +122,9 @@
     "check:personal-portfolio": "bash scripts/sql/personal-portfolio-check.sh",
     "check:lead-worth": "tsx scripts/lead-worth-agreement-check.ts",
     "check:crm-merge": "bash scripts/sql/crm-merge-check.sh",
-    "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts"
+    "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts",
+    "check:company-target": "bash scripts/sql/company-target-check.sh",
+    "check:profile-fields": "tsx scripts/profile-fields-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
@@ -141,6 +143,7 @@
     "lucide-react": "^0.452.0",
     "next": "14.2.15",
     "papaparse": "^5.4.1",
+    "pdf-lib": "^1.17.1",
     "postgres": "^3.4.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -37,8 +37,26 @@ export interface Profile {
 
   /** Which of the eleven roles they hold. Migration 049 added the
       column, 103 filled it with roles this company recognises, and 104
-      put people on them. Optional for the same reason as the rest. */
+      put people on them. Optional for the same reason as the rest.
+
+      THERE IS NO `role_template` FIELD, and that is the point. The name
+      of the role lives on `role_templates`, reached by this id. A
+      screen that asked for `profile.role_template` got undefined every
+      time and fell back to the legacy `role` column below, which told
+      everybody they were an Administrator. See the Settings page. */
   role_template_id?: string | null;
+
+  /* ---- The rest of what somebody fills in about themselves ----
+
+     Real columns on `profiles`, and they were missing from this type,
+     which is why `SettingsPanel` was cast to `Profile & Record<string,
+     unknown>` in order to read them. That cast then made every typo a
+     legal read. The columns are written down instead. */
+  location?: string | null;
+  timezone?: string | null;
+  working_hours?: string | null;
+  responsibilities?: string | null;
+  skills?: string[] | null;
 }
 
 export interface CrmList {
