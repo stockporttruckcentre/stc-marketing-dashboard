@@ -93,24 +93,24 @@ async function main() {
         wizard.includes('/api/rate-cards/${card.card_id}/export?format=xlsx'));
     }
 
-    head('The print view opens the print dialogue');
+    head('The print view is the PDF, not a second design');
     {
-      /* The page calls `window.print()` once it has drawn. Proving the
-         dialogue opened is proving the page is finished, which is the
-         fault the reports had: a print dialogue over a page still
-         waiting for its data prints the spinner. */
-      const printed: string[] = [];
-      await page.exposeFunction('__printed', () => { printed.push('yes'); });
-      await page.addInitScript('window.print = () => window.__printed()');
+      /* It used to draw the card in HTML and open the browser's print
+         dialogue, which is a layout nobody signed off. It sends people
+         to the export route now, so there is one PDF in the product and
+         it is the workbook converted. */
+      const { readFileSync } = await import('node:fs');
+      const view = readFileSync('app/export/rate-card/page.tsx', 'utf8');
+      ok('the print view sends people to the export route',
+        view.includes('/export?format=pdf') && view.includes('redirect('),
+        'a second way of making a PDF is a second design that can drift');
+      ok('and it draws nothing of its own',
+        !view.includes('PrintableRateCard') && !view.includes('window.print'),
+        'it is still rendering a card');
 
-      /* Answered in the browser so the page has a card to draw. */
-      await page.route('**/rest/v1/**', (route: Route) => route.fulfill({
-        status: 200, contentType: 'application/json', body: '[]',
-      }));
-
-      const res = await page.goto(`${BASE}/export/rate-card?card=none`, { waitUntil: 'networkidle' });
-      ok('the print view answers rather than erroring',
-        res !== null && res.status() < 500, `status ${res?.status()}`);
+      const res = await page.request.get(`${BASE}/export/rate-card?card=none`, { maxRedirects: 0 });
+      ok('and it answers rather than erroring',
+        res.status() < 500, `status ${res.status()}`);
     }
 
   } finally {

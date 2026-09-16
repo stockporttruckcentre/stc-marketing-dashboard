@@ -523,9 +523,8 @@ export function ExportModal({ onClose, onExport, busy, cardRef }: {
             <button className="rc-7k" onClick={() => onExport('pdf')} disabled={busy}>
               <span className="rc-4n">PDF</span>
               <span className="rc-2x">
-                The same sheet on paper: the same cells, the same columns, the same order, the
-                same figures. What it cannot carry is the master&rsquo;s own fonts, borders and
-                logo, because those live in the customer&rsquo;s file.
+                The workbook above, converted. Same fonts, same colours, same borders, same logo,
+                same pages. It is the spreadsheet, as a PDF, not a second document.
               </span>
             </button>
           </div>

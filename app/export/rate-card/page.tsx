@@ -1,44 +1,32 @@
-import { notFound, redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { PrintableRateCard } from '@/components/sales/ratecards/PrintableRateCard';
-import type { FullCard } from '@/lib/ratecards/types';
+import { redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 /* =============================================================
-   The printable rate card, which is how a PDF is made here.
+   The print view, which is now the PDF.
 
-   The same pattern the reports use, and for the same reason: there is
-   no PDF renderer in this installation, and the browser's own print
-   dialogue writes a better one than a library would.
+   From the business:
 
-   Built on the server rather than fetched by the browser, so the page
-   arrives complete. A print dialogue opened over a page still waiting
-   for its data prints the spinner.
+     I specifically wrote that currently you are generating a PDF that
+     has a design that differs from the xlsx version and to mirror the
+     xlsx version [...] it HAS to mirror it as compliance have signed
+     off.
+
+   This page used to draw the card in HTML and open the browser's print
+   dialogue. That was a second design: the same figures in a layout
+   nobody had signed off, and whichever route a salesman took decided
+   which document a customer received.
+
+   There is one now. `/api/rate-cards/[id]/export?format=pdf` builds the
+   workbook and converts it, so the PDF is the spreadsheet. This page
+   sends anybody who arrives here to that, including anything bookmarked
+   from before.
    ============================================================= */
-export default async function RateCardPrintPage({
+export default function RateCardPrintPage({
   searchParams,
 }: { searchParams?: { card?: string } }) {
   const id = searchParams?.card;
   if (!id) notFound();
-
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  /* `rate_card_read` checks `ratecard.view` inside the database, so
-     this page cannot be out of step with the screen about who may see
-     a card. A refusal comes back as an error, not as an empty page. */
-  const { data, error } = await supabase.rpc('rate_card_read', { p_card: id });
-  if (error) {
-    return (
-      <main style={{ padding: 40, fontFamily: 'system-ui', maxWidth: 640 }}>
-        <h1 style={{ fontSize: 18 }}>This rate card will not open</h1>
-        <p style={{ fontSize: 14, lineHeight: 1.6 }}>{error.message}</p>
-      </main>
-    );
-  }
-  if (!data) notFound();
-
-  return <PrintableRateCard card={data as FullCard} />;
+  redirect(`/api/rate-cards/${encodeURIComponent(id)}/export?format=pdf`);
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { buildWorkbook } from '@/lib/ratecards/export-xlsx';
-import { buildRateCardPdf } from '@/lib/ratecards/export-pdf';
+import { buildRateCardPdf, NoConverterError } from '@/lib/ratecards/export-pdf';
 import type { FullCard } from '@/lib/ratecards/types';
 
 export const dynamic = 'force-dynamic';
@@ -87,6 +87,19 @@ export async function GET(
       },
     });
   } catch (e) {
+    /* ---- A PDF that cannot be the workbook is not sent ----
+
+       From the business:
+
+         it HAS to mirror it as compliance have signed off.
+
+       So when the converter is missing, the answer is that it is
+       missing. There is no fallback that draws one, because a customer
+       receiving a document that does not match the signed off design is
+       worse than a customer receiving nothing: nobody finds out. */
+    if (e instanceof NoConverterError) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
+    }
     return NextResponse.json({
       error: e instanceof Error ? e.message : 'The file could not be built.',
     }, { status: 500 });
