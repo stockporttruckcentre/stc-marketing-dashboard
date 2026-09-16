@@ -113,7 +113,10 @@
     "check:rate-card-routes": "tsx scripts/rate-card-routes-check.ts",
     "check:social-approval": "bash scripts/sql/social-approval-check.sh",
     "check:social-composer": "tsx scripts/social-composer-check.ts",
-    "check:social-sweep": "tsx scripts/social-sweep-check.ts"
+    "check:social-sweep": "tsx scripts/social-sweep-check.ts",
+    "check:fleetsmart-ratecard": "tsx scripts/fleetsmart-ratecard-check.ts",
+    "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
+    "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

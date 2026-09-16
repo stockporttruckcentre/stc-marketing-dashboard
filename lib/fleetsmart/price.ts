@@ -80,6 +80,56 @@ export function blankAsset(key: string, plan: Plan): FleetAsset {
 
 /* ---- the defaults every blank cell falls back to ---- */
 
+/**
+ * The tachograph an asset of this class starts with.
+ *
+ * From the business, after the sales team reported a tachograph that
+ * added nothing to the price:
+ *
+ *   ensure it doesnt pick up tacho by default for vans. its vans we
+ *   were looking at, this specific van has a taco
+ *
+ * A tachograph is in the cab, so a trailer never has one and most vans
+ * do not either. A van that does is a deliberate choice somebody makes
+ * on the row, not something it arrives carrying: with van rates now on
+ * the card, a default of `2yr` would put a calibration on the price of
+ * every van anybody ever adds, and nobody would be told.
+ *
+ * A vehicle keeps `2yr`, which is what the workbook sets and what
+ * `check:price` holds against its figures.
+ */
+export function defaultTacho(cls: AssetClass | ''): FleetAsset['tacho'] {
+  return cls === 'Vehicle' ? '2yr' : 'none';
+}
+
+/**
+ * Give an asset a type, and the defaults that come with the class.
+ *
+ * Kept here rather than in the screen so the builder and the amendment
+ * editor cannot drift: both change an asset type, and a default applied
+ * in one of them is a default missing from the other.
+ */
+export function withType(asset: FleetAsset, type: AssetType | ''): FleetAsset {
+  const { cls } = describe(type);
+  return { ...asset, type, tacho: defaultTacho(cls) };
+}
+
+/**
+ * Does this rate card price a tachograph for this class at all.
+ *
+ * Used by the screen to disable the control rather than let somebody
+ * change it and watch nothing happen, which is what the sales team
+ * reported. It reads the card rather than naming the classes, so a
+ * class that gains rates in the rate editor gains the control with it,
+ * with nothing here to remember to change.
+ */
+export function tachoPriced(cls: AssetClass | '', axles: number, card: RateCard = SHIPPED_CARD): boolean {
+  if (!cls) return false;
+  const at = Math.max(0, Math.min(3, axles - 1));
+  return card.rates.some((r) =>
+    r.cls === cls && /Tacho|DTCO/.test(r.line) && (r.axle[at] ?? 0) > 0);
+}
+
 export function defaultPmiWeeks(cls: AssetClass | ''): number {
   return cls === 'Van' ? 26 : 6;
 }

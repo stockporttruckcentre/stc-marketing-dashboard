@@ -726,6 +726,11 @@ export function FleetSmart({
         <ContractWizard
           accounts={accounts}
           leads={leads}
+          /* The rates in force, which this component has had all along
+             and never handed on. Without it the builder priced on the
+             card the application ships with and the rate editor moved
+             nothing a salesman could see. */
+          card={card}
           initial={{
             input: open.seed,
             extras: open.extras,
