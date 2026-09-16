@@ -56,7 +56,35 @@ const MASTER = path.join(
 
 const SHEET = 'Costing Info';
 
-export async function buildWorkbook(card: FullCard): Promise<Buffer> {
+/** Options that change how the copy PRINTS, never what is on it. */
+export type WorkbookOptions = {
+  /* ---- Everything on one page ----
+
+     From the business, about the PDF:
+
+       should see all rows/columns filled on the same page of the pdf,
+       1 page total.
+
+     The master carries no print setup at all: no print area, no
+     orientation, no fit to page. So converting it gives six portrait
+     pages with the item names on one and their prices on another, and
+     that is what the export gave too.
+
+     This sets the sheet to print on a single landscape page, over a
+     print area that stops at the last cell with anything in it, so the
+     scale is decided by the card's own content rather than by the
+     master's empty rows.
+
+     It changes nothing about the cells. The workbook a customer is sent
+     does not ask for this: `buildWorkbook(card)` is what it always was,
+     and only the copy handed to the PDF converter asks for it. */
+  onOnePage?: boolean;
+};
+
+export async function buildWorkbook(
+  card: FullCard,
+  options: WorkbookOptions = {},
+): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(MASTER);
 
@@ -82,8 +110,44 @@ export async function buildWorkbook(card: FullCard): Promise<Buffer> {
     cell.value = write.value;
   }
 
+  if (options.onOnePage) onOnePage(ws);
+
   const out = await wb.xlsx.writeBuffer();
   return restoreNumberFormats(Buffer.from(out));
+}
+
+/**
+ * Print the whole sheet on one landscape page.
+ *
+ * The print area stops at the last cell carrying anything, because the
+ * master's grid runs to row 72 and column O whether or not a card
+ * reaches them. Printing the empty rows would shrink everything to fit
+ * paper nobody needs.
+ */
+function onOnePage(ws: ExcelJS.Worksheet): void {
+  let lastRow = 1;
+  let lastCol = 1;
+  ws.eachRow({ includeEmpty: false }, (row, r) => {
+    row.eachCell({ includeEmpty: false }, (cell, c) => {
+      const v = cell.value;
+      if (v === null || v === undefined || v === '') return;
+      if (r > lastRow) lastRow = r;
+      if (c > lastCol) lastCol = c;
+    });
+  });
+
+  const letter = ws.getRow(1).getCell(lastCol).address.replace(/[0-9]+$/, '');
+
+  ws.pageSetup.printArea = `A1:${letter}${lastRow}`;
+  ws.pageSetup.orientation = 'landscape';
+  ws.pageSetup.paperSize = 9; /* A4 */
+  ws.pageSetup.fitToPage = true;
+  ws.pageSetup.fitToWidth = 1;
+  ws.pageSetup.fitToHeight = 1;
+  ws.pageSetup.horizontalCentered = true;
+  ws.pageSetup.margins = {
+    left: 0.25, right: 0.25, top: 0.25, bottom: 0.25, header: 0, footer: 0,
+  };
 }
 
 /**

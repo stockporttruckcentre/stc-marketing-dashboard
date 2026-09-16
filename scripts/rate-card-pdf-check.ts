@@ -143,11 +143,27 @@ async function main() {
   head('It is the master’s own document');
 
   const masterPdf = convert(MASTER, 'master');
-  const masterPages = pagesOf(masterPdf, 'master');
   const builtPages = pagesOf(pdf, 'built');
-  ok(`it comes out on the ${masterPages} pages the master comes out on`,
-    builtPages === masterPages,
-    `the master converts to ${masterPages} pages and this converts to ${builtPages}`);
+
+  /* ---- One page ----
+
+     From the business:
+
+       should see all rows/columns filled on the same page of the pdf,
+       1 page total.
+
+     The master carries no print setup, so converting it untouched gives
+     six portrait pages with the item names on one and their prices on
+     another. The copy handed to the converter asks for a single
+     landscape page over a print area that stops at the last cell with
+     anything in it. */
+  ok('the whole card is on one page', builtPages === 1,
+    `it converts to ${builtPages} pages, and the master's own ${pagesOf(masterPdf, 'master')} `
+    + 'is what that looks like when the print setup is missing');
+
+  ok('and that page is A4 landscape, so the columns are across it',
+    /Page size:\s+841[.\d]*\s+x\s+59[0-9][.\d]*/.test(infoOf(pdf, 'built')),
+    `it says: ${/Page size:.*/.exec(infoOf(pdf, 'built'))?.[0] ?? 'nothing'}`);
 
   /* The master's fonts, not a renderer's. This is the single clearest
      tell: the drawn PDF carried Helvetica and nothing else, because
@@ -235,6 +251,56 @@ async function main() {
   const ticked = card.fleetsmart.inclusions.filter((i) => i.gold);
   ok(`all ${ticked.length} inclusions ticked on Gold are named`,
     ticked.every((i) => words.includes(i.inclusion.slice(0, 14))));
+
+  head('And the workbook a customer downloads is untouched');
+
+  /* Printing on one page is a property of the copy that goes to the
+     converter. The spreadsheet a customer is sent has to stay what it
+     was, because the other half of this task is that the workbook is
+     indistinguishable from the master. */
+  {
+    const plain = new ExcelJS.Workbook();
+    await plain.xlsx.load(Buffer.from(await buildWorkbook(card)) as unknown as ArrayBuffer);
+    const plainSheet = plain.worksheets[0]!;
+
+    const master = new ExcelJS.Workbook();
+    await master.xlsx.readFile(MASTER);
+    const masterSheet = master.getWorksheet('Costing Info')!;
+
+    ok('the downloaded workbook has no print area of its own',
+      (plainSheet.pageSetup.printArea ?? '') === (masterSheet.pageSetup.printArea ?? ''),
+      `it says "${plainSheet.pageSetup.printArea ?? ''}" and the master says `
+      + `"${masterSheet.pageSetup.printArea ?? ''}"`);
+    ok('and is not asked to fit to a page either',
+      !plainSheet.pageSetup.fitToPage === !masterSheet.pageSetup.fitToPage,
+      'the customer\u2019s spreadsheet has been given a print setup the master does not have');
+
+    const forPdf = new ExcelJS.Workbook();
+    await forPdf.xlsx.load(
+      Buffer.from(await buildWorkbook(card, { onOnePage: true })) as unknown as ArrayBuffer,
+    );
+    const pdfSheet = forPdf.worksheets[0]!;
+    ok('while the copy that becomes the PDF is set to one landscape page',
+      pdfSheet.pageSetup.fitToPage === true
+      && pdfSheet.pageSetup.fitToWidth === 1
+      && pdfSheet.pageSetup.fitToHeight === 1
+      && pdfSheet.pageSetup.orientation === 'landscape',
+      `fitToPage ${String(pdfSheet.pageSetup.fitToPage)}, `
+      + `${String(pdfSheet.pageSetup.fitToWidth)} by ${String(pdfSheet.pageSetup.fitToHeight)}, `
+      + `${String(pdfSheet.pageSetup.orientation)}`);
+
+    /* The print area stops at the content. Running it to the master's
+       full 72 rows would shrink the card to fit paper nobody needs. */
+    const area = pdfSheet.pageSetup.printArea ?? '';
+    const lastRow = Number(/([0-9]+)$/.exec(area)?.[1] ?? 0);
+    let written = 0;
+    for (const [at] of sheetGrid(card).cells) {
+      written = Math.max(written, Number(at.replace(/^[A-Z]+/, '')));
+    }
+    ok(`the print area reaches the last row with anything on it, row ${written}`,
+      lastRow >= written,
+      `the print area is ${area} and there is something on row ${written}`);
+  }
 
   head('The terms and the extra inclusions, which the scope names');
 
