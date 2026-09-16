@@ -118,7 +118,9 @@
     "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
     "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts",
     "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh",
-    "check:fy-targets": "bash scripts/sql/fy-targets-check.sh"
+    "check:fy-targets": "bash scripts/sql/fy-targets-check.sh",
+    "check:personal-portfolio": "bash scripts/sql/personal-portfolio-check.sh",
+    "check:lead-worth": "tsx scripts/lead-worth-agreement-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

@@ -247,7 +247,13 @@ ok('every chart colour reads against the card of its own theme');
    cannot tell a documented value from a hardcoded one would force the
    explanation out of the file that needs it. */
 for (const [file, src] of DRAWERS) {
-  const hexes = [...codeOf(src).matchAll(/#[0-9A-Fa-f]{3,8}\b/g)].map((m) => m[0]);
+  /* An HTML entity is not a colour. `&#8217;` is an apostrophe and
+     `&#8594;` is an arrow, and both look exactly like a four digit hex
+     to a regular expression that does not know what came before the
+     hash. Reported as raw hex on a file whose only crime was writing a
+     right single quote properly. */
+  const hexes = [...codeOf(src).replace(/&#\d+;/g, ' ')
+    .matchAll(/#[0-9A-Fa-f]{3,8}\b/g)].map((m) => m[0]);
   if (hexes.length) {
     bad(`${file} holds a raw hex`, `${[...new Set(hexes)].join(', ')}. The kit takes tokens only.`);
   }

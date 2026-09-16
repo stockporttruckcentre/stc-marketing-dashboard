@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Container, KeyRound, RotateCcw, Wrench, X } from 'lucide-react';
+import { ArrowRight, Container, KeyRound, RotateCcw, UserRound, Wrench, X } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -17,7 +17,10 @@ import {
 import { swatchImage } from '@/components/analytics/legacy/texture';
 import { Tile } from '@/components/analytics/legacy/tiles';
 import { NeedsARecord } from '@/components/analytics/legacy/sections';
+import { useRouter } from 'next/navigation';
 import { readable, type DivisionFilter } from '@/lib/protean/rpc';
+import { COMPANY, analyticsHref, type Scope, type Viewable } from '@/lib/analytics/scope';
+import { PersonalAnalytics } from '@/components/analytics/personal/PersonalAnalytics';
 import {
   OPEN_STAGES, STAGE_LABEL,
   concentration, customerMovement, openWorkAgeing, pipelineByStage, reconciliation,
@@ -205,8 +208,38 @@ type Scoped = {
   conc: Concentration | null;
 };
 
-export function AnalyticsHub() {
+/* =============================================================
+   Personal, the fifth scope.
+
+   From the agreed development scope, Task 1:
+
+     Add a fifth scope: Personal [...] Personal is not a fourth
+     division. Model the state cleanly rather than pretending Personal
+     is a division if that makes the existing `DivisionFilter` type
+     semantically wrong.
+
+   It would, so it is not. `only` below is exactly what it was: null for
+   the company, a slug for one division, read by every panel here.
+   Personal is a second piece of state beside it, and the two are
+   mutually exclusive by construction rather than by a fourth member of
+   a type that means "which division".
+
+   Everything about who may see what is a prop, because the server has
+   already decided it against the database.
+   ============================================================= */
+export function AnalyticsHub({
+  initialScope = COMPANY,
+  canPersonal = false,
+  people = [],
+  selfId = null,
+}: {
+  initialScope?: Scope;
+  canPersonal?: boolean;
+  people?: Viewable[];
+  selfId?: string | null;
+} = {}) {
   const supabase = createClient();
+  const router = useRouter();
 
   const [divisions, setDivisions] = useState<Division[]>([]);
   const [months, setMonths] = useState<MonthRow[]>([]);
@@ -221,7 +254,42 @@ export function AnalyticsHub() {
 
   /* THE ONE DRILL IN. Null is the company; a slug is one division, and
      every panel on the page reads it. */
-  const [only, setOnly] = useState<string | null>(null);
+  const [only, setOnly] = useState<string | null>(
+    initialScope.kind === 'division' ? initialScope.slug : null,
+  );
+
+  /* Whose portfolio, or null for nobody's. Never set at the same time
+     as `only`: the two setters below are the only things that write
+     either, and each clears the other. */
+  const [person, setPerson] = useState<string | null>(
+    initialScope.kind === 'personal' ? (initialScope.person ?? selfId) : null,
+  );
+
+  const showDivision = useCallback((slug: string | null) => {
+    setPerson(null);
+    setOnly(slug);
+  }, []);
+
+  const showPersonal = useCallback((who: string | null) => {
+    setOnly(null);
+    setPerson(who ?? selfId);
+  }, [selfId]);
+
+  /* The address bar keeps up, so a refresh comes back to the same
+     screen and Task 4's dashboard link can be written by hand.
+     `replace` rather than `push`: flicking between divisions is not
+     five pages of history to press Back through. */
+  const here: Scope = person
+    ? { kind: 'personal', person }
+    : only
+      ? { kind: 'division', slug: only as 'stc' | 'rental' | 'trailer' }
+      : COMPANY;
+  const href = analyticsHref(here);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname + window.location.search === href) return;
+    router.replace(href, { scroll: false });
+  }, [href, router]);
 
   /* How the month chart is drawn, and which divisions are on it. Held
      here rather than in the chart so the key under it and the toolbar
@@ -544,6 +612,27 @@ export function AnalyticsHub() {
     ...s, pattern: swatchImage(i, textured && shape !== 'line'),
   }));
 
+  /* ---- Personal hands over ----
+
+     Not a panel on this page and not a filter over it. A portfolio
+     belongs to a person and spans all three divisions, so every
+     comparison this page is built to draw is the wrong comparison for
+     it. The as-at date is the only state the two screens share, and it
+     is passed rather than duplicated. */
+  if (person) {
+    return (
+      <PersonalAnalytics
+        person={person}
+        people={people}
+        selfId={selfId}
+        asked={asked}
+        onAsked={setAsked}
+        onLeave={() => showDivision(null)}
+        onPerson={showPersonal}
+      />
+    );
+  }
+
   return (
     <div className="kit" style={PAGE}>
       {/* ---- the one control bar ----
@@ -570,20 +659,33 @@ export function AnalyticsHub() {
         />
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Chip active={only == null} onClick={() => setOnly(null)}>Whole company</Chip>
+          <Chip active={only == null} onClick={() => showDivision(null)}>Whole company</Chip>
           {divisions.map((d) => {
             const Icon = ICON[d.division] ?? Wrench;
             return (
               <Chip
                 key={d.division}
                 active={only === d.division}
-                onClick={() => setOnly(only === d.division ? null : d.division)}
+                onClick={() => showDivision(only === d.division ? null : d.division)}
                 title={`Scope every panel to ${d.name}`}
               >
                 <Icon size={12} /> {d.name}
               </Chip>
             );
           })}
+          {/* The fifth scope. Drawn only where the database says this
+              person has one: the five role templates in
+              `personal_analytics_roles`, which is deliberately not the
+              same set as the people who can open Analytics. */}
+          {canPersonal && (
+            <Chip
+              active={false}
+              onClick={() => showPersonal(null)}
+              title="One person's portfolio rather than a division"
+            >
+              <UserRound size={12} /> Personal
+            </Chip>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -610,7 +712,7 @@ export function AnalyticsHub() {
                 <ArrowRight size={12} />
               </Button>
             </Link>
-            <Button variant="ghost" size="sm" onClick={() => setOnly(null)}>
+            <Button variant="ghost" size="sm" onClick={() => showDivision(null)}>
               <X size={12} /> Whole company
             </Button>
           </Alert>
@@ -752,7 +854,7 @@ export function AnalyticsHub() {
             total={divisions.reduce((s, d) => s + Number(d.this_year || 0), 0)}
             caption="invoiced"
             active={only}
-            onPick={setOnly}
+            onPick={showDivision}
             textured={textured}
             height={260}
           />
@@ -809,7 +911,7 @@ export function AnalyticsHub() {
               left out on purpose: a customer who bought last year and not this one has a
               trailer, not a problem.
               <div style={{ marginTop: 9 }}>
-                <Button variant="secondary" size="sm" onClick={() => setOnly(null)}>
+                <Button variant="secondary" size="sm" onClick={() => showDivision(null)}>
                   See it for the whole company
                 </Button>
               </div>
