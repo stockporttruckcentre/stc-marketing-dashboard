@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
-import { copyGate } from '@/lib/platform/compliance/copy-lint';
-import { createServiceRoleClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,17 +17,27 @@ export const dynamic = 'force-dynamic';
    Migration 050 closed the column, and the transition routes are the
    only way it moves.
 
-   ---- The compliance check runs here ----
+   ---- What used to run here, and why it does not ----
 
-   `copyGate` knows about Regulation FD, the predecessor chain name and
-   US spelling. That belongs in TypeScript, not a trigger. So the words
-   are checked as they are saved and the verdict is recorded against a
-   hash of them, which means editing invalidates the verdict rather than
-   leaving a stale green tick on changed copy.
+   A "compliance check" ran on every save and recorded a verdict against
+   the words. It was not STC's. From the business, looking at a social
+   post:
 
-   The verdict is written with the service role because
-   `content_record_lint` refuses anything else. A verdict a browser
-   could write is a verdict that always says clean.
+     why does one of my social post pages say "US English. STC and Frame
+     use American spelling throughout." Why has frame made it through to
+     this app? that's dangerous
+
+   Correct on both counts. The rules were another company's: a
+   blockchain's name, a share ticker, "the protocol", transactions per
+   second, token prices, and a US spelling rule that would have told
+   the marketing team to write Stockport Truck Center and to bill for
+   labor. It cited `docs/source/STC_CONTEXT.md`, which does not exist in
+   this repository and never has.
+
+   It is gone. Nothing lints a post on the way past. The verdict columns
+   are left on the table because they hold rows somebody may want to
+   read, and the screens still draw a finding if one is ever there, so a
+   policy STC actually writes has somewhere to go.
    ============================================================= */
 
 const WRITABLE = {
@@ -81,9 +89,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ ok: false, error: 'update_failed', message: error.message }, { status: 400 });
   }
 
-  const post = data as { content: string; first_comment: string | null; caption: string | null };
-  const lint = await recordLint(params.id, post);
-  return NextResponse.json({ ok: true, post: { ...data, ...lint } });
+  return NextResponse.json({ ok: true, post: data });
 }
 
 /**
@@ -93,32 +99,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
  * `content_lint_subject` joins it, so the hash the database computes is
  * about the same text this checked.
  */
-async function recordLint(
-  id: string,
-  post: { content: string; first_comment: string | null; caption: string | null },
-) {
-  const text = [post.content ?? '', post.first_comment ?? '', post.caption ?? ''].join('\n');
-  const verdict = copyGate(text, 'outbound');
-  const findings = [...verdict.blocking, ...verdict.advisory];
-  const severity = verdict.blocking.length ? 'blocking'
-    : verdict.advisory.length ? 'advisory' : 'clean';
-
-  try {
-    const admin = createServiceRoleClient();
-    const { data } = await admin.rpc('content_record_lint', {
-      p_post: id,
-      p_severity: severity,
-      p_findings: findings,
-    });
-    if (data) return data as Record<string, unknown>;
-  } catch {
-    /* A deployment with no service role key still saves the post. The
-       verdict is missing rather than wrong, and the composer shows the
-       findings it computed itself either way. */
-  }
-  return { lint_severity: severity, lint_findings: findings };
-}
-
 /**
  * Delete.
  *

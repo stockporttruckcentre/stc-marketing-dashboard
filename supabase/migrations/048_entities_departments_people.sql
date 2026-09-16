@@ -79,8 +79,11 @@ CREATE TABLE IF NOT EXISTS entities (
   name         TEXT NOT NULL,
   legal_name   TEXT,
   jurisdiction TEXT,
-  -- The ticker, where the entity has one. Rendered as `OTCID: CRCW` and
-  -- never as a bare CRCW, per the kit's brand constraints.
+  -- The ticker, where the entity has one. Neither Stockport Truck Centre
+  -- nor STC Sales and Leasing is listed, so this is null for both and
+  -- the column is here because the package this table came from had it.
+  -- It previously carried another company's ticker as an example, which
+  -- is not something to leave in a schema somebody inherits.
   ticker       TEXT,
   -- What a record gets when nobody says otherwise.
   is_default   BOOLEAN NOT NULL DEFAULT FALSE,

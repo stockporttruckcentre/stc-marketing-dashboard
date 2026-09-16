@@ -111,7 +111,7 @@ export function SocialPlanner({
   initialPosts, profile, capabilities,
   channels: initialChannels, networks, slots: initialSlots, columns,
   variants: initialVariants, templates: initialTemplates, campaigns,
-  tags: initialTags, library: initialLibrary, activity, postTags,
+  tags: initialTags, library: initialLibrary, activity, postTags: initialPostTags,
   openTab, openPostId = null, needsReview, startComposing,
 }: {
   initialPosts: Post[];
@@ -147,6 +147,7 @@ export function SocialPlanner({
 
   const [posts, setPosts] = useState<Post[]>(initialPosts);
   const [variants, setVariants] = useState<Variant[]>(initialVariants);
+  const [postTags, setPostTags] = useState(initialPostTags);
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
   const [slots, setSlots] = useState<Slot[]>(initialSlots);
   const [templates, setTemplates] = useState<Template[]>(initialTemplates);
@@ -282,10 +283,24 @@ export function SocialPlanner({
 
   /* ---- writes ---- */
 
+  /* ---- Everything a post is made of, not just the post ----
+
+     `setVariants` existed and was never called once. The channels a
+     post goes to were read on the server when the page was rendered and
+     never read again, so a post created afterwards had no channels as
+     far as this screen was concerned until somebody reloaded. The post
+     drawer said "no channels on it yet" about a post that had three,
+     and the preview said there was nothing to preview against.
+
+     Tags were the same. Both are replaced here, together with the
+     posts, from one request. */
   const refresh = useCallback(async () => {
     const res = await fetch('/api/content/posts');
     const json = await res.json();
-    if (json.ok) setPosts(json.posts as Post[]);
+    if (!json.ok) return;
+    setPosts(json.posts as Post[]);
+    if (Array.isArray(json.variants)) setVariants(json.variants as Variant[]);
+    if (Array.isArray(json.postTags)) setPostTags(json.postTags as { post_id: string; tag_id: string }[]);
   }, []);
 
   const replace = useCallback((post: Post) => {

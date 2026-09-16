@@ -124,7 +124,8 @@
     "check:crm-merge": "bash scripts/sql/crm-merge-check.sh",
     "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts",
     "check:company-target": "bash scripts/sql/company-target-check.sh",
-    "check:profile-fields": "tsx scripts/profile-fields-check.ts"
+    "check:profile-fields": "tsx scripts/profile-fields-check.ts",
+    "check:not-ours": "tsx scripts/not-our-company-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

@@ -13,10 +13,14 @@
 -- Which company somebody works for, when the answer can be both.
 --
 -- Migration 042 gave every person one `entity_id` and every record an
--- `owning_entity_id`. One is not enough. Legal, finance and the founders
--- work for TCC and for Frame, and the two companies are going to run
--- this installation together: TCC staff task Frame staff and Frame staff
--- task TCC staff, and neither can do that if belonging to one company
+-- `owning_entity_id`. One is not enough. Some people work for both
+-- companies in the group, and the two run this installation together:
+-- staff of one task staff of the other in both directions, and neither
+-- can do that if belonging to one company
+--
+-- HERE THE TWO COMPANIES ARE STOCKPORT TRUCK CENTRE AND STC SALES AND
+-- LEASING, seeded by migration 048. The original of this paragraph
+-- named the two the package was written for, which are not these.
 -- hides the other.
 --
 -- So membership becomes a set, and `profiles.entity_id` stays as the
@@ -28,13 +32,13 @@
 --
 -- It decides what somebody SEES BY DEFAULT, and what they can be shown
 -- at all for sensitive records. It does not decide who can be given
--- work. A task owned by TCC and assigned to a Frame engineer is a
--- normal thing, and the engineer can see it because they are on it, not
--- because of who employs them.
+-- work. A task owned by one company and assigned to somebody employed
+-- by the other is a normal thing, and they can see it because they are
+-- on it, not because of who employs them.
 --
--- The design system puts it the same way: cyan marks Frame RECORDS, and
--- "TCC-only records must be invisible to Frame-only staff, so this is a
--- permission boundary before it is a label".
+-- The rule underneath it, which is the part worth keeping: a record
+-- belonging to one company only must be invisible to staff of the other
+-- only, so this is a permission boundary before it is a label.
 -- =============================================================
 
 -- -------------------------------------------------------------
@@ -89,8 +93,8 @@ $fn$;
 
 -- Does this person work for more than one company. The Work screen and
 -- the CRM use it to decide whether to draw a switcher at all: somebody
--- who only works for Frame should never see a control offering to show
--- them TCC.
+-- who works for one company only should never see a control offering to
+-- show them the other.
 CREATE OR REPLACE FUNCTION actor_is_multi_entity()
 RETURNS BOOLEAN
 LANGUAGE SQL
@@ -251,16 +255,18 @@ GRANT EXECUTE ON FUNCTION set_actor_entities(UUID, UUID[], UUID) TO authenticate
 -- exists. Same signature, so every policy that calls it is unchanged.
 --
 -- The ordering is the whole design, and the case that drives it is the
--- one the split exists for: a TCC director tasks a Frame engineer.
+-- one the split exists for: a director of one company tasks somebody
+-- employed by the other.
 --
---   The task is owned by TCC, because the director raised it.
---   The engineer works for Frame only.
---   The engineer has to be able to see the task they were given.
+--   The task is owned by the first company, because the director
+--   raised it.
+--   The person doing it works for the second company only.
+--   They have to be able to see the task they were given.
 --
 -- So being named on a piece of work beats the company filter, and the
 -- company filter only decides what somebody sees when they are NOT
 -- involved. That is what makes cross-company delegation work without
--- opening TCC's confidential work to everybody at Frame.
+-- opening one company's confidential work to everybody at the other.
 -- -------------------------------------------------------------
 CREATE OR REPLACE FUNCTION can_reach_task(
   p_task            UUID,
@@ -291,7 +297,7 @@ AS $fn$
      THEN FALSE
 
     /* Involvement beats the company filter. This is the line that lets
-       TCC task Frame and Frame task TCC. */
+       each company's staff task the other's. */
     WHEN current_actor() IN (p_assignee, p_created_by, p_delegated_by, p_reviewer, p_approver) THEN TRUE
     WHEN EXISTS (
       SELECT 1 FROM task_participants tp
@@ -299,8 +305,9 @@ AS $fn$
     ) THEN TRUE
 
     /* Not involved. Now the company matters: confidential work stays
-       inside the company that owns it, which is what "TCC-only records
-       must be invisible to Frame-only staff" asks for. */
+       inside the company that owns it, which is what "records belonging
+       to one company only must be invisible to staff of the other only"
+       asks for. */
     WHEN classification_rank(p_classification) >= classification_rank('confidential')
      AND NOT actor_in_entity((SELECT t.owning_entity_id FROM tasks t WHERE t.id = p_task))
      THEN FALSE
@@ -324,8 +331,8 @@ GRANT EXECUTE ON FUNCTION can_reach_task(UUID,UUID,UUID,UUID,UUID,UUID,UUID,TEXT
 -- screen to send, because a screen that forgets produces an
 -- unattributed record and nobody notices until an audit asks.
 --
--- An explicit value always wins: somebody at TCC raising work that
--- belongs to Frame says so, and this does not argue.
+-- An explicit value always wins: somebody at one company raising work
+-- that belongs to the other says so, and this does not argue.
 -- -------------------------------------------------------------
 CREATE OR REPLACE FUNCTION stamp_owning_entity()
 RETURNS TRIGGER

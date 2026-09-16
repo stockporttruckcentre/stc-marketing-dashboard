@@ -168,5 +168,36 @@ export async function GET(req: NextRequest) {
   if (error) {
     return NextResponse.json({ ok: false, error: 'query_failed', message: error.message }, { status: 400 });
   }
-  return NextResponse.json({ ok: true, posts: data ?? [] });
+
+  /* ---- The channels, and the tags, with them ----
+
+     From the business, having sent a post for approval with three
+     channels on it:
+
+       They now show nothing when i click them on the List tab and say
+       no preview as no socials selected
+
+     The channels were on the post. They were written by the create
+     route, and `content_submit` refuses a post with no channels, so the
+     submission itself proves they existed. What did not exist was any
+     way for the screen to find out: the planner read the variants once,
+     when the page was rendered on the server, and nothing ever read
+     them again. A post created after that moment had no channels as far
+     as the screen was concerned, for the rest of the session.
+
+     So the refresh returns all three things a post is made of, and the
+     screen replaces all three. One request, because two would let the
+     posts and their channels arrive a moment apart and draw a post with
+     nobody to send it to in between. */
+  const [{ data: variants }, { data: postTags }] = await Promise.all([
+    supabase.from('social_post_variants').select('*').order('position'),
+    supabase.from('social_post_tags').select('post_id, tag_id'),
+  ]);
+
+  return NextResponse.json({
+    ok: true,
+    posts: data ?? [],
+    variants: variants ?? [],
+    postTags: postTags ?? [],
+  });
 }
