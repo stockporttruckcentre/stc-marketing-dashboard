@@ -39,7 +39,7 @@ import {
   ASSET_TYPES, SHIPPED_CARD, cardFrom, type RateCard,
 } from '../lib/fleetsmart/ratecard';
 import {
-  blankAsset, defaultTacho, describe, priceAsset, priceContract, tachoPriced, withType,
+  blankAsset, defaultTacho, describe, priceAsset, priceContract, tachoPriced, tachoRate, withType,
 } from '../lib/fleetsmart/price';
 import { blankContract } from '../lib/fleetsmart/contract';
 import type { ContractInput, FleetAsset } from '../lib/fleetsmart/types';
@@ -122,6 +122,51 @@ ok('and then it moves the price',
 
 ok('a trailer has no tachograph on any card, because it has no cab',
   !tachoPriced('Trailer', 3, SHIPPED_CARD));
+
+/* =============================================================
+   2b. One option at a time.
+
+   The control opening is not enough. A rate card can price one
+   tachograph line for a class and not the others, which is what
+   happens the moment somebody adds the rate they need and not the
+   three they do not. An option that can be picked and adds nothing is
+   the reported fault, one level down.
+   ============================================================= */
+head('Each choice is priced before it is made');
+
+/* Only the two year line added for vans, which is what adding "the rate
+   for the van we have" actually looks like. */
+const ONE_VAN_RATE = cardFrom({
+  ...SHIPPED_CARD,
+  rates: SHIPPED_CARD.rates.map((r) =>
+    (r.cls === 'Van' && r.line === '2 Year Tacho Calibration'
+      ? { ...r, axle: [95, 95, 95, 95] } : r)),
+}, 'test-one-van-rate');
+
+ok('the control opens on the one rate that exists', tachoPriced('Van', 2, ONE_VAN_RATE));
+ok('the two year calibration is priced', tachoRate('2yr', 'Van', 2, ONE_VAN_RATE) === 95);
+for (const choice of ['6yr', 'DTCO', 'Smart']) {
+  ok(`${choice} has no rate, so the screen shuts it rather than offering nothing`,
+    tachoRate(choice, 'Van', 2, ONE_VAN_RATE) === 0);
+}
+ok('and picking the priced one costs exactly that',
+  Math.abs((annual('LCV', '2yr', ONE_VAN_RATE) - annual('LCV', 'none', ONE_VAN_RATE)) - 95) < 0.005);
+
+ok('no tachograph work is always pickable and always free',
+  tachoRate('none', 'Van', 2, ONE_VAN_RATE) === 0
+  && tachoRate('none', 'Vehicle', 2, SHIPPED_CARD) === 0);
+
+/* Every option the shipped card prices agrees with what it costs. */
+for (const t of ASSET_TYPES) {
+  const { cls, axles } = describe(t.type);
+  const wrong = (['2yr', '6yr', 'DTCO', 'Smart'] as const).filter((c) => {
+    const quoted = tachoRate(c, cls, axles, SHIPPED_CARD);
+    const real = annual(t.type, c, SHIPPED_CARD) - annual(t.type, 'none', SHIPPED_CARD);
+    return Math.abs(quoted - real) > 0.005;
+  });
+  ok(`${t.type}: every option is quoted at what it actually adds`, wrong.length === 0,
+    `${wrong.join(', ')} quoted a price the contract does not then charge`);
+}
 
 /* =============================================================
    3. The price on screen is the price on the card in force.

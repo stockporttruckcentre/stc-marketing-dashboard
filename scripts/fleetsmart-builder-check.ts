@@ -105,6 +105,22 @@ async function main() {
       !(await control.isDisabled()),
       'the card has van rates on it and the control is still shut');
 
+    /* ---- What the salesman sees before choosing ----
+
+       The reported fault was a choice that moved nothing. The same
+       fault one option down is a choice priced at nothing while the
+       others are not, so each option carries its own rate and an
+       option with no rate is shut. */
+    const options = await control.evaluate((el) =>
+      Array.from((el as HTMLSelectElement).options)
+        .map((o) => ({ value: o.value, text: o.textContent ?? '', shut: o.disabled })));
+
+    ok('every tachograph option says what it costs',
+      options.filter((o) => o.value !== 'none').every((o) => /£/.test(o.text) || o.shut),
+      `the options read: ${options.map((o) => o.text.trim()).join(' | ')}`);
+    ok('and "no tachograph work" is always pickable',
+      options.some((o) => o.value === 'none' && !o.shut));
+
     const before = await money(page);
     ok('there is a figure on screen to move', before > 0, `the figures added up to ${before}`);
 
@@ -128,6 +144,15 @@ async function main() {
     const shut = tacho(page);
     ok('the control is disabled', await shut.isDisabled(),
       'it can still be changed, and changing it would move nothing');
+
+    const shutOptions = await shut.evaluate((el) =>
+      Array.from((el as HTMLSelectElement).options)
+        .map((o) => ({ value: o.value, shut: o.disabled, text: o.textContent ?? '' })));
+    ok('and every priced option on it is shut, not merely greyed',
+      shutOptions.filter((o) => o.value !== 'none').every((o) => o.shut),
+      `the options read: ${shutOptions.map((o) => o.text.trim()).join(' | ')}`);
+    ok('while "no tachograph work" stays pickable, because that is the truth for a van',
+      shutOptions.some((o) => o.value === 'none' && !o.shut));
 
     const why = await shut.getAttribute('title');
     ok('and it says what would have to change', (why ?? '').length > 20,

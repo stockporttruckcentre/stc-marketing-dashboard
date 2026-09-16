@@ -12,7 +12,7 @@ import {
 } from '@/lib/fleetsmart/ratecard';
 import {
   autoWearAndTear, blankAsset, defaultBrakeTests, defaultCServices, defaultLadenRbt,
-  defaultPmiWeeks, describe, priceContract, tachoPriced, withType,
+  defaultPmiWeeks, describe, priceContract, tachoPriced, tachoRate, withType,
 } from '@/lib/fleetsmart/price';
 import {
   WORDING_LABEL, autoWording, blankExtras,
@@ -1116,7 +1116,23 @@ function FleetStep({
                           : 'Pick an asset type first. The tachograph rates depend on the class.'}
                       onChange={(v) => onAsset(a.key, { tacho: v as FleetAsset['tacho'] })}
                     >
-                      {TACHO_CHOICES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      {/* Each choice priced before it is made, and a
+                          choice with no rate on the card shut rather
+                          than pickable. "It let me choose it and the
+                          total did not move" is the fault that was
+                          reported; the same fault one level down is an
+                          option that is priced at nothing while the
+                          three beside it are not. */}
+                      {TACHO_CHOICES.map((t) => {
+                        const rate = tachoRate(t.value, cls, axles, card);
+                        const nothing = t.value !== 'none' && rate <= 0;
+                        return (
+                          <option key={t.value} value={t.value} disabled={nothing}>
+                            {t.label}
+                            {rate > 0 ? ` ${money(rate)}` : nothing ? ' (no rate on the card)' : ''}
+                          </option>
+                        );
+                      })}
                     </Select>
                   </Field>
                   <Field label="Telematics, £ a year" hint="Brake performance monitoring, priced per asset.">
