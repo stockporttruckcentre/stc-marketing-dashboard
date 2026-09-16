@@ -12,7 +12,7 @@ import {
   STATUS_LABEL, dayKey, dayLabel, postDay,
   type ActivityLine, type BoardColumn, type Campaign, type Channel,
   type LibraryItem, type Network, type Post, type PostStatus,
-  type Slot, type Tag, type Template, type Variant,
+  type Tag, type Template, type Variant,
 } from '@/lib/content/types';
 import type { Capability } from '@/lib/platform/permissions/catalog';
 import { BUCKET, bucketStore, storeImage } from '@/lib/social/media';
@@ -109,7 +109,7 @@ const STATUS_FILTERS: { value: PostStatus | 'all'; label: string }[] = [
 
 export function SocialPlanner({
   initialPosts, profile, capabilities,
-  channels: initialChannels, networks, slots: initialSlots, columns,
+  channels: initialChannels, networks, queueTime: initialQueueTime, columns,
   variants: initialVariants, templates: initialTemplates, campaigns,
   tags: initialTags, library: initialLibrary, activity, postTags: initialPostTags,
   openTab, openPostId = null, needsReview, startComposing,
@@ -120,7 +120,8 @@ export function SocialPlanner({
   capabilities: string[];
   channels: Channel[];
   networks: Network[];
-  slots: Slot[];
+  /** 'HH:MM:SS' out of `tenant_settings.social_queue_time`. */
+  queueTime: string;
   columns: BoardColumn[];
   variants: Variant[];
   templates: Template[];
@@ -149,7 +150,9 @@ export function SocialPlanner({
   const [variants, setVariants] = useState<Variant[]>(initialVariants);
   const [postTags, setPostTags] = useState(initialPostTags);
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
-  const [slots, setSlots] = useState<Slot[]>(initialSlots);
+  /* What time of day the queue posts. One setting for the company, and
+     three o'clock until somebody changes it, per migration 122. */
+  const [queueTime, setQueueTime] = useState<string>(initialQueueTime);
   const [templates, setTemplates] = useState<Template[]>(initialTemplates);
   const [tags, setTags] = useState<Tag[]>(initialTags);
   const [library, setLibrary] = useState<LibraryItem[]>(initialLibrary);
@@ -260,26 +263,41 @@ export function SocialPlanner({
     };
   }, [posts]);
 
-  /** Free posting slots per day, for the calendar's outlines. */
+  /* ---- Which days the queue would take ----
+
+     From the business:
+
+       'next free slot' in socials, have this push it to the next
+       available day where nothing is scheduled, at 3pm.
+
+     So a day is free when nothing at all is scheduled on it, which is
+     the same rule `content_next_slot` applies in the database. It used
+     to count unused posting times per channel out of
+     `social_channel_slots`, a table nobody ever filled in, so every day
+     on the calendar read as having none. */
   const freeSlots = useMemo(() => {
     const out: Record<string, number> = {};
-    const taken = new Set(
-      variants.filter((v) => v.scheduled_at).map((v) => `${v.channel_id}|${v.scheduled_at}`),
-    );
+    const busy = new Set<string>();
+    for (const p of posts) {
+      if (p.status !== 'scheduled' && p.status !== 'publishing') continue;
+      const on = p.scheduled_at ? dayKey(new Date(p.scheduled_at)) : p.scheduled_date;
+      if (on) busy.add(on);
+    }
+    for (const v of variants) {
+      if (v.state !== 'pending' && v.state !== 'scheduled' && v.state !== 'publishing') continue;
+      if (v.scheduled_at) busy.add(dayKey(new Date(v.scheduled_at)));
+    }
+
     const start = new Date(month.getFullYear(), month.getMonth(), 1);
     const end = new Date(month.getFullYear(), month.getMonth() + 1, 0);
-    for (const s of slots) {
-      if (!s.is_active) continue;
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== s.day_of_week) continue;
-        const key = dayKey(d);
-        const at = `${key}T${s.at_time}`;
-        if (taken.has(`${s.channel_id}|${at}`)) continue;
-        out[key] = (out[key] ?? 0) + 1;
-      }
+    const today = dayKey(new Date());
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = dayKey(d);
+      if (key < today) continue;
+      if (!busy.has(key)) out[key] = 1;
     }
     return out;
-  }, [slots, variants, month]);
+  }, [posts, variants, month]);
 
   /* ---- writes ---- */
 
@@ -467,7 +485,7 @@ export function SocialPlanner({
     { key: 'planner',   label: 'Planner',   count: visible.length, show: true },
     { key: 'calendar',  label: 'Calendar',  show: true },
     { key: 'list',      label: 'List',      show: true },
-    { key: 'queue',     label: 'Queue',     count: slots.filter((s) => s.is_active).length, show: true },
+    { key: 'queue',     label: 'Queue',     count: undefined, show: true },
     { key: 'library',   label: 'Library',   count: library.length, show: true },
     { key: 'templates', label: 'Templates', count: templates.length, show: true },
     { key: 'tags',      label: 'Tags',      count: tags.length, show: true },
@@ -706,18 +724,18 @@ export function SocialPlanner({
           <Queue
             channels={channels}
             networks={networks}
-            slots={slots}
             posts={posts}
             variants={variants}
             canEdit={canChannels}
-            onSlots={async (channelId, next) => {
-              const res = await fetch(`/api/content/channels/${channelId}/slots`, {
+            queueTime={queueTime}
+            onQueueTime={async (at) => {
+              const res = await fetch('/api/content/queue/settings', {
                 method: 'PUT', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ slots: next }),
+                body: JSON.stringify({ at }),
               });
-              const json = await res.json();
-              if (!json.ok) return json.message ?? 'Those times could not be saved.';
-              setSlots((s) => [...s.filter((x) => x.channel_id !== channelId), ...(json.slots as Slot[])]);
+              const json = await res.json().catch(() => ({ ok: false }));
+              if (!json.ok) return json.message ?? 'That time could not be saved.';
+              setQueueTime(json.at as string);
               return null;
             }}
           />

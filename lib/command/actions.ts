@@ -868,10 +868,15 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'social.draft', verbs: [...CHANGE, ...MAKE],
     objects: ['first comment', 'the comment', 'a first comment on this post'] },
 
-  { id: 'social.slots', label: 'Change a channel\u2019s posting times', blurb: 'What the queue fills', kind: 'record',
+  /* The queue is one time of day for the whole company, not a week of
+     per channel slots. Migration 122 and the instruction it quotes:
+     "push it to the next available day where nothing is scheduled, at
+     3pm." */
+  { id: 'social.queueTime', label: 'Change what time the queue posts', blurb: 'One time, company wide', kind: 'record',
     capability: 'social.channels', path: '/dashboard/social?tab=queue',
     verbs: [...CHANGE, 'set'],
-    objects: ['the queue times', 'when we post', 'the posting week'] },
+    objects: ['the queue time', 'what time we post', 'when the queue posts',
+      'the posting time', 'the queue times', 'when we post'] },
 
   { id: 'social.libraryAdd', label: 'Add to the content library', blurb: 'A picture the company keeps', kind: 'record',
     capability: 'social.library', path: '/dashboard/social?tab=library', verbs: [...PUSH, ...MAKE],

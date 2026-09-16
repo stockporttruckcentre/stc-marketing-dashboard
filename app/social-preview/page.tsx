@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { SocialPlanner } from '@/components/SocialPlanner';
 import type {
   ActivityLine, BoardColumn, Campaign, Channel, LibraryItem,
-  Network, Post, Slot, Tag, Template, Variant,
+  Network, Post, Tag, Template, Variant,
 } from '@/lib/content/types';
 import type { Profile } from '@/lib/types';
 
@@ -60,10 +60,10 @@ const CHANNELS: Channel[] = [
   },
 ];
 
-const SLOTS: Slot[] = [
-  { id: 'slot-1', channel_id: 'chan-1', day_of_week: 2, at_time: '09:00', is_active: true },
-  { id: 'slot-2', channel_id: 'chan-1', day_of_week: 4, at_time: '14:30', is_active: true },
-];
+/* What time of day the queue posts, per migration 122. The week grid of
+   per channel posting times this used to carry is gone with the table
+   nobody filled in. */
+const QUEUE_TIME = '15:00:00';
 
 const COLUMNS: BoardColumn[] = [
   { id: 'col-1', key: 'draft', label: 'Draft', description: null, maps_to_status: 'draft', wip_limit: null, position: 0, is_active: true },
@@ -185,7 +185,7 @@ export default function SocialPreview() {
       capabilities={CAPABILITIES}
       channels={CHANNELS}
       networks={NETWORKS}
-      slots={SLOTS}
+      queueTime={QUEUE_TIME}
       columns={COLUMNS}
       variants={VARIANTS}
       templates={TEMPLATES}
