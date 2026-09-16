@@ -1,253 +1,141 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import { sheetGrid, WINGDINGS_TICK, SHEET_ALIGN } from './sheet';
-import { money } from './format';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile, readdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildWorkbook } from './export-xlsx';
 import type { FullCard } from './types';
 
 /* =============================================================
-   The rate card as a PDF, which is the workbook on a page.
+   The rate card as a PDF, which is the workbook itself.
 
-   From the agreed development scope, Task 6:
+   From the business, after being sent a PDF that carried the same
+   figures in a layout of its own:
 
-     There is one Rate Card design. The existing Excel Rate Card is the
-     authoritative design. The PDF must be the PDF representation of
-     that same Rate Card. It must not be a separately designed "nice
-     PDF".
+     I specifically wrote that currently you are generating a PDF that
+     has a design that differs from the xlsx version and to mirror the
+     xlsx version, even if it's just a PNG image of it inside a pdf, i
+     don't care, it HAS to mirror it as compliance have signed off.
 
-   So this draws `sheetGrid`, the same grid the preview draws and the
-   same values the workbook receives. It decides nothing about what is
-   on the card, in what order, or in which column. Given the grid, the
-   only thing left here is how to put ink on paper: a page size, a
-   margin, and how to break a long sheet across pages.
+   So nothing here draws anything. The workbook is built, exactly as the
+   Excel export builds it, and handed to LibreOffice to convert. What
+   comes back is the customer's own file: the master's fonts, its navy
+   section bars, its fills, its borders, its merges and its logo, on the
+   pages the master prints on.
 
-   ---- Why not convert the workbook itself ----
+   ---- What was here before, and why it was wrong ----
 
-   The scope prefers that, and it is right to. It needs a spreadsheet
-   engine at run time, and this application deploys as a Next.js server
-   with no LibreOffice behind it. A converter that works on one machine
-   and fails on the deployment is worse than a renderer that works
-   everywhere, so the scope's second route is the one taken: one
-   canonical model, two renderers, and a parity check across them.
+   A renderer. It read the same grid the workbook reads and drew it with
+   pdf-lib: same cells, same columns, same order, same values, and none
+   of the master's fonts, fills, borders, merges or logo. Every figure
+   was right and the document was not the one compliance signed off.
+   That was a decision nobody asked for, taken because converting needs
+   a spreadsheet engine on the server and assuming there was none was
+   easier than finding out.
 
-   What this cannot reproduce is the master's own fonts, its logo and
-   its exact borders, because those live in the customer's file rather
-   than in this repository. The layout, the ordering, the values, the
-   ticks and the terms are the same.
+   ---- What this needs ----
+
+   LibreOffice, with Calc, on the machine running the application:
+
+     apt-get install libreoffice-calc
+
+   `libreoffice-core` on its own is not enough. It has no spreadsheet
+   filter, so it refuses the file with "source file could not be
+   loaded", which is what this container did until Calc was installed.
+
+   If it is not there, this THROWS and the export fails with a message
+   saying so. It does not quietly fall back to drawing one. A customer
+   receiving a document that does not match the signed off design is
+   worse than a customer receiving nothing, because nobody finds out.
    ============================================================= */
 
-/** A4 landscape in points, which is what a wide rate card wants. */
-const PAGE = { width: 841.89, height: 595.28 };
-const MARGIN = 28;
-const ROW_HEIGHT = 13;
-const HEAD_SIZE = 12;
+/** How long to wait for a conversion before giving up, in milliseconds. */
+const TIMEOUT = 60_000;
 
-/* The cell's own breathing room, left and right, in points. */
-const PAD = 3;
+/** Where LibreOffice lives, overridable for a host that puts it elsewhere. */
+const SOFFICE = process.env.SOFFICE_PATH ?? 'soffice';
 
-const INK = rgb(0.06, 0.09, 0.16);
-const FAINT = rgb(0.45, 0.48, 0.55);
-const RULE = rgb(0.80, 0.82, 0.86);
-
-/** What a cell reads as on paper. */
-function textOf(cell: { value: string | number | null; kind: string }): string {
-  if (cell.value === null || cell.value === undefined || cell.value === '') return '';
-  if (cell.kind === 'money' && typeof cell.value === 'number') return money(cell.value);
-  /* The tick in the master is the letter P in Wingdings, which is not a
-     tick in any font this has. Drawn as one. */
-  if (cell.value === WINGDINGS_TICK) return 'Y';
-  return String(cell.value);
+export class NoConverterError extends Error {
+  constructor(why: string) {
+    super(
+      'The PDF is the Excel rate card converted, and the converter is not available on this '
+      + `server. Install LibreOffice Calc (apt-get install libreoffice-calc), or set SOFFICE_PATH. (${why})`,
+    );
+    this.name = 'NoConverterError';
+  }
 }
 
-/* ---- Characters the built in fonts cannot write ----
-
-   Helvetica here is a standard PDF font, which carries WinAnsi and
-   nothing else, and pdf-lib THROWS on a character outside it rather
-   than dropping it. A customer whose name carries a Polish ł or a
-   Turkish ş would have turned the whole export into a 500, and the
-   person exporting would have been told the file could not be built
-   with no way to find out why.
-
-   So a character that cannot be written is written as a question mark
-   and the rest of the card comes out. Cached, because the same few
-   hundred characters come round for every cell on the sheet. */
-const WRITABLE = new Map<string, boolean>();
-function printable(text: string, font: PDFFont): string {
-  let out = '';
-  for (const ch of text) {
-    let can = WRITABLE.get(ch);
-    if (can === undefined) {
-      try { font.encodeText(ch); can = true; } catch { can = false; }
-      WRITABLE.set(ch, can);
+function run(cmd: string, args: string[], cwd: string): Promise<{ code: number; err: string }> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      reject(new NoConverterError(e instanceof Error ? e.message : String(e)));
+      return;
     }
-    out += can ? ch : '?';
-  }
-  return out;
+
+    let err = '';
+    child.stderr?.on('data', (b: Buffer) => { err += b.toString(); });
+    child.stdout?.on('data', () => { /* the filter name, which is not interesting */ });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`The rate card took longer than ${TIMEOUT / 1000} seconds to convert.`));
+    }, TIMEOUT);
+
+    child.on('error', (e: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      if (e.code === 'ENOENT') reject(new NoConverterError(`${cmd} is not on this machine`));
+      else reject(e);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? -1, err });
+    });
+  });
 }
 
-/** Cut a string to what fits, because a sheet cell clips rather than wraps. */
-function clip(text: string, font: PDFFont, size: number, room: number): string {
-  if (!text) return '';
-  if (font.widthOfTextAtSize(text, size) <= room) return text;
-  let cut = text;
-  while (cut.length > 1 && font.widthOfTextAtSize(`${cut}...`, size) > room) {
-    cut = cut.slice(0, -1);
-  }
-  return `${cut}...`;
-}
-
-/* ---- How wide a cell really is ----
-
-   A spreadsheet cell is not a box that swallows what will not fit. Text
-   runs on across its neighbours for as long as they are empty, and stops
-   at the first one that has something in it. Right aligned text runs the
-   other way for the same reason.
-
-   Without this the PDF clipped at the column edge and lost the halves of
-   things that Excel shows in full: 'Effective from 15th September 2026'
-   came out as 'Effective from 15t...', and the FleetSmart+ inclusions,
-   which sit in a 45 unit column and spill into two empty ones, lost
-   their qualifiers. The check that compares the two documents read them
-   as values present in the workbook and missing from the PDF, which is
-   exactly what they were. */
-function roomFor(
-  col: string,
-  row: number,
-  align: 'left' | 'right' | 'centre',
-  grid: { columns: readonly string[]; cells: Map<string, { value: string | number | null }> },
-  widthOf: (c: string) => number,
-): { room: number; left: number } {
-  const i = grid.columns.indexOf(col);
-  const own = widthOf(col);
-  let room = own;
-  let left = 0;
-
-  const empty = (c: string) => {
-    const cell = grid.cells.get(`${c}${row}`);
-    return !cell || cell.value === null || cell.value === undefined || cell.value === '';
-  };
-
-  if (align !== 'right') {
-    for (let n = i + 1; n < grid.columns.length && empty(grid.columns[n]!); n += 1) {
-      room += widthOf(grid.columns[n]!);
-    }
-  }
-  if (align !== 'left') {
-    for (let n = i - 1; n >= 0 && empty(grid.columns[n]!); n -= 1) {
-      const w = widthOf(grid.columns[n]!);
-      room += w;
-      left += w;
-    }
-  }
-  return { room: room - PAD * 2, left };
-}
-
+/**
+ * The rate card as a PDF: the workbook, converted.
+ *
+ * @throws NoConverterError when LibreOffice Calc is not installed.
+ */
 export async function buildRateCardPdf(card: FullCard): Promise<Uint8Array> {
-  const grid = sheetGrid(card);
+  const workbook = await buildWorkbook(card);
 
-  const pdf = await PDFDocument.create();
-  const body = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const dir = await mkdtemp(path.join(tmpdir(), 'rate-card-pdf-'));
+  try {
+    const xlsx = path.join(dir, 'card.xlsx');
+    await writeFile(xlsx, Buffer.from(workbook));
 
-  pdf.setTitle(`${card.card.customer_name} - Customer Rates`);
-  pdf.setSubject('Rate card');
-  pdf.setProducer('Stockport Truck Centre');
+    /* A profile of its own per conversion. LibreOffice keeps one user
+       profile and refuses to start a second instance against it, so two
+       people exporting at the same moment would collide. */
+    const profile = path.join(dir, 'profile');
 
-  /* The master's column widths, scaled to the page. Proportions rather
-     than points, so the card is the same shape here as on screen. */
-  const usable = PAGE.width - MARGIN * 2;
-  const totalUnits = grid.columns.reduce((n, c) => n + (grid.width[c] ?? 9), 0);
-  const colWidth = new Map(grid.columns.map((c) => [c, ((grid.width[c] ?? 9) / totalUnits) * usable]));
-  const colLeft = new Map<string, number>();
-  {
-    let x = MARGIN;
-    for (const c of grid.columns) { colLeft.set(c, x); x += colWidth.get(c) ?? 0; }
-  }
-  const widthOf = (c: string) => colWidth.get(c) ?? 0;
+    const { code, err } = await run(SOFFICE, [
+      '--headless',
+      '--norestore',
+      '--invisible',
+      '--nolockcheck',
+      `-env:UserInstallation=file://${profile}`,
+      '--convert-to', 'pdf:calc_pdf_Export',
+      '--outdir', dir,
+      xlsx,
+    ], dir);
 
-  /* ---- The type size is read off the sheet, not chosen ----
-
-     A column width in a workbook is counted in characters: width 9 means
-     nine digits of the sheet's own font fit across it. So the size that
-     makes this page behave like the sheet is the one where a digit is
-     exactly one of those units wide, and it falls out of the arithmetic
-     rather than being picked.
-
-     Picked, it was 7.2, which is a fifth too big for the grid it was
-     drawn on. Every three figure price overflowed its column and came
-     out of the clipper as '£123....' while the workbook said £123.00. */
-  const unit = usable / totalUnits;
-  const FONT_SIZE = unit / body.widthOfTextAtSize('0', 1);
-
-  const headRoom = HEAD_SIZE + 16;
-  const perPage = Math.floor((PAGE.height - MARGIN * 2 - headRoom) / ROW_HEIGHT);
-
-  let page: PDFPage | null = null;
-  let top = 0;
-  let onPage = 0;
-  let pageNo = 0;
-
-  const newPage = () => {
-    page = pdf.addPage([PAGE.width, PAGE.height]);
-    pageNo += 1;
-    onPage = 0;
-    top = PAGE.height - MARGIN;
-
-    page.drawText(printable(card.card.customer_name, bold), {
-      x: MARGIN, y: top - HEAD_SIZE, size: HEAD_SIZE, font: bold, color: INK,
-    });
-    const right = `Customer rates${pageNo > 1 ? `, page ${pageNo}` : ''}`;
-    page.drawText(right, {
-      x: PAGE.width - MARGIN - body.widthOfTextAtSize(right, FONT_SIZE),
-      y: top - HEAD_SIZE, size: FONT_SIZE, font: body, color: FAINT,
-    });
-    top -= headRoom;
-  };
-
-  newPage();
-
-  for (let row = 1; row <= grid.rows; row += 1) {
-    if (onPage >= perPage) newPage();
-    const y = top - onPage * ROW_HEIGHT;
-
-    for (const col of grid.columns) {
-      const cell = grid.cells.get(`${col}${row}`);
-      const x = colLeft.get(col) ?? MARGIN;
-      const w = colWidth.get(col) ?? 0;
-
-      /* Every cell gets its rule, empty or not, because the grid is the
-         document: a rate card with the lines missing under the empty
-         cells stops looking like the sheet it is. */
-      page!.drawLine({
-        start: { x, y: y - ROW_HEIGHT + 2 },
-        end: { x: x + w, y: y - ROW_HEIGHT + 2 },
-        thickness: 0.3,
-        color: RULE,
-      });
-
-      if (!cell) continue;
-
-      const font = cell.kind === 'label' ? bold : body;
-      const align = cell.align ?? SHEET_ALIGN[cell.kind] ?? 'left';
-      const { room, left } = roomFor(col, row, align, grid, widthOf);
-
-      const text = clip(printable(textOf(cell), font), font, FONT_SIZE, room);
-      if (!text) continue;
-
-      const width = font.widthOfTextAtSize(text, FONT_SIZE);
-      const at = align === 'right' ? x + w - PAD - width
-        : align === 'centre' ? x + (w - width) / 2
-        : x - left + PAD;
-
-      page!.drawText(text, {
-        x: at,
-        y: y - ROW_HEIGHT + 5,
-        size: FONT_SIZE,
-        font,
-        color: cell.kind === 'words' ? FAINT : INK,
-      });
+    const made = (await readdir(dir)).filter((f) => f.toLowerCase().endsWith('.pdf'));
+    if (made.length === 0) {
+      /* No spreadsheet filter reads as an ordinary failure on stdout
+         rather than as a missing binary, so it is named here. */
+      if (err.includes('source file could not be loaded')) {
+        throw new NoConverterError('LibreOffice is installed without Calc, so it cannot open a spreadsheet');
+      }
+      throw new Error(`The rate card would not convert (exit ${code}). ${err.trim().slice(0, 300)}`);
     }
 
-    onPage += 1;
+    return new Uint8Array(await readFile(path.join(dir, made[0]!)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
-
-  return pdf.save();
 }

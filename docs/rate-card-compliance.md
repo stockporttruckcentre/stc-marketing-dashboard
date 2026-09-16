@@ -119,6 +119,13 @@ anything has probably never been tested.
 - Worst of the lot: it only ever asked whether the cells a CARD writes
   were on the page. The master's own 83 labels are not card values, so a
   PDF that printed the prices with nothing naming any of them passed.
+- And worse than that: every assertion in it was about what the document
+  CONTAINED, and none about what it WAS. A renderer can satisfy the
+  first forever while producing a document nobody signed off. It now
+  reads the file's producer, its page count against the master's own
+  conversion, the fonts it embeds against the master's, and whether
+  there is any colour on the page at all. It also reads the exporter's
+  source and fails if a drawing library is anywhere in it.
 
 ## Task 6 of the agreed development scope
 
@@ -127,7 +134,8 @@ anything has probably never been tested.
 > same Rate Card. [...] There must not remain two independently authored
 > layouts that can drift.
 
-There were two, and now there is one.
+There were two, and now there is one. Then there was still a problem,
+because the one that was left was the wrong one.
 
 `lib/ratecards/sheet.ts` holds the grid: the master's fifteen columns,
 its column widths in its own units, every cell a card writes, and the 83
@@ -143,6 +151,55 @@ decides anything about it:
 
 `/api/rate-cards/[id]/export?format=pdf` returns a real PDF, and the
 Export dialog downloads it rather than opening the print view.
+
+## The PDF is the workbook, not a drawing of it
+
+From the business, on being sent a PDF with the right figures in it:
+
+> I specifically wrote that currently you are generating a PDF that has
+> a design that differs from the xlsx version and to mirror the xlsx
+> version, even if it's just a PNG image of it inside a pdf, i don't
+> care, it HAS to mirror it as compliance have signed off.
+
+The first answer to task 6 was a renderer. It drew `sheetGrid` with
+pdf-lib and got every value, every column and every label right, and it
+carried none of the master's fonts, fills, borders, merges or logo. It
+was a correct card and the wrong document, and the check that was
+written alongside it asserted only that the values were present, so it
+passed.
+
+Converting the workbook needs a spreadsheet engine on the server. That
+was assumed to be unavailable rather than checked, and the renderer was
+built on that assumption without asking. It was the wrong call on a
+document that goes to customers with a sign-off attached.
+
+`buildRateCardPdf` now builds the workbook and hands it to LibreOffice.
+What comes back is the customer's file: its fonts, its navy section
+bars, its blue panel, its borders, its merges, its logo, on the pages
+the master prints on. If the converter is missing the export answers 503
+and says so. There is no fallback that draws one, because a customer
+receiving a document that does not match the signed off design is worse
+than one receiving nothing: nobody finds out.
+
+### What the server needs
+
+```bash
+apt-get install libreoffice-calc poppler-utils
+```
+
+`libreoffice-core` alone is not enough. It has no spreadsheet filter, so
+it refuses the file with "source file could not be loaded". `SOFFICE_PATH`
+points at the binary on a host that puts it somewhere else. Poppler is
+for the check rather than the application.
+
+### Why the PDF is six pages
+
+Because the master is. The customer's own file carries no print area, no
+orientation and no fit to page, so converting it untouched gives six
+portrait pages, and converting the export gives the same six. Setting a
+print area would make a tidier PDF and would be a change to the signed
+off document, so it has not been made. It is a one line change to the
+master workbook if it is wanted.
 
 `npm run check:rate-card-pdf` builds the workbook and the PDF from one
 card and reads both back: every one of the 254 cells, every price in
