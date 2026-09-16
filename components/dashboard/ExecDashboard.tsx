@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { FinancialYearTargets } from '@/components/dashboard/FinancialYearTargets';
 import {
   Card, Kpi, Label, SectionHead, EmptyState, NotProvisioned, Bar,
   compactMoney,
@@ -76,6 +77,17 @@ export function ExecDashboard({ profile }: { profile: Profile }) {
             <Kpi label="Reps trading" value={String(data.perRep.filter((r: any) => r.revenueYtd > 0).length)}
                  sub={`of ${data.perRep.length} with a tracker`} />
           </div>
+
+          {/* ---- The financial year, company and personal ----
+
+              The KPI strip above is the month and stays the month. This
+              is the year, and it is the same two blocks the rep
+              dashboard draws from the same route, so the company target
+              cannot read one way here and another way there. */}
+          <Card>
+            <SectionHead title="This financial year" />
+            <FinancialYearTargets />
+          </Card>
 
           <Card>
             <SectionHead title="Pipeline by rep" hint="Open proposals and revenue booked this year" />

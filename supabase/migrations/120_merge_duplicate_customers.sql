@@ -65,6 +65,7 @@ GRANT SELECT ON crm_merges TO authenticated;
 -- -------------------------------------------------------------
 -- Every column in the database that points at a customer.
 -- -------------------------------------------------------------
+DROP FUNCTION IF EXISTS crm_customer_references();
 CREATE OR REPLACE FUNCTION crm_customer_references()
 RETURNS TABLE (table_name TEXT, column_name TEXT)
 LANGUAGE sql
