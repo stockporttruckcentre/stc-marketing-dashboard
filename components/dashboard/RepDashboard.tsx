@@ -263,12 +263,31 @@ export function RepDashboard({ profile }: { profile: Profile }) {
                 <FinancialYearTargets />
               </Card>
 
-              <Card>
-                <SectionHead title="Against target, this month" />
-                {!data.target.available
-                  ? <NotProvisioned what="Your month measured against your number." needs={(data.target as Missing).needs} />
-                  : <TargetGauge actual={data.revenueMtd} target={data.target.target} />}
-              </Card>
+              {/* ---- The month, where somebody has set one ----
+
+                  Drawn only when there IS a monthly target. From the
+                  business, looking at the screen with the year blocks
+                  above it:
+
+                    is that a duplicated section? "against target, this
+                    month"
+
+                  It is not: the year and the month are different
+                  questions. But nobody sets monthly targets, so it sat
+                  under the year saying NOT WIRED UP YET about a feature
+                  nobody uses, which reads as something broken.
+
+                  Nothing is deleted and nothing is disabled. The
+                  monthly target still works and the gauge comes back
+                  the moment anybody sets one on the targets screen. An
+                  empty box explaining its own emptiness is not a
+                  feature. */}
+              {data.target.available && (
+                <Card>
+                  <SectionHead title="Against target, this month" />
+                  <TargetGauge actual={data.revenueMtd} target={data.target.target} />
+                </Card>
+              )}
 
               <Card>
                 <SectionHead title="In flight" />
