@@ -836,6 +836,11 @@ export function SocialPlanner({
           caps={caps}
           canApprove={canApprove}
           onClose={() => setComposing(null)}
+          /* The post is in the list the moment it exists, not when the
+             composer finishes. A submission refused after the write
+             used to leave the row in the database and nothing about it
+             on screen. */
+          onStored={replace}
           onSaved={(saved, submitted) => {
             replace(saved);
             setComposing(null);

@@ -48,11 +48,17 @@ const CHANNELS: Channel[] = [
 export default function ComposerPreview() {
   if (process.env.NODE_ENV === 'production') notFound();
   const [open, setOpen] = useState(true);
+  /* What the screen was told, in the order it was told. The planner
+     puts the post in its list from `onStored` and closes the drawer on
+     `onSaved`, so a check can read this and know whether a post that
+     failed to submit would have appeared anywhere. */
+  const [told, setTold] = useState<string[]>([]);
 
   if (!open) return <div data-closed>Closed</div>;
 
   return (
     <div className="kit" style={{ padding: 20 }}>
+      <div data-told style={{ display: 'none' }}>{told.join(',')}</div>
       <Composer
         post={null}
         variants={[] as Variant[]}
@@ -65,7 +71,11 @@ export default function ComposerPreview() {
         caps={new Set<CrmCapability>(['social.draft', 'social.approve', 'social.schedule'])}
         canApprove
         onClose={() => setOpen(false)}
-        onSaved={() => setOpen(false)}
+        onStored={(post) => setTold((t) => [...t, `stored:${post.id}`])}
+        onSaved={(post, submitted) => {
+          setTold((t) => [...t, `saved:${post.id}:${submitted}`]);
+          setOpen(false);
+        }}
         /* The real upload is a bucket write. Here it answers the way the
            planner's does, because what is being driven is what the
            COMPOSER does with the answer. */

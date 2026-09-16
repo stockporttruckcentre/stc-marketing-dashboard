@@ -69,11 +69,27 @@ export default async function SocialPage({
     libraryRes, activityRes, postTagsRes, capabilities,
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
+    /* ---- Deleted means gone from here ----
+
+       This read had no `deleted_at` filter on it, so a post somebody
+       deleted came straight back on the next load. From the business,
+       using the planner for real:
+
+         i tried to delete it as i've already remade the post and the
+         draft is still sat there.
+
+       The delete worked. `soft_delete` stamped the row and the screen
+       took the card away, and then this line put it back. The refresh
+       read, `/api/content/posts`, has always filtered it, so the two
+       reads of the same table disagreed about what existed and which
+       answer you got depended on whether you had reloaded. */
     supabase.from('social_posts').select('*')
+      .is('deleted_at', null)
       .order('scheduled_date', { ascending: true })
       .limit(1000),
     supabase.from('social_post_variants').select('*').order('position'),
     supabase.from('social_channels').select('*')
+      .is('deleted_at', null)
       .eq('is_active', true).order('position').order('handle'),
     supabase.from('social_networks').select('*')
       .eq('is_active', true).order('position'),
@@ -82,12 +98,19 @@ export default async function SocialPage({
     supabase.from('social_board_columns').select('*')
       .eq('is_active', true).order('position'),
     supabase.from('social_templates').select('*')
+      .is('deleted_at', null)
       .eq('is_active', true).order('name'),
     supabase.from('social_campaigns').select('*')
+      .is('deleted_at', null)
       .eq('is_active', true).order('starts_on', { ascending: false }),
     supabase.from('social_tags').select('*')
       .eq('is_active', true).order('position').order('name'),
+    /* `is_active` and `deleted_at` are two different states and
+       `soft_delete` only ever writes the second one, so filtering the
+       first was never filtering deletes. Same on the three reads
+       above. */
     supabase.from('social_library').select('*')
+      .is('deleted_at', null)
       .eq('is_active', true)
       .order('created_at', { ascending: false }).limit(400),
     /* The timeline for the whole screen, which is the Activity tab. One
