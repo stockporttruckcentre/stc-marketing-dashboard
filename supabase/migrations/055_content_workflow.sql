@@ -69,10 +69,16 @@ ALTER TABLE social_posts
 -- Whether a blocking finding refuses a submit outright.
 --
 -- A setting rather than a rule, and off until somebody says otherwise.
--- The lint knows about Regulation FD and the predecessor chain name,
--- which is more than either vendor does, but deciding that a machine
--- may refuse to let a person submit their own words is the user's
--- decision and not this file's.
+--
+-- THE LINT THIS SWITCHED ON WAS NOT STC'S AND HAS BEEN REMOVED. It came
+-- in with the package these migrations came from and carried that
+-- company's rules: a blockchain's name, a share ticker, US securities
+-- regulation, and a spelling rule that would have told the marketing
+-- team to write Stockport Truck Center and to bill for labor. See the
+-- note in app/api/content/posts/[id]/route.ts.
+--
+-- The column stays because it is a setting somebody may want when STC
+-- writes rules of its own. Nothing reads it today.
 ALTER TABLE tenant_settings
   ADD COLUMN IF NOT EXISTS content_lint_blocks BOOLEAN NOT NULL DEFAULT FALSE;
 
@@ -819,12 +825,16 @@ $fn$;
 -- -------------------------------------------------------------
 -- 10. Recording a compliance verdict.
 --
--- The lint is TypeScript: it knows about Regulation FD, the predecessor
--- chain name and US spelling, and none of that belongs in a trigger. So
--- the route runs it and this records what it found.
+-- Kept, and nothing calls it.
 --
--- Service role only. A verdict a browser could write is a verdict that
--- always says clean.
+-- The lint that used to call this was not STC's: it came in with the
+-- package these migrations came from and carried another company's
+-- rules. It is gone, so nothing writes a verdict today.
+--
+-- This function stays because the columns it writes still hold rows,
+-- and because a policy STC actually writes needs somewhere to record
+-- itself. Service role only, then as now: a verdict a browser could
+-- write is a verdict that always says clean.
 -- -------------------------------------------------------------
 CREATE OR REPLACE FUNCTION content_record_lint(
   p_post     UUID,

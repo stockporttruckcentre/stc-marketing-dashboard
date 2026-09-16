@@ -21,14 +21,20 @@
 -- The question will be asked, and it deserves a straight answer rather
 -- than a preference.
 --
---   1. TCC is a business that gets audited. Section 4 of the TCC context
---      says a system holding deal notes holds commercially sensitive information by definition, and a
---      task carrying "prepare the exchange listing pack" is exactly
---      that. Every table here takes `add_record_columns`, so a task
+--   1. This is a business that gets audited. A system holding deal
+--      notes holds commercially sensitive information by definition,
+--      and a task carrying "put the pricing pack together for the
+--      Wincanton tender" is exactly that. Every table here takes
+--      `add_record_columns`, so a task
 --      inherits owning entity, classification, the sensitivity flag with its
 --      review date, and soft delete. Notion has no concept of an
 --      owning legal entity, and it cannot make a record invisible to
---      Frame-only staff because it does not know what TCC is.
+--      the staff of one company in a group because it does not know
+--      the companies apart.
+--
+--      The original of this paragraph named the two companies the
+--      package was written for. Here the two are Stockport Truck Centre
+--      and STC Sales and Leasing.
 --
 --   2. Delegation has to be refusable. A task assigned downward that
 --      cannot be handed back is a instruction, not a work item, and

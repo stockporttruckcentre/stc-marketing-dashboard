@@ -35,9 +35,20 @@
 --
 -- ---- Which tables ----
 --
--- The ones that survive into Frame. `stock_trailers`, `trailer_sales`,
--- `maint_accounts`, `revenue_targets` and `account_ownership` are being
--- deleted, so columns added to them would be wasted work.
+-- WHICH TABLES THIS ORIGINALLY MEANT IS NOT WHICH TABLES STC HAS.
+--
+-- This line came in with the package and said `stock_trailers`,
+-- `trailer_sales`, `maint_accounts`, `revenue_targets` and
+-- `account_ownership` were being deleted, so columns were not added to
+-- them. That was the other product's plan. STOCKPORT TRUCK CENTRE USES
+-- EVERY ONE OF THOSE TABLES: the stock list is the trailer sales
+-- division's revenue on the Analytics screen, and `revenue_targets` is
+-- the monthly target on the dashboard.
+--
+-- Nothing is changed here, because the migration has run and the
+-- columns it did or did not add are settled. The note is corrected so
+-- that whoever reads it next is not told that live tables are on their
+-- way out.
 -- `crm_contacts` and `crm_lists` are covered even though the CRM
 -- decomposition replaces them, because they hold the live data until it
 -- does and an uncovered table is an uncovered table.

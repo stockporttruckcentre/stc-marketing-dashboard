@@ -14,9 +14,12 @@
 --
 -- Scope section 37 lists twelve things that must be auditable and
 -- section 48 makes audit part of the definition of a completed write.
--- `docs/source/TCC_CONTEXT.md` 4.4 goes further, because TCC is an SEC
--- reporting company: assume every record is potentially discoverable and
--- potentially subject to auditor review.
+-- The package this came from went further still, because the company it
+-- was written for files with the SEC. STOCKPORT TRUCK CENTRE DOES NOT.
+-- The standard it set is kept anyway, on its own merits rather than on
+-- a regulator's: assume every record is potentially discoverable and
+-- potentially subject to review. The document it cited has never been
+-- in this repository.
 --
 -- Before this, nothing in the application recorded who changed what.
 -- Worse, `lib/crm/roles.ts` opened by claiming `command_set_role` writes

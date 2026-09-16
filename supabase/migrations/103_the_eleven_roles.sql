@@ -373,8 +373,8 @@ UPDATE profiles p
    SET role_template_id = (SELECT id FROM role_templates WHERE slug = 'managing_director')
  WHERE p.role_template_id = (SELECT id FROM role_templates WHERE slug = 'administrator');
 
--- "Read only - this can go", and the four that came in with the Frame
--- package and describe a company this is not.
+-- "Read only - this can go", and the four that came in with the
+-- imported package and describe a company this is not.
 UPDATE role_templates
    SET is_active = FALSE
  WHERE slug IN ('administrator', 'compliance', 'member', 'contributor', 'observer');

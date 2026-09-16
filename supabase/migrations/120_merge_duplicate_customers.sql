@@ -414,6 +414,7 @@ DO $$ BEGIN RAISE NOTICE 'a merge moves everything, records itself, and deletes 
 -- It returns which it chose and why, so the choice is reviewable
 -- afterwards rather than buried.
 -- -------------------------------------------------------------
+DROP FUNCTION IF EXISTS crm_merge_pair(UUID, UUID, BOOLEAN);
 CREATE OR REPLACE FUNCTION crm_merge_pair(p_one UUID, p_other UUID, p_force BOOLEAN DEFAULT FALSE)
 RETURNS TABLE (kept TEXT, merged TEXT, because TEXT, moved JSONB, warnings TEXT[])
 LANGUAGE plpgsql
