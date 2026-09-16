@@ -180,6 +180,69 @@ async function main() {
       (await page.locator('body').innerText()).toLowerCase().includes('approve'),
       'no message on screen about the refusal');
 
+    /* =============================================================
+       A post that has moved on is not offered a button that can only
+       fail, and its channels are not thrown away silently.
+
+       From the business:
+
+         If i press edit and try to add the socials again and hit save,
+         it's either endless saving or says "a post is submitted from
+         draft, and this one is pending_review". If I want to edit the
+         time on one already approved, i can't just amend the time
+         without having to send it back for approval
+
+       A post is submitted FROM DRAFT and from nowhere else, so on a post
+       that is already waiting or approved that button could only ever
+       produce that sentence.
+       ============================================================= */
+    for (const state of ['pending_review', 'approved', 'scheduled']) {
+      head(`A post that is already ${state.replace('_', ' ')}`);
+
+      await page.goto(`${URL}?status=${state}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(600);
+
+      const words = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('button')).map((b) => (b.textContent ?? '').trim()));
+
+      ok('it is not offered a submit that can only be refused',
+        !words.some((w) => /send for approval|submit for review/i.test(w)),
+        `the buttons read: ${words.filter(Boolean).join(' | ')}`);
+
+      ok('and it can be saved as it is',
+        words.some((w) => /save changes/i.test(w)),
+        `the buttons read: ${words.filter(Boolean).join(' | ')}`);
+
+      ok('and it does not call itself a draft',
+        !words.some((w) => /save draft/i.test(w)),
+        'a post that has been approved is not a draft');
+    }
+
+    head('A failed channel write is said out loud, not swallowed');
+
+    await page.goto(`${URL}?status=pending_review`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+
+    /* The post saves and the channels are refused, which is the shape
+       that used to end with the person told it had all worked. */
+    await page.route('**/api/content/posts/*/variants', (route: Route) => route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, message: 'The channels were refused.' }),
+    }));
+
+    await page.locator('textarea').first().fill('A post whose channels will be refused');
+    await page.waitForTimeout(150);
+    await page.locator('button', { hasText: /save changes/i }).first().click();
+    await page.waitForTimeout(1200);
+
+    ok('the composer stays open when the channels are refused',
+      (await page.locator('textarea').count()) > 0,
+      'it closed, so the person was told it had all saved');
+
+    ok('and says so', (await page.locator('body').innerText()).toLowerCase().includes('channel'),
+      'no message about the channels on screen');
+
     head('Nothing threw while any of that happened');
     ok('no page errors', errors.length === 0, errors.slice(0, 3).join('\n        '));
   } finally {

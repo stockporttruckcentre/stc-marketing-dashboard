@@ -45,9 +45,35 @@ const CHANNELS: Channel[] = [
   } as Channel,
 ];
 
-export default function ComposerPreview() {
+/* A post that has already been sent for approval, for driving the case
+   the business reported: the buttons on a post that cannot be
+   submitted again. `?status=pending_review` mounts it. */
+function postInState(status: string): Post {
+  return {
+    id: 'post-1', content: 'A post already sent for approval', caption: null,
+    first_comment: null, hashtags: [], platform: ['LinkedIn'], image_url: null,
+    status: status as Post['status'], scheduled_date: '2026-09-16', scheduled_at: null,
+    from_queue: false, author_id: 'u1', created_by: 'Dana Drafter', reviewed_by: null,
+    approved_by_id: null, submitted_at: '2026-09-16T09:00:00Z', approved_at: null,
+    rejected_at: null, rejection_note: null, published_at: null, failed_at: null,
+    failure_reason: null, campaign_id: null, template_id: null, board_column_id: null,
+    board_position: 0, link_url: null, utm_source: null, utm_medium: null,
+    utm_campaign: null, utm_content: null, internal_note: null, lint_severity: null,
+    lint_findings: null, lint_hash: null, lint_checked_at: null,
+    classification: 'internal', is_sensitive: false,
+    created_at: '2026-09-16T08:00:00Z', updated_at: '2026-09-16T09:00:00Z',
+  };
+}
+
+export default function ComposerPreview({
+  searchParams,
+}: {
+  searchParams?: { status?: string };
+}) {
   if (process.env.NODE_ENV === 'production') notFound();
   const [open, setOpen] = useState(true);
+  const status = searchParams?.status ?? '';
+  const existing = status ? postInState(status) : null;
   /* What the screen was told, in the order it was told. The planner
      puts the post in its list from `onStored` and closes the drawer on
      `onSaved`, so a check can read this and know whether a post that
@@ -60,7 +86,7 @@ export default function ComposerPreview() {
     <div className="kit" style={{ padding: 20 }}>
       <div data-told style={{ display: 'none' }}>{told.join(',')}</div>
       <Composer
-        post={null}
+        post={existing}
         variants={[] as Variant[]}
         channels={CHANNELS}
         networks={NETWORKS}

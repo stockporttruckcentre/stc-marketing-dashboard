@@ -122,6 +122,12 @@ export function Composer({
   onStored?: (post: Post) => void;
   uploadImage: (file: File) => Promise<{ ok: true; url: string } | { ok: false; why: string }>;
 }) {
+  /* A post is submitted from draft and from nowhere else. `content_submit`
+     says so, and a button that can only be refused is worse than no
+     button: it teaches people the screen is broken. A post that has not
+     been created yet is a draft by definition. */
+  const canSubmit = !post || post.status === 'draft';
+
   const byKey = useMemo(() => new Map(networks.map((n) => [n.key, n])), [networks]);
   const byId = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
 
@@ -308,14 +314,37 @@ export function Composer({
          their own endpoints, because replacing them is a set operation
          and a published channel must never be dropped. */
       if (post) {
-        await fetch(`/api/content/posts/${post.id}/variants`, {
+        /* ---- And these are checked ----
+
+           They were awaited and their answers thrown away. A refused
+           channel write then left the post saved, the person told it
+           had saved, and the channels quietly gone, which survives a
+           reload and looks exactly like the post never had any.
+
+           The channels are the important one: a post with none of them
+           cannot be submitted and cannot be previewed, so a silent
+           failure here is the difference between a post and nothing. */
+        const chans = await fetch(`/api/content/posts/${post.id}/variants`, {
           method: 'PUT', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ channel_ids: draft.channelIds, variants: body.variants }),
-        });
-        await fetch(`/api/content/posts/${post.id}/tags`, {
+        }).then((r) => r.json()).catch(() => ({ ok: false, message: 'The channels did not reach the server.' }));
+
+        if (!chans.ok) {
+          setBusy(null);
+          setError(chans.message ?? 'The post saved, but its channels did not.');
+          return;
+        }
+
+        const tagged = await fetch(`/api/content/posts/${post.id}/tags`, {
           method: 'PUT', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ tag_ids: draft.tagIds }),
-        });
+        }).then((r) => r.json()).catch(() => ({ ok: false, message: 'The tags did not reach the server.' }));
+
+        if (!tagged.ok) {
+          setBusy(null);
+          setError(tagged.message ?? 'The post and its channels saved, but its tags did not.');
+          return;
+        }
       }
 
       if (then === 'submit') {
@@ -365,14 +394,39 @@ export function Composer({
               <Trash2 size={12} /> Delete
             </Button>
           )}
-          <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => save('draft')}>
-            {busy === 'save' ? 'Saving' : 'Save draft'}
-          </Button>
-          <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => save('submit')}>
-            {busy === 'submit'
-              ? 'Sending'
-              : canApprove ? 'Save and send for approval' : 'Submit for review'}
-          </Button>
+          {/* ---- Submitting is only offered where it can work ----
+
+              From the business:
+
+                If i press edit and try to add the socials again and hit
+                save, it's either endless saving or says "a post is
+                submitted from draft, and this one is pending_review"
+
+              It said that because the button was always there. A post
+              is submitted FROM DRAFT and from nowhere else, so on a
+              post that is already waiting, or approved, or scheduled,
+              or out, pressing it could only ever produce that sentence.
+              A control whose only outcome is an error is not a control.
+
+              What somebody actually wants on a post that has moved on
+              is to change it and keep it where it is, which is what the
+              one remaining button now does, and says. */}
+          {canSubmit ? (
+            <>
+              <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => save('draft')}>
+                {busy === 'save' ? 'Saving' : 'Save draft'}
+              </Button>
+              <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => save('submit')}>
+                {busy === 'submit'
+                  ? 'Sending'
+                  : canApprove ? 'Save and send for approval' : 'Submit for review'}
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => save('draft')}>
+              {busy === 'save' ? 'Saving' : 'Save changes'}
+            </Button>
+          )}
         </>
       }
     >
