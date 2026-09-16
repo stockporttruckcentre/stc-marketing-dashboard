@@ -88,7 +88,7 @@ function Panel({ title, icon, children }: { title: string; icon?: ReactNode; chi
 
 export function Composer({
   post, variants, channels, networks, templates, campaigns, tags, library,
-  caps, canApprove, onClose, onSaved, uploadImage,
+  caps, canApprove, onClose, onSaved, onStored, uploadImage,
 }: {
   /** An existing post to edit, or null for a new one. */
   post: Post | null;
@@ -103,6 +103,23 @@ export function Composer({
   canApprove: boolean;
   onClose: () => void;
   onSaved: (post: Post, submitted: boolean) => void;
+  /* ---- The row exists, whatever happens next ----
+
+     Called the moment the post is written, before the channels, the
+     tags and the submission that follow it. The screen puts it in the
+     list and leaves this drawer open.
+
+     From the business, using the planner for real:
+
+       drafts aren't saving in the social editor
+       [...] the draft now shows after 10 minutes
+
+     They were saving. Pressing "Save and send for approval" writes the
+     post and THEN submits it, and when the submission was refused this
+     returned early with the error and never told anybody a post had
+     been created. It sat in the database, correct and invisible, until
+     something reloaded the page. */
+  onStored?: (post: Post) => void;
   uploadImage: (file: File) => Promise<{ ok: true; url: string } | { ok: false; why: string }>;
 }) {
   const byKey = useMemo(() => new Map(networks.map((n) => [n.key, n])), [networks]);
@@ -282,6 +299,10 @@ export function Composer({
       if (!json.ok) { setBusy(null); setError(json.message ?? 'That could not be saved.'); return; }
 
       let saved = json.post as Post;
+
+      /* Said straight away and said once. Everything after this line
+         can fail without the post going missing. */
+      onStored?.(saved);
 
       /* Editing an existing post: the channel set and the tags are
          their own endpoints, because replacing them is a set operation

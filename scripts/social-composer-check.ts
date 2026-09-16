@@ -113,6 +113,73 @@ async function main() {
     ok('and the words are there too, so nothing else was lost',
       create?.body.content === 'A post about a truck');
 
+    /* =============================================================
+       A post that saves and then fails to submit is still a post.
+
+       From the business, using the planner for real:
+
+         drafts aren't saving in the social editor
+         [...] the draft now shows after 10 minutes
+
+       They were saving. "Save and send for approval" writes the post
+       and then submits it, and when the submission was refused the
+       composer returned early with the error and told the screen
+       nothing. The row existed, correct, and no list on the screen had
+       heard of it until something reloaded the page.
+
+       So: make the submission fail, and assert the post reaches the
+       screen anyway.
+       ============================================================= */
+    head('A post that cannot be submitted is still saved, and still shows');
+
+    await page.goto(URL, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(600);
+
+    /* ---- Pick the channel by what the button actually says ----
+
+       The channel button reads "LinkedIn@stc", the network's label and
+       the handle, not the display name. Looking for the display name
+       found nothing, the channel was never picked, and the composer
+       refused the submission with "Pick at least one channel" before it
+       sent a single request. Which the check then read as the fault it
+       was looking for. */
+    /* Registered after the general one, so it wins: Playwright matches
+       the most recently added route first. */
+    await page.route('**/api/content/posts/*/transition', (route: Route) => route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: false, error: 'refused',
+        message: 'You wrote this, so somebody else has to approve it.',
+      }),
+    }));
+
+    await page.locator('textarea').first().fill('A post that will not submit');
+    await page.waitForTimeout(150);
+    const pick = page.locator('button', { hasText: /^LinkedIn@/ }).first();
+    ok('the channel is there to pick', (await pick.count()) > 0,
+      'no channel button, so nothing below is testing what it says it is');
+    await pick.click();
+    await page.waitForTimeout(250);
+
+    const submit = page.locator('button', { hasText: /send for approval/i }).first();
+    ok('the submit button is there', (await submit.count()) > 0);
+    await submit.click();
+    await page.waitForTimeout(1200);
+
+    const told = (await page.locator('[data-told]').first().textContent()) ?? '';
+
+    ok('the screen was told the post exists', told.includes('stored:'),
+      `the screen was told: "${told}". A post was written and nothing on the screen heard about it.`);
+
+    ok('and the composer stayed open with the reason',
+      (await page.locator('textarea').count()) > 0,
+      'the composer closed, so the person never saw why it was not submitted');
+
+    ok('and it says why it was not submitted',
+      (await page.locator('body').innerText()).toLowerCase().includes('approve'),
+      'no message on screen about the refusal');
+
     head('Nothing threw while any of that happened');
     ok('no page errors', errors.length === 0, errors.slice(0, 3).join('\n        '));
   } finally {

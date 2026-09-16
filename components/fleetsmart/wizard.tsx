@@ -7,12 +7,12 @@ import {
   Printer, Search, Send, Trash2, Truck, X,
 } from 'lucide-react';
 import {
-  ASSET_TYPES, PMI_INTERVALS, PLANS, TACHO_CHOICES, TERM_MONTHS, WORK_PATTERNS,
-  type AssetType, type Plan,
+  ASSET_TYPES, PMI_INTERVALS, PLANS, SHIPPED_CARD, TACHO_CHOICES, TERM_MONTHS, WORK_PATTERNS,
+  type AssetType, type Plan, type RateCard,
 } from '@/lib/fleetsmart/ratecard';
 import {
   autoWearAndTear, blankAsset, defaultBrakeTests, defaultCServices, defaultLadenRbt,
-  defaultPmiWeeks, describe, priceContract,
+  defaultPmiWeeks, describe, priceContract, tachoPriced, withType,
 } from '@/lib/fleetsmart/price';
 import {
   WORDING_LABEL, autoWording, blankExtras,
@@ -116,9 +116,21 @@ const PLAN_BLURB: Record<Plan, string> = {
 export type SaveResult = { ok: true; id: string; ref: string | null } | { ok: false; message: string };
 
 export function ContractWizard({
-  accounts, leads, initial, contractId, reference, may, onClose, onSaved,
+  accounts, leads, initial, contractId, reference, may, card = SHIPPED_CARD, onClose, onSaved,
 }: {
   accounts: PickableAccount[];
+  /* ---- The rates this contract is priced on ----
+
+     It used to price on `SHIPPED_CARD` and nothing else, which meant
+     the rate editor changed the amendment screen and the worked example
+     on its own page and NOTHING a salesman could see. From the
+     business, having just put van tachograph rates into that editor:
+
+       actually i cant add it to this gold contract as an extra, it
+       doesnt add any cost at all
+
+     The rates were on the card. The card was never read here. */
+  card?: RateCard;
   leads: { id: string; contact_id: string | null; company_name: string | null; requirement: string | null }[];
   initial: { input: ContractInput; extras: ContractExtras; accountId: string | null; leadId: string | null };
   /** Set when reopening a draft, so saving updates rather than duplicates. */
@@ -225,7 +237,7 @@ export function ContractWizard({
      multiplications over at most a couple of dozen assets, so there is
      nothing to memoise around and a stale figure would be worse than a
      wasted one. */
-  const priced = useMemo(() => priceContract(input), [input]);
+  const priced = useMemo(() => priceContract(input, card), [input, card]);
   const realAssets = input.assets.filter((a) => a.reg.trim());
 
   const setAsset = useCallback((key: string, patch: Partial<FleetAsset>) => {
@@ -618,7 +630,7 @@ export function ContractWizard({
 
       {step === 'Fleet' && (
         <FleetStep
-          input={input} priced={priced.assets} openRow={openRow} onOpenRow={setOpenRow}
+          input={input} priced={priced.assets} card={card} openRow={openRow} onOpenRow={setOpenRow}
           onAsset={setAsset} onAdd={addAsset} onDuplicate={duplicateAsset} onRemove={removeAsset}
         />
       )}
@@ -926,10 +938,12 @@ function PlanStep({
 /* ---------------- 3. fleet ---------------- */
 
 function FleetStep({
-  input, priced, openRow, onOpenRow, onAsset, onAdd, onDuplicate, onRemove,
+  input, priced, card, openRow, onOpenRow, onAsset, onAdd, onDuplicate, onRemove,
 }: {
   input: ContractInput;
   priced: PricedAsset[];
+  /** The rates in force, so a control with no rate behind it says so. */
+  card: RateCard;
   openRow: string | null;
   onOpenRow: (k: string | null) => void;
   onAsset: (key: string, patch: Partial<FleetAsset>) => void;
@@ -960,7 +974,7 @@ function FleetStep({
 
       {input.assets.map((a) => {
         const p = byKey.get(a.key);
-        const { cls } = describe(a.type);
+        const { cls, axles } = describe(a.type);
         const open = openRow === a.key;
         return (
           <div key={a.key} style={PANEL}>
@@ -976,7 +990,13 @@ function FleetStep({
                 />
               </div>
               <div style={{ width: 170 }}>
-                <Select value={a.type} onChange={(v) => onAsset(a.key, { type: v as AssetType })}>
+                <Select
+                  value={a.type}
+                  /* The class carries its own defaults with it. A van
+                     picked here does not arrive with a tachograph on
+                     it: see `defaultTacho`. */
+                  onChange={(v) => onAsset(a.key, withType(a, v as AssetType))}
+                >
                   <option value="">Pick an asset type</option>
                   {ASSET_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
                 </Select>
@@ -1075,8 +1095,27 @@ function FleetStep({
                       ))}
                     </Select>
                   </Field>
+                  {/* ---- Tachograph ----
+
+                      Offered only where the rate card prices one for
+                      this class. The sales team reported changing it on
+                      a van and watching the total sit still, and that is
+                      what it looked like from the outside: the control
+                      moved, the price did not, and nothing said why.
+                      Where no rate exists it is disabled and the title
+                      names what would have to change. */}
                   <Field label="Tachograph">
-                    <Select value={a.tacho} onChange={(v) => onAsset(a.key, { tacho: v as FleetAsset['tacho'] })}>
+                    <Select
+                      value={a.tacho}
+                      disabled={!tachoPriced(cls, axles, card)}
+                      title={tachoPriced(cls, axles, card)
+                        ? undefined
+                        : cls
+                          ? `The rate card prices no tachograph work for a ${cls.toLowerCase()}. `
+                            + 'Add the rates on the Rate card tab and this opens.'
+                          : 'Pick an asset type first. The tachograph rates depend on the class.'}
+                      onChange={(v) => onAsset(a.key, { tacho: v as FleetAsset['tacho'] })}
+                    >
                       {TACHO_CHOICES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </Select>
                   </Field>

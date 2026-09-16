@@ -6,7 +6,7 @@ import {
   ASSET_TYPES, PLANS, PMI_INTERVALS, TACHO_CHOICES, WORK_PATTERNS,
   type AssetType, type Plan, type RateCard,
 } from '@/lib/fleetsmart/ratecard';
-import { blankAsset, priceAsset } from '@/lib/fleetsmart/price';
+import { blankAsset, describe, priceAsset, tachoPriced, withType } from '@/lib/fleetsmart/price';
 import type { ContractInput, FleetAsset } from '@/lib/fleetsmart/types';
 import { Checkbox, Field, Select, Split, TextInput } from '@/components/kit/forms';
 import { Badge, Button, Label } from '@/components/kit/primitives';
@@ -164,7 +164,14 @@ export function AmendFleet({
                   />
                 </div>
                 <div style={{ width: 168 }}>
-                  <Select value={a.type} onChange={(v) => setAsset(a.key, { type: v as AssetType })}>
+                  <Select
+                    value={a.type}
+                    /* Same rule as the builder: the class brings its own
+                       defaults, and a van does not arrive carrying a
+                       tachograph. Applied through the one helper so the
+                       two screens cannot drift. */
+                    onChange={(v) => setAsset(a.key, withType(a, v as AssetType))}
+                  >
                     <option value="">Pick an asset type</option>
                     {ASSET_TYPES.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
                   </Select>
@@ -213,6 +220,11 @@ export function AmendFleet({
                     <Field label="Tacho">
                       <Select
                         value={a.tacho}
+                        disabled={!tachoPriced(describe(a.type).cls, describe(a.type).axles, card)}
+                        title={tachoPriced(describe(a.type).cls, describe(a.type).axles, card)
+                          ? undefined
+                          : 'This contract is on a rate card that prices no tachograph work for '
+                            + 'this class, so changing it would move nothing.'}
                         onChange={(v) => setAsset(a.key, { tacho: v as FleetAsset['tacho'] })}
                       >
                         {TACHO_CHOICES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}

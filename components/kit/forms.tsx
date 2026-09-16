@@ -159,21 +159,29 @@ export function TextArea({ value, onChange, onCommit, placeholder, rows = 3, inv
 }
 
 /** The chevron is drawn here rather than left to the platform, because the native one ignores the theme. */
-export function Select({ value, onChange, children, invalid, disabled }: {
+export function Select({ value, onChange, children, invalid, disabled, title }: {
   value: string; onChange: (v: string) => void; children: ReactNode;
   invalid?: boolean;
   /** A select has no readOnly, so this is the same idea by its own name. */
   disabled?: boolean;
+  /* Why it is disabled, in the words of what would have to change. The
+     house rule is that a control is wired or it is disabled AND says
+     what is missing, and until this existed a disabled Select could
+     only do the first half. It sits on the wrapper as well as the
+     select itself so the tooltip appears over the whole control: a
+     disabled `<select>` swallows pointer events in some browsers. */
+  title?: string;
 }) {
   const [focused, setFocused] = useState(false);
   return (
-    <div style={{
+    <div title={title} style={{
       ...shellStyle(invalid ? 'error' : 'rest', focused), height: 32, position: 'relative',
       background: disabled ? 'var(--surface-sunken)' : 'var(--surface)',
     }}>
       <select
         value={value}
         disabled={disabled}
+        title={title}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

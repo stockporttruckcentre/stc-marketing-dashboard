@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { priceContract } from '@/lib/fleetsmart/price';
+import { cardFrom, SHIPPED_CARD } from '@/lib/fleetsmart/ratecard';
 import { readContractBody } from '@/lib/fleetsmart/wire';
 
 export const dynamic = 'force-dynamic';
@@ -49,11 +50,29 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 
   const { input, extras } = read;
-  const priced = priceContract(input);
+
+  /* ---- The rates a draft is re-priced on ----
+
+     The card in force, not the one the draft was first written on, and
+     not the shipped one this used to fall back to. A draft has not gone
+     to anybody, so there is no price being held to: what matters is
+     that the figure saved is the figure the salesman is looking at, and
+     the wizard reads the same card. The version is re-stamped with it,
+     so an amendment later reprices on the right one. A SENT contract
+     never reaches here: it is refused above. */
+  const { data: cardRow } = await supabase
+    .rpc('fleetsmart_current_rate_card')
+    .maybeSingle();
+  const card = cardRow
+    ? cardFrom((cardRow as { card: unknown }).card, (cardRow as { version: string }).version)
+    : SHIPPED_CARD;
+
+  const priced = priceContract(input, card);
 
   const { data, error } = await supabase
     .from('fleetsmart_contracts')
     .update({
+      rate_card_version: card.version,
       account_id: body.account_id || null,
       lead_id: body.lead_id || null,
       customer_name: input.customerName,

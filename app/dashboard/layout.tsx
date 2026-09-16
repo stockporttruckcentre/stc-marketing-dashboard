@@ -18,14 +18,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: profile } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
 
+  /* Deleted posts are not waiting for anybody. Without the filter the
+     sidebar badge counted posts somebody had thrown away, so the number
+     beside Content never came down. */
   const { count: pendingPosts } = await supabase
     .from('social_posts').select('*', { count: 'exact', head: true })
+    .is('deleted_at', null)
     .eq('status', 'pending_review');
 
   // Sidebar emblem URL. Look up the most recent emblem, the no-text logo, from brand_assets.
   const { data: emblemRow } = await supabase
     .from('brand_assets')
     .select('url')
+    .is('deleted_at', null)
     .or('name.ilike.%emblem%,name.ilike.%no text%,name.ilike.%notext%,url.ilike.%emblem%,url.ilike.%notext%,url.ilike.%no_text%')
     .order('created_at', { ascending: false })
     .limit(1)

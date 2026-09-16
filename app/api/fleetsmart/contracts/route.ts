@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCapability } from '@/lib/api/guard';
 import { priceContract } from '@/lib/fleetsmart/price';
+import { cardFrom, SHIPPED_CARD } from '@/lib/fleetsmart/ratecard';
 import { readContractBody } from '@/lib/fleetsmart/wire';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,16 @@ export const dynamic = 'force-dynamic';
    The two engines are the same file, so the figure on screen and the
    figure in the database agree without either trusting the other.
 
+   ---- And the same card, which took two goes ----
+
+   "The same rate card the screen ran it against" was only true while
+   there was one card. Once rates could be edited, this route went on
+   pricing against the card the application ships with, and so did the
+   wizard, so the two still agreed and both were wrong. The current card
+   is read here and stamped onto the row, which is also what makes a
+   later amendment reprice the untouched half of the fleet on the rates
+   this contract was actually written on.
+
    The manager's discount is the exception that proves it: it is dropped
    unless the person holds `fleetsmart.discount`, so somebody without it
    can type one into a form they have modified and still not get it.
@@ -39,7 +50,15 @@ export async function POST(req: NextRequest) {
   }
 
   const { input, extras } = read;
-  const priced = priceContract(input);
+
+  const { data: cardRow } = await supabase
+    .rpc('fleetsmart_current_rate_card')
+    .maybeSingle();
+  const card = cardRow
+    ? cardFrom((cardRow as { card: unknown }).card, (cardRow as { version: string }).version)
+    : SHIPPED_CARD;
+
+  const priced = priceContract(input, card);
 
   const { data, error } = await supabase
     .from('fleetsmart_contracts')
@@ -50,6 +69,10 @@ export async function POST(req: NextRequest) {
       plan: input.plan,
       term_months: input.termMonths,
       starts_on: input.startDate || null,
+      /* The column defaults to the shipped card's version, so a
+         contract built on a newer one used to be recorded as being on
+         a card it had never been priced against. */
+      rate_card_version: card.version,
       input, priced, extras,
       owner_id: user.id,
       created_by: user.id,
