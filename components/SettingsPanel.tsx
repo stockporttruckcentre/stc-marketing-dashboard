@@ -60,8 +60,23 @@ import type { Profile } from '@/lib/types';
 type Tab = 'profile' | 'password' | 'appearance' | 'notifications' | 'access';
 
 export function SettingsPanel({
-  profile, openTab = 'profile',
-}: { profile: Profile & Record<string, unknown>; openTab?: Tab }) {
+  profile, roleName = null, openTab = 'profile',
+}: {
+  /* ---- NOT `& Record<string, unknown>` ----
+
+     It was, and that cast is what let this screen read
+     `profile.role_template` for months. There is no such column: it is
+     `role_template_id`, a uuid. The cast made an undefined field a
+     legal read, the code fell through to the legacy `role` column, and
+     the screen told everybody they were an Administrator.
+
+     Without the cast, asking for a field `Profile` does not have is a
+     compile error, which is where that belongs. */
+  profile: Profile;
+  /** The role template's name, read on the server. Null if on none. */
+  roleName?: string | null;
+  openTab?: Tab;
+}) {
   const [tab, setTab] = useState<Tab>(openTab);
 
   return (
@@ -86,11 +101,11 @@ export function SettingsPanel({
         />
 
         <div style={{ marginTop: 16 }}>
-          {tab === 'profile' && <ProfileTab profile={profile} />}
+          {tab === 'profile' && <ProfileTab profile={profile} roleName={roleName} />}
           {tab === 'password' && <PasswordTab email={profile.email} />}
           {tab === 'appearance' && <AppearanceTab profile={profile} />}
           {tab === 'notifications' && <NotificationPrefs />}
-          {tab === 'access' && <AccessTab profile={profile} />}
+          {tab === 'access' && <AccessTab profile={profile} roleName={roleName} />}
         </div>
       </div>
     </Toasts>
@@ -101,21 +116,23 @@ export function SettingsPanel({
    Profile
    ============================================================= */
 
-function ProfileTab({ profile }: { profile: Profile & Record<string, unknown> }) {
+function ProfileTab({ profile, roleName }: { profile: Profile; roleName: string | null }) {
   const supabase = createClient();
   const { say } = useToast();
   const [saving, setSaving] = useState(false);
 
-  const text = (key: string) => String((profile[key] as string | null) ?? '');
+  /* Named rather than indexed by a string. Indexing let a field that
+     does not exist read as empty instead of failing to compile. */
+  const text = (v: string | null | undefined) => String(v ?? '');
 
   const [form, setForm] = useState({
     full_name: profile.full_name ?? '',
-    job_title: text('job_title'),
-    location: text('location'),
-    timezone: text('timezone'),
-    working_hours: text('working_hours'),
-    responsibilities: text('responsibilities'),
-    skills: (Array.isArray(profile.skills) ? (profile.skills as string[]) : []).join(', '),
+    job_title: text(profile.job_title),
+    location: text(profile.location),
+    timezone: text(profile.timezone),
+    working_hours: text(profile.working_hours),
+    responsibilities: text(profile.responsibilities),
+    skills: (profile.skills ?? []).join(', '),
   });
 
   const set = (key: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [key]: v }));
@@ -210,10 +227,7 @@ function ProfileTab({ profile }: { profile: Profile & Record<string, unknown> })
             <Field label="Your role" hint="What this decides is on the Access tab">
               <div style={{ display: 'flex', alignItems: 'center', height: 32 }}>
                 <Badge tone="info">
-                  {roleInWords({
-                    role: profile.role,
-                    role_template: (profile.role_template as string | null) ?? null,
-                  })}
+                  {roleInWords({ role: profile.role, role_template: roleName })}
                 </Badge>
               </div>
             </Field>
@@ -444,7 +458,7 @@ function NotOnTheSidebarYet() {
    they hold cannot answer that.
    ============================================================= */
 
-function AccessTab({ profile }: { profile: Profile & Record<string, unknown> }) {
+function AccessTab({ profile, roleName }: { profile: Profile; roleName: string | null }) {
   const supabase = createClient();
   const [lines, setLines] = useState<ResolvedCapability[] | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -484,11 +498,13 @@ function AccessTab({ profile }: { profile: Profile & Record<string, unknown> }) 
         <div style={{ padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 11 }}>
           <ShieldCheck size={16} style={{ color: 'var(--accent)', flex: 'none' }} />
           <span style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            You are on {roleInWords({
-              role: profile.role,
-              role_template: (profile.role_template as string | null) ?? null,
-            })}. Most of what you can do comes from that. Anything granted or refused
-            to you personally is marked, and only an administrator can change either.
+            {roleName
+              ? <>You are on {roleName}. Most of what you can do comes from that.</>
+              : <>You are on no role template, so what you can do comes from the older{' '}
+                 <strong>{profile.role}</strong> column on your account. An administrator
+                 putting you on a role fixes that.</>}
+            {' '}Anything granted or refused to you personally is marked, and only an
+            administrator can change either.
           </span>
         </div>
         {/* This list is what you hold. When the question is "a page will

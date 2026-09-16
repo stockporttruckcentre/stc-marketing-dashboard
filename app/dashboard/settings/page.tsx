@@ -33,12 +33,37 @@ export default async function SettingsPage({
   const { data: profile } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
 
+  /* ---- The role they are actually on ----
+
+     From the business, looking at What you can do:
+
+       says tom is on Administrator which is a removed role
+
+     It did. `profiles` has `role_template_id`, a uuid, and no
+     `role_template` column at all. The screen asked for
+     `profile.role_template`, got undefined every single time, and fell
+     through to the legacy `role` column, which says `admin` for
+     everybody who was an administrator before role templates existed.
+     So it printed a role nobody is on, for everybody.
+
+     Read here rather than in the panel because the page already has a
+     server client and a round trip in a client component would draw the
+     wrong name first and correct it a moment later. */
+  const { data: template } = (profile as { role_template_id?: string | null } | null)?.role_template_id
+    ? await supabase
+        .from('role_templates')
+        .select('name')
+        .eq('id', (profile as { role_template_id: string }).role_template_id)
+        .maybeSingle()
+    : { data: null };
+
   const asked = searchParams.tab === 'account' ? 'profile' : searchParams.tab;
   const tab: Tab = TABS.includes(asked as Tab) ? (asked as Tab) : 'profile';
 
   return (
     <SettingsPanel
-      profile={profile as Profile & Record<string, unknown>}
+      profile={profile as Profile}
+      roleName={(template as { name: string } | null)?.name ?? null}
       openTab={tab}
     />
   );
