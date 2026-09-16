@@ -108,7 +108,15 @@ head('Every class the screens use is the kit’s');
   /* The port's own wrapper classes, declared in port.css and named here
      so they are a short list somebody can read rather than a pattern
      that would let anything through. */
-  const MINE = new Set(['rc-scrim', 'rc-pop', 'rc-toasts', 'rc-tokens', 'sheet', 'noprint']);
+  const MINE = new Set([
+    'rc-scrim', 'rc-pop', 'rc-toasts', 'rc-tokens', 'sheet', 'noprint',
+    /* The workbook preview's grid. The kit has no preview of the
+       spreadsheet: it is a repository feature, asked for separately, and
+       `rc-sheet--screen` is declared in port.css. `rc-sheet` carries no
+       styling of its own, so the print view can dress the same table for
+       paper without the screen's tokens coming with it. */
+    'rc-sheet', 'rc-sheet--screen',
+  ]);
 
   const files = tsxFiles();
   const strays: string[] = [];

@@ -1219,6 +1219,7 @@ for (const said of [
 for (const [said, id] of [
   ['queue', 'nav.contentQueue'],
   ['posting times', 'nav.contentQueue'],
+  ['what time does the queue post', 'nav.contentQueue'],
   ['posting slots', 'nav.contentQueue'],
   ['library', 'nav.contentLibrary'],
   ['content library', 'nav.contentLibrary'],

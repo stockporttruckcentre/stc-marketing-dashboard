@@ -1158,6 +1158,520 @@ export const SHEET_COLUMNS = {
   ]
 };
 
+/* ---- The master's own labels ----
+
+   THE CUSTOMER'S DOCUMENT, NOT PROSE WRITTEN HERE. Every string below
+   was read out of
+   `docs/source/rate_cards/master/KNDS UK - Customer Rates 2026.xlsx`
+   by `scripts/rate-card-sheet-map.py` and is reproduced exactly,
+   punctuation included. Nothing here is edited, and a new master is
+   picked up by running the script again.
+
+   `bold` and `align` are the master's own, so a renderer drawing this
+   grid does not have to decide how a heading sits in its column. */
+export const SHEET_STATIC: {
+  at: string; text: string; bold: boolean; align: 'left' | 'center' | 'right' | null;
+}[] = [
+  {
+    "at": "A3",
+    "text": "Main Contact",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "A4",
+    "text": "Address",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "A5",
+    "text": "Telephone",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "A6",
+    "text": "Email",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "A7",
+    "text": "Other",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "A8",
+    "text": "Accounts Details",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "K8",
+    "text": "Note: extra contractual inclusions for this specific customer - if any -  will be reflected in the table below",
+    "bold": false,
+    "align": "left"
+  },
+  {
+    "at": "C10",
+    "text": "Price",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "D10",
+    "text": "1-axle",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "E10",
+    "text": "2-axle",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "F10",
+    "text": "3-axle",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "G10",
+    "text": "4-axle",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "H10",
+    "text": "BRT interval",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "I10",
+    "text": "Add to Truckfile?",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "K10",
+    "text": "FleetSmart+ Inclusions",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "L10",
+    "text": "SILVER",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "M10",
+    "text": "GOLD",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "N10",
+    "text": "PLATINUM",
+    "bold": true,
+    "align": "center"
+  },
+  {
+    "at": "A11",
+    "text": "Hourly Rate - Trailers",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B11",
+    "text": "In hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B12",
+    "text": "Out of Hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A13",
+    "text": "Hourly Rate - HGVs/LCV's",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B13",
+    "text": "In hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B14",
+    "text": "Out of Hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A15",
+    "text": "Hourly Rate - Bodyshop",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B15",
+    "text": "In hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A16",
+    "text": "Callout/Travel Rates",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B16",
+    "text": "In hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B17",
+    "text": "Out of Hours",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B18",
+    "text": "Mileage Charge",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B19",
+    "text": "C&D",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A21",
+    "text": "Service Rates",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B21",
+    "text": "Trailer Service/Inspection",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B22",
+    "text": "Van Engine Service (up to 3.5 ton)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B23",
+    "text": "Van A Service & Inspection (up to 3.5 ton)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B24",
+    "text": "Van B Service & Inspection (up to 3.5 ton)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B25",
+    "text": "HGV 7.5 ton+ A Service & Inspection",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B26",
+    "text": "HGV 7.5 ton+ B Service & Inspection",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B27",
+    "text": "HGV 7.5 ton+ C Service & Inspection",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B28",
+    "text": "Digital Tacho",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B29",
+    "text": "Smart Tacho",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B30",
+    "text": "Tail Lift LOLER & Weight Test (Vehicle)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B31",
+    "text": "Tail Lift LOLER (Vehicle)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B32",
+    "text": "Weights",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B33",
+    "text": "Consumables",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B34",
+    "text": "Grease & Lubricants",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A36",
+    "text": "MOT Fees",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B36",
+    "text": "Submit for MOT at Hyde",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B37",
+    "text": "Submit for MOT elsewhere",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B38",
+    "text": "Van Steam Clean",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B39",
+    "text": "HGV Steam Clean",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B40",
+    "text": "Trailer Steam Clean",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B41",
+    "text": "Brake Test",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B42",
+    "text": "Headlamp Test",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B43",
+    "text": "Trailer Test Fee",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B44",
+    "text": "Trailer Retest Fee (within 14 days)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B45",
+    "text": "Trailer Lane Fee (Max per DVSA £50)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B46",
+    "text": "HGV Test Fee",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B47",
+    "text": "HGV Retest Fee (within 14 days)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B48",
+    "text": "HGV Lane Fee (Max per DVSA £70)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B49",
+    "text": "Loaded blocks – Trailers",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A50",
+    "text": "Tractors only",
+    "bold": true,
+    "align": null
+  },
+  {
+    "at": "B50",
+    "text": "Loaded Weight trailer – Vehicles",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B51",
+    "text": "Hire of Weights",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B52",
+    "text": "Out of area submit for MOT – If needed?",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B53",
+    "text": "Warm brakes for MOT – If needed?",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B54",
+    "text": "Smoke Test",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A56",
+    "text": "Tacho Costs",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "B56",
+    "text": "DTCO Calibration",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B57",
+    "text": "Buffer Battery",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B58",
+    "text": "Submit for Tacho",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A60",
+    "text": "Parts Rates",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "A61",
+    "text": "Mechanical Parts",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "B61",
+    "text": "supplied by customer",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B62",
+    "text": "supplied by STC  (£ + %)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A64",
+    "text": "Tail lift Parts",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "B64",
+    "text": "supplied by customer",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B65",
+    "text": "supplied by STC  (£ + %)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A67",
+    "text": "Bodywork Parts",
+    "bold": false,
+    "align": "right"
+  },
+  {
+    "at": "B67",
+    "text": "supplied by customer",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "B68",
+    "text": "supplied by STC  (£ + %)",
+    "bold": false,
+    "align": null
+  },
+  {
+    "at": "A70",
+    "text": "Invoicing & Authority Instruction and Contact",
+    "bold": true,
+    "align": "left"
+  },
+  {
+    "at": "A72",
+    "text": "All work MUST be authorised prior to commencement",
+    "bold": true,
+    "align": null
+  }
+];
+
 /* ---- What the builder calls each labour rate ----
 
    The kit's own words, from `rate-builder.html`, in the order the kit

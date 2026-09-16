@@ -127,3 +127,4 @@
 119_personal_portfolio
 120_merge_duplicate_customers
 121_company_target_from_last_year
+122_social_next_free_day

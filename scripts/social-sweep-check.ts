@@ -104,11 +104,9 @@ async function stubs(page: Page) {
         profile_url: null, entity_id: null, timezone: 'Europe/London',
         state: 'connected', last_error: null, position: 9, is_active: true,
       },
-      slot: {
-        id: `slot-${Math.random().toString(36).slice(2, 8)}`, channel_id: 'chan-1',
-        day_of_week: 1, at_time: '10:00', is_active: true,
-      },
-      slots: [],
+      /* What the queue's own setting route answers. One time of day for
+         the company, per migration 122. */
+      at: '16:00:00',
       queue: [],
     }),
   }));
@@ -368,6 +366,67 @@ async function main() {
       await page.waitForTimeout(500);
       await openTab(page, tab);
       await sweep(page, tab.toLowerCase(), { tab });
+    }
+
+    /* ---------------------------------------------------------
+       The queue's own setting, end to end from the screen.
+
+       From the business:
+
+         'next free slot' in socials, have this push it to the next
+         available day where nothing is scheduled, at 3pm.
+
+       The sweep above only asks whether pressing it does anything. This
+       asks whether the right thing goes to the right place: the rule
+       itself is proved against real PostgreSQL by `npm run
+       check:next-slot`, and this is the wire between the two.
+       --------------------------------------------------------- */
+    head('The queue posts at the time the screen says');
+    {
+      await page.goto(URL, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(400);
+      await openTab(page, 'Queue');
+      await page.waitForTimeout(300);
+
+      const field = page.locator('input[aria-label="What time of day the queue posts"]');
+      ok('the queue has a time on it', await field.count() === 1);
+      ok('and it starts at the setting the page was given',
+        (await field.inputValue()) === '15:00', `it reads ${await field.inputValue()}`);
+
+      const save = page.locator('button', { hasText: 'Save' }).first();
+      ok('Save is refused until the time is actually different',
+        await save.isDisabled(),
+        'a Save that saves what is already saved teaches people to press it for nothing');
+
+      await field.fill('16:00');
+      await page.waitForTimeout(150);
+      ok('and offered once it is', !(await save.isDisabled()));
+
+      let sent: { method: string; url: string; body: string } | null = null;
+      const watch = (r: { method(): string; url(): string; postData(): string | null }) => {
+        if (r.url().includes('/api/content/queue/settings')) {
+          sent = { method: r.method(), url: r.url(), body: r.postData() ?? '' };
+        }
+      };
+      page.on('request', watch);
+      await save.click();
+      await page.waitForTimeout(500);
+      page.off('request', watch);
+
+      const put = sent as { method: string; url: string; body: string } | null;
+      ok('pressing Save sends the time to the queue\u2019s own route',
+        put !== null && put.method === 'PUT',
+        put === null ? 'nothing was sent anywhere' : `it sent ${put.method} ${put.url}`);
+      ok('and sends the time that is on the screen',
+        put !== null && put.body.includes('16:00'),
+        put === null ? '' : `it sent ${put.body}`);
+
+      /* The field shows what the SERVER said, not what was typed. The
+         two are the same here because the stub agrees, and the point is
+         that the screen is reading the answer rather than assuming it
+         worked. */
+      ok('and the field then shows what came back',
+        (await field.inputValue()) === '16:00', `it reads ${await field.inputValue()}`);
     }
 
     head('The composer, opened from the planner');

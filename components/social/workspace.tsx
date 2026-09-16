@@ -1,13 +1,13 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Plus, X, Check, Trash2, Upload, Merge, Clock, AlertTriangle,
+  Plus, X, Check, Trash2, Upload, Merge, Clock, CalendarDays, AlertTriangle,
 } from 'lucide-react';
 import {
   DAY_LABEL, whenLabel,
-  type Channel, type LibraryItem, type Network, type NetworkKey, type Post, type Slot,
+  type Channel, type LibraryItem, type Network, type NetworkKey, type Post,
   type Tag, type Template, type Variant,
 } from '@/lib/content/types';
 import type { Capability } from '@/lib/platform/permissions/catalog';
@@ -87,29 +87,45 @@ const ZONES: { value: string; label: string }[] = [
 /* -------------------------------------------------------------
    The queue.
 
-   A channel has posting times, content flows into the next free one,
-   and nobody chooses a time for every post.
+   From the business:
+
+     'next free slot' in socials, have this push it to the next
+     available day where nothing is scheduled, at 3pm.
+
+   So the queue has one setting, the time of day, and one rule that is
+   not a setting: the next day with nothing scheduled on it, anywhere.
+   `content_next_slot` in migration 122 is that rule, and this screen
+   shows what it would do rather than describing it.
+
+   ---- What was here ----
+
+   A per channel week grid: tick Monday 09:00, Monday 13:00, Tuesday
+   09:00 and the queue fills them in turn. Nobody at STC ever filled it
+   in, so `content_next_slot` answered null, and "Next free slot" did
+   nothing at all while this screen looked finished. The table is still
+   in the database and nothing reads it.
    ------------------------------------------------------------- */
 export function Queue({
-  channels, networks, slots, posts, variants, canEdit, onSlots,
+  channels, networks, posts, variants, canEdit, queueTime, onQueueTime,
 }: {
   channels: Channel[];
   networks: Network[];
-  slots: Slot[];
   posts: Post[];
   variants: Variant[];
   canEdit: boolean;
-  onSlots: (channelId: string, slots: { day_of_week: number; at_time: string }[]) => Promise<string | null>;
+  /** 'HH:MM:SS', as the setting holds it. */
+  queueTime: string;
+  onQueueTime: (at: string) => Promise<string | null>;
 }) {
   const [open, setOpen] = useState<string | null>(channels[0]?.id ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<{ day: number } | null>(null);
-  const [time, setTime] = useState('09:00');
+  const [time, setTime] = useState(queueTime.slice(0, 5));
+
+  useEffect(() => { setTime(queueTime.slice(0, 5)); }, [queueTime]);
 
   const byKey = useMemo(() => new Map(networks.map((n) => [n.key, n])), [networks]);
   const channel = channels.find((c) => c.id === open);
-  const mine = slots.filter((s) => s.channel_id === open && s.is_active);
 
   const queued = useMemo(() => {
     const ids = new Set(
@@ -119,32 +135,113 @@ export function Queue({
       .sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''));
   }, [variants, posts, open]);
 
-  async function save(next: { day_of_week: number; at_time: string }[]) {
-    if (!open) return;
+  /* The next seven days the queue would take, in order, so somebody can
+     see the rule rather than read a sentence about it. Worked out the
+     same way `content_next_slot` works it out: a day is free when
+     nothing at all is scheduled on it. */
+  const coming = useMemo(() => {
+    const zone = channel?.timezone ?? 'Europe/London';
+    const dayOf = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: zone });
+    const busyDays = new Set<string>();
+    for (const p of posts) {
+      if (p.status !== 'scheduled' && p.status !== 'publishing') continue;
+      if (p.scheduled_at) busyDays.add(dayOf(p.scheduled_at));
+      else if (p.scheduled_date) busyDays.add(p.scheduled_date);
+    }
+    for (const v of variants) {
+      if (v.state !== 'pending' && v.state !== 'scheduled' && v.state !== 'publishing') continue;
+      if (v.scheduled_at) busyDays.add(dayOf(v.scheduled_at));
+    }
+
+    const out: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 90 && out.length < 7; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      const key = d.toLocaleDateString('en-CA');
+      if (busyDays.has(key)) continue;
+      const at = new Date(`${key}T${time.length === 5 ? time : time.slice(0, 5)}:00`);
+      if (at <= now) continue;
+      out.push(at.toISOString());
+    }
+    return out;
+  }, [posts, variants, channel, time]);
+
+  async function save() {
     setBusy(true); setError(null);
-    const why = await onSlots(open, next.map((s) => ({ day_of_week: s.day_of_week, at_time: s.at_time })));
+    const why = await onQueueTime(time);
     setBusy(false);
     if (why) setError(why);
-    setAdding(null);
   }
 
   if (!channels.length) {
     return (
       <EmptyState
         what="No channels yet"
-        why="A queue is a channel's posting times. Add an account under Channels and its week appears here."
+        why="The queue puts a post on the next day with nothing on it. Add an account under Channels and it has somewhere to go."
       />
     );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Note>
+        Next free slot puts a post on the next day that has nothing scheduled on it, at the time
+        below. A day with a post on any channel is not a free day, so posts come out one a day.
+      </Note>
+
+      <Panel title="What time the queue posts" icon={<Clock size={12} />}>
+        <div style={{ padding: 12, display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <Field label="Time of day">
+            <input
+              type="time"
+              value={time}
+              disabled={!canEdit}
+              onChange={(e) => setTime(e.target.value)}
+              aria-label="What time of day the queue posts"
+              style={{
+                height: 32, width: 92, padding: '0 8px',
+                borderRadius: 'var(--r-sm)', border: '1px solid var(--border-strong)',
+                background: 'var(--surface)', color: 'var(--text)',
+                fontFamily: 'var(--inter)', fontSize: 13, outline: 0,
+              }}
+            />
+          </Field>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!canEdit || busy || time.slice(0, 5) === queueTime.slice(0, 5)}
+            title={canEdit
+              ? 'Save the time the queue posts at'
+              : 'You do not have permission to change the channels and the queue'}
+            onClick={() => { void save(); }}
+          >{busy ? 'Saving' : 'Save'}</Button>
+          <Note>Everybody sees this. It is one time for the whole company.</Note>
+        </div>
+        {error && <div style={{ padding: '0 12px 12px' }}><Alert tone="danger">{error}</Alert></div>}
+      </Panel>
+
+      <Panel title="The next seven days it would take" icon={<CalendarDays size={12} />}>
+        <div style={{ padding: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {coming.length === 0
+            ? <Note>Every day for the next three months already has a post on it.</Note>
+            : coming.map((iso) => (
+              <span key={iso} style={{
+                display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 9px',
+                borderRadius: 'var(--r-sm)', background: 'var(--bg-subtle)',
+                border: '1px solid var(--border)', fontSize: 12, color: 'var(--text)',
+              }}>
+                {whenLabel(iso, channel?.timezone ?? 'Europe/London')}
+              </span>
+            ))}
+        </div>
+      </Panel>
+
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {channels.map((c) => (
           <Chip
             key={c.id}
             active={open === c.id}
-            count={slots.filter((s) => s.channel_id === c.id && s.is_active).length}
+            count={variants.filter((v) => v.channel_id === c.id && v.state === 'scheduled').length}
             onClick={() => setOpen(c.id)}
           >
             {byKey.get(c.network_key)?.label ?? c.network_key}
@@ -153,128 +250,29 @@ export function Queue({
       </div>
 
       {channel && (
-        <>
-          <Note>
-            @{channel.handle}. Times are {channel.timezone.replace(/_/g, ' ')}.
-          </Note>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', ...PANEL }}>
-            {[1, 2, 3, 4, 5, 6, 0].map((day, i) => {
-              const today = mine.filter((s) => s.day_of_week === day)
-                .sort((a, b) => a.at_time.localeCompare(b.at_time));
-              return (
-                <div key={day} style={{
-                  display: 'flex', flexDirection: 'column',
-                  borderLeft: i === 0 ? 'none' : '1px solid var(--border)',
-                }}>
-                  <div style={{
-                    height: 30, display: 'flex', alignItems: 'center', padding: '0 9px',
-                    background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)',
-                  }}>
-                    <Label>{DAY_LABEL[day]}</Label>
-                  </div>
-                  <div style={{
-                    display: 'flex', flexDirection: 'column', gap: 5,
-                    padding: 8, minHeight: 92,
-                  }}>
-                    {today.map((s) => (
-                      <span key={s.id} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        height: 24, padding: '0 8px', borderRadius: 'var(--r-sm)',
-                        background: 'var(--bg-subtle)', border: '1px solid var(--border)',
-                        fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text)',
-                      }}>
-                        {s.at_time.slice(0, 5)}
-                        {canEdit && (
-                          <button
-                            aria-label="Remove this time"
-                            onClick={() => save(mine.filter((x) => x.id !== s.id))}
-                            style={{
-                              border: 0, background: 'transparent', padding: 0, cursor: 'pointer',
-                              display: 'flex', color: 'var(--text-subtle)',
-                            }}
-                          >
-                            <X size={11} />
-                          </button>
-                        )}
-                      </span>
-                    ))}
-
-                    {canEdit && adding?.day === day ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <input
-                          type="time"
-                          value={time}
-                          onChange={(e) => setTime(e.target.value)}
-                          autoFocus
-                          style={{
-                            height: 24, width: 78, padding: '0 6px',
-                            borderRadius: 'var(--r-sm)', border: '1px solid var(--border-strong)',
-                            background: 'var(--surface)', color: 'var(--text)',
-                            fontFamily: 'var(--inter)', fontSize: 12, outline: 0,
-                          }}
-                        />
-                        <IconButton
-                          label="Add this time"
-                          onClick={() => save([
-                            ...mine.map((s) => ({ day_of_week: s.day_of_week, at_time: s.at_time })),
-                            { day_of_week: day, at_time: time },
-                          ])}
-                        >
-                          <Check size={12} />
-                        </IconButton>
-                      </span>
-                    ) : canEdit ? (
-                      <button
-                        onClick={() => setAdding({ day })}
-                        aria-label={`Add a posting time on ${DAY_LABEL[day]}`}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          height: 24, borderRadius: 'var(--r-sm)', cursor: 'pointer',
-                          border: '1px dashed var(--border-strong)', background: 'transparent',
-                          color: 'var(--text-subtle)',
-                        }}
-                      >
-                        <Plus size={11} />
-                      </button>
-                    ) : null}
-
-                    {!canEdit && today.length === 0 && (
-                      <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>None</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {busy && <Note>Saving.</Note>}
-          {error && <Alert tone="danger">{error}</Alert>}
-
-          <Panel title="In this queue" icon={<Clock size={12} />}>
-            {queued.length === 0 ? (
-              <Note>Nothing is waiting on this channel. Approved posts go in from the planner.</Note>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <tbody>
-                  {queued.map((p) => {
-                    const v = variants.find((x) => x.post_id === p.id && x.channel_id === open);
-                    return (
-                      <tr key={p.id}>
-                        <td style={{ ...TD, color: 'var(--text-subtle)', width: 190, whiteSpace: 'nowrap' }}>
-                          {whenLabel(v?.scheduled_at ?? p.scheduled_at, channel.timezone)}
-                        </td>
-                        <td style={TD}>
-                          {p.content.length > 76 ? `${p.content.slice(0, 76)}...` : p.content}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </Panel>
-        </>
+        <Panel title="In this queue" icon={<Clock size={12} />}>
+          {queued.length === 0 ? (
+            <Note>Nothing is waiting on this channel. Approved posts go in from the planner.</Note>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                {queued.map((p) => {
+                  const v = variants.find((x) => x.post_id === p.id && x.channel_id === open);
+                  return (
+                    <tr key={p.id}>
+                      <td style={{ ...TD, color: 'var(--text-subtle)', width: 190, whiteSpace: 'nowrap' }}>
+                        {whenLabel(v?.scheduled_at ?? p.scheduled_at, channel.timezone)}
+                      </td>
+                      <td style={TD}>
+                        {p.content.length > 76 ? `${p.content.slice(0, 76)}...` : p.content}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </Panel>
       )}
     </div>
   );

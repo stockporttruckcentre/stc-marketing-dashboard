@@ -727,7 +727,7 @@ export function Composer({
                   {byKey.get(c.network_key)?.label}:{' '}
                   {nextSlots[c.id]
                     ? whenLabel(nextSlots[c.id], c.timezone)
-                    : 'no posting times set yet, so the queue has nowhere to put it'}
+                    : 'every day for the next year already has a post on it'}
                 </span>
               ))}
             </div>

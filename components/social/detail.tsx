@@ -392,7 +392,7 @@ export function PostDrawer({
               <Button
                 size="sm" variant="secondary" disabled={busy !== null}
                 onClick={() => move('schedule', { at: null })}
-                title="Put it in the next free slot on every channel"
+                title="Put it on the next day with nothing scheduled on it"
               >Next free slot</Button>
               <Button
                 size="sm" variant="primary" disabled={!at || busy !== null}

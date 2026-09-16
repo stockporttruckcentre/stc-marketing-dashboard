@@ -7,7 +7,7 @@ import { resolveCapabilities } from '@/lib/platform/permissions/resolve';
 import { NotProvisioned, TabShell } from '@/components/kit/primitives';
 import type {
   ActivityLine, BoardColumn, Campaign, Channel, LibraryItem,
-  Network, Post, Slot, Tag, Template, Variant,
+  Network, Post, Tag, Template, Variant,
 } from '@/lib/content/types';
 import type { Profile } from '@/lib/types';
 
@@ -65,7 +65,7 @@ export default async function SocialPage({
 
   const [
     profileRes, postsRes, variantsRes, channelsRes, networksRes,
-    slotsRes, columnsRes, templatesRes, campaignsRes, tagsRes,
+    queueTimeRes, columnsRes, templatesRes, campaignsRes, tagsRes,
     libraryRes, activityRes, postTagsRes, capabilities,
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).single(),
@@ -93,8 +93,11 @@ export default async function SocialPage({
       .eq('is_active', true).order('position').order('handle'),
     supabase.from('social_networks').select('*')
       .eq('is_active', true).order('position'),
-    supabase.from('social_channel_slots').select('*')
-      .eq('is_active', true).order('day_of_week').order('at_time'),
+    /* What time of day the queue posts. One row, one setting, per
+       migration 122. The week grid of per channel posting times this
+       used to read is gone: nobody ever filled it in, so the queue had
+       nowhere to put anything and "Next free slot" did nothing. */
+    supabase.from('tenant_settings').select('social_queue_time').limit(1).maybeSingle(),
     supabase.from('social_board_columns').select('*')
       .eq('is_active', true).order('position'),
     supabase.from('social_templates').select('*')
@@ -177,7 +180,7 @@ export default async function SocialPage({
       variants={(variantsRes.data ?? []) as Variant[]}
       channels={(channelsRes.data ?? []) as Channel[]}
       networks={(networksRes.data ?? []) as Network[]}
-      slots={(slotsRes.data ?? []) as Slot[]}
+      queueTime={(queueTimeRes.data as { social_queue_time?: string } | null)?.social_queue_time ?? '15:00:00'}
       columns={(columnsRes.data ?? []) as BoardColumn[]}
       templates={(templatesRes.data ?? []) as Template[]}
       campaigns={(campaignsRes.data ?? []) as Campaign[]}

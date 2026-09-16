@@ -356,21 +356,27 @@ DECLARE
 BEGIN
   PERFORM pg_temp.act_as('ee000000-0000-0000-0000-000000000002');
 
+  -- The queue is the next clear day at three o'clock, per migration 122
+  -- and the instruction it quotes. It does not read a slot table, and
+  -- it does not need one filled in: that is why it used to do nothing.
   slot := content_next_slot('ee000000-0000-0000-0000-0000000000c1', NOW());
   IF slot IS NULL THEN
-    RAISE EXCEPTION 'a channel with ten slots has no next slot';
+    RAISE EXCEPTION 'the queue found no free day inside a year';
   END IF;
   IF slot <= NOW() THEN
     RAISE EXCEPTION 'the next slot is in the past';
   END IF;
-  IF EXTRACT(DOW FROM (slot AT TIME ZONE 'Europe/London')) NOT BETWEEN 1 AND 5 THEN
-    RAISE EXCEPTION 'the queue offered a weekend, and every slot is a weekday';
+  IF (slot AT TIME ZONE 'Europe/London')::TIME
+     IS DISTINCT FROM (SELECT social_queue_time FROM tenant_settings LIMIT 1) THEN
+    RAISE EXCEPTION 'the queue offered %, and the setting says %',
+      (slot AT TIME ZONE 'Europe/London')::TIME,
+      (SELECT social_queue_time FROM tenant_settings LIMIT 1);
   END IF;
 
-  -- A channel with no slots answers null rather than guessing, so the
-  -- screen can say the channel has no posting times yet.
-  IF content_next_slot('ee000000-0000-0000-0000-0000000000c2', NOW()) IS NOT NULL THEN
-    RAISE EXCEPTION 'a channel with no slots offered a time anyway';
+  -- A channel with no slot rows is offered the same day as any other,
+  -- because the slot table is no longer what the queue reads.
+  IF content_next_slot('ee000000-0000-0000-0000-0000000000c2', NOW()) IS NULL THEN
+    RAISE EXCEPTION 'a channel with no slot rows was refused a day';
   END IF;
 
   -- Two posts do not land in one slot. That is the failure people
@@ -399,6 +405,22 @@ BEGIN
   again := content_next_slot('ee000000-0000-0000-0000-0000000000c1', NOW());
   IF again = slot THEN
     RAISE EXCEPTION 'the queue offered the same slot twice, which is how a tool double posts';
+  END IF;
+
+  -- And the day it moves to is a LATER day, not a second time on the
+  -- same one. "The next available day where nothing is scheduled" means
+  -- a day with nothing on it, and that day now has something on it.
+  IF (again AT TIME ZONE 'Europe/London')::DATE
+     <= (slot AT TIME ZONE 'Europe/London')::DATE THEN
+    RAISE EXCEPTION 'the queue offered % again after filling %', again, slot;
+  END IF;
+
+  -- A post on ONE channel takes the whole day, across every channel,
+  -- which is the rule as it was asked for.
+  IF (content_next_slot('ee000000-0000-0000-0000-0000000000c2', NOW())
+        AT TIME ZONE 'Europe/London')::DATE
+     = (slot AT TIME ZONE 'Europe/London')::DATE THEN
+    RAISE EXCEPTION 'another channel was offered a day that already has a post on it';
   END IF;
 END $$;
 

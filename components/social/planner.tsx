@@ -244,6 +244,10 @@ export function Calendar({
   variants: Variant[];
   onOpen: (post: Post) => void;
   /** Day key to the number of unfilled posting slots on it. */
+  /* 1 on a day with nothing scheduled on it, 0 otherwise. A count
+     rather than a boolean because it used to be the number of unused
+     posting times on that day, and the queue no longer works that way:
+     a day is free or it is not. */
   freeSlots: Record<string, number>;
   month: Date;
   onMonth: (d: Date) => void;
@@ -381,7 +385,7 @@ export function Calendar({
                   fontSize: 10.5, color: 'var(--text-subtle)', padding: '2px 6px',
                   border: '1px dashed var(--border-strong)', borderRadius: 'var(--r-sm)',
                 }}>
-                  {free} free slot{free === 1 ? '' : 's'}
+                  Free
                 </span>
               )}
             </div>

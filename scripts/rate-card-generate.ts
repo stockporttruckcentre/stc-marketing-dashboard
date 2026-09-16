@@ -80,6 +80,16 @@ const SHEET_MAP = JSON.parse(
   readFileSync('docs/source/rate_cards/sheet-map.json', 'utf8'),
 ) as { rows: Record<string, number>; columns: { single: string; axle: string[] } };
 
+/* ---- The words the master prints that no card supplies ----
+
+   Read out of the same file by the same script. The export writes into
+   a copy of the master, so the sheet's labels come along with it; the
+   PDF and the in-app preview draw a grid and have to be given them, or
+   they show a column of prices with nothing naming any of them. */
+const SHEET_STATIC = JSON.parse(
+  readFileSync('docs/source/rate_cards/sheet-static.json', 'utf8'),
+) as { at: string; text: string; bold: boolean; align: string | null }[];
+
 /* ---- The short label the kit puts above each labour rate ----
 
    The card in the builder is sized for "HGV / LCV · in hours", which is
@@ -211,6 +221,21 @@ export const FS_INCLUSIONS = ${JSON.stringify(model.fleetsmartInclusions, null, 
 export const ROW_OF: Record<string, number> = ${JSON.stringify(SHEET_MAP.rows, null, 2)};
 
 export const SHEET_COLUMNS = ${JSON.stringify(SHEET_MAP.columns, null, 2)};
+
+/* ---- The master's own labels ----
+
+   THE CUSTOMER'S DOCUMENT, NOT PROSE WRITTEN HERE. Every string below
+   was read out of
+   \`docs/source/rate_cards/master/KNDS UK - Customer Rates 2026.xlsx\`
+   by \`scripts/rate-card-sheet-map.py\` and is reproduced exactly,
+   punctuation included. Nothing here is edited, and a new master is
+   picked up by running the script again.
+
+   \`bold\` and \`align\` are the master's own, so a renderer drawing this
+   grid does not have to decide how a heading sits in its column. */
+export const SHEET_STATIC: {
+  at: string; text: string; bold: boolean; align: 'left' | 'center' | 'right' | null;
+}[] = ${JSON.stringify(SHEET_STATIC, null, 2)};
 
 /* ---- What the builder calls each labour rate ----
 
