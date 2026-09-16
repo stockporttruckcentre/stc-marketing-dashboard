@@ -116,7 +116,8 @@
     "check:social-sweep": "tsx scripts/social-sweep-check.ts",
     "check:fleetsmart-ratecard": "tsx scripts/fleetsmart-ratecard-check.ts",
     "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
-    "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts"
+    "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts",
+    "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
