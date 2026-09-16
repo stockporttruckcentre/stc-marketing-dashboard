@@ -80,8 +80,13 @@ async function main() {
       ok('the builder asks for the export route by exactly that path',
         builder.includes('/api/rate-cards/${cardId}/export?format='),
         'the screen and the route have to name the same path, or Export downloads nothing');
-      ok('and opens the print view by exactly that path',
-        builder.includes('/export/rate-card?card='));
+      /* Both formats are files built by the server now. The PDF used to
+         open the print view instead, which is a second layout of the
+         same card; `check:rate-card-pdf` holds the PDF and the workbook
+         together, and it can only do that for a PDF the server built. */
+      ok('and the PDF comes off that route too, rather than the print view',
+        !builder.includes('/export/rate-card?card='),
+        'Export is opening the print view for a PDF, which is a layout nothing compares');
 
       const wizard = readFileSync('components/sales/ratecards/RateCardFromContract.tsx', 'utf8');
       ok('the FleetSmart+ panel asks for the same export route',

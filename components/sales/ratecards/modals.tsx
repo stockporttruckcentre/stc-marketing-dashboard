@@ -523,9 +523,9 @@ export function ExportModal({ onClose, onExport, busy, cardRef }: {
             <button className="rc-7k" onClick={() => onExport('pdf')} disabled={busy}>
               <span className="rc-4n">PDF</span>
               <span className="rc-2x">
-                The same figures, laid out for paper. It opens the print view, where the
-                destination is Save as PDF. There is no PDF renderer on the server, so this is the
-                browser&rsquo;s own, which writes a better one anyway.
+                The same sheet on paper: the same cells, the same columns, the same order, the
+                same figures. What it cannot carry is the master&rsquo;s own fonts, borders and
+                logo, because those live in the customer&rsquo;s file.
               </span>
             </button>
           </div>

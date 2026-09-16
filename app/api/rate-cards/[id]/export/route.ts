@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { buildWorkbook } from '@/lib/ratecards/export-xlsx';
+import { buildRateCardPdf } from '@/lib/ratecards/export-pdf';
 import type { FullCard } from '@/lib/ratecards/types';
 
 export const dynamic = 'force-dynamic';
@@ -24,14 +25,22 @@ export async function GET(
     return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
   }
 
+  /* ---- Two formats, one card ----
+
+     From the agreed development scope, Task 6:
+
+       `/api/rate-cards/[id]/export?format=pdf` should return a real PDF
+       rather than refusing and telling the user to use the print view.
+
+     It used to refuse. Both are built here now, and both are built from
+     `sheetGrid`: the same cells, in the same columns, in the same
+     order. The workbook gets them written into a copy of the master so
+     the customer's file keeps the master's own styling; the PDF draws
+     the same grid on a page. Neither decides what is on the card. */
   const format = new URL(request.url).searchParams.get('format') ?? 'xlsx';
-  if (format !== 'xlsx') {
-    /* The PDF is the print view rather than a file built here, because
-       there is no PDF renderer in this installation and a button that
-       downloads a PDF nobody generated is the kind of half-wired
-       control this repository has a check for. */
+  if (format !== 'xlsx' && format !== 'pdf') {
     return NextResponse.json({
-      error: 'A PDF is taken from the print view at /export/rate-card, not from this route.',
+      error: `There is no ${format} rate card. Ask for xlsx or pdf.`,
     }, { status: 400 });
   }
 
@@ -46,11 +55,23 @@ export async function GET(
   const card = data as FullCard;
 
   try {
-    const workbook = await buildWorkbook(card);
     const year = new Date(card.card.effective_from).getFullYear();
     /* The master's own naming, so a customer filing it beside last
        year's finds them next to each other. */
-    const name = `${card.card.customer_name} - Customer Rates ${year}.xlsx`;
+    const name = `${card.card.customer_name} - Customer Rates ${year}.${format}`;
+
+    if (format === 'pdf') {
+      const pdf = await buildRateCardPdf(card);
+      return new NextResponse(new Uint8Array(pdf).slice().buffer, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${name.replace(/"/g, '')}"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    const workbook = await buildWorkbook(card);
 
     /* A fresh ArrayBuffer rather than the Buffer's own view of a pooled
        one: Node reuses allocation pools, and handing the response a
@@ -67,7 +88,7 @@ export async function GET(
     });
   } catch (e) {
     return NextResponse.json({
-      error: e instanceof Error ? e.message : 'The workbook could not be built.',
+      error: e instanceof Error ? e.message : 'The file could not be built.',
     }, { status: 500 });
   }
 }

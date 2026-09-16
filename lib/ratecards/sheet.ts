@@ -20,7 +20,7 @@
    describes a font or a border: it describes values and addresses, and
    the master supplies everything else.
    ============================================================= */
-import { ROW_OF, SHEET_COLUMNS } from './kit.generated';
+import { ROW_OF, SHEET_COLUMNS, SHEET_STATIC } from './kit.generated';
 import { round2 } from './format';
 import type { FullCard } from './types';
 
@@ -31,6 +31,8 @@ export type CellWrite = {
   value: string | number | null;
   /** How the preview should draw it, and nothing to do with the export. */
   kind: 'text' | 'money' | 'words' | 'tick' | 'label';
+  /** The master's own alignment, where the master has one to give. */
+  align?: 'left' | 'right' | 'centre';
 };
 
 /* ---- The header block ----
@@ -189,3 +191,113 @@ function ordinal(iso: string): string {
 
 /** The grid the preview draws: 72 rows by 15 columns, as the master is. */
 export const SHEET_EXTENT = { rows: 72, columns: 15 };
+
+/* =============================================================
+   THE GRID, ONCE.
+
+   From the agreed development scope, Task 6:
+
+     There is one Rate Card design. The existing Excel Rate Card is the
+     authoritative design. The PDF must be the PDF representation of
+     that same Rate Card. It must not be a separately designed "nice
+     PDF". [...] There must not remain two independently authored
+     layouts that can drift.
+
+   The values were already shared: `sheetWrites` above is the one list
+   the workbook, the preview and the print view all read. What was NOT
+   shared was the LAYOUT. The preview drew the master's grid. The print
+   view rebuilt the card as sections and tables of its own design. Same
+   figures, two documents, and the one a customer receives as a PDF
+   looked nothing like the one they receive as a spreadsheet.
+
+   So the grid is described here, beside the values, and everything that
+   draws a rate card draws this: the same columns, the same widths in
+   the master's own units, the same order, the same alignment per kind.
+   A third renderer cannot invent a fourth layout, because there is
+   nothing left for it to decide.
+   ============================================================= */
+
+/** The master's columns, A to O. */
+export const SHEET_COLS = [
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+] as const;
+
+/**
+ * The master's own column widths, in its units.
+ *
+ * Read out of the file and quoted in the handoff: A 24.29, B 38.86,
+ * H 12.71, I 11.71, K 45, L 14.86, M 13.14, N 16.86. The rest are the
+ * file's default. They are proportions, not pixels, so every renderer
+ * scales them to whatever it is drawing on and the card comes out the
+ * same shape on screen, on paper and in a PDF.
+ */
+export const SHEET_WIDTH: Record<string, number> = {
+  A: 24.29, B: 38.86, C: 9, D: 9, E: 9, F: 9, G: 9, H: 12.71, I: 11.71,
+  J: 3, K: 45, L: 14.86, M: 13.14, N: 16.86, O: 9,
+};
+
+/** How a cell of each kind sits in its column. */
+export const SHEET_ALIGN: Record<CellWrite['kind'], 'left' | 'right' | 'centre'> = {
+  text: 'left',
+  words: 'left',
+  label: 'left',
+  money: 'right',
+  tick: 'centre',
+};
+
+/**
+ * The grid to draw for one card: every cell, in row order, and how far
+ * down the sheet there is anything worth drawing.
+ *
+ * `rows` stops two rows past the last thing written rather than at the
+ * master's full 72, so a card with no FleetSmart+ section does not
+ * carry twenty empty rows onto a second page.
+ */
+export function sheetGrid(card: FullCard): {
+  rows: number;
+  columns: readonly string[];
+  width: Record<string, number>;
+  cells: Map<string, CellWrite>;
+} {
+  const cells = new Map<string, CellWrite>();
+
+  /* ---- The master's own labels first, the card's values over them ----
+
+     `sheetWrites` is what a card CHANGES about the master. It is not
+     what the sheet says: 'Main Contact', 'Hourly Rate - Trailers',
+     'Price', '1-axle', 'FleetSmart+ Inclusions' and the authority
+     instruction at the foot are all printed by the master itself, and
+     the workbook keeps them because it is a copy of the master.
+
+     A renderer given only the writes draws a grid of prices with
+     nothing naming any of them, which is what the PDF and the print
+     view were doing. They are read out of the master mechanically and
+     laid down here, underneath, so every renderer of this grid carries
+     them and none of them has to know any of the words.
+
+     `check:rate-card-pdf` asserts the two sets never overlap, so a
+     label can never sit on top of a customer's figure. */
+  for (const s of SHEET_STATIC) {
+    cells.set(s.at, {
+      at: s.at,
+      value: s.text,
+      kind: s.bold ? 'label' : 'text',
+      align: s.align === 'center' ? 'centre' : s.align === 'right' ? 'right' : 'left',
+    });
+  }
+
+  for (const w of sheetWrites(card)) cells.set(w.at, w);
+
+  let last = 12;
+  for (const at of cells.keys()) {
+    const n = Number(at.replace(/^[A-Z]+/, ''));
+    if (n > last) last = n;
+  }
+
+  return {
+    rows: Math.min(SHEET_EXTENT.rows, last + 1),
+    columns: SHEET_COLS,
+    width: SHEET_WIDTH,
+    cells,
+  };
+}

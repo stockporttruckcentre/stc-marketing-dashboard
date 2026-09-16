@@ -125,7 +125,8 @@
     "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts",
     "check:company-target": "bash scripts/sql/company-target-check.sh",
     "check:profile-fields": "tsx scripts/profile-fields-check.ts",
-    "check:not-ours": "tsx scripts/not-our-company-check.ts"
+    "check:not-ours": "tsx scripts/not-our-company-check.ts",
+    "check:rate-card-pdf": "tsx scripts/rate-card-pdf-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

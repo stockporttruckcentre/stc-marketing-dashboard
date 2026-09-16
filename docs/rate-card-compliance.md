@@ -25,7 +25,7 @@ maintained as part of the work.
 | 10 | Well thought out UX and UI | ported from the pack | `check:rate-card-port` |
 | 11 | Cards show on the Rate Card Builder tab | `rate_cards_list` | drive check |
 | 12 | A card can be amended easily | inline editors, autosave on blur | drive check |
-| 13 | Save as xlsx or PDF | export route, print view | `check:rate-card-export`, drive check |
+| 13 | Save as xlsx or PDF | export route, both built from `sheetGrid` | `check:rate-card-export`, `check:rate-card-pdf`, drive check |
 | 14 | The xlsx identical to the attached | written into a copy of the master | `check:rate-card-export` |
 | 15 | FleetSmart+ inclusions generated from the contract | `rate_card_read` | `check:rate-card`, drive check |
 | 16 | A customer who already holds a contract gets it | migrations 113 and 115 | `check:rate-card` |
@@ -104,3 +104,48 @@ anything has probably never been tested.
   were none.
 - The routes check followed redirects, so a correctly protected route
   answering 307 looked like an open one answering 200.
+- The first PDF parity check read the file's raw bytes. PDF content
+  streams are Flate compressed, so it found no text at all and reported
+  every one of 171 values missing from a PDF that had all of them.
+- Inflated, it then looked for `(text) Tj`. pdf-lib writes hex strings,
+  `<74657874> Tj`, so it still read nothing.
+- Reading hex, it decoded byte for byte. The master writes 'Loaded
+  blocks - Trailers' with an en dash, which WinAnsi puts at 0x96 and
+  Latin-1 leaves empty, so a value that was on the page read as missing.
+- It compared the order of prices by looking each one up with `indexOf`.
+  £70.00 is on the card four times and all four found the same first
+  occurrence, so it could report a reordered card while nothing was out
+  of order, and could not have noticed one that was.
+- Worst of the lot: it only ever asked whether the cells a CARD writes
+  were on the page. The master's own 83 labels are not card values, so a
+  PDF that printed the prices with nothing naming any of them passed.
+
+## Task 6 of the agreed development scope
+
+> There is one Rate Card design. The existing Excel Rate Card is the
+> authoritative design. The PDF must be the PDF representation of that
+> same Rate Card. [...] There must not remain two independently authored
+> layouts that can drift.
+
+There were two, and now there is one.
+
+`lib/ratecards/sheet.ts` holds the grid: the master's fifteen columns,
+its column widths in its own units, every cell a card writes, and the 83
+labels the master itself prints, read out of the file by
+`scripts/rate-card-sheet-map.py`. Three things draw it and none of them
+decides anything about it:
+
+| Renderer | What it adds |
+|---|---|
+| `lib/ratecards/export-xlsx.ts` | writes the values into a copy of the master, so the customer's own styling, merges and logo survive |
+| `lib/ratecards/export-pdf.ts` | draws the grid on A4 landscape |
+| `components/sales/ratecards/SheetGridTable.tsx` | draws it in the browser, for the in-app preview and the print view |
+
+`/api/rate-cards/[id]/export?format=pdf` returns a real PDF, and the
+Export dialog downloads it rather than opening the print view.
+
+`npm run check:rate-card-pdf` builds the workbook and the PDF from one
+card and reads both back: every one of the 254 cells, every price in
+sheet order, the terms, the extra inclusions and their ticks, and the
+master's own labels. It was proved by putting three faults back in, one
+at a time, and watching it fail on each.

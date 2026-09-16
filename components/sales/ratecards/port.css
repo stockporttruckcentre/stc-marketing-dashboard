@@ -306,3 +306,46 @@
 @media (prefers-reduced-motion: reduce) {
   .rc-6a *, .rc-scrim * { transition: none !important; animation: none !important; }
 }
+
+/* =============================================================
+   The sheet preview's grid.
+
+   Not a kit component. The kit has no preview of the workbook: it is a
+   repository feature, asked for separately.
+
+     Ensure we have a preview of the rate card - how it looks in excel -
+     within the app.
+
+   It was drawn with inline styles and its own copy of the master's
+   column widths, which is how the print view and the preview came to be
+   two layouts of one card. The layout now comes from
+   `lib/ratecards/sheet.ts`, through `SheetGridTable`, and all that is
+   left here is ink: the application's own tokens, so the preview reads
+   as part of this screen rather than as a pasted screenshot.
+   ============================================================= */
+.rc-sheet--screen {
+  table-layout: fixed;
+  min-width: 900px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-sheet--screen td {
+  border: 1px solid var(--border);
+  padding: 3px 5px;
+  height: 19px;
+  max-width: 0;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.rc-sheet--screen td[data-kind="label"] {
+  font-family: var(--panton);
+  font-weight: 700;
+}
+
+.rc-sheet--screen td[data-kind="words"] {
+  color: var(--text-subtle);
+}

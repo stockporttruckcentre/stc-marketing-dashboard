@@ -282,14 +282,11 @@ export function RateBuilder({
   };
 
   const doExport = async (kind: 'xlsx' | 'pdf') => {
-    /* The PDF is the print view rather than a file built on the server,
-       because there is no PDF renderer in this installation. The dialog
-       says so rather than offering a button that downloads nothing. */
-    if (kind === 'pdf') {
-      window.open(`/export/rate-card?card=${cardId}`, '_blank', 'noopener');
-      setShowExport(false);
-      return;
-    }
+    /* Both formats are files built on the server now, from the same
+       grid. The PDF used to open the print view instead, which was a
+       second layout of the same card: the workbook said one thing and
+       the paper said another. `check:rate-card-pdf` holds them
+       together. */
     setBusy(true);
     try {
       const res = await fetch(`/api/rate-cards/${cardId}/export?format=${kind}`);
