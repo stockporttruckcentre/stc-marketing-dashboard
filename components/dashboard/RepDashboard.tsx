@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { FinancialYearTargets } from '@/components/dashboard/FinancialYearTargets';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -245,8 +246,25 @@ export function RepDashboard({ profile }: { profile: Profile }) {
             {/* quieter reference rail */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
 
+              {/* ---- The financial year, company and personal ----
+
+                  Added beside the monthly gauge below rather than in
+                  place of it. From the scope: "Do not delete existing
+                  monthly target data or break existing Analytics target
+                  features while changing the overview target section to
+                  the new financial-year company/personal model."
+
+                  So the month is still the month, and the year is a
+                  different question sitting above it. The personal
+                  block opens Personal Analytics on whoever is signed
+                  in, in one press. */}
               <Card>
-                <SectionHead title="Against target" />
+                <SectionHead title="This financial year" />
+                <FinancialYearTargets />
+              </Card>
+
+              <Card>
+                <SectionHead title="Against target, this month" />
                 {!data.target.available
                   ? <NotProvisioned what="Your month measured against your number." needs={(data.target as Missing).needs} />
                   : <TargetGauge actual={data.revenueMtd} target={data.target.target} />}

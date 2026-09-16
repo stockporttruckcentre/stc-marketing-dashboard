@@ -116,7 +116,13 @@
     "check:social-sweep": "tsx scripts/social-sweep-check.ts",
     "check:fleetsmart-ratecard": "tsx scripts/fleetsmart-ratecard-check.ts",
     "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
-    "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts"
+    "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts",
+    "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh",
+    "check:fy-targets": "bash scripts/sql/fy-targets-check.sh",
+    "check:personal-portfolio": "bash scripts/sql/personal-portfolio-check.sh",
+    "check:lead-worth": "tsx scripts/lead-worth-agreement-check.ts",
+    "check:crm-merge": "bash scripts/sql/crm-merge-check.sh",
+    "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",

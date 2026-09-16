@@ -115,6 +115,36 @@ export function withType(asset: FleetAsset, type: AssetType | ''): FleetAsset {
 }
 
 /**
+ * The rate card line behind each tachograph choice.
+ *
+ * The same four pairings `overrideFor` reads, written once so the
+ * screen can price a choice before somebody makes it.
+ */
+const TACHO_LINE: Record<string, string> = {
+  '2yr':   '2 Year Tacho Calibration',
+  '6yr':   '6 Year Tacho Calibration',
+  DTCO:    'DTCO',
+  Smart:   'Smart DTCO',
+};
+
+/**
+ * What one tachograph choice costs on this asset, before it is chosen.
+ *
+ * `none` is nothing, correctly. Anything else with no rate on the card
+ * is nothing too, and that is the case the screen has to say out loud:
+ * an option somebody can pick that adds nothing to the price is the
+ * fault the sales team reported, one option down.
+ */
+export function tachoRate(
+  choice: string, cls: AssetClass | '', axles: number, card: RateCard = SHIPPED_CARD,
+): number {
+  const line = TACHO_LINE[choice];
+  if (!line || !cls) return 0;
+  const at = Math.max(0, Math.min(3, axles - 1));
+  return card.rates.find((r) => r.cls === cls && r.line === line)?.axle[at] ?? 0;
+}
+
+/**
  * Does this rate card price a tachograph for this class at all.
  *
  * Used by the screen to disable the control rather than let somebody
@@ -125,9 +155,7 @@ export function withType(asset: FleetAsset, type: AssetType | ''): FleetAsset {
  */
 export function tachoPriced(cls: AssetClass | '', axles: number, card: RateCard = SHIPPED_CARD): boolean {
   if (!cls) return false;
-  const at = Math.max(0, Math.min(3, axles - 1));
-  return card.rates.some((r) =>
-    r.cls === cls && /Tacho|DTCO/.test(r.line) && (r.axle[at] ?? 0) > 0);
+  return Object.keys(TACHO_LINE).some((choice) => tachoRate(choice, cls, axles, card) > 0);
 }
 
 export function defaultPmiWeeks(cls: AssetClass | ''): number {
