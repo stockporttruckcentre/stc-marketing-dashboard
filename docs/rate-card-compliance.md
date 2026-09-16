@@ -192,14 +192,29 @@ it refuses the file with "source file could not be loaded". `SOFFICE_PATH`
 points at the binary on a host that puts it somewhere else. Poppler is
 for the check rather than the application.
 
-### Why the PDF is six pages
+### One page, and which file asked for it
 
-Because the master is. The customer's own file carries no print area, no
-orientation and no fit to page, so converting it untouched gives six
-portrait pages, and converting the export gives the same six. Setting a
-print area would make a tidier PDF and would be a change to the signed
-off document, so it has not been made. It is a one line change to the
-master workbook if it is wanted.
+From the business:
+
+> should see all rows/columns filled on the same page of the pdf, 1 page
+> total.
+
+The master carries no print setup: no print area, no orientation, no fit
+to page. Converting it untouched gives six portrait pages with the item
+names on one and their prices on another.
+
+So the copy handed to the converter asks to print on a single A4
+landscape page, over a print area that stops at the last cell with
+anything in it, so the scale follows the card's content rather than the
+master's empty rows. Nothing about the cells changes.
+
+The workbook a customer downloads does NOT ask for this.
+`buildWorkbook(card)` is what it always was and only
+`buildWorkbook(card, { onOnePage: true })` sets a print setup, because
+the other half of this task is that the spreadsheet is
+indistinguishable from the master. `check:rate-card-pdf` asserts both:
+the PDF is one page, and the downloaded workbook's print area and fit to
+page are still the master's.
 
 `npm run check:rate-card-pdf` builds the workbook and the PDF from one
 card and reads both back: every one of the 254 cells, every price in

@@ -101,7 +101,19 @@ function run(cmd: string, args: string[], cwd: string): Promise<{ code: number; 
  * @throws NoConverterError when LibreOffice Calc is not installed.
  */
 export async function buildRateCardPdf(card: FullCard): Promise<Uint8Array> {
-  const workbook = await buildWorkbook(card);
+  /* ---- On one page ----
+
+     From the business:
+
+       should see all rows/columns filled on the same page of the pdf,
+       1 page total.
+
+     The master has no print setup, so left alone it converts to six
+     portrait pages with the item names on one page and their prices on
+     another. The copy handed to the converter asks to print on a single
+     landscape page. Nothing about the cells changes, and the workbook a
+     customer downloads is untouched. */
+  const workbook = await buildWorkbook(card, { onOnePage: true });
 
   const dir = await mkdtemp(path.join(tmpdir(), 'rate-card-pdf-'));
   try {
