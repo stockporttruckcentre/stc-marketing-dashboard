@@ -117,7 +117,8 @@
     "check:fleetsmart-ratecard": "tsx scripts/fleetsmart-ratecard-check.ts",
     "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
     "check:fleetsmart-builder": "tsx scripts/fleetsmart-builder-check.ts",
-    "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh"
+    "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh",
+    "check:fy-targets": "bash scripts/sql/fy-targets-check.sh"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
