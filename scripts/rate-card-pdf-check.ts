@@ -16,8 +16,8 @@
 
      1. the PDF came out of LibreOffice, so it is a conversion
      2. nothing in the export path draws a PDF
-     3. it has the pages the MASTER converts to, not a page count of
-        somebody's choosing
+     3. it is one page, with every row and column on it, which is what
+        was asked for
      4. the master's own styling is in it: its fonts and its fills
      5. and the values are still the card's
 
@@ -107,7 +107,45 @@ function convert(file: string, name: string): string {
   return path.join(out, made);
 }
 
+/* ---- What this needs, said once and plainly ----
+
+   From the business, about what happens after they go:
+
+     once I leave STC in a couple of months it has no more developer at
+     all [...] The app should be self-sufficient
+
+   A check that dies with a stack trace saying 'spawnSync soffice
+   ENOENT' is not self-sufficient. It names the two packages and stops. */
+function toolsArePresent(): string | null {
+  const missing: string[] = [];
+  for (const [tool, pkg] of [
+    ['soffice', 'libreoffice-calc'],
+    ['pdftotext', 'poppler-utils'],
+    ['pdfinfo', 'poppler-utils'],
+    ['pdffonts', 'poppler-utils'],
+    ['pdftoppm', 'poppler-utils'],
+  ] as [string, string][]) {
+    try {
+      execFileSync('which', [tool], { stdio: 'ignore' });
+    } catch {
+      missing.push(`${tool} (${pkg})`);
+    }
+  }
+  return missing.length === 0 ? null : missing.join(', ');
+}
+
 async function main() {
+  const absent = toolsArePresent();
+  if (absent) {
+    console.log(`\n  This check cannot run here. Missing: ${absent}\n`);
+    console.log('  The PDF is the Excel rate card converted, so checking it needs the');
+    console.log('  converter and something to read a PDF back:\n');
+    console.log('      apt-get install libreoffice-calc poppler-utils\n');
+    console.log('  The application itself needs libreoffice-calc on whatever server it');
+    console.log('  runs on, or the PDF export answers 503 and says so.\n');
+    process.exit(1);
+  }
+
   const card = kndsCard();
 
   head('It is a conversion, not a drawing');
