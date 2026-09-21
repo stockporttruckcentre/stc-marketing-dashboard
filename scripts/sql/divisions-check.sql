@@ -121,16 +121,44 @@ DO $$
 DECLARE r RECORD;
 BEGIN
   PERFORM pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+  /* ---- Revenue is the invoices. Margin is the yard. ----
+
+     This used to assert that Trailer Sales revenue read 45000 off the
+     stock list, dated by dispatch. From the business:
+
+       revenue populates it all, you've been instructed on that
+       countless times.
+
+     Migration 125 moved every money figure onto `protean_invoices`, so
+     the revenue column is what was INVOICED. The dispatch-date rule did
+     not go away: it still decides which year a trailer's MARGIN falls
+     in, which is asserted below and is the only thing the stock list is
+     still the source of.
+
+     An invoice for this customer, so the column has something in it. */
+  INSERT INTO protean_accounts (division, alpha, protean_name, last_seen)
+  VALUES ('trailer', 'YEARTEST', 'Year Test Haulage', NOW())
+  ON CONFLICT (division, alpha) DO NOTHING;
+  INSERT INTO protean_invoices (division, invoice_no, alpha, protean_name, tax_point, net)
+  VALUES ('trailer', 'YT-1', 'YEARTEST', 'Year Test Haulage', '2026-04-05', 45000),
+         ('trailer', 'YT-0', 'YEARTEST', 'Year Test Haulage', '2025-06-01', 20000)
+  ON CONFLICT (division, invoice_no) DO NOTHING;
+
   SELECT * INTO r FROM division_revenue('2026-08-01') WHERE division = 'trailer';
 
   IF r.this_year <> 45000 THEN
-    RAISE EXCEPTION 'trailer sales read %, not 45000. A March order dispatched in April '
-                    'belongs to the year it left the yard in', r.this_year;
+    RAISE EXCEPTION 'trailer sales read %, not 45000, off the uploaded invoices', r.this_year;
   END IF;
   IF r.last_year <> 20000 THEN
     RAISE EXCEPTION 'the same point last year reads %, not 20000', r.last_year;
   END IF;
-  IF r.deals <> 1 THEN RAISE EXCEPTION 'it counts % sales, not 1', r.deals; END IF;
+  IF r.deals <> 1 THEN RAISE EXCEPTION 'it counts % invoices, not 1', r.deals; END IF;
+
+  /* And the year rule, where it still applies: a trailer ordered in
+     March and dispatched in April earns its margin in the April year. */
+  IF r.margin IS NULL THEN
+    RAISE EXCEPTION 'trailer sales has no margin, and the stock list records a cost';
+  END IF;
 
   /* Stock is money committed and not yet billed, which is the trailer
      equivalent of work on the ramps. */
@@ -207,6 +235,23 @@ DO $$
 DECLARE n INTEGER; r RECORD;
 BEGIN
   PERFORM pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+
+  /* ---- Trailer buying is invoiced buying now ----
+
+     This customer's trailers were linked through `stock_trailers`, and
+     migration 125 moved every money figure onto the invoices, so their
+     trailer division is reached through a Protean account like the
+     other two. Same customer, same 65000, said in the unit the data is
+     in now. */
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, last_seen)
+  VALUES ('trailer', 'ALLTHREE', 'All Three Haulage',
+          'a1000000-0000-0000-0000-000000000001', NOW())
+  ON CONFLICT (division, alpha) DO UPDATE SET contact_id = EXCLUDED.contact_id;
+  INSERT INTO protean_invoices (division, invoice_no, alpha, protean_name, tax_point, net)
+  VALUES ('trailer', 'AT-1', 'ALLTHREE', 'All Three Haulage', '2026-05-01', 40000),
+         ('trailer', 'AT-2', 'ALLTHREE', 'All Three Haulage', '2026-06-01', 25000)
+  ON CONFLICT (division, invoice_no) DO NOTHING;
+
   SELECT count(*) INTO n FROM customer_divisions('a1000000-0000-0000-0000-000000000001');
   IF n <> 3 THEN
     RAISE EXCEPTION 'a customer buying from all three reads as % divisions', n;

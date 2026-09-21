@@ -105,6 +105,12 @@ GRANT EXECUTE ON FUNCTION sold_on(stock_trailers) TO authenticated;
 -- for like against the same point last year, so the three columns are
 -- comparable rather than merely adjacent.
 -- -------------------------------------------------------------
+/* Dropped first because a LATER migration changes this function's return
+   type. On a replay of the whole history the later shape is what is live
+   here, and CREATE OR REPLACE cannot change a return type: it raises
+   42P13 and takes the transaction with it. A no-op on a fresh database. */
+DROP FUNCTION IF EXISTS division_revenue(DATE);
+
 CREATE OR REPLACE FUNCTION division_revenue(p_upto DATE DEFAULT NULL)
 RETURNS TABLE (
   division       TEXT,
