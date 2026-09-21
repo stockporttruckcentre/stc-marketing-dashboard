@@ -284,6 +284,53 @@ export async function findCustomerRevenue(
   return rows<FoundCustomer>(data);
 }
 
+/* The FleetSmart+ invoice queue. Migration 135: the contract knows its
+   monthly charge, so an invoice at that value for that customer in any
+   division is a candidate, and a person says yes or no once. Nothing
+   counts until they do. */
+export type FsCandidate = {
+  contract_id: string;
+  ref: string | null;
+  customer_name: string;
+  account_id: string | null;
+  owner_id: string | null;
+  monthly_total: number;
+  division: Division;
+  division_name: string;
+  invoice_no: string;
+  tax_point: string;
+  net: number;
+  exact: boolean;
+};
+
+export async function fsCandidates(db: Db, owner?: string): Promise<FsCandidate[]> {
+  const { data, error } = await db.rpc('fleetsmart_candidates', {
+    p_owner: owner ?? null, p_tolerance: 0.01,
+  });
+  if (error) throw readable(error);
+  return rows<FsCandidate>(data);
+}
+
+export async function fsAnswerInvoice(
+  db: Db, contract: string, division: Division, invoice: string, contractual: boolean,
+) {
+  const { error } = await db.rpc('fleetsmart_answer_invoice', {
+    p_contract: contract, p_division: division,
+    p_invoice: invoice, p_contractual: contractual,
+  });
+  if (error) throw readable(error);
+}
+
+export async function fsAnswerAll(
+  db: Db, contract: string, contractual: boolean,
+): Promise<number> {
+  const { data, error } = await db.rpc('fleetsmart_answer_all', {
+    p_contract: contract, p_contractual: contractual, p_tolerance: 0.01,
+  });
+  if (error) throw readable(error);
+  return (data as number) ?? 0;
+}
+
 export async function yearOnYear(
   db: Db, division: DivisionFilter = null, upto?: string,
 ): Promise<YearOnYear[]> {
