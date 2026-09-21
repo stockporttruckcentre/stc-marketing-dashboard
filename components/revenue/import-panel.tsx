@@ -86,6 +86,21 @@ type Sent = {
      showing only the latest run is what turned "you imported it twice"
      into "the app ignored my invoices". */
   earlier?: string | null;
+  /* ---- What the READER dropped, before the database saw anything ----
+
+     "Left out" counts rows the database refused. Rows discarded while
+     reading the file never reached it, so they were counted nowhere and
+     shown nowhere: a file could lose half its rows and the screen would
+     say "Left out 0".
+
+     `inFile` is what the sheet had. `unreadable` is what had no invoice
+     number, account, date or figure. `bare` is the rental export's own
+     habit of listing every invoice number it has ever issued and filling
+     in only the ones inside the range asked for, which on the first real
+     file was 2,653 empty rows and is not a fault. */
+  inFile: number;
+  unreadable: number;
+  bare: number;
 };
 
 /* The one destructive step in the whole import, held back until
@@ -209,6 +224,9 @@ export function ImportPanel({ division, divisionName, onDone }: {
         landed.push({
           kind, fileName: d.fileName, result: addUp(results), closed,
           earlier: await importedBefore(supabase, d.fileName, importId),
+          inFile: d.read.read,
+          unreadable: d.read.unusable,
+          bare: d.read.blank,
         });
       }
 
@@ -534,6 +552,24 @@ export function ImportPanel({ division, divisionName, onDone }: {
                   color: 'var(--text-muted)', maxWidth: '78ch',
                 }}>
                   {whatHappened(s.result, s.kind, s.earlier ?? null)}
+                </p>
+                {/* Every row accounted for, from the sheet to the
+                    database, so a file that loses rows on the way in
+                    cannot do it quietly. */}
+                <p style={{
+                  margin: '4px 0 0', fontSize: 12,
+                  color: s.unreadable > 0 ? 'var(--danger)' : 'var(--text-subtle)',
+                }}>
+                  {s.inFile.toLocaleString('en-GB')} row
+                  {s.inFile === 1 ? '' : 's'} in the sheet.
+                  {' '}
+                  {(s.result.rows_new + s.result.rows_updated).toLocaleString('en-GB')} stored.
+                  {s.bare > 0 && ` ${s.bare.toLocaleString('en-GB')} were empty rows the export pads with.`}
+                  {s.unreadable > 0
+                    ? ` ${s.unreadable.toLocaleString('en-GB')} could not be read and did NOT go in: no invoice number, account, date or figure.`
+                    : ' None were unreadable.'}
+                  {s.result.rows_skipped > 0
+                    && ` ${s.result.rows_skipped.toLocaleString('en-GB')} were refused by the database.`}
                 </p>
                 <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginTop: 9 }}>
                   <Figure label="New" value={s.result.rows_new.toLocaleString('en-GB')} />
