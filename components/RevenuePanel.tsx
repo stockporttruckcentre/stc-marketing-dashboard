@@ -390,9 +390,28 @@ function Customers({ rows, loading }: { rows: YearOnYear[]; loading: boolean }) 
       cell: (r) => <Money>{money(r.this_year)}</Money>,
     },
     {
-      key: 'last', label: 'Last year', flex: 1.1, minWidth: 100, align: 'right',
+      /* ---- "Last year" here has always meant THE SAME POINT last year ----
+
+         It has to, or the change column compares five months against
+         twelve. But the header said "Last year", and a customer whose
+         only invoices fall later in the year than today's date renders
+         as nought in both money columns while its "last billed" date
+         sits three columns along proving otherwise.
+
+         That is exactly what happened to Hats Group: two invoices in
+         January, a year that starts in April, and a screen reading
+         zero, zero. The figure was right and the label was a lie. */
+      key: 'last', label: 'Same point last year', flex: 1.2, minWidth: 110, align: 'right',
       sort: (r) => Number(r.last_year || 0),
       cell: (r) => <Money quiet>{money(r.last_year)}</Money>,
+    },
+    {
+      /* The whole of last year, which is the figure somebody means
+         when they ask what a customer spent. Without it, money that
+         exists is displayed as nought. */
+      key: 'lastfull', label: 'All of last year', flex: 1.2, minWidth: 110, align: 'right',
+      sort: (r) => Number(r.last_year_full || 0),
+      cell: (r) => <Money quiet>{money(r.last_year_full)}</Money>,
     },
     {
       key: 'change', label: 'Change', flex: 1.2, minWidth: 110, align: 'right',
