@@ -270,6 +270,12 @@ GRANT EXECUTE ON FUNCTION protean_take_open_jobs(UUID, JSONB) TO authenticated;
 -- that closed on everything open would mark the whole maintenance
 -- workshop finished, because none of it appears in a rental file.
 -- -------------------------------------------------------------
+/* Dropped first because a LATER migration changes this function's return
+   type. On a replay of the whole history the later shape is what is live
+   here, and CREATE OR REPLACE cannot change a return type: it raises
+   42P13 and takes the transaction with it. A no-op on a fresh database. */
+DROP FUNCTION IF EXISTS protean_would_close(UUID);
+
 CREATE OR REPLACE FUNCTION protean_would_close(p_import UUID)
 RETURNS TABLE (would_close INTEGER, open_now INTEGER, in_this_file INTEGER,
                biggest_job TEXT, biggest_value NUMERIC)
