@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   TrendingUp, TrendingDown, Upload, Download, ChevronRight, Minus,
@@ -18,6 +20,7 @@ import { ExportWizard } from '@/components/revenue/export-wizard';
 import { ModeratePanel } from '@/components/revenue/moderate-panel';
 import {
   yearOnYear, groupRevenue, groupBreakdown, companyRevenue, everyOpenJob,
+  findCustomerRevenue, type FoundCustomer,
   type YearOnYear, type GroupRevenue, type GroupLine, type CompanyRevenue,
   type OpenJob, type Division,
 } from '@/lib/protean/rpc';
@@ -164,6 +167,32 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
     return customers.filter((c) => c.company_name.toLowerCase().includes(needle));
   }, [q, customers]);
 
+  /* ---- A name typed here NEVER comes back with nothing ----
+
+     The list above is this division's billed customers. Typing a name
+     that is not in it used to answer with an empty table, which reads
+     as "your customer has been lost". It has not been: it is on
+     another division's tab, or its account is set aside, or it has
+     never been billed, or it has no Protean account at all. Migration
+     129 asks the database directly and returns the REASON alongside
+     the figure, so the answer is always a sentence. */
+  const [elsewhere, setElsewhere] = useState<FoundCustomer[]>([]);
+  const [looking, setLooking] = useState(false);
+
+  useEffect(() => {
+    const needle = q.trim();
+    if (needle.length < 2 || shown.length > 0) { setElsewhere([]); return; }
+    let live = true;
+    setLooking(true);
+    const t = setTimeout(() => {
+      void findCustomerRevenue(supabase, needle)
+        .then((r) => { if (live) setElsewhere(r); })
+        .catch(() => { if (live) setElsewhere([]); })
+        .finally(() => { if (live) setLooking(false); });
+    }, 200);
+    return () => { live = false; clearTimeout(t); setLooking(false); };
+  }, [q, shown.length, supabase]);
+
   const shownJobs = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return open;
@@ -300,6 +329,12 @@ export function RevenuePanel({ mayImport, division, divisionName }: {
         )}
 
         {showing.body === 'customers' && <Customers rows={shown} loading={loading} />}
+
+        {/* Found somewhere else, or found with a reason rather than a
+            figure. Only shown when the list above has nothing. */}
+        {showing.body === 'customers' && q.trim().length >= 2 && shown.length === 0 && (
+          <FoundElsewhere rows={elsewhere} looking={looking} needle={q.trim()} />
+        )}
         {showing.body === 'groups' && (
           <Groups rows={groups} division={division} onChanged={() => void load()} />
         )}
@@ -1022,4 +1057,91 @@ function Stat({ label, value, note, under, quiet, tone }: {
 
 function Quiet({ children }: { children: React.ReactNode }) {
   return <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{children}</span>;
+}
+
+/* =============================================================
+   "Where is my customer."
+
+   Shown when the Customers list has no match for what was typed. The
+   list is one division's billed customers, so a name missing from it
+   is usually somewhere else rather than gone. Every row here carries
+   either a figure or the reason there is not one, because an empty
+   answer in front of a managing director is what caused this to be
+   written.
+   ============================================================= */
+function FoundElsewhere({ rows, looking, needle }: {
+  rows: FoundCustomer[]; looking: boolean; needle: string;
+}) {
+  if (looking) {
+    return (
+      <Card>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', padding: 12, display: 'block' }}>
+          Looking for &#8220;{needle}&#8221; across every division.
+        </span>
+      </Card>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        what={`Nothing in the CRM is called "${needle}"`}
+        why="Not on this division and not on any other. It is not hidden, there is no customer record with that name. Check the spelling, or it has not been added yet."
+      />
+    );
+  }
+
+  return (
+    <Card>
+      <SectionHead
+        title={`Found on another division, or with no figure on this one`}
+        hint="This division's list holds only what it has billed. These are the rest."
+      />
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {rows.map((r) => (
+          <div
+            key={r.contact_id}
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap',
+              padding: '10px 14px', borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <Link
+                href={`/dashboard/crm?contact=${r.contact_id}`}
+                style={{ fontSize: 13, fontWeight: 600, textDecoration: 'none', color: 'inherit' }}
+              >
+                {r.company_name}
+              </Link>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+                {r.divisions
+                  ? `Billed through ${r.divisions}`
+                  : 'No Protean or Sage account linked'}
+                {r.alphas.length > 0 && ` · ${r.alphas.join(', ')}`}
+              </div>
+              {r.why && (
+                <div style={{ fontSize: 12, color: 'var(--warning-text, var(--text-muted))', marginTop: 4 }}>
+                  {r.why}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                This year <strong style={{
+                  color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                }}>{money(Number(r.this_year))}</strong>
+              </span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Last year <strong style={{
+                  color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                }}>{money(Number(r.last_year))}</strong>
+              </span>
+              {r.open_jobs > 0 && <Badge tone="neutral">{r.open_jobs} open</Badge>}
+              {r.set_aside > 0 && <Badge tone="warning">{r.set_aside} set aside</Badge>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }

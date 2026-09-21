@@ -130,6 +130,7 @@
     "check:next-slot": "bash scripts/sql/next-slot-check.sh",
     "check:job-invoice": "bash scripts/sql/job-invoice-check.sh",
     "check:misbound": "bash scripts/sql/misbound-check.sh",
+    "check:find-customer": "bash scripts/sql/find-customer-check.sh",
     "check:portfolio-year": "bash scripts/sql/portfolio-year-check.sh",
     "check:import-wording": "tsx scripts/import-wording-check.ts",
     "check:chart-inside": "tsx scripts/chart-inside-check.ts"
