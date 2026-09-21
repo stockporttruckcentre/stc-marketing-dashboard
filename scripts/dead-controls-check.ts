@@ -61,6 +61,7 @@ const GOVERNED = [
   'components/social/previews.tsx',
   'components/analytics/personal/PersonalAnalytics.tsx',
   'components/dashboard/FinancialYearTargets.tsx',
+  'components/revenue/moderate-panel.tsx',
 ];
 
 let bad = 0;

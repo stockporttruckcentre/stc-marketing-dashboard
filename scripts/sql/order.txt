@@ -131,3 +131,5 @@
 123_jobs_meet_their_invoices
 124_trailer_revenue_is_the_uploads
 125_every_figure_is_the_revenue
+126_portfolio_against_last_year
+127_no_money_on_a_deleted_customer
