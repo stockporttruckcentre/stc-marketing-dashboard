@@ -10,13 +10,13 @@ import {
 } from '@/components/kit/primitives';
 import { useToast } from '@/components/kit/toast';
 import {
-  readDroppedFile, inBatches,
+  readDroppedFile, inBatches, unmatchableInvoices,
   type Read, type InvoiceRow, type OpenJobRow,
 } from '@/lib/protean/import';
 import {
   startImport, sendInvoices, sendOpenJobs, closeWhatWentAway, wouldClose,
-  relinkJobs, addUp,
-  type BatchResult, type WouldClose, type Division,
+  relinkJobs, matchJobsToInvoices, awaitingInvoice, addUp,
+  type BatchResult, type WouldClose, type Division, type Matched, type AwaitingJob,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -117,6 +117,18 @@ export function ImportPanel({ division, divisionName, onDone }: {
   const [sent, setSent] = useState<Sent[]>([]);
   const [closing, setClosing] = useState<Closing | null>(null);
   const [linkedNow, setLinkedNow] = useState(0);
+  /* Jobs settled by the invoices that just landed, and jobs still
+     holding out for one. */
+  const [matched, setMatched] = useState<Matched | null>(null);
+  /* Invoices that settle a job but do not say which, because Protean
+     writes `Multiple` when one invoice covers several. */
+  const [coversMany, setCoversMany] = useState<
+    { invoice_no: string; protean_name: string | null; net: number | null }[]
+  >([]);
+  /* The jobs themselves, not just how many. "Seventeen are waiting" is
+     a fact nobody can act on; seventeen job numbers is a list somebody
+     takes to Protean and asks about. */
+  const [waiting, setWaiting] = useState<AwaitingJob[]>([]);
 
   const take = useCallback(async (files: FileList | File[]) => {
     const next: Dropped[] = [];
@@ -202,6 +214,34 @@ export function ImportPanel({ division, divisionName, onDone }: {
       }
       setLinkedNow(linked);
 
+      /* ---- Jobs and their invoices ----
+
+         From the business:
+
+           it should be wired to dynamically elevate the status of an
+           open job [...] when I upload my updated invoices for this
+           week it should be looking for those now-assumed-to-be-
+           invoiced jobs to match it up.
+
+         Run after either kind of file, because either can be the one
+         that completes a pair. Closing an open jobs import runs it
+         again on the other side of the confirmation, so a job that
+         leaves the list with its invoice already here never spends a
+         moment reading as unpaid. */
+      setBusy('Matching jobs to their invoices');
+      setMatched(await matchJobsToInvoices(supabase, division));
+      setWaiting(await awaitingInvoice(supabase, division));
+
+      /* And the ones that can never match, said out loud. On the first
+         real export that is 13 invoices and 13.7% of the week. */
+      setCoversMany(
+        usable.flatMap((d) => (d.read.ok && d.read.kind === 'invoices'
+          ? unmatchableInvoices(d.read).map((u) => ({
+            invoice_no: u.invoice_no, protean_name: u.protean_name, net: u.net,
+          }))
+          : [])),
+      );
+
       setSent(landed);
       setDropped([]);
       say({ tone: 'success', title: 'That is in. Anything the matcher could not place is waiting under Accounts.' });
@@ -220,13 +260,17 @@ export function ImportPanel({ division, divisionName, onDone }: {
       const closed = await closeWhatWentAway(supabase, closing.importId);
       setSent((was) => was.map((s) =>
         s.fileName === closing.fileName && s.kind === 'open_jobs' ? { ...s, closed } : s));
+      /* Closing runs the match inside the database, so read back what
+         the screen should now say rather than leaving a stale count. */
+      setMatched(await matchJobsToInvoices(supabase, division));
+      setWaiting(await awaitingInvoice(supabase, division));
       setClosing(null);
       say({ tone: 'success', title: `${closed} jobs marked as finished.` });
       onDone();
     } catch (e) {
       say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
     } finally { setBusy(null); }
-  }, [closing, supabase, say, onDone]);
+  }, [closing, supabase, say, onDone, division]);
 
   const ready = dropped.some((d) => d.read.ok);
 
@@ -420,6 +464,17 @@ export function ImportPanel({ division, divisionName, onDone }: {
           <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginBottom: 12 }}>
             <Figure label="Would be finished" value={closing.would.would_close.toLocaleString('en-GB')} />
             <Figure label="Their value" value={money(closing.would.biggest_value)} />
+            {/* The split, because it is the difference between confirming
+                a number and reading one. A week where none of them has an
+                invoice yet is normal; a week where none of them has one
+                and the invoice file went in first is a sign the wrong
+                report was run. */}
+            <Figure label="Already invoiced" value={closing.would.already_invoiced.toLocaleString('en-GB')} />
+            <Figure
+              label="Will wait for an invoice"
+              value={closing.would.will_wait.toLocaleString('en-GB')}
+              quiet={closing.would.will_wait === 0}
+            />
             {closing.would.biggest_job && (
               <Figure label="Largest of them" value={closing.would.biggest_job} />
             )}
@@ -487,6 +542,68 @@ export function ImportPanel({ division, divisionName, onDone }: {
               </div>
             ))}
           </div>
+          {matched && (matched.matched > 0 || matched.still_waiting > 0) && (
+            <div style={{ marginTop: 14 }}>
+              <Alert tone={matched.still_waiting > 0 ? 'warning' : 'info'}>
+                {matched.matched > 0
+                  ? `${matched.matched.toLocaleString('en-GB')} job${matched.matched === 1 ? '' : 's'} settled by an invoice. `
+                  : 'No job was settled by this file. '}
+                {matched.still_waiting > 0
+                  ? `${matched.still_waiting.toLocaleString('en-GB')} job${matched.still_waiting === 1 ? ' is' : 's are'} off the open list with no invoice yet, and will be picked up by a later invoice import.`
+                  : 'Nothing is waiting on an invoice.'}
+              </Alert>
+            </div>
+          )}
+
+          {coversMany.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <Alert tone="warning">
+                {coversMany.length.toLocaleString('en-GB')} invoice
+                {coversMany.length === 1 ? '' : 's'} cover more than one job, so Protean wrote
+                &ldquo;Multiple&rdquo; where the job number goes and they cannot be matched
+                automatically. Their value is counted in revenue in full. The jobs they settle
+                will keep reading as waiting until somebody closes them by hand.
+                {' '}
+                {coversMany.slice(0, 4).map((c) => c.invoice_no).join(', ')}
+                {coversMany.length > 4 ? ` and ${coversMany.length - 4} more.` : '.'}
+              </Alert>
+            </div>
+          )}
+
+          {waiting.length > 0 && (
+            <Card style={{ marginTop: 14 }}>
+              <SectionHead
+                title="Waiting on an invoice"
+                hint={`${waiting.length.toLocaleString('en-GB')} job${waiting.length === 1 ? '' : 's'} `
+                  + 'left the open list and no invoice has arrived. They are held here and settled '
+                  + 'automatically the moment one does.'}
+              />
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <tbody>
+                  {waiting.slice(0, 25).map((j) => (
+                    <tr key={`${j.division}-${j.job_no}`}>
+                      <td style={{ ...CELL, width: 92, fontVariantNumeric: 'tabular-nums' }}>{j.job_no}</td>
+                      <td style={CELL}>{j.protean_name ?? 'No account'}</td>
+                      <td style={{ ...CELL, width: 110, color: 'var(--text-subtle)' }}>{j.depot ?? ''}</td>
+                      <td style={{ ...CELL, width: 96, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                        {j.job_total === null ? '' : money(j.job_total)}
+                      </td>
+                      <td style={{ ...CELL, width: 108, textAlign: 'right', color: 'var(--text-subtle)' }}>
+                        {j.days_waiting === 0 ? 'today'
+                          : `${j.days_waiting} day${j.days_waiting === 1 ? '' : 's'}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {waiting.length > 25 && (
+                <p style={{ fontSize: 12, color: 'var(--text-subtle)', margin: '8px 0 0' }}>
+                  and {(waiting.length - 25).toLocaleString('en-GB')} more.
+                </p>
+              )}
+            </Card>
+          )}
+
           {linkedNow > 0 && (
             <div style={{ marginTop: 14 }}>
               <Alert tone="info">
@@ -523,6 +640,14 @@ export function ImportPanel({ division, divisionName, onDone }: {
     </div>
   );
 }
+
+/** One cell of the waiting list. */
+const CELL: React.CSSProperties = {
+  padding: '5px 8px',
+  borderBottom: '1px solid var(--border)',
+  textAlign: 'left',
+  verticalAlign: 'middle',
+};
 
 /** A small labelled number. Panton, tabular, because these get compared. */
 function Figure({ label, value, quiet }: { label: string; value: string; quiet?: boolean }) {

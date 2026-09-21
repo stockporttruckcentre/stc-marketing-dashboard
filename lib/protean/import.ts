@@ -27,6 +27,21 @@ import { proteanDate, proteanMoney } from '@/lib/protean/customers';
 export type InvoiceRow = {
   invoice_no: string;
   document_no: string | null;
+  /* ---- The job this invoice settles ----
+
+     The Protean sales invoice export carries both an `Invoice No` and a
+     `Document No`, and the `Document No` is the JOB. On the export of
+     21 September 2026: invoice numbers run 296xxx to 297xxx and not one
+     of the 382 falls inside the job number band, while 359 of the 369
+     document numbers do. None of them is a job still open today, which
+     is the model confirming itself rather than contradicting it: a job
+     leaves the open list because it has been invoiced.
+
+     Null where there is no job. Thirteen of those 382 invoices carry no
+     document number, the trailer sales export has no such column at
+     all, and on the Sage rental export `Document No` is the invoice
+     number rather than a job. */
+  job_no: string | null;
   alpha: string;
   customer_ref: string | null;
   protean_name: string | null;
@@ -186,9 +201,27 @@ export function readProteanRows(headers: string[], rows: Record<string, unknown>
       if (isBlankRow([alpha, r['Tax Point'], r[netCol], r['Customer']])) { blank += 1; continue; }
       if (!invoice_no || !alpha || !tax_point || net === null) { unusable += 1; continue; }
 
+      const document_no = text(r, 'Document No');
       out.push({
         invoice_no,
-        document_no: text(r, 'Document No'),
+        document_no,
+        /* The same column, read as what it means, but only where it IS
+           a job number.
+
+           ---- "Multiple" ----
+
+           An invoice covering several jobs has the literal word
+           `Multiple` in this column instead of a number. On the export
+           of 21 September 2026 that is 13 of 382 invoices and £26,192.92
+           of £191,888.81, which is 13.7% of the week.
+
+           Stored as a job number it would match nothing, and the jobs
+           those invoices actually settled would sit waiting for an
+           invoice that had already been paid. So it is not a job number
+           here. `document_no` keeps the word, and
+           `unmatchableInvoices` is what puts them in front of somebody
+           rather than letting them disappear. */
+        job_no: document_no && /^\d+$/.test(document_no) ? document_no : null,
         alpha: alpha.toUpperCase(),
         customer_ref: text(r, 'Customer Ref'),
         protean_name: text(r, 'Customer'),
@@ -293,6 +326,10 @@ function readSage(rows: Record<string, unknown>[]): Read {
     out.push({
       invoice_no,
       document_no: invoice_no,
+      /* Sage's `Document No` IS the invoice number, so there is no job
+         here. Reading it as one would invent a link to a maintenance
+         job that happens to share the number. */
+      job_no: null,
       alpha: alpha.toUpperCase(),
       customer_ref: null,
       protean_name: text(r, 'Customer Name'),
@@ -311,6 +348,30 @@ function readSage(rows: Record<string, unknown>[]): Read {
   }
 
   return { ok: true, kind: 'invoices', rows: out, read: rows.length, unusable, blank };
+}
+
+/**
+ * Invoices that settle a job but do not say which.
+ *
+ * Protean writes `Multiple` in the document column when one invoice
+ * covers several jobs. Those cannot be matched, and 13.7% of a week's
+ * maintenance revenue arrived that way on the first real file, so they
+ * are counted and shown rather than quietly skipped. Somebody reconciles
+ * them by hand, and the point is that they know there is something to
+ * reconcile.
+ */
+export function unmatchableInvoices(read: Read): {
+  invoice_no: string; protean_name: string | null; net: number | null; document_no: string | null;
+}[] {
+  if (!read.ok || read.kind !== 'invoices') return [];
+  return read.rows
+    .filter((r) => r.job_no === null && r.document_no !== null && !/^\d+$/.test(r.document_no))
+    .map((r) => ({
+      invoice_no: r.invoice_no,
+      protean_name: r.protean_name,
+      net: r.net,
+      document_no: r.document_no,
+    }));
 }
 
 /**
