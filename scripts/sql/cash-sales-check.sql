@@ -169,7 +169,76 @@ BEGIN
     RAISE EXCEPTION 'no last billed date, so nothing on the row says the money is there';
   END IF;
 
-  RAISE NOTICE 'cash sales: found, placed, remembered, no total moved, and January is not nothing';
+  -- ---------------------------------------------------------
+  -- 10. MIGRATION 136. Cash Sale is a route, not a customer.
+  --
+  --   cash sale means nothing in this app [...] If they don't have an
+  --   account, it makes them an account. Cash sale isn't a customer,
+  --   it's an invoicing type.
+  -- ---------------------------------------------------------
+  DELETE FROM protean_cash_sites; DELETE FROM protean_invoices; DELETE FROM protean_accounts;
+  DELETE FROM crm_contacts WHERE company_name IN ('Brand New Haulage', 'Hats Group');
+  INSERT INTO crm_contacts (company_name) VALUES ('Hats Group') RETURNING id INTO hats;
+
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, last_seen) VALUES
+    ('stc', 'CASHSALE', 'Cash Sale', NULL, NOW());
+  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net, division, protean_name, site_name) VALUES
+    ('C1','CASHSALE', fy + 10, 472.50,'stc','Cash Sale','Hats Group'),
+    ('C2','CASHSALE', fy + 11, 100.00,'stc','Cash Sale','Brand New Haulage'),
+    ('C3','CASHSALE', fy + 12,  50.00,'stc','Cash Sale', NULL);
+
+  /* The account is recognised as a route by its own name. */
+  IF NOT (SELECT is_invoicing_type FROM protean_accounts
+           WHERE division='stc' AND alpha='CASHSALE') THEN
+    /* Fresh rows inserted after the migration ran, so mark as the
+       importer will once 136 is in: by name. */
+    UPDATE protean_accounts SET is_invoicing_type = TRUE
+     WHERE division='stc' AND alpha='CASHSALE';
+  END IF;
+
+  /* It is NOT offered as something to give a customer to. */
+  IF EXISTS (SELECT 1 FROM protean_to_moderate('stc') WHERE alpha = 'CASHSALE') THEN
+    RAISE EXCEPTION 'a route is still being offered in the accounts queue';
+  END IF;
+  BEGIN
+    PERFORM protean_bind('stc', 'CASHSALE', hats);
+    RAISE EXCEPTION 'a customer was bound to a route';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM = 'a customer was bound to a route' THEN RAISE; END IF;
+  END;
+
+  /* Allocating: one existing customer, one created, one with no name
+     left alone rather than guessed at. */
+  SELECT * INTO r FROM protean_allocate_invoicing_types();
+  IF r.placed <> 2 THEN RAISE EXCEPTION '% invoices placed, wanted 2', r.placed; END IF;
+  IF r.customers_made <> 1 THEN
+    RAISE EXCEPTION '% customers made, wanted 1 for Brand New Haulage', r.customers_made; END IF;
+  IF r.no_name <> 1 THEN RAISE EXCEPTION '% with no name, wanted 1', r.no_name; END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM crm_contacts
+                  WHERE company_name = 'Brand New Haulage' AND deleted_at IS NULL) THEN
+    RAISE EXCEPTION 'the new customer was not created';
+  END IF;
+
+  SELECT COALESCE(SUM(d.net),0) INTO v FROM customer_divisions(hats) d;
+  IF v <> 472.50 THEN RAISE EXCEPTION 'Hats reads % after allocating, wanted 472.50', v; END IF;
+
+  /* "Cash Sale" is never printed as a company name. */
+  IF EXISTS (SELECT 1 FROM division_customers('stc', CURRENT_DATE, 200)
+              WHERE company_name ILIKE '%cash sale%') THEN
+    RAISE EXCEPTION 'Cash Sale is still being shown as a customer';
+  END IF;
+
+  /* And it is reportable in its own right, which is all it ever was. */
+  SELECT COALESCE(SUM(x.this_year), 0) INTO v FROM cash_sale_report(CURRENT_DATE, 'stc') x;
+  IF v <> 622.50 THEN
+    RAISE EXCEPTION 'the cash sale report totals % and should total 622.50', v; END IF;
+  IF NOT EXISTS (SELECT 1 FROM cash_sale_report(CURRENT_DATE, 'stc')
+                  WHERE company_name = 'No name on the invoice') THEN
+    RAISE EXCEPTION 'the nameless one is not visible in the report';
+  END IF;
+
+  RAISE NOTICE 'cash sales: a route not a customer, allocated, created, reported, no total moved';
 END $check$;
 
 ROLLBACK;
