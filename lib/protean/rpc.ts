@@ -400,6 +400,38 @@ export async function makeCustomer(
   return data as string;
 }
 
+/* Accounts sitting on a customer record that was merged away, and what
+   that hides. See migration 127: the money is in the division total and
+   on no customer, which is the hardest shape of wrong to notice. */
+export type Misbound = {
+  division: Division;
+  alpha: string;
+  protean_name: string | null;
+  contact_id: string;
+  was_called: string | null;
+  deleted_on: string | null;
+  goes_to: string | null;
+  goes_to_named: string | null;
+  invoices: number;
+  net_hidden: number;
+  this_year: number;
+};
+
+export async function misboundAccounts(db: Db): Promise<Misbound[]> {
+  const { data, error } = await db.rpc('protean_misbound');
+  if (error) throw readable(error);
+  return rows<Misbound>(data);
+}
+
+export async function fixMisbound(
+  db: Db,
+): Promise<{ moved: number; left_alone: number; net_restored: number }> {
+  const { data, error } = await db.rpc('protean_fix_misbound');
+  if (error) throw readable(error);
+  const r = rows<{ moved: number; left_alone: number; net_restored: number }>(data)[0];
+  return r ?? { moved: 0, left_alone: 0, net_restored: 0 };
+}
+
 export async function setAside(db: Db, division: Division, alpha: string, why: string) {
   const { error } = await db.rpc('protean_ignore', {
     p_division: division, p_alpha: alpha, p_why: why,

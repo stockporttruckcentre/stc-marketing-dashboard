@@ -14,7 +14,8 @@ import { decide, type Verdict, type CrmCustomer } from '@/lib/protean/customers'
 import {
   waitingOnUs, bindAccount, makeCustomer, setAside,
   jobsWithoutAccount, placeOpenWork, makeCustomerForWork,
-  type Waiting, type Division, type DivisionFilter, type OrphanJobs,
+  misboundAccounts, fixMisbound,
+  type Waiting, type Division, type DivisionFilter, type OrphanJobs, type Misbound,
 } from '@/lib/protean/rpc';
 
 /* =============================================================
@@ -75,15 +76,30 @@ export function ModeratePanel({ division, onChanged }: {
   const [orphans, setOrphans] = useState<OrphanJobs[]>([]);
   const [pickingWork, setPickingWork] = useState<OrphanJobs | null>(null);
   const [aside, setAsideFor] = useState<Decision | null>(null);
+  /* Accounts already sitting on a customer a merge deleted. Their money
+     is counted in the division total and shows against nobody, so it is
+     not in the queue above and has to be looked for on purpose. */
+  const [misbound, setMisbound] = useState<Misbound[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [queue, contacts, unplaced] = await Promise.all([
+      const [queue, contacts, unplaced, stranded] = await Promise.all([
         waitingOnUs(supabase, division),
-        supabase.from('crm_contacts').select('id, company_name').order('company_name'),
+        /* LIVE RECORDS ONLY. This list used to be every row of the
+           table, so a customer a merge had soft deleted and renamed to
+           "HATS Group (merged into HATS Group Ltd)" was still offered
+           here. Binding to one put the invoice on a record every
+           customer facing figure filters out, so the division total
+           counted the money and no customer showed it. Migration 127
+           refuses that bind as well: this stops it being offered, that
+           stops it happening. */
+        supabase.from('crm_contacts').select('id, company_name')
+          .is('deleted_at', null).order('company_name'),
         jobsWithoutAccount(supabase, division),
+        misboundAccounts(supabase),
       ]);
+      setMisbound(stranded);
       setWaiting(queue);
       setCrm((contacts.data ?? []) as CrmCustomer[]);
       setOrphans(unplaced);
@@ -163,6 +179,31 @@ export function ModeratePanel({ division, onChanged }: {
     } finally { setBusy(null); }
   };
 
+  /* Putting a stranded account back. Only `contact_id` moves: no
+     invoice is edited and nothing is deleted. An account whose dead
+     record has no successor is left alone and said so, because a guess
+     here would put somebody else's money on a customer. */
+  const putBack = async () => {
+    setBusy('misbound');
+    try {
+      const r = await fixMisbound(supabase);
+      say({
+        tone: r.moved > 0 ? 'success' : 'info',
+        title: r.moved === 0
+          ? 'Nothing could be moved automatically.'
+          : `${r.moved} account${r.moved === 1 ? '' : 's'} back on a live customer, `
+            + `${money(Number(r.net_restored))} showing again this year.`,
+        body: r.left_alone > 0
+          ? `${r.left_alone} could not be placed: the record they were on was deleted `
+            + 'and no merge says where it went. Place those by hand below.'
+          : undefined,
+      });
+      await after();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setBusy(null); }
+  };
+
   const nothingWaiting = !decisions.length && !orphans.length;
 
   return (
@@ -179,6 +220,57 @@ export function ModeratePanel({ division, onChanged }: {
           January. Their invoices are already counted in the company total. They will not appear on
           anybody&apos;s customer record until they are placed.
         </Alert>
+      )}
+
+      {misbound.length > 0 && (
+        <Card>
+          <SectionHead
+            title="On a customer that is no longer there"
+            hint="These are bound to a record a merge deleted, so their money counts in the division total and shows against nobody."
+            action={
+              misbound.some((m) => m.goes_to) ? (
+                <Button variant="primary" onClick={() => void putBack()} disabled={!!busy}>
+                  {busy === 'misbound' ? <Loader size={14} className="spin" /> : <Check size={14} />}
+                  Put {misbound.filter((m) => m.goes_to).length} back
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  disabled
+                  title="None of these has a live record to go back to. Place each one below."
+                >
+                  <Check size={14} /> Put back
+                </Button>
+              )
+            }
+          />
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {misbound.map((m) => (
+              <div
+                key={`${m.division}:${m.alpha}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  padding: '9px 14px', borderBottom: '1px solid var(--border)', fontSize: 13,
+                }}
+              >
+                <strong style={{ minWidth: 150 }}>{m.protean_name ?? m.alpha}</strong>
+                <Badge tone="neutral">{m.division}</Badge>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  was on {m.was_called ?? 'a deleted record'}
+                  {m.deleted_on ? `, deleted ${m.deleted_on}` : ''}
+                </span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                    {money(Number(m.this_year))} this year
+                  </span>
+                  {m.goes_to_named
+                    ? <Badge tone="success">goes to {m.goes_to_named}</Badge>
+                    : <Badge tone="warning">no live record</Badge>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {exact.length > 0 && (
