@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { compactMoney, money } from '@/components/kit/primitives';
 import { Textures, patternId } from './texture';
 
@@ -112,6 +112,9 @@ export function MonthlyStack({
   textured?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  /* Unique per instance, because two charts on one page would share
+     a clip path id and the second would clip to the first's box. */
+  const clipId = useId().replace(/:/g, '');
   const [width, setWidth] = useState(0);
   const [tall, setTall] = useState(0);
   const [over, setOver] = useState<number | null>(null);
@@ -289,6 +292,33 @@ export function MonthlyStack({
           >
             <Textures scope="monthly" colours={colours} on={textured} />
 
+            {/* ---- NOTHING PAINTS OUTSIDE THE PLOT ----
+
+                From the business, looking at a band label running off
+                the side of the card:
+
+                  it's allowed to load outside the bounds of its card
+                  instead of being forced to fully paint inside it
+
+                The box already clips, so the drawing could not escape
+                the CARD. What it could do is paint over the card's own
+                padding and get cut mid word at the edge, which is what
+                a band label anchored in the middle does when it sits on
+                the last month.
+
+                This is the plot's own boundary, in the padding the
+                chart already defines, so anything drawn against the
+                data is clipped to the area the data occupies rather
+                than to wherever the panel happens to end. */}
+            <defs>
+              <clipPath id={`plot-${clipId}`}>
+                <rect
+                  x={PAD.left} y={PAD.top}
+                  width={inner.w} height={inner.h}
+                />
+              </clipPath>
+            </defs>
+
             {/* ---- the money axis ---- */}
             {ticks.map((v) => (
               <g key={v}>
@@ -425,15 +455,29 @@ export function MonthlyStack({
             ) : null))}
 
             {/* ---- the bands, named on themselves ---- */}
-            {bandLabels.map((l) => (
-              <text
-                key={`band-${l.key}`} x={l.x} y={l.y + 3.5} textAnchor="middle"
-                fontFamily="var(--panton)" fontWeight={700} fontSize={11}
-                fill="var(--surface)"
-                stroke="none"
-                style={{ paintOrder: 'stroke', pointerEvents: 'none' }}
-              >{l.name}</text>
-            ))}
+            {/* Clipped to the plot, and anchored away from whichever
+                side it is nearest, so a name on the last month reads
+                backwards into the chart instead of off the edge. The
+                halfway line is the plot's own middle: no new measurement
+                and nothing chosen. */}
+            <g clipPath={`url(#plot-${clipId})`}>
+              {bandLabels.map((l) => {
+                const mid = PAD.left + inner.w / 2;
+                const anchor = l.x > mid ? 'end' : 'start';
+                return (
+                  <text
+                    key={`band-${l.key}`}
+                    x={anchor === 'end' ? Math.min(l.x, PAD.left + inner.w)
+                      : Math.max(l.x, PAD.left)}
+                    y={l.y + 3.5} textAnchor={anchor}
+                    fontFamily="var(--panton)" fontWeight={700} fontSize={11}
+                    fill="var(--surface)"
+                    stroke="none"
+                    style={{ paintOrder: 'stroke', pointerEvents: 'none' }}
+                  >{l.name}</text>
+                );
+              })}
+            </g>
 
             {/* ---- what the pointer is on ---- */}
             {over != null && (
@@ -523,6 +567,9 @@ export function Sparkline({ points, colour, height = 34 }: {
   points: number[]; colour: string; height?: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  /* Unique per instance, because two charts on one page would share
+     a clip path id and the second would clip to the first's box. */
+  const clipId = useId().replace(/:/g, '');
   const [width, setWidth] = useState(0);
 
   useEffect(() => {

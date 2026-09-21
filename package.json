@@ -129,7 +129,8 @@
     "check:rate-card-pdf": "tsx scripts/rate-card-pdf-check.ts",
     "check:next-slot": "bash scripts/sql/next-slot-check.sh",
     "check:job-invoice": "bash scripts/sql/job-invoice-check.sh",
-    "check:import-wording": "tsx scripts/import-wording-check.ts"
+    "check:import-wording": "tsx scripts/import-wording-check.ts",
+    "check:chart-inside": "tsx scripts/chart-inside-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
