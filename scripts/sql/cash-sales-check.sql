@@ -135,7 +135,41 @@ BEGIN
     IF SQLERRM = 'a cash sale was placed on a deleted customer' THEN RAISE; END IF;
   END;
 
-  RAISE NOTICE 'cash sales: found, placed, remembered, and no total moved';
+  -- ---------------------------------------------------------
+  -- 9. THE JANUARY PROBLEM. A customer billed only later in last
+  --    financial year than today's date falls outside BOTH comparison
+  --    windows and renders as nought twice. The whole of last year has
+  --    to carry it, or money that exists is displayed as nothing.
+  --
+  --    This is what Hats Group did on the Revenue tab: two invoices in
+  --    January, a year starting in April, and a screen reading 0 and 0
+  --    with a last billed date of 2026-01-13 beside it.
+  -- ---------------------------------------------------------
+  INSERT INTO crm_contacts (company_name) VALUES ('January Only Ltd') RETURNING id INTO andrew;
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, last_seen)
+  VALUES ('stc','JAN01','JANUARY ONLY', andrew, NOW());
+  /* Ten months into the previous financial year, so after the same
+     point last year but inside it. */
+  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net, division)
+  VALUES ('JAN001','JAN01', (fy - INTERVAL '1 year' + INTERVAL '9 months')::DATE, 1730.31, 'stc');
+
+  SELECT * INTO r FROM protean_year_on_year(CURRENT_DATE, 'stc') WHERE contact_id = andrew;
+  IF r.contact_id IS NULL THEN
+    RAISE EXCEPTION 'a customer billed only in January is missing from the list entirely';
+  END IF;
+  IF r.this_year <> 0 OR r.last_year <> 0 THEN
+    RAISE EXCEPTION 'the windowed columns read % and %, this check is not reproducing it',
+      r.this_year, r.last_year;
+  END IF;
+  IF r.last_year_full <> 1730.31 THEN
+    RAISE EXCEPTION 'the whole of last year reads % and must read 1730.31, or the screen shows nothing',
+      r.last_year_full;
+  END IF;
+  IF r.last_billed IS NULL THEN
+    RAISE EXCEPTION 'no last billed date, so nothing on the row says the money is there';
+  END IF;
+
+  RAISE NOTICE 'cash sales: found, placed, remembered, no total moved, and January is not nothing';
 END $check$;
 
 ROLLBACK;
