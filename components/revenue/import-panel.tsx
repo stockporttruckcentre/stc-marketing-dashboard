@@ -9,6 +9,7 @@ import {
   Alert, Badge, Button, Card, EmptyState, Label, SectionHead, money,
 } from '@/components/kit/primitives';
 import { useToast } from '@/components/kit/toast';
+import { whatHappened } from '@/lib/protean/import-wording';
 import {
   readDroppedFile, inBatches, unmatchableInvoices,
   type Read, type InvoiceRow, type OpenJobRow,
@@ -81,6 +82,10 @@ type Sent = {
   result: Required<BatchResult>;
   /** Null while the closing question is still on the screen. */
   closed: number | null;
+  /* When this same file went in before, if it did today. The screen
+     showing only the latest run is what turned "you imported it twice"
+     into "the app ignored my invoices". */
+  earlier?: string | null;
 };
 
 /* The one destructive step in the whole import, held back until
@@ -201,7 +206,10 @@ export function ImportPanel({ division, divisionName, onDone }: {
           }
         }
 
-        landed.push({ kind, fileName: d.fileName, result: addUp(results), closed });
+        landed.push({
+          kind, fileName: d.fileName, result: addUp(results), closed,
+          earlier: await importedBefore(supabase, d.fileName, importId),
+        });
       }
 
       /* Link any job that had nothing to point at when it landed. It
@@ -507,7 +515,10 @@ export function ImportPanel({ division, divisionName, onDone }: {
 
       {sent.length > 0 && (
         <Card>
-          <SectionHead title="What landed" hint="From the last import." />
+          <SectionHead
+            title="What landed"
+            hint="From the file you just dropped. Earlier imports are not counted here."
+          />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
             {sent.map((s) => (
               <div key={s.fileName}>
@@ -518,6 +529,12 @@ export function ImportPanel({ division, divisionName, onDone }: {
                   <Check size={14} style={{ color: 'var(--success)' }} />
                   {s.fileName}
                 </div>
+                <p style={{
+                  margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.55,
+                  color: 'var(--text-muted)', maxWidth: '78ch',
+                }}>
+                  {whatHappened(s.result, s.kind, s.earlier ?? null)}
+                </p>
                 <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', marginTop: 9 }}>
                   <Figure label="New" value={s.result.rows_new.toLocaleString('en-GB')} />
                   <Figure label="Updated" value={s.result.rows_updated.toLocaleString('en-GB')} />
@@ -648,6 +665,35 @@ const CELL: React.CSSProperties = {
   textAlign: 'left',
   verticalAlign: 'middle',
 };
+
+
+/**
+ * When this file was last imported before now, as a time, or null.
+ *
+ * Read from the import log rather than remembered in the browser, so it
+ * is still true after a reload and true for a file somebody else
+ * dropped this morning.
+ */
+async function importedBefore(
+  db: { from: (t: string) => any }, fileName: string, thisImport: string,
+): Promise<string | null> {
+  try {
+    const { data } = await db.from('protean_imports')
+      .select('at')
+      .eq('file_name', fileName)
+      .neq('id', thisImport)
+      .gte('at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString())
+      .order('at', { ascending: false })
+      .limit(1);
+    const at = (data as { at: string }[] | null)?.[0]?.at;
+    if (!at) return null;
+    return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    /* The sentence reads fine without it. A failure here must not stop
+       somebody being told what landed. */
+    return null;
+  }
+}
 
 /** A small labelled number. Panton, tabular, because these get compared. */
 function Figure({ label, value, quiet }: { label: string; value: string; quiet?: boolean }) {
