@@ -83,6 +83,31 @@ head('Jobs are called jobs, not invoices');
   ok('an open jobs file talks about jobs', /jobs/i.test(s) && !/invoice/i.test(s), s);
 }
 
+head('Every row is accounted for, sheet to database');
+{
+  const src = readFileSync(SRC, 'utf8');
+  /* ---- The blind spot this closes ----
+
+     "Left out" is `rows_skipped`, which the DATABASE reports about rows
+     it refused. Rows the READER discards never reach the database, so a
+     file could lose most of itself and the screen would still say
+     "Left out 0". Nothing counted them and nothing showed them. */
+  ok('the screen is told how many rows the sheet had',
+    src.includes('inFile: d.read.read'),
+    'without the file\u2019s own row count there is nothing to reconcile against');
+  ok('and how many the reader could not read',
+    src.includes('unreadable: d.read.unusable'));
+  ok('and how many were the padding the rental export adds',
+    src.includes('bare: d.read.blank'));
+  ok('the unreadable count is drawn, and in the danger colour when it is not zero',
+    src.includes("s.unreadable > 0 ? 'var(--danger)'")
+    && src.includes('could not be read and did NOT go in'),
+    'a row that vanished between the sheet and the database has to be loud');
+  ok('and it says plainly when none were lost',
+    src.includes('None were unreadable'),
+    'silence reads as "not checked"');
+}
+
 head('The screen says which import the figures are from');
 {
   const src = readFileSync(SRC, 'utf8');
