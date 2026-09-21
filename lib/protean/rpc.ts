@@ -254,6 +254,36 @@ export function readable(error: { message: string; code?: string }): Error {
   return new Error(error.message);
 }
 
+/* Every live customer matching a name, across all divisions, billed or
+   not, set aside or not. Migration 129. The Customers list is filtered
+   by division and drops set aside accounts and never billed customers,
+   all correct for a list and all reasons a NAME can come back with
+   nothing. This one always answers. */
+export type FoundCustomer = {
+  contact_id: string;
+  company_name: string;
+  divisions: string;
+  alphas: string[];
+  this_year: number;
+  last_year: number;
+  change: number;
+  ever: number;
+  last_billed: string | null;
+  open_jobs: number;
+  set_aside: number;
+  why: string | null;
+};
+
+export async function findCustomerRevenue(
+  db: Db, needle: string, upto?: string,
+): Promise<FoundCustomer[]> {
+  const { data, error } = await db.rpc('revenue_find_customer', {
+    p_needle: needle, p_upto: upto ?? null,
+  });
+  if (error) throw readable(error);
+  return rows<FoundCustomer>(data);
+}
+
 export async function yearOnYear(
   db: Db, division: DivisionFilter = null, upto?: string,
 ): Promise<YearOnYear[]> {
