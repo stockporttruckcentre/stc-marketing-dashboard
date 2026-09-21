@@ -32,7 +32,66 @@ const head = (s: string) => console.log(`\n  ${s}\n  ${'-'.repeat(s.length)}`);
 const SRC = 'components/analytics/legacy/monthly.tsx';
 const src = readFileSync(SRC, 'utf8');
 
+head('The axis ceiling is above the data, never below it');
+
+/* ---- The bug that was actually spilling ----
+
+   The chart takes its ceiling from the LAST GRIDLINE. `niceTicks` used
+   to stop at the last round number that fitted UNDER the highest
+   figure, so a company month of 1.2m against a 500k step gave ticks at
+   0, 500k and 1m, a ceiling of 1m, and that month drawn a fifth of the
+   plot's height ABOVE the plot.
+
+   Every month over the top gridline painted outside the area the axis
+   describes. Clipping hid it; it did not fix it. This is the fix, and
+   it is a property rather than an example: for any figure, the top
+   gridline is at or above it. */
+function ticksOf(max: number, want = 4): number[] {
+  if (max <= 0) return [0];
+  const raw = max / want;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? mag * 10;
+  const ceiling = Math.ceil(max / step) * step;
+  const out: number[] = [];
+  for (let v = 0; v <= ceiling + step * 0.001; v += step) out.push(v);
+  return out;
+}
+
+{
+  const spilled: string[] = [];
+  /* Every order of magnitude a haulage company's month could be, and
+     the awkward ones just over a round number. */
+  for (const m of [
+    1, 9, 345, 999, 1000, 1001, 9999, 12345, 99999, 100001,
+    345678, 500001, 999999, 1000000, 1000001, 1200000, 1750000,
+    2400000, 5000001, 9999999, 65704118.28,
+  ]) {
+    const t = ticksOf(m);
+    const top = t[t.length - 1]!;
+    if (top < m) spilled.push(`${m} tops out at ${top}`);
+  }
+  ok(`the top gridline sits at or above the figure, across 21 magnitudes`,
+    spilled.length === 0, spilled.slice(0, 4).join(', '));
+
+  ok('and it does not add gridlines without cause',
+    ticksOf(1000000).length <= 6 && ticksOf(999999).length <= 6,
+    'rounding the ceiling up costs one gridline at most, not a ladder');
+
+  ok('zero and below still answer with a single line',
+    ticksOf(0).length === 1 && ticksOf(-5).length === 1);
+}
+
+{
+  const src2 = readFileSync('components/analytics/monthly.tsx', 'utf8');
+  ok('and the ported chart rounds its ceiling up too',
+    src2.includes('const ceiling = Math.ceil(max / step) * step'),
+    'two copies of this function with two behaviours is the next bug');
+}
+
 head('Nothing drawn against the data can paint outside the plot');
+
+ok('the source rounds the ceiling up',
+  src.includes('const ceiling = Math.ceil(max / step) * step'));
 
 ok('the chart declares a clip bounded to the plot',
   /<clipPath id=\{`plot-\$\{clipId\}`\}>/.test(src)
