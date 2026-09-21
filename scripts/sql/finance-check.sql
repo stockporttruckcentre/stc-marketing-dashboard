@@ -183,11 +183,33 @@ BEGIN
     RAISE EXCEPTION 'the deal list totals %, the year totals %', total, expect;
   END IF;
 
-  /* And it agrees with the column above it on Analytics, which is the
-     figure somebody will be reading off the same screen. */
+  /* ---- The deal list and the revenue column are two questions ----
+
+     They used to be one. Trailer Sales revenue was added up from the
+     stock list, so the deal list and the column were the same sum and
+     this asserted they matched.
+
+     From the business:
+
+       revenue populates it all, you've been instructed on that
+       countless times.
+
+     Migration 124 moved Trailer Sales onto the uploaded invoices with
+     the other two divisions, so the column is what was INVOICED and
+     the deal list is what LEFT THE YARD. They answer different
+     questions and will not tie, which is why this now asserts what the
+     column is made of rather than that two different things are equal. */
   SELECT this_year INTO expect FROM division_revenue('2026-08-01') WHERE division = 'trailer';
+
+  SELECT COALESCE(SUM(i.net), 0) INTO total
+    FROM protean_invoices i
+   WHERE i.division = 'trailer'
+     AND i.tax_point >= financial_year_of('2026-08-01'::DATE)
+     AND i.tax_point <= '2026-08-01';
+
   IF total <> expect THEN
-    RAISE EXCEPTION 'the deals add to % but the Trailer Sales column says %', total, expect;
+    RAISE EXCEPTION 'the Trailer Sales column says % and the uploaded invoices add to %',
+      expect, total;
   END IF;
 
   /* Margin recomputed, not read off the spreadsheet column. */
@@ -199,7 +221,7 @@ BEGIN
     RAISE EXCEPTION 'a linked trailer came back with no customer to click through to';
   END IF;
 
-  RAISE NOTICE 'ok  % deals listed, adding to the Trailer Sales column exactly', n;
+  RAISE NOTICE 'ok  % deals listed, and the revenue column is the uploaded invoices', n;
 END $$;
 
 -- -------------------------------------------------------------
@@ -523,9 +545,25 @@ BEGIN
           'Nowhere Transport Ltd',  9000,  900, 7000,  8000, '2026-06-05', '2026-06-06')
   ON CONFLICT (id) DO NOTHING;
 
+  /* ---- Counted by account, not by trailer ----
+
+     Migration 124 moved Trailer Sales onto the uploaded invoices, so
+     the gap is now counted the way the other two divisions count it:
+     an invoice whose Protean account has no CRM record behind it. Two
+     invoices to one account are still one record to make, which is the
+     point this always made, in the unit the data is now in. */
+  INSERT INTO protean_accounts (division, alpha, protean_name, last_seen)
+  VALUES ('trailer', 'NOWHERE', 'Nowhere Transport Ltd', NOW())
+  ON CONFLICT (division, alpha) DO NOTHING;
+
+  INSERT INTO protean_invoices (division, invoice_no, alpha, protean_name, tax_point, net)
+  VALUES ('trailer', 'T910', 'NOWHERE', 'Nowhere Transport Ltd', '2026-06-02', 11000),
+         ('trailer', 'T911', 'NOWHERE', 'Nowhere Transport Ltd', '2026-06-06',  9000)
+  ON CONFLICT (division, invoice_no) DO NOTHING;
+
   SELECT * INTO r FROM division_reconciliation('2026-08-01') WHERE division = 'trailer';
   IF r.unattributed_n <> 1 THEN
-    RAISE EXCEPTION 'two trailers to one unlinked haulier count as % records to make, not 1',
+    RAISE EXCEPTION 'two invoices to one unlinked haulier count as % records to make, not 1',
       r.unattributed_n;
   END IF;
   IF r.unattributed <> 20000 THEN
