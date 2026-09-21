@@ -64,6 +64,33 @@ type Overview = {
   won_undated: number;
   achieved: number | null;
   to_go: number | null;
+  /* Migration 126. Won work to the as at date, against the same point
+     last year. `target_revenue` above is the whole financial year,
+     because that is what a target is measured against; these two are
+     capped at the date being asked about, because that is what a fair
+     comparison needs. */
+  won_to_date: number | null;
+  last_year_won: number | null;
+  won_change: number | null;
+  won_change_pct: number | null;
+};
+
+/* The portfolio's invoiced revenue, this year against the same point
+   last year. A different basis from the tiles above and labelled as
+   one: this is money that came in through the uploads, not won work on
+   the tracker. */
+type RevenueYear = {
+  year_from: string;
+  year_to: string;
+  last_from: string;
+  last_to: string;
+  this_year: number;
+  last_year: number;
+  change: number;
+  change_pct: number | null;
+  customers: number;
+  with_revenue: number;
+  not_bound: number;
 };
 
 type PipelineRow = {
@@ -125,6 +152,7 @@ export function PersonalAnalytics({
   const [overview, setOverview] = useState<Overview | null>(null);
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
   const [movers, setMovers] = useState<Mover[]>([]);
+  const [revYear, setRevYear] = useState<RevenueYear | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
 
@@ -146,21 +174,25 @@ export function PersonalAnalytics({
     setOverview(null);
     setPipeline([]);
     setMovers([]);
+    setRevYear(null);
     try {
-      const [o, p, m] = await Promise.all([
+      const [o, p, m, y] = await Promise.all([
         supabase.rpc('personal_overview', { p_person: person, p_when: upto ?? null }),
         supabase.rpc('personal_pipeline', { p_person: person, p_when: upto ?? null }),
         supabase.rpc('personal_movers', {
           p_person: person, p_upto: upto ?? null, p_limit: SHOW_MOVERS * 2,
         }),
+        supabase.rpc('personal_revenue_year', { p_person: person, p_upto: upto ?? null }),
       ]);
       if (o.error) throw readable(o.error);
       if (p.error) throw readable(p.error);
       if (m.error) throw readable(m.error);
+      if (y.error) throw readable(y.error);
 
       setOverview(((o.data ?? []) as Overview[])[0] ?? null);
       setPipeline((p.data ?? []) as PipelineRow[]);
       setMovers((m.data ?? []) as Mover[]);
+      setRevYear(((y.data ?? []) as RevenueYear[])[0] ?? null);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : 'The figures would not load.');
     } finally {
@@ -294,6 +326,30 @@ export function PersonalAnalytics({
             : money(Math.abs(Number(overview.to_go)))}
           tone={overview?.to_go != null && Number(overview.to_go) > 0 ? 'warning' : 'plain'}
         />
+        {/* Won work against the same point last year. The SAME basis as
+            the three tiles to its left, so it answers "up on last
+            year" in the currency the target is measured in. The
+            invoiced comparison is a separate panel further down and is
+            never mixed into this one. */}
+        <Tile
+          label={overview?.won_change == null
+            ? 'Against last year'
+            : Number(overview.won_change) < 0 ? 'Down on last year' : 'Up on last year'}
+          value={overview?.won_change == null
+            ? 'Not known'
+            : `${Number(overview.won_change) > 0 ? '+' : ''}${money(Number(overview.won_change))}`}
+          tone={overview?.won_change == null
+            ? 'plain'
+            : Number(overview.won_change) < 0 ? 'warning' : 'plain'}
+          note={overview?.last_year_won == null && overview?.won_to_date == null
+            ? 'No won work either year to compare'
+            : `${money(num(overview?.won_to_date))} so far, `
+              + `${money(num(overview?.last_year_won))} to the same point last year`
+              + (overview?.won_change_pct == null
+                ? ''
+                : `, ${Number(overview.won_change_pct) > 0 ? '+' : ''}`
+                  + `${Number(overview.won_change_pct).toFixed(1)}%`)}
+        />
         <Tile
           label="Open pipeline"
           value={money(num(overview?.open_pipeline))}
@@ -401,6 +457,89 @@ export function PersonalAnalytics({
               <Sub>
                 Won this year is work with an order date inside the financial year. Open
                 pipeline is still winnable and is not revenue.
+              </Sub>
+            </div>
+          )}
+        </Panel>
+
+        {/* ---- the other last year, and it is a different number ----
+
+            The tiles above are WON WORK on the tracker, which is what
+            the target is measured on. This is what the portfolio's
+            customers were INVOICED, out of the uploads, which is what
+            the company Analytics screen and the two lists below read.
+            Both are real and they do not agree, so both are on the
+            screen saying which is which rather than one of them being
+            picked quietly. */}
+        <Panel
+          span={12}
+          title="What this portfolio invoiced, against last year"
+          hint="From the uploads, not the tracker. The same basis as the two lists below."
+        >
+          {!revYear ? (
+            <EmptyState
+              what={loading ? 'Reading the invoices' : 'No invoiced revenue to compare'}
+              why={loading
+                ? 'One moment.'
+                : 'None of this portfolio&#8217;s customers is bound to a Protean or Sage account yet.'}
+            />
+          ) : (
+            <div style={{ display: 'grid', gap: 10, padding: 12 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                padding: '12px 14px',
+                border: '1px solid var(--border)', borderRadius: 'var(--r)',
+                background: 'var(--surface-sunken)',
+              }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  This year to date <strong style={{
+                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                  }}>{money(Number(revYear.this_year))}</strong>
+                </span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Same point last year <strong style={{
+                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                  }}>{money(Number(revYear.last_year))}</strong>
+                </span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {Number(revYear.change) < 0
+                    ? <TrendingDown size={14} color="var(--danger)" />
+                    : <TrendingUp size={14} color="var(--success)" />}
+                  <strong style={{
+                    fontSize: 15, fontVariantNumeric: 'tabular-nums',
+                    color: Number(revYear.change) < 0 ? 'var(--danger)' : 'var(--success)',
+                  }}>
+                    {Number(revYear.change) > 0 ? '+' : ''}{money(Number(revYear.change))}
+                  </strong>
+                  {revYear.change_pct != null && (
+                    <Badge tone={Number(revYear.change) < 0 ? 'warning' : 'success'}>
+                      {Number(revYear.change_pct) > 0 ? '+' : ''}
+                      {Number(revYear.change_pct).toFixed(1)}%
+                    </Badge>
+                  )}
+                </span>
+              </div>
+
+              {/* A customer with no Protean account has no invoiced
+                  figure, and that is not nought. Said out loud rather
+                  than quietly making the total smaller. */}
+              {revYear.not_bound > 0 && (
+                <Alert tone="warning">
+                  <span style={{ flex: 1 }}>
+                    {revYear.not_bound} of this portfolio&#8217;s {revYear.customers} customers
+                    {revYear.not_bound === 1 ? ' is' : ' are'} not bound to a Protean or Sage
+                    account, so {revYear.not_bound === 1 ? 'it adds' : 'they add'} nothing to
+                    either figure. That is not the same as spending nothing.
+                  </span>
+                </Alert>
+              )}
+
+              <Sub>
+                {new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to
+                {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
+                {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
+                {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
+                net by tax point. This is not the figure the target is measured on.
               </Sub>
             </div>
           )}
