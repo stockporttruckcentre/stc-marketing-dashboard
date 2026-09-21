@@ -82,14 +82,36 @@ export type Shape = 'stack' | 'line' | 'column';
    plot rather than in it. */
 const PAD = { top: 22, right: 16, bottom: 26, left: 58 };
 
-/** Three or four gridlines at round numbers, never at 3.7 million. */
+/** Three or four gridlines at round numbers, never at 3.7 million.
+ *
+ * ---- The top gridline is ABOVE the data, never below it ----
+ *
+ * From the business, looking at the area chart running off the top and
+ * the side of its panel:
+ *
+ *   chart data all still breaks out its div
+ *
+ * This used to stop at the last round number that fitted UNDER the
+ * highest figure, and the chart takes its ceiling from the last tick.
+ * So a company month of £1.2m against a £500k step gave ticks at 0,
+ * £500k and £1m, a ceiling of £1m, and the band for that month drawn a
+ * fifth of the plot's height ABOVE the plot. Every month over the top
+ * gridline painted outside the area the axis describes, which is the
+ * whole of what was spilling.
+ *
+ * Rounding the ceiling UP to the next step on the same ladder is the
+ * fix and costs one gridline at most. The ladder is unchanged: the
+ * numbers are as round as they were.
+ */
 export function niceTicks(max: number, want = 4): number[] {
   if (max <= 0) return [0];
   const raw = max / want;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? mag * 10;
+  /* The first round number at or above the highest figure. */
+  const ceiling = Math.ceil(max / step) * step;
   const out: number[] = [];
-  for (let v = 0; v <= max + step * 0.001; v += step) out.push(v);
+  for (let v = 0; v <= ceiling + step * 0.001; v += step) out.push(v);
   return out;
 }
 
