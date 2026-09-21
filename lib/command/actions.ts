@@ -1423,6 +1423,18 @@ export const ACTIONS: CommandActionSpec[] = [
               'jobs on the system', 'work in progress', 'wip',
               'stc revenue', 'maintenance revenue', 'workshop revenue'] },
 
+  /* Jobs that have left the open list with no invoice against them.
+     Reachable by name, because "what's waiting to be invoiced" is a
+     question somebody asks on a Friday and the answer lives on the
+     revenue screen rather than anywhere obvious. */
+  { id: 'nav.awaitingInvoice', label: 'Jobs waiting on an invoice',
+    blurb: 'Finished, and not billed yet', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/revenue/stc', verbs: GO,
+    objects: ['awaiting invoice', 'waiting on an invoice', 'waiting to be invoiced',
+              'not invoiced', 'uninvoiced', 'unbilled', 'unbilled jobs',
+              'jobs waiting on an invoice', 'finished but not invoiced',
+              'what needs invoicing', 'yet to be invoiced', 'outstanding invoicing'] },
+
   /* Its own entry rather than a filter on the one above. Two systems
      that use the same account code for different companies are two
      screens, and somebody typing "rental revenue" means the rental

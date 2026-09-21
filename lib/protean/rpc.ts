@@ -518,6 +518,12 @@ export type WouldClose = {
   in_this_file: number;
   biggest_job: string | null;
   biggest_value: number;
+  /* Of the jobs leaving the list, how many an invoice is already here
+     for, and how many will be held waiting for one. "Close 41 jobs" is
+     a number to confirm; "close 41, of which 33 are already invoiced
+     and 8 will wait" is a number to read. */
+  already_invoiced: number;
+  will_wait: number;
 };
 
 /**
@@ -533,7 +539,52 @@ export async function wouldClose(db: Db, importId: string): Promise<WouldClose> 
   if (error) throw readable(error);
   return (rows<WouldClose>(data)[0]) ?? {
     would_close: 0, open_now: 0, in_this_file: 0, biggest_job: null, biggest_value: 0,
+    already_invoiced: 0, will_wait: 0,
   };
+}
+
+export type Matched = { matched: number; still_waiting: number };
+
+/**
+ * Settle every job whose invoice is now here.
+ *
+ * From the business:
+ *
+ *   it should be wired to dynamically elevate the status of an open
+ *   job [...] if an invoice isn't uploaded yet then it should hold the
+ *   record and await an invoice being uploaded. Again when I upload my
+ *   updated invoices for this week it should be looking for those
+ *   now-assumed-to-be-invoiced jobs to match it up.
+ *
+ * One function, run from either side. After an invoice import it
+ * settles the jobs that were waiting. After an open jobs import it
+ * settles the ones that have just left the list and whose invoice was
+ * already here. An invoice is the authority: a job still showing open
+ * when its invoice arrives is closed by the invoice.
+ */
+export async function matchJobsToInvoices(db: Db, division: Division): Promise<Matched> {
+  const { data, error } = await db.rpc('protean_match_jobs_to_invoices', { p_division: division });
+  if (error) throw readable(error);
+  return (rows<Matched>(data)[0]) ?? { matched: 0, still_waiting: 0 };
+}
+
+export type AwaitingJob = {
+  division: string;
+  job_no: string;
+  protean_name: string | null;
+  depot: string | null;
+  job_type: string | null;
+  job_total: number | null;
+  logged_on: string | null;
+  left_list_on: string | null;
+  days_waiting: number;
+};
+
+/** The jobs that have left the list and have no invoice yet. */
+export async function awaitingInvoice(db: Db, division: Division): Promise<AwaitingJob[]> {
+  const { data, error } = await db.rpc('protean_awaiting_invoice', { p_division: division });
+  if (error) throw readable(error);
+  return rows<AwaitingJob>(data);
 }
 
 /**

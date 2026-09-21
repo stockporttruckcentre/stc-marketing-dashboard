@@ -1219,6 +1219,8 @@ for (const said of [
 for (const [said, id] of [
   ['queue', 'nav.contentQueue'],
   ['posting times', 'nav.contentQueue'],
+  ['what is waiting to be invoiced', 'nav.awaitingInvoice'],
+  ['unbilled jobs', 'nav.awaitingInvoice'],
   ['what time does the queue post', 'nav.contentQueue'],
   ['posting slots', 'nav.contentQueue'],
   ['library', 'nav.contentLibrary'],
