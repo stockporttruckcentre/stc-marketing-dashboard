@@ -76,8 +76,14 @@ type Overview = {
   /* Migration 133. The target figure's two halves, named, so it can be
      checked rather than trusted. */
   tracker_revenue: number | null;
-  fleetsmart_value: number | null;
-  fleetsmart_n: number;
+  /* Migration 134. Two figures, and only one of them counts.
+     Value won is the whole term the moment it is accepted. Value
+     invoiced is money actually billed, and that is what the target
+     is measured on. */
+  fs_value_won: number | null;
+  fs_value_invoiced: number | null;
+  fs_contracts: number;
+  fs_contract_only: boolean;
 };
 
 /* The portfolio's invoiced revenue, this year against the same point
@@ -318,13 +324,18 @@ export function PersonalAnalytics({
           label="Towards target"
           value={money(num(overview?.target_revenue))}
           note={`Won tracker work ${money(num(overview?.tracker_revenue))}`
-            + ` plus FleetSmart+ ${money(num(overview?.fleetsmart_value))}.`
+            + ` plus FleetSmart+ invoiced ${money(num(overview?.fs_value_invoiced))}.`
             + ' Trailer sales are not in this.'}
         />
         <Tile
-          label="FleetSmart+ accepted"
-          value={money(num(overview?.fleetsmart_value))}
-          note={`${overview?.fleetsmart_n ?? 0} contract(s) accepted this year, at their annual value. Counted towards the target.`}
+          label="FS+ value won"
+          value={money(num(overview?.fs_value_won))}
+          note={`${overview?.fs_contracts ?? 0} contract(s) accepted this year, over their whole term. Not counted towards the target.`}
+        />
+        <Tile
+          label="FS+ value invoiced"
+          value={money(num(overview?.fs_value_invoiced))}
+          note="Billed and in the bank. This is the half that counts towards the target."
         />
         <Tile
           label="Achieved"

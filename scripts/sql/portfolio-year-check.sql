@@ -197,14 +197,37 @@ BEGIN
           NOW(), (fy + 5)::TIMESTAMPTZ);
 
   SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
-  IF o.fleetsmart_value <> 20000.00 THEN
-    RAISE EXCEPTION 'FleetSmart+ reads % and should read its annual 20000', o.fleetsmart_value; END IF;
-  IF o.fleetsmart_n <> 1 THEN
-    RAISE EXCEPTION '% contracts counted, wanted 1', o.fleetsmart_n; END IF;
+  /* Migration 134. Value won is the whole TERM: 20000 a year over 36
+     months is 60000. It is reported and is NOT in the target. */
+  IF o.fs_value_won <> 60000.00 THEN
+    RAISE EXCEPTION 'value won reads % and should read the term, 60000', o.fs_value_won; END IF;
+  IF o.fs_contracts <> 1 THEN
+    RAISE EXCEPTION '% contracts counted, wanted 1', o.fs_contracts; END IF;
   IF o.tracker_revenue <> 50000.00 THEN
     RAISE EXCEPTION 'the tracker half reads % and should read 50000', o.tracker_revenue; END IF;
-  IF o.target_revenue <> 70000.00 THEN
-    RAISE EXCEPTION 'the target figure reads % and should read 70000', o.target_revenue; END IF;
+
+  /* Nothing invoiced against it yet, so the target has not moved. */
+  IF COALESCE(o.fs_value_invoiced, 0) <> 0 THEN
+    RAISE EXCEPTION 'value invoiced reads % with no invoices', o.fs_value_invoiced; END IF;
+  IF o.target_revenue <> 50000.00 THEN
+    RAISE EXCEPTION 'the target reads % and value won must not be in it', o.target_revenue; END IF;
+
+  /* Bill some of it. THAT moves the target, and only that. */
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, last_seen)
+  VALUES ('stc','FS0001','ACME HAULAGE FS', acme, NOW())
+  ON CONFLICT (division, alpha) DO NOTHING;
+  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net, division)
+  VALUES ('FSINV1','FS0001', fy + 8, 1666.67, 'stc');
+
+  SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF o.fs_value_invoiced <> 1666.67 THEN
+    RAISE EXCEPTION 'value invoiced reads % and should read 1666.67', o.fs_value_invoiced; END IF;
+  IF o.target_revenue <> 51666.67 THEN
+    RAISE EXCEPTION 'the target reads % and should read 51666.67', o.target_revenue; END IF;
+  IF o.fs_value_won <> 60000.00 THEN
+    RAISE EXCEPTION 'value won moved to %', o.fs_value_won; END IF;
+
+  DELETE FROM protean_invoices WHERE invoice_no = 'FSINV1';
 
   -- A contract that already made a WON tracker lead is NOT added twice.
   UPDATE fleetsmart_contracts f SET lead_id = (
@@ -218,8 +241,9 @@ BEGIN
   -- A draft or declined one reaches nothing.
   UPDATE fleetsmart_contracts SET lead_id = NULL, status = 'declined' WHERE owner_id = rep;
   SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
-  IF COALESCE(o.fleetsmart_value, 0) <> 0 THEN
-    RAISE EXCEPTION 'a declined contract counted %', o.fleetsmart_value; END IF;
+  IF COALESCE(o.fs_value_won, 0) <> 0 OR COALESCE(o.fs_value_invoiced, 0) <> 0 THEN
+    RAISE EXCEPTION 'a declined contract counted % won and % invoiced',
+      o.fs_value_won, o.fs_value_invoiced; END IF;
 
   DELETE FROM fleetsmart_contracts WHERE owner_id = rep;
   DELETE FROM crm_leads WHERE owner_id = rep AND order_date = fy + 1;
