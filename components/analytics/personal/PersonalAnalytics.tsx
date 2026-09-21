@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw, TrendingDown, TrendingUp, UserRound, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { readable } from '@/lib/protean/rpc';
+import {
+  readable, fsCandidates, fsAnswerInvoice, fsAnswerAll, type FsCandidate,
+} from '@/lib/protean/rpc';
+import { useToast } from '@/components/kit/toast';
 import type { Viewable } from '@/lib/analytics/scope';
 import {
   Alert, Badge, Button, Chip, EmptyState, PageHead, compactMoney,
@@ -84,6 +87,10 @@ type Overview = {
   fs_value_invoiced: number | null;
   fs_contracts: number;
   fs_contract_only: boolean;
+  /* How many invoices are waiting to be answered. A figure with a
+     queue behind it says so rather than looking finished. */
+  fs_waiting: number;
+  fs_waiting_worth: number | null;
 };
 
 /* The portfolio's invoiced revenue, this year against the same point
@@ -164,6 +171,9 @@ export function PersonalAnalytics({
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
+  const [queue, setQueue] = useState<FsCandidate[]>([]);
+  const [answering, setAnswering] = useState<string | null>(null);
+  const { say } = useToast();
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
 
@@ -186,7 +196,12 @@ export function PersonalAnalytics({
     setPipeline([]);
     setMovers([]);
     setRevYear(null);
+    setQueue([]);
     try {
+      /* The queue is a side question and must never stop the figures
+         drawing, so it is fetched separately and its failure is shown
+         on the panel rather than over the whole screen. */
+      void fsCandidates(supabase, person).then(setQueue).catch(() => setQueue([]));
       const [o, p, m, y] = await Promise.all([
         supabase.rpc('personal_overview', { p_person: person, p_when: upto ?? null }),
         supabase.rpc('personal_pipeline', { p_person: person, p_when: upto ?? null }),
@@ -212,6 +227,42 @@ export function PersonalAnalytics({
   }, [supabase, person, upto]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* ---- Answering the queue ----
+
+     Every press reaches the database, is refused by the same
+     capability the button is gated on, and the screen redraws from
+     what actually happened rather than from what was attempted. */
+  const answer = useCallback(async (c: FsCandidate, yes: boolean) => {
+    const key = `${c.contract_id}:${c.division}:${c.invoice_no}`;
+    setAnswering(key);
+    try {
+      await fsAnswerInvoice(supabase, c.contract_id, c.division, c.invoice_no, yes);
+      say({
+        tone: 'success',
+        title: yes
+          ? `Invoice ${c.invoice_no} counts towards ${c.customer_name}'s contract.`
+          : `Invoice ${c.invoice_no} is not contractual, and will not be asked again.`,
+      });
+      await load();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setAnswering(null); }
+  }, [supabase, say, load]);
+
+  const answerAll = useCallback(async (c: FsCandidate, yes: boolean) => {
+    setAnswering(c.contract_id);
+    try {
+      const n = await fsAnswerAll(supabase, c.contract_id, yes);
+      say({
+        tone: 'success',
+        title: `${n} invoice(s) on ${c.customer_name} marked ${yes ? 'contractual' : 'not contractual'}.`,
+      });
+      await load();
+    } catch (e) {
+      say({ tone: 'danger', title: e instanceof Error ? e.message : 'That would not save.' });
+    } finally { setAnswering(null); }
+  }, [supabase, say, load]);
 
   const who = people.find((p) => p.id === person) ?? null;
   const isSelf = person === selfId;
@@ -335,7 +386,11 @@ export function PersonalAnalytics({
         <Tile
           label="FS+ value invoiced"
           value={money(num(overview?.fs_value_invoiced))}
-          note="Billed and in the bank. This is the half that counts towards the target."
+          tone={(overview?.fs_waiting ?? 0) > 0 ? 'warning' : 'plain'}
+          note={(overview?.fs_waiting ?? 0) > 0
+            ? `Billed and in the bank. ${overview?.fs_waiting} invoice(s) worth `
+              + `${money(num(overview?.fs_waiting_worth))} are still waiting to be confirmed below.`
+            : 'Billed and in the bank. This is the half that counts towards the target.'}
         />
         <Tile
           label="Achieved"
@@ -489,6 +544,86 @@ export function PersonalAnalytics({
             </div>
           )}
         </Panel>
+
+        {/* ---- is this invoice the contract, or is it ad hoc work ----
+
+            From the business: "you need a checker that listens to
+            invoices at the same value for the same customer and it can
+            ask me if the invoice is contractual or not."
+
+            So the contract's monthly charge is matched against every
+            division, STC first because three in four are, and NOTHING
+            counts until somebody presses one of these. */}
+        {queue.length > 0 && (
+          <Panel
+            span={12}
+            title="Is this invoice part of the contract?"
+            hint="Matched on the contract's monthly charge, across all three divisions. Nothing counts towards the target until it is answered."
+          >
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {queue.map((c) => {
+                const key = `${c.contract_id}:${c.division}:${c.invoice_no}`;
+                const busy = answering === key || answering === c.contract_id;
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                      padding: '10px 14px', borderBottom: '1px solid var(--border)',
+                      fontSize: 13,
+                    }}
+                  >
+                    <strong style={{ minWidth: 170 }}>{c.customer_name}</strong>
+                    <Badge tone="neutral">{c.division_name}</Badge>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      Invoice {c.invoice_no}, {new Date(`${c.tax_point}T00:00:00`)
+                        .toLocaleDateString('en-GB')}
+                    </span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      <strong>{money(Number(c.net))}</strong>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {' '}against {money(Number(c.monthly_total))} a month
+                      </span>
+                    </span>
+                    {!c.exact && <Badge tone="warning">pennies out</Badge>}
+                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void answer(c, true)}
+                      >
+                        Yes, contractual
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void answer(c, false)}
+                      >
+                        No
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void answerAll(c, true)}
+                        title={`Mark every waiting invoice on ${c.customer_name}'s contract as contractual`}
+                      >
+                        Yes to all
+                      </Button>
+                    </span>
+                  </div>
+                );
+              })}
+              <Sub>
+                A direct debit is the same figure every month, so &#8220;Yes to all&#8221; answers
+                the rest of that contract in one press. Every answer is written down per invoice
+                and never asked again.
+              </Sub>
+            </div>
+          </Panel>
+        )}
 
         {/* ---- the other last year, and it is a different number ----
 
