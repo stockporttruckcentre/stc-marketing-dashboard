@@ -103,14 +103,39 @@ BEGIN
   -- ---------------------------------------------------------
   -- Nothing last year is not a percentage.
   -- ---------------------------------------------------------
+  /* Migration 128. The business read "Up on last year +8k" off a
+     portfolio whose last year was Not known, and said it looked like
+     last year was being picked up as this year. It was not: the null
+     was being coalesced to nought and subtracted, so the rise was the
+     whole of this year. No figure for last year means NO change
+     figure. */
   DELETE FROM crm_leads WHERE owner_id = rep AND order_date < fy;
   SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF o.last_year_won IS NOT NULL THEN
+    RAISE EXCEPTION 'last year should be unknown here and is %', o.last_year_won;
+  END IF;
+  IF o.won_change IS NOT NULL THEN
+    RAISE EXCEPTION 'a rise of % was invented out of an unknown last year', o.won_change;
+  END IF;
   IF o.won_change_pct IS NOT NULL THEN
     RAISE EXCEPTION 'a percentage was worked out from nothing: %', o.won_change_pct;
   END IF;
-  IF o.won_change <> 50000.00 THEN
-    RAISE EXCEPTION 'won_change is % and should still be 50000', o.won_change;
+  IF o.won_to_date <> 50000.00 THEN
+    RAISE EXCEPTION 'won_to_date is % and should still be 50000', o.won_to_date;
   END IF;
+
+  /* But a REAL nought last year is a real fall, and is reported. */
+  INSERT INTO crm_leads (id, company_name, contact_id, owner_id, type, status,
+                         sale_price, order_date)
+  VALUES (gen_random_uuid(), 'Acme Haulage', acme, rep, 'maintenance', 'won', 0.00, cut - 5);
+  SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF o.last_year_won <> 0 THEN
+    RAISE EXCEPTION 'last year should be a known nought and is %', o.last_year_won;
+  END IF;
+  IF o.won_change <> 50000.00 THEN
+    RAISE EXCEPTION 'won_change is % and should be 50000 against a known nought', o.won_change;
+  END IF;
+  DELETE FROM crm_leads WHERE owner_id = rep AND order_date < fy;
 
   -- ---------------------------------------------------------
   -- Invoiced revenue. A different basis, and it must not borrow from
