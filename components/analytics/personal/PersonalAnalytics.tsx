@@ -73,6 +73,11 @@ type Overview = {
   last_year_won: number | null;
   won_change: number | null;
   won_change_pct: number | null;
+  /* Migration 133. The target figure's two halves, named, so it can be
+     checked rather than trusted. */
+  tracker_revenue: number | null;
+  fleetsmart_value: number | null;
+  fleetsmart_n: number;
 };
 
 /* The portfolio's invoiced revenue, this year against the same point
@@ -312,7 +317,14 @@ export function PersonalAnalytics({
         <Tile
           label="Towards target"
           value={money(num(overview?.target_revenue))}
-          note="Won work on the tracker. Trailer sales are not in this."
+          note={`Won tracker work ${money(num(overview?.tracker_revenue))}`
+            + ` plus FleetSmart+ ${money(num(overview?.fleetsmart_value))}.`
+            + ' Trailer sales are not in this.'}
+        />
+        <Tile
+          label="FleetSmart+ accepted"
+          value={money(num(overview?.fleetsmart_value))}
+          note={`${overview?.fleetsmart_n ?? 0} contract(s) accepted this year, at their annual value. Counted towards the target.`}
         />
         <Tile
           label="Achieved"

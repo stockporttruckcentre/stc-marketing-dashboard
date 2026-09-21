@@ -182,6 +182,48 @@ BEGIN
     RAISE EXCEPTION 'a rep read somebody else''s won work';
   END IF;
 
+  -- ---------------------------------------------------------
+  -- Migration 133. An accepted FleetSmart+ contract is that person's
+  -- sale and reaches their target, once and only once.
+  -- ---------------------------------------------------------
+  INSERT INTO crm_leads (id, company_name, contact_id, owner_id, type, status,
+                         sale_price, order_date)
+  VALUES (gen_random_uuid(), 'Acme Haulage', acme, rep, 'maintenance', 'won', 50000.00, fy + 1);
+
+  INSERT INTO fleetsmart_contracts (customer_name, account_id, owner_id, status,
+                                    annual_total, monthly_total, term_months,
+                                    sent_at, decided_at)
+  VALUES ('Acme Haulage', acme, rep, 'accepted', 20000.00, 1666.67, 36,
+          NOW(), (fy + 5)::TIMESTAMPTZ);
+
+  SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF o.fleetsmart_value <> 20000.00 THEN
+    RAISE EXCEPTION 'FleetSmart+ reads % and should read its annual 20000', o.fleetsmart_value; END IF;
+  IF o.fleetsmart_n <> 1 THEN
+    RAISE EXCEPTION '% contracts counted, wanted 1', o.fleetsmart_n; END IF;
+  IF o.tracker_revenue <> 50000.00 THEN
+    RAISE EXCEPTION 'the tracker half reads % and should read 50000', o.tracker_revenue; END IF;
+  IF o.target_revenue <> 70000.00 THEN
+    RAISE EXCEPTION 'the target figure reads % and should read 70000', o.target_revenue; END IF;
+
+  -- A contract that already made a WON tracker lead is NOT added twice.
+  UPDATE fleetsmart_contracts f SET lead_id = (
+    SELECT l.id FROM crm_leads l
+     WHERE l.owner_id = rep AND l.status = 'won' AND l.order_date IS NOT NULL LIMIT 1)
+   WHERE f.owner_id = rep;
+  SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF o.target_revenue <> 50000.00 THEN
+    RAISE EXCEPTION 'a contract was double counted, target reads %', o.target_revenue; END IF;
+
+  -- A draft or declined one reaches nothing.
+  UPDATE fleetsmart_contracts SET lead_id = NULL, status = 'declined' WHERE owner_id = rep;
+  SELECT * INTO o FROM personal_overview(rep, CURRENT_DATE);
+  IF COALESCE(o.fleetsmart_value, 0) <> 0 THEN
+    RAISE EXCEPTION 'a declined contract counted %', o.fleetsmart_value; END IF;
+
+  DELETE FROM fleetsmart_contracts WHERE owner_id = rep;
+  DELETE FROM crm_leads WHERE owner_id = rep AND order_date = fy + 1;
+
   RAISE NOTICE 'portfolio year: both bases right, capped at the date, and nobody else can read them';
 END $check$;
 
