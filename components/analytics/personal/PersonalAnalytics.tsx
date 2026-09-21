@@ -341,8 +341,13 @@ export function PersonalAnalytics({
           tone={overview?.won_change == null
             ? 'plain'
             : Number(overview.won_change) < 0 ? 'warning' : 'plain'}
-          note={overview?.last_year_won == null && overview?.won_to_date == null
-            ? 'No won work either year to compare'
+          /* Migration 128. No figure for last year is not a start of
+             nought, so there is no rise to report and the note says
+             why rather than leaving "Not known" unexplained. The
+             tracker simply was not carrying won deals a year ago. */
+          note={overview?.last_year_won == null
+            ? `Nothing won on the tracker last year to compare with. `
+              + `${money(num(overview?.won_to_date))} won so far this year.`
             : `${money(num(overview?.won_to_date))} so far, `
               + `${money(num(overview?.last_year_won))} to the same point last year`
               + (overview?.won_change_pct == null
