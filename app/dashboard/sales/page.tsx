@@ -10,7 +10,7 @@ export default async function StockPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
-  const { verdict } = await requirePage(supabase, '/dashboard/sales', profile as { role?: string | null } | null);
+  const { caps, verdict } = await requirePage(supabase, '/dashboard/sales', profile as { role?: string | null } | null);
   if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="trailer sales" />;
   // Sold list is huge (~1300 rows). Cap initial load; client can paginate later if needed.
   const { data: rows } = await supabase
@@ -20,5 +20,15 @@ export default async function StockPage() {
     .order('category', { ascending: true })
     .order('stc_no', { ascending: true })
     .limit(2000);
-  return <StockList initialRows={(rows ?? []) as StockTrailer[]} role={(profile as Profile)?.role ?? 'viewer'} />;
+  /* Capabilities, not the legacy role. The grid decided what was
+     editable from `role === admin | sales | marketer`, so the Roles tab
+     governed nothing on this screen. Migration 139 puts the same
+     capability on the write policy underneath it. */
+  return (
+    <StockList
+      initialRows={(rows ?? []) as StockTrailer[]}
+      role={(profile as Profile)?.role ?? 'viewer'}
+      caps={[...caps]}
+    />
+  );
 }

@@ -130,6 +130,7 @@
     "check:next-slot": "bash scripts/sql/next-slot-check.sh",
     "check:job-invoice": "bash scripts/sql/job-invoice-check.sh",
     "check:misbound": "bash scripts/sql/misbound-check.sh",
+    "check:view-as": "bash scripts/sql/view-as-check.sh",
     "check:cash-sales": "bash scripts/sql/cash-sales-check.sh",
     "check:report-customers": "bash scripts/sql/report-customers-check.sh",
     "check:fs-invoices": "bash scripts/sql/fs-invoices-check.sh",
