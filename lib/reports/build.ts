@@ -248,9 +248,18 @@ async function revenueSection(db: Db, f: ReportFilters, now: Date): Promise<Sect
   const divisions = divisionFilter(f);
   const from = periodStart(f.period, now);
 
+  /* ---- FETCH FROM WHICHEVER IS EARLIER ----
+
+     This used to fetch from the start of the financial year only,
+     while `from` can be up to a year back. "Last twelve months" then
+     silently lost every month before April, and so did any period
+     crossing it. The period total was quietly a financial year total. */
+  const fy = fyStart(now);
+  const earliest = from < fy ? from : fy;
+
   let q = db.from('protean_invoices').select('net, tax_point, division');
   if (divisions) q = q.in('division', divisions);
-  const { data, error } = await q.gte('tax_point', fyStart(now).toISOString().slice(0, 10));
+  const { data, error } = await q.gte('tax_point', earliest.toISOString().slice(0, 10));
 
   if (error) {
     return { kind: 'note', id: 'revenue', title: 'Invoiced revenue',
@@ -259,7 +268,11 @@ async function revenueSection(db: Db, f: ReportFilters, now: Date): Promise<Sect
 
   const rows = (data ?? []) as { net: number; tax_point: string }[];
   const inPeriod = rows.filter((r) => new Date(r.tax_point) >= from);
-  const fyTotal = rows.reduce((s, r) => s + Number(r.net || 0), 0);
+  /* Filtered now, because the fetch can reach back past April. Summing
+     everything returned would make "financial year to date" carry last
+     year's months whenever the period is longer than the year so far. */
+  const inFy = rows.filter((r) => new Date(r.tax_point) >= fy);
+  const fyTotal = inFy.reduce((s, r) => s + Number(r.net || 0), 0);
   const periodTotal = inPeriod.reduce((s, r) => s + Number(r.net || 0), 0);
 
   return {
@@ -694,29 +707,42 @@ type SpendRow = {
   invoicesLast: number;
 };
 
+/* ---- ONE CUSTOMER, ONE RULE, AND LIKE COMPARED WITH LIKE ----
+
+   This grouped invoices by `protean_name`, which is the rule this
+   product moved away from in migration 131. Two faults came out of it
+   and an audit found both:
+
+     A customer with two accounts was split into two rows.
+
+     Every cash sale in the business pooled under the words "Cash
+     Sale", which would have ranked as a top customer in a report
+     handed to a finance director the day after those same invoices
+     were allocated to their real owners.
+
+   And `lastYear` was everything before the financial year started,
+   which is the WHOLE previous year, set against a `thisYear` of five
+   months, under a note reading "against the same point last financial
+   year". Every seasonal customer read as collapsing.
+
+   `report_customer_spend` is migration 138: the same ownership rule as
+   the customer card, the customers list and the analytics screens, and
+   last year cut at today's date a year back. */
 async function customerSpend(db: Db, f: ReportFilters): Promise<SpendRow[] | null> {
   const divisions = divisionFilter(f);
-  const now = new Date();
-  const thisFy = fyStart(now);
-  const lastFy = new Date(Date.UTC(thisFy.getUTCFullYear() - 1, 3, 1));
-
-  let q = db.from('protean_invoices')
-    .select('protean_name, net, tax_point, division')
-    .gte('tax_point', lastFy.toISOString().slice(0, 10));
-  if (divisions) q = q.in('division', divisions);
-  const { data, error } = await q.limit(50000);
+  const { data, error } = await db.rpc('report_customer_spend', {
+    p_divisions: divisions ?? null,
+    p_upto: null,
+  });
   if (error) return null;
 
-  const by = new Map<string, SpendRow>();
-  for (const r of (data ?? []) as any[]) {
-    const name = (r.protean_name ?? '').trim() || 'Unnamed account';
-    const at = by.get(name) ?? { name, thisYear: 0, lastYear: 0, invoicesThis: 0, invoicesLast: 0 };
-    const on = new Date(r.tax_point);
-    if (on >= thisFy) { at.thisYear += Number(r.net) || 0; at.invoicesThis += 1; }
-    else { at.lastYear += Number(r.net) || 0; at.invoicesLast += 1; }
-    by.set(name, at);
-  }
-  return [...by.values()];
+  return ((data ?? []) as any[]).map((r) => ({
+    name: r.company_name ?? 'Unnamed account',
+    thisYear: Number(r.this_year) || 0,
+    lastYear: Number(r.last_year) || 0,
+    invoicesThis: Number(r.invoices_this) || 0,
+    invoicesLast: Number(r.invoices_last) || 0,
+  }));
 }
 
 async function customerRankSection(

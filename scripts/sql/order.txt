@@ -143,3 +143,4 @@
 135_which_invoices_are_the_contract
 136_cash_sale_is_a_type_not_a_customer
 137_the_gap_panel_reads_the_invoice
+138_reports_read_the_same_customer
