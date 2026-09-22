@@ -270,6 +270,29 @@ BEGIN
     RAISE EXCEPTION 'the two depot customer was unbound from its own account';
   END IF;
 
+  -- ---------------------------------------------------------
+  -- 12. THE PANEL THE BUSINESS WAS LOOKING AT.
+  --
+  --   pasted those, nothing changed on analytics tab
+  --
+  -- division_reconciliation decided "unattributed" from the ACCOUNT's
+  -- customer alone, so every cash sale invoice could be sitting on the
+  -- right customer and the panel still counted the whole Cash Sale
+  -- account as unplaced, because that account has no customer and
+  -- never will have one. Migration 137 asks the invoice instead.
+  -- ---------------------------------------------------------
+  SELECT COALESCE(SUM(x.unattributed), 0) INTO v
+    FROM division_reconciliation(CURRENT_DATE) x;
+  IF v <> 50.00 THEN
+    RAISE EXCEPTION 'the gap panel says % is unplaced and only the 50.00 with no name on it is', v;
+  END IF;
+
+  /* And the nameless one IS still reported. A gap that disappears is
+     worse than a gap that is shown. */
+  IF (SELECT SUM(x.unattributed_n) FROM division_reconciliation(CURRENT_DATE) x) < 1 THEN
+    RAISE EXCEPTION 'the invoice with no customer name on it vanished from the panel';
+  END IF;
+
   RAISE NOTICE 'cash sales: a route not a customer, allocated, created, reported, no total moved';
 END $check$;
 
