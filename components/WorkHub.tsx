@@ -44,7 +44,7 @@
    Everything on this screen is drawn from `components/kit`. The package
    this came in with brought its own stylesheet; none of it is here.
    ============================================================= */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Columns3, Table2, List as ListIcon, CalendarDays, GanttChart, Gauge,
   ChevronLeft, ChevronRight, Search, SlidersHorizontal, ListChecks,
@@ -127,7 +127,7 @@ export function viewSlug(name: string): string {
 
 export function WorkHub({
   initialTasks, views, people, departments, entities, projects, customers, trailers,
-  requests, viewer, capabilities, multiEntity, openView, openLayout, openTab,
+  requests, viewer, capabilities, multiEntity, openView, openLayout, openTab, openTaskId,
   diaryEvents, diaryInvites, diaryGuests, diaryPeople,
 }: {
   initialTasks: Task[];
@@ -154,6 +154,8 @@ export function WorkHub({
   openLayout: string | null;
   /** `?tab=diary` from the command bar, so a sentence can land on it. */
   openTab: 'tasks' | 'diary';
+  /** A task id from a notification link, opened once on arrival. */
+  openTaskId?: string | null;
   /* Everything booked anywhere in the application. Read on the server
      alongside the tasks so the tab draws once with real rows rather
      than flashing an empty diary and filling it in. */
@@ -231,6 +233,7 @@ export function WorkHub({
   const [entityFilter, setEntityFilter] = useState<string>('all');
   const [month, setMonth] = useState(() => new Date());
   const [open, setOpen] = useState<Task | null>(null);
+
   const [moves, setMoves] = useState<Move[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -339,6 +342,24 @@ export function WorkHub({
       if (res.ok) setMoves(await res.json());
     } catch { /* the drawer still opens; it just offers no moves */ }
   }, []);
+
+  /* ---- ARRIVING FROM A NOTIFICATION ----
+
+     Opened once, on arrival, and only if the task is one this person
+     can see. Not in a dependency-chasing effect: reopening it every
+     time `tasks` changes would fight somebody who has closed it and
+     moved on, and that is a drawer nobody can get rid of. */
+  const arrived = useRef(false);
+  useEffect(() => {
+    if (arrived.current || !openTaskId) return;
+    arrived.current = true;
+    const wanted = tasks.find((t) => t.id === openTaskId);
+    /* Through openTask, not setOpen, so the drawer arrives with its
+       history the way it does from a click. */
+    if (wanted) void openTask(wanted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTaskId]);
+
 
   const call = useCallback(async (url: string, body: unknown) => {
     setBusy(open?.id ?? 'x');

@@ -166,6 +166,9 @@ export function EntryDrawer({
   /* The link for a guest just added, shown once. There is no transport
      here, so this is how the invitation gets to them. */
   const [freshLink, setFreshLink] = useState<{ who: string; link: string | null } | null>(null);
+  /* Guests added while the meeting was being created, and the links
+     the organiser now has to send them. */
+  const [pendingLinks, setPendingLinks] = useState<{ who: string; link: string | null }[]>([]);
   const [copied, setCopied] = useState(false);
   const [loadingInvites, setLoadingInvites] = useState(!isNew);
   const [proposing, setProposing] = useState<{ inviteId: string; at: string } | null>(null);
@@ -295,6 +298,7 @@ export function EntryDrawer({
       const newId = (json.event as { id?: string } | undefined)?.id ?? draft.id;
       let added = 0;
       const refused: string[] = [];
+      const links: { who: string; link: string | null }[] = [];
       if (newId && pending.length) {
         for (const g of pending) {
           try {
@@ -303,8 +307,22 @@ export function EntryDrawer({
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ email: g.email, name: g.name, contact_id: draft.contactId }),
             })).json();
-            if (one.ok) added += 1;
-            else refused.push(g.name || g.email);
+            if (one.ok) {
+              added += 1;
+              /* ---- THE LINK IS THE INVITATION ----
+
+                 Nothing emails a guest. On a meeting that already
+                 exists the organiser is handed the link to send, and
+                 they copy it out. This loop read `one.ok` and threw
+                 `one.link` away, so adding a guest while CREATING the
+                 meeting left the organiser with a guest on the entry
+                 and no way to tell them, which is the half of the
+                 flow that matters. */
+              links.push({
+                who: (one.guest?.name as string) || (one.guest?.email as string) || g.email,
+                link: (one.link as string | undefined) ?? null,
+              });
+            } else refused.push(g.name || g.email);
           } catch {
             refused.push(g.name || g.email);
           }
@@ -321,6 +339,17 @@ export function EntryDrawer({
       const missed = refused.length
         ? ` ${refused.join(' and ')} could not be added, so add them again from the entry.`
         : '';
+
+      /* Somebody has to be given the links, so the drawer stays open
+         holding them rather than closing over the one thing the
+         organiser came here to get. Saved either way: `onStored` has
+         already put the meeting in the list. */
+      const sendable = links.filter((l) => l.link);
+      if (sendable.length > 0) {
+        setPendingLinks(sendable);
+        setError(null);
+        return;
+      }
 
       onSaved((json.warning as string | undefined)
         ?? `${draft.title} is in the diary.${asked}${guested}${missed}`);
@@ -632,6 +661,44 @@ export function EntryDrawer({
             this application cannot send it and, on the VPN, a customer
             cannot open it. It is here for whoever can reach the
             application and for the day that changes. */}
+        {pendingLinks.length > 0 && (
+          <div style={{
+            margin: '0 14px 12px', padding: 11, borderRadius: 'var(--r)',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+            borderLeft: '2px solid var(--info)',
+            display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text)' }}>
+              {draft.title} is in the diary. Nothing emails a guest, so these links are how
+              they are told. Send them, then close this.
+            </span>
+            {pendingLinks.map((g) => (
+              <div key={g.link ?? g.who} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{g.who}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <TextInput value={g.link ?? ''} readOnly onChange={() => undefined} />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => { void navigator.clipboard?.writeText(g.link ?? ''); }}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            ))}
+            <div>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => { setPendingLinks([]); onSaved(`${draft.title} is in the diary.`); }}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
+
         {freshLink && !freshLink.link && (
           <div style={{
             margin: '0 14px 12px', padding: '9px 11px', borderRadius: 'var(--r)',
