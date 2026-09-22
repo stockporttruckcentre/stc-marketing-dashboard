@@ -238,6 +238,38 @@ BEGIN
     RAISE EXCEPTION 'the nameless one is not visible in the report';
   END IF;
 
+  -- ---------------------------------------------------------
+  -- 11. A REAL COMPANY WITH TWO DEPOTS IS NOT A BILLING ROUTE.
+  --
+  -- 136 first recognised a route by counting distinct site names. Run
+  -- against the real export that converted 37 real companies worth
+  -- 4,511,247.12, Booker and Dawson Group among them, because they
+  -- invoice two depots. Their revenue would have been stripped off
+  -- their records and re-filed under depot names.
+  -- ---------------------------------------------------------
+  INSERT INTO crm_contacts (company_name) VALUES ('Two Depot Haulage') RETURNING id INTO normal;
+  INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, last_seen)
+  VALUES ('stc','TWODEPOT','TWO DEPOT HAULAGE', normal, NOW());
+  INSERT INTO protean_invoices (invoice_no, alpha, tax_point, net, division, protean_name, site_name) VALUES
+    ('TD1','TWODEPOT', fy + 5, 4000.00,'stc','TWO DEPOT HAULAGE','Hyde'),
+    ('TD2','TWODEPOT', fy + 6, 6000.00,'stc','TWO DEPOT HAULAGE','Haydock');
+
+  IF (SELECT is_invoicing_type FROM protean_accounts
+       WHERE division='stc' AND alpha='TWODEPOT') THEN
+    RAISE EXCEPTION 'a real company with two depots was turned into a billing route';
+  END IF;
+
+  PERFORM protean_allocate_invoicing_types();
+
+  SELECT COALESCE(SUM(d.net),0) INTO v FROM customer_divisions(normal) d;
+  IF v <> 10000.00 THEN
+    RAISE EXCEPTION 'the two depot customer reads % and should read 10000, its money was re-filed', v;
+  END IF;
+  IF (SELECT contact_id FROM protean_accounts WHERE division='stc' AND alpha='TWODEPOT')
+     IS DISTINCT FROM normal THEN
+    RAISE EXCEPTION 'the two depot customer was unbound from its own account';
+  END IF;
+
   RAISE NOTICE 'cash sales: a route not a customer, allocated, created, reported, no total moved';
 END $check$;
 
