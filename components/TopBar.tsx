@@ -41,7 +41,17 @@ export function TopBar({ role = 'viewer', caps }: { role?: UserRole; caps?: stri
 
       <div className="topbar__right">
         <NotificationBell />
-        <button className="btn btn--icon" title="Help" aria-label="Help"><HelpCircle size={14} /></button>
+        {/* The command bar IS the help, so Help opens it. This button
+            had no handler at all and did nothing on every page the top
+            bar appears on, which is the whole of the application. */}
+        <button
+          className="btn btn--icon"
+          title="Help: ask the command bar anything"
+          aria-label="Help: ask the command bar anything"
+          onClick={() => window.dispatchEvent(new Event('stc:open-command-bar'))}
+        >
+          <HelpCircle size={14} />
+        </button>
       </div>
     </header>
   );

@@ -175,6 +175,8 @@ export function RateBuilder({
   };
 
   const commitRate = async (rate: Rate, value: number | null) => {
+    /* What the rate was overridden to before this edit, if anything. */
+    const was = rate.override_value ?? null;
     setBusy(true);
     const done = await api.setRate(cardId, rate.rate_id, rate.axle, value);
     setBusy(false);
@@ -188,14 +190,32 @@ export function RateBuilder({
       await load();
       return;
     }
-    await after(`${rate.item} set to ${money(value)}`, () => { void revert(rate); });
+    /* ---- UNDO PUTS BACK WHAT WAS THERE ----
+
+       This passed `revert`, which clears the override entirely. So on
+       a rate that already had one, undo did not undo: a 100 template
+       with a 120 override, changed to 140, came back as 100. The one
+       number the person was trying to recover was the only one they
+       could not get.
+
+       `was` is read BEFORE the write, off the row the edit came from,
+       and undo writes it back. Null still means "there was no
+       override", so undo clears it, which is the case revert was
+       written for and the only case it was ever right for. */
+    await after(`${rate.item} set to ${money(value)}`, () => { void putBack(rate, was); });
   };
 
-  const revert = async (rate: Rate) => {
-    const done = await api.setRate(cardId, rate.rate_id, rate.axle, null);
+  /* Undo: back to whatever was there, which is the template only when
+     there was no override to begin with. */
+  const putBack = async (rate: Rate, was: number | null) => {
+    const done = await api.setRate(cardId, rate.rate_id, rate.axle, was);
     if (!done.ok) { onToast({ tone: 'error', text: done.why }); return; }
-    await after(`${rate.item} back on the template`);
+    await after(was == null
+      ? `${rate.item} back on the template`
+      : `${rate.item} back to ${money(was)}`);
   };
+
+  const revert = async (rate: Rate) => putBack(rate, null);
 
   /* A labour edit is staged rather than written, and the review dialog
      works out what would move from the card in the browser. The numbers

@@ -88,7 +88,7 @@ function Panel({ title, icon, children }: { title: string; icon?: ReactNode; chi
 
 export function Composer({
   post, variants, channels, networks, templates, campaigns, tags, library,
-  caps, canApprove, onClose, onSaved, onStored, uploadImage,
+  caps, canApprove, onClose, onSaved, onStored, onDeleted, uploadImage,
 }: {
   /** An existing post to edit, or null for a new one. */
   post: Post | null;
@@ -120,6 +120,8 @@ export function Composer({
      been created. It sat in the database, correct and invisible, until
      something reloaded the page. */
   onStored?: (post: Post) => void;
+  /** The post is gone. The planner drops it from its own list. */
+  onDeleted?: (id: string) => void;
   uploadImage: (file: File) => Promise<{ ok: true; url: string } | { ok: false; why: string }>;
 }) {
   /* A post is submitted from draft and from nowhere else. `content_submit`
@@ -385,9 +387,23 @@ export function Composer({
           {post && caps.has('social.delete') && (
             <Button
               size="sm" variant="secondary"
+              /* ---- THE ANSWER IS READ, AND THE LIST IS TOLD ----
+
+                 This fired the request, ignored what came back, and
+                 closed. A refusal looked exactly like a success and
+                 said nothing at all; a success left the post sitting
+                 in the planner's own list until the page was
+                 reloaded, so it could be opened again and deleted
+                 again. */
               onClick={async () => {
                 if (!confirm('Delete this post? It can be restored by an administrator.')) return;
-                await fetch(`/api/content/posts/${post.id}`, { method: 'DELETE' });
+                const res = await fetch(`/api/content/posts/${post.id}`, { method: 'DELETE' });
+                if (!res.ok) {
+                  const why = await res.json().catch(() => ({}));
+                  setError(why.error ?? 'That post would not delete.');
+                  return;
+                }
+                onDeleted?.(post.id);
                 onClose();
               }}
             >

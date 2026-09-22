@@ -38,7 +38,7 @@ function missingTable(error: { code?: string } | null): boolean {
 export default async function WorkPage({
   searchParams,
 }: {
-  searchParams: { view?: string; layout?: string; tab?: string };
+  searchParams: { view?: string; layout?: string; tab?: string; task?: string };
 }) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -152,6 +152,14 @@ export default async function WorkPage({
          so there is one list of them and it is the one drawing. */
       openLayout={searchParams?.layout ?? null}
       openTab={searchParams?.tab === 'diary' ? 'diary' : 'tasks'}
+      /* ---- THE TASK A NOTIFICATION WAS ABOUT ----
+
+         Every task notification links to /dashboard/work?task=<id>
+         and nothing here read it, so pressing one landed on the Work
+         tab with the referenced task nowhere in sight. The person is
+         then hunting a board for the thing they were just told about,
+         which is worse than not having been told. */
+      openTaskId={searchParams?.task ?? null}
       diaryEvents={(diaryRes.data ?? []) as CalendarEvent[]}
       diaryInvites={(inviteRes.data ?? []) as DiaryInvite[]}
       diaryGuests={(guestRes.data ?? []) as DiaryGuest[]}

@@ -253,6 +253,26 @@ export function FleetSmart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ---- ARRIVING FROM A NOTIFICATION ----
+
+     Renewal and decision notifications link to
+     /dashboard/fleetsmart?contract=<id> and only `new` and `contact`
+     were ever read, so pressing one landed somebody on the list with
+     the contract they had just been told about nowhere in sight.
+
+     Opened through openRow, so a draft opens in the builder and
+     anything else opens as the document, exactly as a click does. The
+     parameter is cleared afterwards for the same reason `new` is: a
+     refresh should not reopen it over work already in progress. */
+  useEffect(() => {
+    const wanted = params.get('contract');
+    if (!wanted) return;
+    const row = contracts.find((c) => c.id === wanted);
+    if (row) openRow(row);
+    router.replace('/dashboard/fleetsmart');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contracts.length]);
+
   /**
    * A new contract, for a customer if one was named on the way in.
    *

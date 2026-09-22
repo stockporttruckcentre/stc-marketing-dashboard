@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type { CalendarEvent } from '@/lib/types';
@@ -173,14 +173,43 @@ export function TeamCalendar({
   /* An invitation email, a notification, or the Work tab's diary sends
      somebody to `?event=`. Opening it here is what makes those links
      lead somewhere rather than to the month it happens to be. */
+  const fetchedLink = useRef<string | null>(null);
   useEffect(() => {
     if (!openEventId) return;
+
     const found = events.find((e) => e.id === openEventId);
-    if (!found) return;
-    setOpen({ event: found, draft: draftFor(found) });
-    setCursor(new Date(found.start_at));
-    router.replace('/dashboard/calendar');
-  }, [openEventId, events, router]);
+    if (found) {
+      setOpen({ event: found, draft: draftFor(found) });
+      setCursor(new Date(found.start_at));
+      router.replace('/dashboard/calendar');
+      return;
+    }
+
+    /* ---- NOT IN THE WINDOW IS NOT NOT THERE ----
+
+       The read above covers one month back to four months on, so a
+       meeting further out than that was simply absent from `events`,
+       this returned, and the link did nothing at all. No error, no
+       empty state, no movement: the commonest way for a link to be
+       broken and for nobody to be able to say what happened.
+
+       So it is fetched by id. Once, guarded, because a meeting that
+       has genuinely been deleted must not send this looking for it
+       again on every reload. */
+    if (fetchedLink.current === openEventId) return;
+    fetchedLink.current = openEventId;
+
+    void (async () => {
+      const { data } = await supabase
+        .from('calendar_events').select('*').eq('id', openEventId).maybeSingle();
+      if (!data) { router.replace('/dashboard/calendar'); return; }
+      const far = data as CalendarEvent;
+      setEvents((es) => (es.some((e) => e.id === far.id) ? es : [...es, far]));
+      setOpen({ event: far, draft: draftFor(far) });
+      setCursor(new Date(far.start_at));
+      router.replace('/dashboard/calendar');
+    })();
+  }, [openEventId, events, router, supabase]);
 
   /* ---- moving about ---- */
 

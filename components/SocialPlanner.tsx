@@ -329,6 +329,14 @@ export function SocialPlanner({
     setOpen((o) => (o && o.id === post.id ? post : o));
   }, []);
 
+  /* A post that has been deleted leaves the list here, rather than
+     staying on screen until somebody reloads and finding out it is
+     gone by trying to open it. */
+  const forget = useCallback((id: string) => {
+    setPosts((ps) => ps.filter((p) => p.id !== id));
+    setOpen((o) => (o && o.id === id ? null : o));
+  }, []);
+
   /** Dragging a card. What the move costs is the database's answer. */
   const moveCard = useCallback(async (postId: string, columnId: string, position: number) => {
     const before = posts.find((p) => p.id === postId);
@@ -874,6 +882,7 @@ export function SocialPlanner({
              used to leave the row in the database and nothing about it
              on screen. */
           onStored={replace}
+          onDeleted={forget}
           onSaved={(saved, submitted) => {
             replace(saved);
             setComposing(null);

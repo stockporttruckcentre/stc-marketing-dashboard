@@ -141,8 +141,21 @@ export function CommandBar({ seed, variant = 'panel', role = 'viewer', caps: giv
         e.preventDefault(); inputRef.current?.focus();
       }
     }
+    /* ---- AND THE HELP BUTTON ----
+
+       The top bar's Help button had no handler and did nothing on
+       every page it appeared on. There is no help PAGE to send it to,
+       and this bar is what the product has instead: it reaches every
+       screen, action and shortcut, and answers however somebody
+       chooses to type it. So Help opens this, the same as pressing
+       the shortcut, rather than being drawn and doing nothing. */
+    const onHelp = () => inputRef.current?.focus();
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    window.addEventListener('stc:open-command-bar', onHelp);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('stc:open-command-bar', onHelp);
+    };
   }, []);
 
   /**
