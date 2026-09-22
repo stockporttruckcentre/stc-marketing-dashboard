@@ -145,3 +145,4 @@
 137_the_gap_panel_reads_the_invoice
 138_reports_read_the_same_customer
 139_view_as_cannot_write
+140_the_tracker_asks_the_capability
