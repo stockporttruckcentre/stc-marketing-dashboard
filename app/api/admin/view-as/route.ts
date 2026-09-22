@@ -47,6 +47,22 @@ export async function POST(request: Request) {
     .from('profiles').select('id, full_name').eq('id', userId).maybeSingle();
   if (!them) return NextResponse.json({ error: 'No such person.' }, { status: 404 });
 
+  /* ---- THE ROW THE DATABASE READS ----
+
+     The cookie drives the interface and never reaches PostgreSQL, so
+     row level security could not know this was happening. A screen
+     that writes straight from the browser, like the stock list, met no
+     guard at all and saved, under the administrator's name, from a
+     screen claiming to be somebody else's.
+
+     Migration 139 gives it a row. Written BEFORE the cookie, so a
+     failure here leaves the session unchanged rather than leaving the
+     interface pretending while the database still lets writes through. */
+  const { error: marked } = await gate.supabase.rpc('view_as_start', { p_person: userId });
+  if (marked) {
+    return NextResponse.json({ error: marked.message }, { status: 403 });
+  }
+
   const res = NextResponse.json({
     ok: true,
     viewingAs: (them as { full_name?: string }).full_name ?? 'them',
@@ -65,7 +81,15 @@ export async function POST(request: Request) {
 export async function DELETE() {
   /* Deliberately not gated. Somebody whose administrator permission was
      removed while they were viewing as another person must still be
-     able to stop, and stopping is the safe direction. */
+     able to stop, and stopping is the safe direction.
+
+     The row goes first and its failure is IGNORED, for the same
+     reason: being unable to clear it must never trap somebody inside
+     somebody else's account. A stale row only ever refuses writes,
+     which is the safe way to be wrong. */
+  const supabase = createClient();
+  await supabase.rpc('view_as_stop');
+
   const res = NextResponse.json({ ok: true });
   res.cookies.set(VIEW_AS_COOKIE, '', { path: '/', maxAge: 0 });
   return res;

@@ -43,7 +43,12 @@ const GBP = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP',
 const fmtMoney = (v: number | null | undefined) => (v == null ? '' : GBP.format(Number(v)));
 const fmtDate = (v: string | null | undefined) => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '';
 
-export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; role: Profile['role'] }) {
+export function StockList({ initialRows, role, caps = [] }: {
+  initialRows: StockTrailer[];
+  role: Profile['role'];
+  /** What this person may do, from `requirePage`. */
+  caps?: string[];
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [rows, setRows] = useState<StockTrailer[]>(initialRows);
   const [showImport, setShowImport] = useState(false);
@@ -79,7 +84,14 @@ export function StockList({ initialRows, role }: { initialRows: StockTrailer[]; 
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key); };
   }, []);
 
-  const canEdit = role === 'admin' || role === 'sales' || role === 'marketer';
+  /* ---- THE CAPABILITY, NOT THE LEGACY ROLE ----
+
+     This read `role === 'admin' || 'sales' || 'marketer'`, so the
+     Roles tab governed nothing here: revoking `stock.edit` left the
+     grid editable and granting it to a viewer left the grid read only.
+     Migration 139 puts the same capability on the write policy, so the
+     screen and the database now answer the same question. */
+  const canEdit = caps.includes('stock.edit');
 
   const counts = useMemo(() => {
     const c: Record<StatusTab, number> = { all: rows.length, new_build: 0, in_stock: 0, sales_order: 0, sold: 0, rental: 0, scrap: 0 };
