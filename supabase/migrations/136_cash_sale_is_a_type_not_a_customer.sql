@@ -39,22 +39,25 @@ COMMENT ON COLUMN protean_accounts.is_invoicing_type IS
   'This account is how money arrived, not who paid it. Cash Sale. Never a customer, '
   'never bindable, never in a customer list. Its invoices belong to their site name.';
 
-/* Anything already carrying more than one customer's work is one, and
-   so is anything Protean calls a cash sale. Both, because the first
-   catches the ones nobody has named and the second catches a brand new
-   cash sale account with a single invoice on it so far. */
+/* ---- ONLY BY NAME. NEVER BY COUNTING SITES. ----
+
+   This first said an account carrying more than one distinct site name
+   was an invoicing type. Run against the real export it converted 37
+   REAL COMPANIES, worth 4,511,247.12: Booker, Dawson Group, Davies
+   Turner, Culina, Allianz, and every asset finance house on trailer
+   sales. All of them have two depots. That is what a site name is for.
+
+   A customer with two sites is a customer with two sites. There is no
+   count that distinguishes one from a shared billing route, and a
+   heuristic that strips a real company's revenue off its record and
+   re-files it under a depot name is far worse than leaving a route
+   unmarked for somebody to tick.
+
+   So: the name, and nothing else. Anything further is marked by hand. */
 UPDATE protean_accounts a
    SET is_invoicing_type = TRUE
  WHERE NOT a.is_invoicing_type
-   AND (
-     a.alpha ILIKE '%CASHSALE%' OR a.protean_name ILIKE 'cash sale%'
-     OR EXISTS (
-       SELECT 1 FROM protean_invoices i
-        WHERE i.division = a.division AND i.alpha = a.alpha
-          AND i.site_name IS NOT NULL AND BTRIM(i.site_name) <> ''
-        GROUP BY i.division, i.alpha
-       HAVING count(DISTINCT i.site_name) > 1)
-   );
+   AND (a.alpha ILIKE '%CASHSALE%' OR a.protean_name ILIKE 'cash sale%');
 
 /* A route is nobody's customer, so it holds no contact. The record it
    pointed at, if any, keeps every other account it had. */
