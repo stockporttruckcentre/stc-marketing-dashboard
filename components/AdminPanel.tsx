@@ -350,7 +350,7 @@ function Person({
   say: ReturnType<typeof useToast>['say'];
 }) {
   const supabase = createClient();
-  const [tab, setTab] = useState<'role' | 'permissions'>('role');
+  const [tab, setTab] = useState<'role' | 'permissions' | 'portfolios'>('role');
   const [busy, setBusy] = useState(false);
 
   async function run<T>(
@@ -393,14 +393,28 @@ function Person({
             tabs={[
               { key: 'role' as const, label: 'Role and account' },
               { key: 'permissions' as const, label: 'Permissions', count: member.capabilities ?? undefined },
+              /* ---- WHOSE FIGURES THEY MAY OPEN ----
+
+                 This is not a capability, so it never appeared in the
+                 Permissions list and could not be found by looking
+                 there. It was a role-to-role table nothing but a
+                 migration could change, which made it the one
+                 permission that needed a developer to grant. */
+              { key: 'portfolios' as const, label: 'Whose figures' },
             ]}
           />
         </div>
       </Card>
 
-      {tab === 'role'
-        ? <RoleTab member={member} isSelf={isSelf} templates={templates} busy={busy} run={run} supabase={supabase} />
-        : <PermissionsTab member={member} supabase={supabase} say={say} onChanged={onChanged} />}
+      {tab === 'role' && (
+        <RoleTab member={member} isSelf={isSelf} templates={templates} busy={busy} run={run} supabase={supabase} />
+      )}
+      {tab === 'permissions' && (
+        <PermissionsTab member={member} supabase={supabase} say={say} onChanged={onChanged} />
+      )}
+      {tab === 'portfolios' && (
+        <PortfoliosTab member={member} supabase={supabase} say={say} />
+      )}
     </div>
   );
 }
@@ -538,6 +552,157 @@ function RoleTab({
 /* =============================================================
    Every permission, and every exception to their role
    ============================================================= */
+
+/* =============================================================
+   Whose figures this person may open.
+
+   From the business:
+
+     if I leave this company in a month, that is one permission that
+     can't be granted to specific people and therefore the app fails on
+     being self-sustainable. I won't always be here.
+
+   Portfolio visibility is not a capability. It was a role-to-role
+   table, seeded by migration 117 and deliberately writable by nobody,
+   so it appeared nowhere in the Permissions list and the only way to
+   change it was somebody writing SQL. Migration 143 made it grantable
+   by name. This is where that happens.
+
+   Every row says WHY it reads the way it does, because "their role"
+   and "somebody decided this about these two people" are different
+   facts and an administrator taking this over needs to see which is
+   which before changing anything.
+   ============================================================= */
+function PortfoliosTab({ member, supabase, say }: {
+  member: TeamMember;
+  supabase: ReturnType<typeof createClient>;
+  say: ReturnType<typeof useToast>['say'];
+}) {
+  type Row = {
+    subject_id: string;
+    full_name: string | null;
+    role_name: string | null;
+    may_view: boolean;
+    because: string;
+    is_exception: boolean;
+  };
+
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [why, setWhy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.rpc('portfolio_access_for', { p_viewer: member.id });
+    if (error) { setWhy(error.message); setRows([]); return; }
+    setWhy(null);
+    setRows((data ?? []) as Row[]);
+  }, [supabase, member.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  /* Three states, not two: given by name, taken away by name, and
+     left to the role. The third is what "Clear" returns it to, and it
+     is a different thing from "no", which is why it is its own
+     button rather than an absence. */
+  const set = async (subject: string, granted: boolean | null) => {
+    setBusy(subject);
+    const { error } = granted === null
+      ? await supabase.rpc('clear_portfolio_grant', { p_viewer: member.id, p_subject: subject })
+      : await supabase.rpc('set_portfolio_grant', {
+        p_viewer: member.id, p_subject: subject, p_granted: granted, p_reason: null,
+      });
+    setBusy(null);
+    if (error) { say({ tone: 'danger', title: 'Not changed', body: error.message }); return; }
+    say({
+      tone: 'success',
+      title: granted === null ? 'Back to whatever their role says'
+        : granted ? 'They can open it' : 'They cannot open it',
+    });
+    await load();
+  };
+
+  if (rows === null) return <Card><span style={{ fontSize: 13, color: "var(--text-muted)" }}>Reading who they can open.</span></Card>;
+
+  return (
+    <Card padded={false}>
+      <div style={{ padding: '12px 15px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 13, color: 'var(--text)' }}>
+          Whose Analytics portfolio {member.full_name || 'this person'} can open.
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 3 }}>
+          Their role decides this by default. Anything set here is about these two people
+          and overrides the role, in either direction. Every change is recorded against
+          your name.
+        </div>
+      </div>
+
+      {why && <div style={{ padding: 15 }}><Alert tone="danger">{why}</Alert></div>}
+
+      {rows.length === 0 && !why && (
+        <div style={{ padding: 15 }}>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Nobody on this system holds a role that has a portfolio.</span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {rows.filter((r) => r.subject_id !== member.id).map((r) => (
+          <div
+            key={r.subject_id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+              padding: '10px 15px', borderBottom: '1px solid var(--border)', fontSize: 13,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ color: 'var(--text)' }}>{r.full_name ?? 'Unnamed'}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
+                {r.role_name} · {r.because}
+              </div>
+            </div>
+            <Badge tone={r.may_view ? 'success' : 'neutral'}>
+              {r.may_view ? 'Can open' : 'Cannot open'}
+            </Badge>
+            <span style={{ display: 'flex', gap: 6 }}>
+              <Button
+                size="sm"
+                variant={r.may_view ? 'secondary' : 'primary'}
+                disabled={busy === r.subject_id || (r.may_view && r.is_exception)}
+                title={r.may_view && r.is_exception
+                  ? 'Already given to them by name'
+                  : `Let them open ${r.full_name ?? 'this person'}'s figures`}
+                onClick={() => void set(r.subject_id, true)}
+              >
+                Give
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy === r.subject_id || (!r.may_view && r.is_exception)}
+                title={!r.may_view && r.is_exception
+                  ? 'Already taken away by name'
+                  : `Stop them opening ${r.full_name ?? 'this person'}'s figures`}
+                onClick={() => void set(r.subject_id, false)}
+              >
+                Take away
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy === r.subject_id || !r.is_exception}
+                title={r.is_exception
+                  ? 'Forget this exception and let their role decide again'
+                  : 'Nothing has been set about these two, so their role already decides'}
+                onClick={() => void set(r.subject_id, null)}
+              >
+                Clear
+              </Button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function PermissionsTab({
   member, supabase, say, onChanged,
