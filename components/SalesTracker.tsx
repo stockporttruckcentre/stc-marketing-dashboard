@@ -711,19 +711,58 @@ export function SalesTracker({
    * the rule the business set: you cannot have a lead for a company that
    * does not exist as an account.
    */
-  async function accountFor(companyName: string, websiteUrl = ''): Promise<string | null> {
+  async function accountFor(
+    companyName: string,
+    websiteUrl = '',
+    /* ---- THE DETAILS THE IMPORT USED TO THROW AWAY ----
+
+       A tracker import maps contact name, email, phone, location and
+       the rest, then dropped every one of them: they are account
+       fields, so they were skipped on the way to the lead, and nothing
+       ever wrote them to the account. The import reported success and
+       the details were gone.
+
+       On an account that already exists they FILL BLANKS ONLY. A
+       spreadsheet is somebody's working copy and the CRM is the shared
+       record, so an import must never quietly overwrite a phone number
+       somebody has already corrected. On a new account they are simply
+       written, because there is nothing to protect. */
+    details: Record<string, unknown> = {},
+  ): Promise<string | null> {
     const name = companyName.trim();
     if (!name) { setMessage('A lead needs a company.'); return null; }
 
+    const worth = Object.entries(details).filter(([k, v]) =>
+      k !== 'company_name' && typeof v === 'string' && v.trim() !== '');
+
     const { data: found } = await supabase.from('crm_contacts')
-      .select('id').ilike('company_name', name).limit(1).maybeSingle();
-    if (found) return (found as { id: string }).id;
+      .select('id, contact_name, email, phone, location, source, description, category, account_manager, vehicles')
+      .ilike('company_name', name).limit(1).maybeSingle();
+
+    if (found) {
+      const have = found as Record<string, unknown> & { id: string };
+      const fill: Record<string, unknown> = {};
+      for (const [k, v] of worth) {
+        const already = have[k];
+        if (already === null || already === undefined
+            || (typeof already === 'string' && already.trim() === '')) {
+          fill[k] = v;
+        }
+      }
+      if (Object.keys(fill).length > 0) {
+        await supabase.from('crm_contacts').update(fill).eq('id', have.id);
+      }
+      return have.id;
+    }
 
     const links = websiteUrl.trim()
       ? [{ id: crypto.randomUUID(), label: 'Website', url: websiteUrl.trim(), kind: 'website' as const }]
       : [];
     const { data: made, error } = await supabase.from('crm_contacts')
-      .insert({ company_name: name, source: 'Manual', status: 'lead', links })
+      .insert({
+        company_name: name, source: 'Manual', status: 'lead', links,
+        ...Object.fromEntries(worth),
+      })
       .select('id').single();
     if (error || !made) { setMessage(error?.message ?? 'Could not create that account.'); return null; }
 
@@ -754,14 +793,18 @@ export function SalesTracker({
   async function commitTrackerImport(records: Record<string, any>[]) {
     const made: TrackerRow[] = [];
     for (const r of records) {
-      const contactId = await accountFor(String(r.company_name ?? ''));
-      if (!contactId) continue;
-
+      /* The account fields go to the ACCOUNT, which is what they are
+         for, instead of being dropped on the floor between the two. */
+      const details: Record<string, unknown> = {};
       const patch: Record<string, any> = {};
       for (const [k, v] of Object.entries(r)) {
-        if (k === 'company_name' || ACCOUNT_FIELDS.has(k)) continue;
+        if (k === 'company_name') continue;
+        if (ACCOUNT_FIELDS.has(k)) { details[k] = v; continue; }
         patch[k] = v;
       }
+
+      const contactId = await accountFor(String(r.company_name ?? ''), '', details);
+      if (!contactId) continue;
       const { data, error } = await supabase.from('crm_leads').insert({
         contact_id: contactId,
         owner_id: profile.id,

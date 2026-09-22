@@ -85,8 +85,22 @@ export default async function SalesTrackerPage({
   const ownerId = viewing?.id ?? user.id;
   const { data: leads } = await supabase
     .from('crm_leads')
+    /* ---- EVERY COLUMN THE TRACKER DRAWS, OR IT ERASES THEM ----
+
+       This listed seven columns. The tracker reads twelve, and turns
+       anything absent into a blank before it draws the row. So source,
+       description, category, account manager and vehicles came back
+       undefined on every load, were written down as empty, and a
+       salesperson who had typed them in watched them disappear on
+       refresh. Nothing was ever lost in the database. The screen
+       simply never asked for them.
+
+       The five are named here rather than the whole row, because
+       `crm_contacts` carries turnover, notes and enrichment nobody on
+       this screen needs and every one of them travels to the browser. */
     .select(`*, account:crm_contacts (
-       id, company_name, contact_name, email, phone, location, relationship
+       id, company_name, contact_name, email, phone, location, relationship,
+       source, description, category, account_manager, vehicles
      )`)
     .or(`owner_id.eq.${ownerId},shared_with.cs.{${ownerId}}`)
     .order('last_activity_at', { ascending: false, nullsFirst: false })
