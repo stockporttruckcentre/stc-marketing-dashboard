@@ -203,7 +203,11 @@ function stem(report: Report): string {
 }
 
 export async function GET(req: NextRequest) {
-  const gate = await requireCapability('crm.export');
+  /* reports.export, not crm.export. Taking a report out is its own
+     right in the register, described as exactly that, and asking for
+     the CRM's export right instead refused people who held the one
+     the screen offered them. */
+  const gate = await requireCapability('reports.export');
   if (!gate.ok) return gate.response;
 
   const params = req.nextUrl.searchParams;

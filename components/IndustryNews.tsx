@@ -23,8 +23,11 @@ function formatDate(iso: string): string {
 }
 
 export function IndustryNews({
-  initialItems, initialSources, role,
-}: { initialItems: NewsItem[]; initialSources: NewsSource[]; role: UserRole }) {
+  initialItems, initialSources, role, caps = [],
+}: {
+  initialItems: NewsItem[]; initialSources: NewsSource[];
+  role: UserRole; caps?: string[];
+}) {
   const supabase = createClient();
   const [items, setItems] = useState<NewsItem[]>(initialItems);
   const [sources] = useState<NewsSource[]>(initialSources);
@@ -34,7 +37,12 @@ export function IndustryNews({
   const [query, setQuery] = useState('');
   const [activeSource, setActiveSource] = useState<string | null>(null);
 
-  const canRefresh = role === 'admin' || role === 'marketer';
+  /* THE SAME QUESTION THE ENDPOINT ASKS. This read the old role names
+     while /api/news/fetch asks marketing.edit, so the two halves
+     disagreed with each other: grant marketing.edit to somebody
+     outside those roles and the button stayed hidden, revoke it from a
+     marketer and the button stayed visible and was refused. */
+  const canRefresh = caps.includes('marketing.edit');
 
   // Source -> static backdrop image shipped in /public/news-backdrops.
   // 7 sources, no fallback - blank gradient is intentional for any unmapped source.

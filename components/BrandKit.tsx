@@ -6,15 +6,18 @@ import { createClient } from '@/lib/supabase/client';
 import type { BrandAsset, AssetType, UserRole } from '@/lib/types';
 
 export function BrandKit({
-  initialAssets, role,
-}: { initialAssets: BrandAsset[]; role: UserRole }) {
+  initialAssets, role, caps = [],
+}: { initialAssets: BrandAsset[]; role: UserRole; caps?: string[] }) {
   const supabase = useMemo(() => createClient(), []);
   const [assets, setAssets] = useState<BrandAsset[]>(initialAssets);
   const [uploading, setUploading] = useState(false);
   const [showAddColor, setShowAddColor] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const canEdit = role === 'admin' || role === 'marketer';
+  /* The capability, not the legacy role. Granting brand.manage used to
+     leave upload and delete refused by the database; revoking it left
+     them working. Migration 141 puts the same question underneath. */
+  const canEdit = caps.includes('brand.manage');
 
   // Logo display order — STC house first, then S&L, then divisions, then seasonal/no-oval last.
   // Matched against the file name in the public URL (case-insensitive).

@@ -10,7 +10,7 @@ export default async function NewsPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
-  const { verdict } = await requirePage(supabase, '/dashboard/news', profile as { role?: string | null } | null);
+  const { caps, verdict } = await requirePage(supabase, '/dashboard/news', profile as { role?: string | null } | null);
   if (verdict.state !== 'allowed') return <NoAccess verdict={verdict} page="industry news" />;
   const [{ data: items }, { data: sources }] = await Promise.all([
     supabase
@@ -26,6 +26,7 @@ export default async function NewsPage() {
       initialItems={(items ?? []) as NewsItem[]}
       initialSources={(sources ?? []) as NewsSource[]}
       role={(profile as Profile)?.role ?? 'viewer'}
+      caps={[...caps]}
     />
   );
 }

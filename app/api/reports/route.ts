@@ -27,7 +27,11 @@ const DIVISIONS: Division[] = ['stc', 'trailer', 'rental'];
 const PERIODS: Period[] = ['week', 'fortnight', 'month', 'quarter', 'fy', 'year'];
 
 export async function POST(req: NextRequest) {
-  const gate = await requireCapability('crm.view');
+  /* reports.view, not crm.view. The Reports hub is drawn from
+     reports.view and reports.export, so somebody granted exactly those
+     two could open the hub, press a report, and be refused by the
+     route behind it. Running a report is what reports.view means. */
+  const gate = await requireCapability('reports.view');
   if (!gate.ok) return gate.response;
 
   const b = await req.json().catch(() => ({})) as Record<string, unknown>;
