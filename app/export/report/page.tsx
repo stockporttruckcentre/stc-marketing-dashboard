@@ -33,7 +33,12 @@ export default async function ReportExportPage({
   const { data: profileRow } = await supabase
     .from('profiles').select('*').eq('id', user.id).single();
   const caps = await screenCapabilities(supabase, profileRow as { role?: string | null } | null);
-  if (!caps.has('crm.view')) redirect('/dashboard');
+  /* The print view is a report being taken out of the building, so it
+     asks for both: reports.view to run one and reports.export to leave
+     with it. It asked for crm.view, which is neither, so it let
+     somebody without the export right print one and refused somebody
+     who held it. */
+  if (!caps.has('reports.view') || !caps.has('reports.export')) redirect('/dashboard');
 
   const filters = fromParams(slug, params);
   const made = await buildReport(supabase as never, slug, filters);

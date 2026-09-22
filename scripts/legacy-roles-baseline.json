@@ -1,0 +1,11 @@
+{
+  "supabase/migrations/001_dashboard.sql": 2,
+  "supabase/migrations/014_command_attachments.sql": 1,
+  "supabase/migrations/016_capability_roles_seed.sql": 1,
+  "supabase/migrations/040_leads.sql": 4,
+  "supabase/migrations/045_the_shared_pipeline_is_writable.sql": 3,
+  "supabase/migrations/047_actor_and_policy_holes.sql": 2,
+  "supabase/migrations/054_content_model.sql": 1,
+  "supabase/migrations/097_a_lead_can_quote_more_than_one_trailer.sql": 1,
+  "supabase/schema.sql": 18
+}
