@@ -66,7 +66,30 @@ function emptyDb(broken: string[] = []): any {
       return () => make(table);
     },
   });
-  return { from: (t: string) => make(t) };
+  /* ---- AND THE FUNCTIONS, WHICH ARE A TABLE BY ANOTHER NAME ----
+
+     Customer ranking moved off a table and onto `report_customer_spend`
+     in migration 138, so the stub grew an `rpc`. A function this
+     installation does not have answers the way a missing table does,
+     because the section has to say so rather than print a zero, and
+     that is the whole point of this check.
+
+     `MISSING_FN` maps the tables named broken to the functions that
+     read them, so "the Protean table is not here" still reaches the
+     builder now that the builder asks a function instead. */
+  const MISSING_FN: Record<string, string[]> = {
+    protean_invoices: ['report_customer_spend'],
+  };
+  const gone = new Set(broken.flatMap((t) => MISSING_FN[t] ?? []));
+
+  return {
+    from: (t: string) => make(t),
+    rpc: (fn: string) => Promise.resolve(
+      gone.has(fn)
+        ? { data: null, error: { message: `function ${fn} does not exist` } }
+        : { data: [], error: null },
+    ),
+  };
 }
 
 const NO_FILTERS = defaultFilters();
