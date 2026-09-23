@@ -157,3 +157,4 @@
 149_the_crm_picks_a_division
 150_the_column_is_rescued_before_it_is_overwritten
 151_a_bundle_remembers_what_it_swallowed
+152_another_companys_verdicts_come_off_the_posts
