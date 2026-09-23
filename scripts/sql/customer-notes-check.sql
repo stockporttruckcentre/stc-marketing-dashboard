@@ -19,7 +19,8 @@ DECLARE
   rep  UUID := 'cccc2222-0000-0000-0000-000000000001';
   mate UUID := 'cccc2222-0000-0000-0000-000000000002';
   boss UUID := 'cccc2222-0000-0000-0000-000000000003';
-  cust UUID; lead_a UUID; lead_b UUID; note contact_notes; r RECORD; n INT; said TEXT;
+  cust UUID; other UUID; lead_a UUID; lead_b UUID; lead_c UUID;
+  note contact_notes; r RECORD; n INT; said TEXT;
 BEGIN
   ALTER TABLE profiles DISABLE TRIGGER USER;
   INSERT INTO auth.users (id, email) VALUES
@@ -209,7 +210,60 @@ BEGIN
   SELECT * INTO r FROM contact_notes_from_column();
   IF r.moved <> 0 THEN RAISE EXCEPTION 'a second run of the column backfill wrote % more', r.moved; END IF;
 
-  RAISE NOTICE 'customer notes: one story per customer, editable, removable, mirrored, and both backfills keep their source';
+  -- ---------------------------------------------------------
+  -- 10. THE TWO BACKFILLS IN THE WRONG ORDER LOSE NOTHING.
+  --
+  -- Found by running the handover files against real data. The mirror
+  -- recomputes `crm_contacts.notes` the moment any note is written, so
+  -- moving the deal notes first overwrote the column, and the sweep
+  -- that exists to rescue that value then found the column agreeing
+  -- with a note and reported "already there". A line somebody had
+  -- typed about a customer was gone and the counts looked fine.
+  --
+  -- Migration 150 makes the order stop mattering. This asserts the
+  -- WRONG order, on purpose, because the right one already worked.
+  -- ---------------------------------------------------------
+  PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
+
+  INSERT INTO crm_contacts (company_name, notes)
+  VALUES ('Order Matters Haulage', 'Typed into the grid long ago')
+  RETURNING id INTO other;
+  INSERT INTO crm_leads (company_name, contact_id, owner_id, created_by, type, status, notes)
+  VALUES ('Order Matters Haulage', other, rep, rep, 'maintenance', 'quoted',
+          'Rang them about the curtainsiders')
+  RETURNING id INTO lead_c;
+
+  -- Deals first, which is the order that destroyed it.
+  PERFORM tracker_notes_to_customers();
+  PERFORM contact_notes_from_column();
+
+  IF NOT EXISTS (SELECT 1 FROM contact_notes
+                  WHERE contact_id = other AND deleted_at IS NULL
+                    AND text = 'Typed into the grid long ago') THEN
+    RAISE EXCEPTION 'the column value was destroyed by moving the deal notes first';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM contact_notes
+                  WHERE contact_id = other AND deleted_at IS NULL
+                    AND text = 'Rang them about the curtainsiders') THEN
+    RAISE EXCEPTION 'the deal note did not reach the customer';
+  END IF;
+
+  /* And the rescued one is the OLDER of the two, so the grid still
+     shows what was said most recently rather than what was rescued. */
+  SELECT text INTO said FROM contact_notes
+   WHERE contact_id = other AND deleted_at IS NULL
+   ORDER BY created_at DESC, id DESC LIMIT 1;
+  IF said <> 'Rang them about the curtainsiders' THEN
+    RAISE EXCEPTION 'the rescued column value jumped the queue: newest is now %', said;
+  END IF;
+
+  -- Both again, still two notes.
+  PERFORM tracker_notes_to_customers();
+  PERFORM contact_notes_from_column();
+  SELECT count(*) INTO n FROM contact_notes WHERE contact_id = other AND deleted_at IS NULL;
+  IF n <> 2 THEN RAISE EXCEPTION 'a second run of both left % notes, wanted 2', n; END IF;
+
+  RAISE NOTICE 'customer notes: one story per customer, editable, removable, mirrored, and the backfills keep their source in either order';
 END $check$;
 
 ROLLBACK;
