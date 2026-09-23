@@ -64,6 +64,7 @@ const GOVERNED = [
   'components/revenue/moderate-panel.tsx',
   'components/TopBar.tsx',
   'components/AdminPanel.tsx',
+  'components/crm/CustomerNotes.tsx',
 ];
 
 let bad = 0;

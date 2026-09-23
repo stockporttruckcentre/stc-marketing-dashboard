@@ -330,6 +330,15 @@ export interface ContactNote {
   author_name: string;
   text: string;
   created_at: string;
+  /* A note that has been changed after it was written says so, and
+     names who changed it. Rewriting attributed words silently is not
+     something this application does. Migration 144. */
+  edited_at?: string | null;
+  edited_by?: string | null;
+  /* Set when the note was added from a deal on the tracker rather than
+     from the customer record itself. The note still belongs to the
+     customer: this only says where somebody was standing. */
+  from_lead_id?: string | null;
 }
 
 export interface ContactAddress {

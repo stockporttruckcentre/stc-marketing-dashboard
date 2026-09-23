@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  X, Building2, Plus, Trash2, Star, Send, CalendarPlus, FileText,
+  X, Building2, Plus, Trash2, Star, CalendarPlus, FileText,
   MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Briefcase, Bell
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -20,8 +20,9 @@ import { HealthPanel } from './HealthPanel';
 import { AddressMap } from './AddressMap';
 import { CustomerValue } from './CustomerValue';
 import { ProteanSpend } from './ProteanSpend';
+import { CustomerNotes } from './CustomerNotes';
 import type {
-  CRMContact, ContactStatus, CrmList, Profile, ContactNote, ContactAddress, Lead, LeadType,
+  CRMContact, ContactStatus, CrmList, Profile, ContactAddress, Lead, LeadType,
 } from '@/lib/types';
 
 /** A pitch with whose tracker it sits on, which is how it is listed. */
@@ -77,9 +78,6 @@ export function ContactDrawer({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [edit, setEdit] = useState<CRMContact>(contact);
-  const [notes, setNotes] = useState<ContactNote[]>([]);
-  const [noteText, setNoteText] = useState('');
-  const [loadingNotes, setLoadingNotes] = useState(true);
   const [meetings, setMeetings] = useState<any[]>([]);
   const [showSchedule, setShowSchedule] = useState(false);
   const [showProposal, setShowProposal] = useState(false);
@@ -138,16 +136,6 @@ export function ContactDrawer({
     setAddresses((data ?? []) as ContactAddress[]);
   }, [supabase, contact.id]);
   useEffect(() => { loadAddresses(); }, [loadAddresses]);
-
-  useEffect(() => {
-    (async () => {
-      setLoadingNotes(true);
-      const { data } = await supabase.from('contact_notes').select('*')
-        .eq('contact_id', contact.id).order('created_at', { ascending: false });
-      setNotes((data ?? []) as ContactNote[]);
-      setLoadingNotes(false);
-    })();
-  }, [supabase, contact.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,18 +202,6 @@ export function ContactDrawer({
       return;
     }
     setEdit(data as CRMContact); onChange(data as CRMContact);
-  }
-
-  async function addNote() {
-    if (!noteText.trim()) return;
-    const { data, error } = await supabase.from('contact_notes').insert({
-      contact_id: contact.id, author_id: profile.id,
-      author_name: profile.full_name, text: noteText.trim(),
-    }).select('*').single();
-    if (error) { setMessage(error.message); return; }
-    setNotes((n) => [data as ContactNote, ...n]);
-    setNoteText('');
-    onChange({ ...contact, notes: (data as ContactNote).text });
   }
 
   async function addLink(kind: string, label: string, url: string) {
@@ -820,47 +796,20 @@ export function ContactDrawer({
           </section>
 
 
+          {/* One notes list, one set of rows, shared with the tracker.
+
+              A note added against a deal on the sales tracker is this
+              note, and editing or removing it here changes it there,
+              because there is only ever one row. See
+              `components/crm/CustomerNotes.tsx`. */}
           <section>
-            <SectionHead title="Notes and history" hint={notes.length ? `${notes.length}` : undefined} />
-            {canEdit && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 14 }}>
-                <textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Call summary, next step, anything worth remembering"
-                  style={{ ...inputStyle, minHeight: 66, padding: 10, flex: 1, resize: 'vertical' }}
-                />
-                <Button variant="primary" onClick={addNote} disabled={!noteText.trim()}>
-                  <Send size={14} /> Add
-                </Button>
-              </div>
-            )}
-            {loadingNotes ? (
-              <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>Loading</div>
-            ) : notes.length === 0 ? (
-              <EmptyState
-                what="No notes yet."
-                why="The newest note shows in the grid, so the team can see where this stands without opening the record."
-              />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {notes.map((n) => (
-                  <div key={n.id} style={{
-                    padding: '11px 13px', borderRadius: 'var(--r)',
-                    background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderLeft: '2px solid var(--border-emphasis)',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 5 }}>
-                      <Label>{n.author_name}</Label>
-                      <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
-                        {new Date(n.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.55, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{n.text}</p>
-                  </div>
-                ))}
-              </div>
-            )}
+            <SectionHead title="Notes and history" />
+            <CustomerNotes
+              contactId={edit.id}
+              profile={profile}
+              readOnly={!canEdit}
+              onChanged={(latest) => onChange({ ...contact, notes: latest?.text ?? null })}
+            />
           </section>
         </div>
 

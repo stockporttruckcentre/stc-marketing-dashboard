@@ -11,6 +11,7 @@ import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calen
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import { CustomerValue } from './crm/CustomerValue';
 import { LeadTrailers } from './crm/LeadTrailers';
+import { CustomerNotes } from './crm/CustomerNotes';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
@@ -56,6 +57,12 @@ type TrackerRow = LeadWithAccount & {
   category: string | null;
   account_manager: string | null;
   vehicles: string | null;
+  /* The CUSTOMER's latest note, not this deal's. Loaded separately
+     because it belongs to the company and every deal against them
+     shows the same one. */
+  customer_note: string | null;
+  customer_note_id: string | null;
+  customer_notes_total: number;
 };
 
 /**
@@ -86,6 +93,11 @@ function flatten(l: LeadWithAccount): TrackerRow {
     category:        (l.account as any)?.category ?? null,
     account_manager: (l.account as any)?.account_manager ?? null,
     vehicles:        (l.account as any)?.vehicles ?? null,
+    /* Filled in by `refreshNotes` once the customer notes come back.
+       A lead with no account can never carry one. */
+    customer_note:        null,
+    customer_note_id:     null,
+    customer_notes_total: 0,
   };
 }
 
@@ -150,6 +162,41 @@ export function SalesTracker({
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [rows, setRows] = useState<TrackerRow[]>(() => initialLeads.map(flatten));
+
+  /* ---- THE CUSTOMER'S NOTES, ONCE PER CUSTOMER ----
+
+     Read for every customer on screen in one call rather than per row,
+     because Dawson with four open pitches is one note, not four reads
+     of the same note. */
+  /* Keyed on the customers rather than on the rows. Writing a note
+     replaces every row object, so depending on `rows` would ask the
+     database again for the answer it just gave. The set of customers
+     is what actually decides the call. */
+  const customerKey = useMemo(() => Array.from(new Set(
+    rows.map((r) => r.contact_id).filter((x): x is string => Boolean(x)),
+  )).sort().join(','), [rows]);
+
+  const refreshNotes = useCallback(async () => {
+    const ids = customerKey ? customerKey.split(',') : [];
+    if (!ids.length) return;
+    const { data, error } = await supabase.rpc('crm_latest_notes', { p_contacts: ids });
+    if (error) return;
+    const by = new Map<string, { note_id: string; text: string; notes_total: number }>();
+    for (const n of (data ?? []) as any[]) {
+      by.set(n.contact_id, { note_id: n.note_id, text: n.text, notes_total: n.notes_total });
+    }
+    setRows((rs) => rs.map((r) => {
+      const hit = r.contact_id ? by.get(r.contact_id) : undefined;
+      return {
+        ...r,
+        customer_note: hit?.text ?? null,
+        customer_note_id: hit?.note_id ?? null,
+        customer_notes_total: hit?.notes_total ?? 0,
+      };
+    }));
+  }, [supabase, customerKey]);
+
+  useEffect(() => { void refreshNotes(); }, [refreshNotes]);
   const [side, setSide] = useState<LeadType>('trailer_sales');
 
   /* Somebody else's tracker is read through this screen, not edited
@@ -440,6 +487,26 @@ export function SalesTracker({
    * everywhere, which is the point of there being one Dawson. An
    * estimated value is this pitch's and touches nothing else.
    */
+  /* Adding a note to the CUSTOMER from the tracker grid. The shortcut
+     the business asked for: same thing as opening the CRM record and
+     pressing add note, without leaving the row you are on. */
+  const addCustomerNote = useCallback((params: ValueSetterParams<TrackerRow>): boolean => {
+    const text = String(params.newValue ?? '').trim();
+    if (!text) return false;
+    const contact = params.data.contact_id;
+    if (!contact) { setMessage('That row has no customer behind it to note against.'); return false; }
+
+    (params.data as any).customer_note = text;
+    void supabase.rpc('crm_note_add', {
+      p_contact: contact, p_text: text, p_from_lead: params.data.id,
+    }).then(({ error }) => {
+      if (error) { setMessage(error.message); return; }
+      setMessage('Added to the customer. Everybody working them sees it.');
+      void refreshNotes();
+    });
+    return true;
+  }, [supabase, refreshNotes]);
+
   const saveCell = useCallback((params: ValueSetterParams<TrackerRow>): boolean => {
     const field = params.colDef.field as string;
     const before = (params.data as any)[field];
@@ -595,7 +662,18 @@ export function SalesTracker({
         cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
         cellRenderer: (p: ICellRendererParams<TrackerRow, ContactStatus>) => p.value
           ? <GridBadge tone={STATUS_TONE[p.value] ?? 'neutral'}>{STATUS_LABEL[p.value]}</GridBadge> : null },
-      { field: 'notes', headerName: 'Latest update', flex: 1.5, minWidth: 200, editable: true, valueSetter: saveCell },
+      /* ---- THE ONE COLUMN THAT IS NOT ABOUT THIS DEAL ----
+
+         Everything else in this grid belongs to the pitch in front of
+         you. This does not: it is the customer's note, shared with
+         every other deal against them and with their CRM record. Two
+         people working Dawson each kept half the story here and
+         neither could see the other's.
+
+         Typing ADDS one rather than replacing the text, because a
+         note is a thing somebody wrote on a day, not a field. */
+      { field: 'customer_note', headerName: 'Customer note (latest)',
+        flex: 1.5, minWidth: 200, editable: true, valueSetter: addCustomerNote },
     ];
     const mid = side === 'maintenance' ? maintMid : side === 'rental' ? rentalMid : salesMid;
     const base = [...commonStart, ...mid, ...commonEnd];
@@ -674,7 +752,7 @@ export function SalesTracker({
        `side` rather than `isMaintenance` now, because there are three
        sets of columns and not two: rental used to be given trailer
        sales' and was asked whether a hire was new or used. */
-  }, [saveCell, supabase, isCustomerTab, side, readOnly]);
+  }, [saveCell, addCustomerNote, supabase, isCustomerTab, side, readOnly]);
 
   const defaultColDef = useMemo<ColDef>(() => ({
     resizable: true, sortable: true, filter: true, floatingFilter: false,
@@ -1084,7 +1162,19 @@ export function SalesTracker({
           onWon={maybeConvert}
           onClose={() => setEditingRow(null)}
           onSave={(patch) => {
-            setRows(r => r.map(x => x.id === editingRow.id ? { ...x, ...patch } : x));
+            /* A customer note belongs to the company, so it lands on
+               every row for that company rather than only the deal that
+               happened to be open. Everything else on the patch is this
+               deal's and touches nothing else. */
+            const { customer_note, customer_note_id, ...deal } = patch;
+            const noted = 'customer_note' in patch;
+            const company = editingRow.contact_id;
+            setRows(r => r.map(x => {
+              const shared = noted && company && x.contact_id === company
+                ? { customer_note: customer_note ?? null, customer_note_id: customer_note_id ?? null }
+                : {};
+              return x.id === editingRow.id ? { ...x, ...deal, ...shared } : { ...x, ...shared };
+            }));
             setEditingRow({ ...editingRow, ...patch });
           }}
         />
@@ -1623,11 +1713,44 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
             </div>
           </Card>
 
-          <Field label="Latest update / notes">
-            <TextArea readOnly={readOnly} rows={3} value={edit.notes ?? ''}
-              onChange={(v) => setEdit(s => ({ ...s, notes: v }))}
-              onCommit={(v) => saveField('notes', v || null)} />
-          </Field>
+          {/* CUSTOMER NOTES, NOT THIS DEAL'S.
+
+              Asked for by name: "rework this so that it's a global
+              customer note adder that will update the CRM record [...]
+              will show when clicking into the customer in the CRM and
+              also in any other leads for this customer".
+
+              Same component as the CRM record uses, writing the same
+              rows, so a note added here is the note the CRM shows and
+              editing it there changes it here. A lead with no customer
+              behind it has nothing to note against and says so rather
+              than offering a box that cannot save. */}
+          <Card padded={false}>
+            <PanelHead
+              title="Customer notes"
+              hint="Shared with everybody working this customer, on every deal and on their CRM record"
+            />
+            <div style={{ padding: '12px 14px 14px' }}>
+              {edit.contact_id ? (
+                <CustomerNotes
+                  contactId={edit.contact_id}
+                  profile={profile}
+                  readOnly={readOnly}
+                  fromLeadId={edit.id}
+                  compact
+                  onChanged={(latest) => onSave({
+                    customer_note: latest?.text ?? null,
+                    customer_note_id: latest?.id ?? null,
+                  })}
+                />
+              ) : (
+                <EmptyState
+                  what="No customer behind this lead yet."
+                  why="A note belongs to the company. Convert this prospect, or attach it to a customer, and the note box appears."
+                />
+              )}
+            </div>
+          </Card>
 
           {/* Only once there is something to describe, and in the words
               of the thing that was agreed. A maintenance contract has no
