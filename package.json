@@ -39,7 +39,7 @@
     "check:roles": "tsx scripts/generate-role-seed.ts --check",
     "check:role-shape": "tsx scripts/role-shape-check.ts",
     "check:screens": "tsx scripts/screen-capability-check.ts",
-    "check:view-as": "tsx scripts/view-as-check.ts",
+    "check:view-as": "bash scripts/sql/view-as-check.sh",
     "check:asking": "bash scripts/sql/asking-check.sh",
     "check:role-edit": "bash scripts/sql/role-edit-check.sh",
     "check:enrichment": "bash scripts/sql/enrichment-check.sh",
@@ -131,7 +131,6 @@
     "check:next-slot": "bash scripts/sql/next-slot-check.sh",
     "check:job-invoice": "bash scripts/sql/job-invoice-check.sh",
     "check:misbound": "bash scripts/sql/misbound-check.sh",
-    "check:view-as": "bash scripts/sql/view-as-check.sh",
     "check:legacy-roles": "tsx scripts/legacy-roles-check.ts",
     "check:tracker-fields": "tsx scripts/tracker-fields-check.ts",
     "check:notify-bundle": "bash scripts/sql/notify-bundle-check.sh",
@@ -148,7 +147,9 @@
     "check:find-customer": "bash scripts/sql/find-customer-check.sh",
     "check:portfolio-year": "bash scripts/sql/portfolio-year-check.sh",
     "check:import-wording": "tsx scripts/import-wording-check.ts",
-    "check:chart-inside": "tsx scripts/chart-inside-check.ts"
+    "check:chart-inside": "tsx scripts/chart-inside-check.ts",
+    "orderform:extract": "tsx scripts/order-form-extract.ts",
+    "check:order-form": "tsx scripts/order-form-check.ts"
   },
   "dependencies": {
     "@nivo/bar": "^0.99.0",
@@ -163,6 +164,7 @@
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "fast-xml-parser": "^4.5.0",
+    "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.452.0",
     "next": "14.2.15",
