@@ -216,6 +216,67 @@ export interface Lead {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+
+  /* ---- The hire a trailer deal actually is. Migration 153. ----
+
+     Eight fields the business named as what a trailer deal's drawer has
+     to hold before an order form can be generated off it. All nullable,
+     because a deal at enquiry stage has been asked none of them, and a
+     blank is a different answer from a nought. */
+
+  /** When the equipment went on hire. Not `order_date`, which is when
+      the deal was agreed: the two are often weeks apart. */
+  on_hire_date: string | null;
+  /** When it is expected back. An estimate, and named as one. */
+  off_hire_estimate: string | null;
+  term_months: number | null;
+  /** The periodic rate, as opposed to `sale_price` which is the whole. */
+  hire_rate: number | null;
+  service_cycle: string | null;
+  maintenance_cover: MaintenanceCover | null;
+  /** A third party garage, where the customer sits outside our coverage. */
+  vendor_id: string | null;
+  /** The maintenance rate agreed with that vendor FOR THIS DEAL. Falls
+      back to the vendor's own where it is not set. */
+  vendor_rate: number | null;
+}
+
+/**
+ * The cover levels, in the business's own words:
+ *
+ *   NET/NET / R&M / Full R&M + Tyres as a drop down box
+ *
+ * Stored as slugs so the wording can be corrected without a migration.
+ * NULL is its own answer and means nobody has been asked yet.
+ */
+export type MaintenanceCover = 'net_net' | 'rm' | 'full_rm_tyres';
+
+/**
+ * A garage or service provider outside STC coverage.
+ *
+ * A table rather than four columns on the deal, because the same garage
+ * covers more than one customer and an address typed onto every deal is
+ * an address corrected in eleven places when they move.
+ */
+export interface ThirdPartyVendor {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  postcode: string | null;
+  /** What they charge as a rule. The deal's own rate wins where set. */
+  maintenance_rate: number | null;
+  /** Where they cover, in their own words. */
+  covers: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
 }
 
 /** The company a lead is against, carried alongside it. */

@@ -11,6 +11,7 @@ import { Plus, Trash2, TrendingUp, ChevronRight, Loader, Search, Edit2, X, Calen
 import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import { CustomerValue } from './crm/CustomerValue';
 import { LeadTrailers } from './crm/LeadTrailers';
+import { HirePanel } from './crm/HirePanel';
 import { CustomerNotes } from './crm/CustomerNotes';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -1322,6 +1323,11 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
   const [siblings, setSiblings] = useState<SiblingLead[]>([]);
   const [loadingSiblings, setLoadingSiblings] = useState(true);
 
+  /* How many units are on the deal, reported up by the panel that owns
+     them, so the order form buttons can say what the schedule will
+     carry without asking the database a second time. */
+  const [unitCount, setUnitCount] = useState(0);
+
   useEffect(() => {
     if (!row.contact_id) { setSiblings([]); setLoadingSiblings(false); return; }
     let cancelled = false;
@@ -1585,7 +1591,42 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
               only way to record which trailer a deal was for was to type
               the stock number into the notes. */}
           {words.stockTrailer && (
-            <LeadTrailers leadId={row.id} readOnly={readOnly} />
+            <LeadTrailers leadId={row.id} readOnly={readOnly} onChange={setUnitCount} />
+          )}
+
+          {/* THE HIRE, AND THE TWO DOCUMENTS OFF THE BACK OF IT.
+
+              From the business, listing what a trailer deal's drawer has
+              to hold: the on hire and estimated off hire dates, the
+              term, the rate, the service cycle, a third party vendor
+              where the customer is outside our coverage and the rate
+              agreed with them, and NET/NET, R&M or Full R&M + Tyres.
+
+              Under the units on purpose. "details below to be generated
+              on order form if populated" is what these are for, and the
+              order form's schedule is the units above it, so the
+              reading order on the screen is the reading order on the
+              document.
+
+              Trailer sales only, which is what was asked for. See
+              `components/crm/HirePanel.tsx`. */}
+          {words.stockTrailer && (
+            <HirePanel
+              leadId={row.id}
+              readOnly={readOnly}
+              trailers={unitCount}
+              value={{
+                on_hire_date:      edit.on_hire_date ?? null,
+                off_hire_estimate: edit.off_hire_estimate ?? null,
+                term_months:       edit.term_months ?? null,
+                hire_rate:         edit.hire_rate ?? null,
+                service_cycle:     edit.service_cycle ?? null,
+                maintenance_cover: edit.maintenance_cover ?? null,
+                vendor_id:         edit.vendor_id ?? null,
+                vendor_rate:       edit.vendor_rate ?? null,
+              }}
+              onSave={(field, v) => saveField(field as keyof TrackerRow, v as never)}
+            />
           )}
 
           {/* New or used describes a trailer. A maintenance contract is

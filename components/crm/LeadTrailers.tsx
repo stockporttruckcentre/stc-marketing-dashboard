@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader, Package, Plus, X } from 'lucide-react';
+import { Check, ExternalLink, Loader, Package, Plus, PoundSterling, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Alert, Badge, Button, Card, IconButton, PanelHead } from '@/components/kit/primitives';
+import { Field, Split, TextInput } from '@/components/kit/forms';
 import { StockSearch, describeTrailer, type PickedTrailer } from './StockSearch';
 
 /* =============================================================
@@ -41,7 +42,22 @@ type Attached = {
   stock_trailer_id: string;
   position: number;
   note: string | null;
+  /** What this unit is priced at ON THIS DEAL, which is not the stock
+      record's retail price. Migration 153. */
+  rate: number | null;
+  quantity: number;
   trailer: PickedTrailer | null;
+};
+
+/** One line of what `lead_price_across` is about to do. */
+type Preview = {
+  stock_trailer_id: string;
+  stc_no: string | null;
+  rate_before: number | null;
+  rate_after: number | null;
+  quantity_before: number | null;
+  quantity_after: number | null;
+  changed: boolean;
 };
 
 const money = (n: number | null | undefined) =>
@@ -68,13 +84,30 @@ export function LeadTrailers({ leadId, readOnly = false, onChange }: {
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /* ---- ONE PRICE ACROSS THE LIST ----
+
+     From the business: "add in 1 price, set quantity, have a button
+     that allows you to set that same price across all trailers on your
+     list (or choose specific ones to apply it to)".
+
+     `picked` empty means all of them, which is what the button says it
+     will do. Nothing is written on the first press: `preview` holds
+     what the database says is about to change, with the value before
+     and the value after per unit, and a second press applies it. The
+     same rule the command bar works to, for the same reason. */
+  const [price, setPrice] = useState('');
+  const [qty, setQty] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [preview, setPreview] = useState<Preview[] | null>(null);
+  const [pricing, setPricing] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     /* The join reads the trailer through the foreign key rather than in
        a second round trip, so a quote of four units is one request. */
     const { data, error: err } = await supabase
       .from('crm_lead_trailers')
-      .select(`stock_trailer_id, position, note, trailer:stock_trailers (
+      .select(`stock_trailer_id, position, note, rate, quantity, trailer:stock_trailers (
         id, stc_no, chassis_number, year, make, model, category, status, location,
         colour, axle_type, door_type, new_or_used, nbv, retail_price, description, mot_date
       )`)
@@ -102,6 +135,36 @@ export function LeadTrailers({ leadId, readOnly = false, onChange }: {
        reopening the picker between each is the version of this that
        gets used once. */
     return true;
+  }
+
+  /** What `lead_price_across` would do, or what it did. */
+  async function priceAcross(apply: boolean) {
+    setError(null);
+    const rate = Number(price);
+    if (price.trim() === '' || !Number.isFinite(rate)) {
+      setError('Type the price first.'); return;
+    }
+    const quantity = qty.trim() === '' ? null : Number(qty);
+    if (quantity != null && (!Number.isInteger(quantity) || quantity < 1)) {
+      setError('A quantity is a whole number, one or more.'); return;
+    }
+
+    setPricing(true);
+    const { data, error: err } = await supabase.rpc('lead_price_across', {
+      p_lead: leadId,
+      p_rate: rate,
+      p_quantity: quantity,
+      p_only: picked.size ? [...picked] : null,
+      p_dry_run: !apply,
+    });
+    setPricing(false);
+    if (err) { setError(err.message); setPreview(null); return; }
+
+    if (!apply) { setPreview((data ?? []) as Preview[]); return; }
+
+    setPreview(null);
+    setPicked(new Set());
+    await load();
   }
 
   async function detach(id: string) {
@@ -141,13 +204,40 @@ export function LeadTrailers({ leadId, readOnly = false, onChange }: {
           </div>
         ) : rows.map((r, i) => {
           const t = r.trailer;
-          const price = money(t?.retail_price ?? t?.nbv ?? null);
+          const listed = money(t?.retail_price ?? t?.nbv ?? null);
+          const soon = preview?.find((p) => p.stock_trailer_id === r.stock_trailer_id);
+          const chosen = picked.has(r.stock_trailer_id);
           return (
             <div key={r.stock_trailer_id} style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '8px 10px', borderRadius: 'var(--r)',
-              background: 'var(--surface-sunken)', border: '1px solid var(--border)',
+              background: 'var(--surface-sunken)',
+              border: `1px solid ${soon?.changed ? 'var(--primary)' : 'var(--border)'}`,
             }}>
+              {/* Which units a price applies to. Nothing ticked means
+                  all of them, which is what the button says, so the
+                  ticks are how you narrow it rather than how you start.
+                  Bound with htmlFor so the label is the hit area. */}
+              {!readOnly && rows.length > 1 && (
+                <>
+                  <input
+                    id={`price-${r.stock_trailer_id}`}
+                    type="checkbox"
+                    checked={chosen}
+                    onChange={() => {
+                      setPreview(null);
+                      setPicked((s2) => {
+                        const next = new Set(s2);
+                        if (next.has(r.stock_trailer_id)) next.delete(r.stock_trailer_id);
+                        else next.add(r.stock_trailer_id);
+                        return next;
+                      });
+                    }}
+                    style={{ accentColor: 'var(--primary)', flexShrink: 0, margin: 0 }}
+                  />
+                  <label htmlFor={`price-${r.stock_trailer_id}`} style={{ display: 'contents' }} />
+                </>
+              )}
               <Package size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
@@ -160,11 +250,31 @@ export function LeadTrailers({ leadId, readOnly = false, onChange }: {
                        by "the trailer on this deal", so it says so. */
                     i === 0 && rows.length > 1 ? 'First on the quote' : null,
                     t?.location,
-                    price,
+                    listed ? `Listed ${listed}` : null,
                     r.note,
                   ].filter(Boolean).join(' · ') || 'No details on the stock record'}
                 </div>
               </div>
+
+              {/* What this unit is priced at ON THIS DEAL, which is not
+                  the stock record's retail price and is what prints in
+                  the order form's Net Price Per Trailer column. */}
+              <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 96 }}>
+                <div style={{
+                  fontFamily: 'var(--panton)', fontSize: 13, fontWeight: 700,
+                  color: soon?.changed ? 'var(--primary)' : r.rate == null ? 'var(--text-subtle)' : 'var(--text)',
+                }} className="tnum">
+                  {soon?.changed
+                    ? money(soon.rate_after) ?? '—'
+                    : r.rate == null ? 'Not priced' : money(r.rate)}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-subtle)' }} className="tnum">
+                  {soon?.changed && soon.rate_before != null && soon.rate_before !== soon.rate_after
+                    ? `was ${money(soon.rate_before)}`
+                    : `× ${soon?.changed ? soon.quantity_after : r.quantity}`}
+                </div>
+              </div>
+
               {t && (
                 <Badge tone={STATUS_TONE[t.status] ?? 'neutral'}>
                   {STATUS_LABEL[t.status] ?? t.status}
@@ -183,6 +293,63 @@ export function LeadTrailers({ leadId, readOnly = false, onChange }: {
             </div>
           );
         })}
+
+        {/* ---- One price, a quantity, and the button ---- */}
+        {!readOnly && rows.length > 0 && (
+          <div style={{
+            marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <Split>
+              <Field label="Price each (£)" hint="What one of these is being quoted at.">
+                <TextInput
+                  type="number" value={price}
+                  onChange={(v) => { setPrice(v); setPreview(null); }}
+                />
+              </Field>
+              <Field label="Quantity" hint="Leave blank to keep the counts as they are.">
+                <TextInput
+                  type="number" value={qty}
+                  onChange={(v) => { setQty(v); setPreview(null); }}
+                />
+              </Field>
+            </Split>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Button
+                size="sm"
+                variant={preview ? 'primary' : 'secondary'}
+                disabled={pricing || price.trim() === ''}
+                title={price.trim() === '' ? 'Type the price first.' : undefined}
+                onClick={() => void priceAcross(Boolean(preview))}
+              >
+                {pricing ? <Loader size={13} className="spin" />
+                  : preview ? <Check size={13} /> : <PoundSterling size={13} />}
+                {preview
+                  ? `Apply to ${preview.filter((p) => p.changed).length} of ${preview.length}`
+                  : picked.size
+                    ? `Price the ${picked.size} ticked`
+                    : `Price all ${rows.length}`}
+              </Button>
+
+              {preview && (
+                <Button size="sm" variant="secondary" onClick={() => setPreview(null)}>
+                  Cancel
+                </Button>
+              )}
+
+              <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+                {preview
+                  ? preview.some((p) => p.changed)
+                    ? 'Nothing is written yet. The prices above show what it will be.'
+                    : 'Every one of them is already at that price.'
+                  : picked.size
+                    ? 'Only the ticked ones.'
+                    : 'Tick units above to price some of them instead.'}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {picking && (
