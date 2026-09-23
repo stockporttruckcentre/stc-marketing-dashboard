@@ -122,6 +122,18 @@ export function CrmWorkspace({
       .filter((c) => onPipeline.has(c.id) || !filedIds.has(c.id));
   }, [supabase, selectedListId, showingThePipeline]);
 
+  /* ---- "LATEST NOTE" IS THE CUSTOMER'S NEWEST NOTE ----
+
+     The column is a mirror of `contact_notes`, kept by the database
+     itself: migration 145 recomputes it whenever a note is added,
+     edited or removed, from wherever. So a note written on the sales
+     tracker shows here, and one corrected in the drawer changes here,
+     without this screen knowing anything about it.
+
+     Before that it only copied across on INSERT, so a corrected note
+     left the grid showing the old wording and a removed one left it
+     showing a note that no longer existed. */
+
   // Remember last list so the sidebar nav can return you here
   useEffect(() => {
     if (selectedListId) try { localStorage.setItem('stc:lastListId', selectedListId); } catch {}
@@ -318,7 +330,12 @@ export function CrmWorkspace({
         })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'crm_contacts' },
         (payload: any) => {
-          setRows((rs) => rs.map((r) => (r.id === payload.new.id ? (payload.new as CRMContact) : r)));
+          /* `notes` on the row is the customer's newest NOTE, overlaid
+             above, not the stale column of the same name. An update
+             arriving from somewhere else must not put the column back. */
+          setRows((rs) => rs.map((r) => (
+            r.id === payload.new.id ? { ...(payload.new as CRMContact), notes: r.notes } : r
+          )));
         })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'crm_contacts' },
         (payload: any) => {
@@ -335,17 +352,20 @@ export function CrmWorkspace({
     if (params.data[field] === newValue) return false;
     (params.data as any)[field] = newValue;
 
-    if (field === 'notes' && newValue) {
-      // Inline-edited notes = new note entry in history
-      supabase.from('contact_notes')
-        .insert({ contact_id: params.data.id, author_id: profile.id, author_name: profile.full_name, text: newValue })
+    if (field === 'notes') {
+      /* Typing in this cell adds a note to the CUSTOMER, which is the
+         same thing the drawer and the sales tracker do, through the
+         same function. Clearing the cell is not a delete: notes are
+         removed one at a time, by name, from the record. */
+      if (!newValue) { setMessage('Notes are removed from the customer record, not by clearing this cell.'); return false; }
+      void supabase.rpc('crm_note_add', { p_contact: params.data.id, p_text: newValue, p_from_lead: null })
         .then(({ error }) => { if (error) setMessage(`Note save failed: ${error.message}`); });
     } else {
       supabase.from('crm_contacts').update({ [field]: newValue }).eq('id', params.data.id)
         .then(({ error }) => { if (error) setMessage(`Save failed: ${error.message}`); });
     }
     return true;
-  }, [supabase, profile]);
+  }, [supabase]);
 
   const columnDefs: ColDef<CRMContact>[] = useMemo(() => [
     { headerName: '', field: 'id', width: 38, pinned: 'left',
