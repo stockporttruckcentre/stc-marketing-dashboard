@@ -111,7 +111,14 @@ type RevenueYear = {
   change_pct: number | null;
   customers: number;
   with_revenue: number;
-  not_bound: number;
+  /* Three numbers, not one. Migration 155. The old `not_bound` counted
+     every customer with no Protean account and called it a gap, which
+     is mostly a count of prospects nobody has ever billed. Saying that
+     about 108 of somebody's 257 customers reads as a hole in the
+     accounts, and it is not one. */
+  never_billed: number;
+  split_twin: number;
+  payer_on_book: number;
 };
 
 type PipelineRow = {
@@ -680,13 +687,36 @@ export function PersonalAnalytics({
               {/* A customer with no Protean account has no invoiced
                   figure, and that is not nought. Said out loud rather
                   than quietly making the total smaller. */}
-              {revYear.not_bound > 0 && (
+              {/* ---- THE ONE THAT MATTERS, AND ONLY IT ----
+
+                  A company held twice splits its own revenue across two
+                  records, so this portfolio reads one half and some
+                  other screen reads the other. Neither is what the
+                  customer spends. The company and division totals are
+                  unaffected, which is exactly why this survives an
+                  audit, and it is why it has to be said here.
+
+                  Nothing else gets an alert. A prospect with no Protean
+                  account is a prospect, not a fault. */}
+              {revYear.split_twin > 0 && (
                 <Alert tone="warning">
                   <span style={{ flex: 1 }}>
-                    {revYear.not_bound} of this portfolio&#8217;s {revYear.customers} customers
-                    {revYear.not_bound === 1 ? ' is' : ' are'} not bound to a Protean or Sage
-                    account, so {revYear.not_bound === 1 ? 'it adds' : 'they add'} nothing to
-                    either figure. That is not the same as spending nothing.
+                    {revYear.split_twin} of this portfolio&#8217;s {revYear.customers} customers
+                    {revYear.split_twin === 1 ? ' is' : ' are'} entered twice under
+                    {revYear.split_twin === 1 ? ' a second spelling' : ' second spellings'}, and
+                    the revenue is on the other record. The figures above are missing it. The
+                    division totals are not affected. Merging them puts it back.
+                  </span>
+                </Alert>
+              )}
+
+              {revYear.payer_on_book > 0 && (
+                <Alert tone="info">
+                  <span style={{ flex: 1 }}>
+                    {revYear.payer_on_book} of these {revYear.payer_on_book === 1 ? 'is' : 'are'} an
+                    insurer or other payer rather than a customer. What they settle is already
+                    counted against whoever the work was done for, so they should not be on a
+                    portfolio at all.
                   </span>
                 </Alert>
               )}
@@ -697,6 +727,11 @@ export function PersonalAnalytics({
                 {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
                 {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
                 net by tax point. This is not the figure the target is measured on.
+                {revYear.never_billed > 0 && (
+                  <> {revYear.never_billed} of the {revYear.customers} customers here have never
+                  been billed, which is what a prospect is. They are counted in the list and add
+                  nothing to either figure.</>
+                )}
               </Note>
             </div>
           )}
