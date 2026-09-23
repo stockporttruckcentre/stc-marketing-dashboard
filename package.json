@@ -133,6 +133,7 @@
     "check:view-as": "bash scripts/sql/view-as-check.sh",
     "check:legacy-roles": "tsx scripts/legacy-roles-check.ts",
     "check:tracker-fields": "tsx scripts/tracker-fields-check.ts",
+    "check:notify-bundle": "bash scripts/sql/notify-bundle-check.sh",
     "check:notify-faults": "bash scripts/sql/notify-faults-check.sh",
     "check:portfolio-grants": "bash scripts/sql/portfolio-grants-check.sh",
     "check:crm-division": "bash scripts/sql/crm-division-check.sh",
