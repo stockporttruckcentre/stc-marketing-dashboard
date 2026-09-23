@@ -349,10 +349,20 @@ BEGIN
   IF p_id IS NULL THEN
     /* The same name twice is somebody adding a vendor that is already
        there, so they get the one that exists rather than a second copy
-       the next person has to choose between. */
+       the next person has to choose between.
+
+       AND IT IS RETURNED UNCHANGED. Adding "Aberdeen Commercials" a
+       second time, with the boxes empty because the person is halfway
+       through typing, used to fall into the UPDATE below and blank the
+       phone number, the address and the rate somebody agreed. Finding a
+       record is not the same act as editing one: editing passes the id,
+       which is what the Edit button does. */
     SELECT * INTO made FROM third_party_vendors
      WHERE deleted_at IS NULL AND lower(BTRIM(name)) = lower(clean)
      ORDER BY created_at LIMIT 1;
+    IF made.id IS NOT NULL THEN
+      RETURN made;
+    END IF;
   ELSE
     SELECT * INTO made FROM third_party_vendors WHERE id = p_id AND deleted_at IS NULL;
     IF made.id IS NULL THEN

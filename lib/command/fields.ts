@@ -303,6 +303,48 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit', aliases: ['enquiry date', 'date of enquiry', 'enquired on', 'came in on'] },
   { key: 'order_date', label: 'Order date', kind: 'date', entity: 'leads', clearable: true,
     capability: 'crm.edit', aliases: ['order date', 'ordered on'] },
+
+  /* ---- The hire a trailer deal is. Migration 153. ----
+
+     Every one of these prints on the order form, so every one of them
+     has to be reachable by typing rather than only by opening a drawer
+     and scrolling: "add 13 weekly service to the Suttle hire" is the
+     shape of sentence somebody says on the way out of a meeting. */
+  { key: 'on_hire_date', label: 'On hire date', kind: 'date', entity: 'leads', clearable: true,
+    capability: 'crm.edit',
+    aliases: ['on hire date', 'on hire', 'went on hire', 'hire start', 'hire started',
+      'start of hire', 'on hire from'] },
+  { key: 'off_hire_estimate', label: 'Off hire estimate', kind: 'date', entity: 'leads', clearable: true,
+    capability: 'crm.edit',
+    aliases: ['off hire estimate', 'off hire', 'estimated off hire', 'off hire date',
+      'hire end', 'due back', 'back on'] },
+  { key: 'term_months', label: 'Term', kind: 'number', entity: 'leads', clearable: true,
+    capability: 'crm.edit',
+    aliases: ['term', 'term length', 'months', 'contract length', 'hire term', 'length of hire'] },
+  { key: 'hire_rate', label: 'Rate', kind: 'money', entity: 'leads', clearable: true, arithmetic: true,
+    capability: 'crm.edit',
+    aliases: ['rate', 'hire rate', 'weekly rate', 'monthly rate', 'rate per week'] },
+  { key: 'service_cycle', label: 'Service cycle', kind: 'text', entity: 'leads', clearable: true,
+    capability: 'crm.edit',
+    aliases: ['service cycle', 'service interval', 'service schedule', 'servicing',
+      'inspection cycle', 'service frequency'] },
+  { key: 'maintenance_cover', label: 'Cover', kind: 'enum', entity: 'leads', clearable: true,
+    capability: 'crm.edit',
+    aliases: ['cover', 'maintenance cover', 'cover level', 'r and m', 'rm', 'maintenance'],
+    /* The three the business named, and the ways somebody types each.
+       Nobody writes `full_rm_tyres`, so nobody has to. */
+    vocabulary: {
+      'net net': 'net_net', 'net/net': 'net_net', 'netnet': 'net_net', 'net': 'net_net',
+      'r&m': 'rm', 'r and m': 'rm', 'rm': 'rm', 'repair and maintenance': 'rm',
+      'full r&m + tyres': 'full_rm_tyres', 'full r and m plus tyres': 'full_rm_tyres',
+      'full rm tyres': 'full_rm_tyres', 'full r&m': 'full_rm_tyres',
+      'full repair and maintenance': 'full_rm_tyres', 'full cover': 'full_rm_tyres',
+      'with tyres': 'full_rm_tyres', 'rm and tyres': 'full_rm_tyres',
+    } },
+  { key: 'vendor_rate', label: 'Vendor rate', kind: 'money', entity: 'leads', clearable: true, arithmetic: true,
+    capability: 'crm.edit',
+    aliases: ['vendor rate', 'third party rate', 'garage rate', 'rate with the vendor',
+      'subcontract rate', 'maintenance rate'] },
   { key: 'source', label: 'Source', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['source', 'came from', 'lead source', 'found via'] },
   { key: 'side', label: 'Side', kind: 'enum', entity: 'contacts', clearable: true,
