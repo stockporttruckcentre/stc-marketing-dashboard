@@ -436,7 +436,7 @@ function CustomerBreakdown({ person, upto, row, others, against, onAgainst, othe
                     }}>{money(Number(d.this_year))}</span>
                     {other && (
                       <span style={{
-                        fontSize: 12.5, color: 'var(--accent)',
+                        fontSize: 12.5, color: 'var(--chart-rental)',
                         fontVariantNumeric: 'tabular-nums', minWidth: 78, textAlign: 'right',
                       }}>{mirror ? money(Number(mirror.this_year)) : 'Nothing'}</span>
                     )}
@@ -460,9 +460,14 @@ function CustomerBreakdown({ person, upto, row, others, against, onAgainst, othe
                     flex: 1, height: 8, borderRadius: 4,
                     background: 'var(--surface-sunken)', overflow: 'hidden',
                   }}>
+                    {/* A chart colour, not an action colour. `--accent`
+                        is what buttons are, and it inverts between the
+                        two themes: a bar drawn in it reads as something
+                        to press. `scripts/chart-colour-check.ts` is
+                        what says so, and it said so about this line. */}
                     <div style={{
                       width: `${Math.round((Number(m.this_year) / biggestMonth) * 100)}%`,
-                      height: '100%', background: 'var(--accent)',
+                      height: '100%', background: 'var(--chart-company)',
                     }} />
                   </div>
                   <span style={{
@@ -484,7 +489,7 @@ function Side({ row, muted }: { row: Row; muted?: boolean }) {
   return (
     <div style={{
       padding: '11px 13px', borderRadius: 'var(--r)',
-      border: `1px solid ${muted ? 'var(--accent)' : 'var(--border-strong)'}`,
+      border: `1px solid ${muted ? 'var(--chart-rental)' : 'var(--border-strong)'}`,
       background: 'var(--surface)',
     }}>
       <Label>{row.company_name ?? 'Unnamed'}</Label>
