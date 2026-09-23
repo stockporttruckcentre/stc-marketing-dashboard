@@ -80,22 +80,34 @@ type Part = {
    somebody scanning for a problem expects to find first. It is called
    what it does now.
 
-   `column` names the column each one orders, so the header can say
-   which of the three the list is currently sorted by. */
+   AND EVERY ONE OF THEM ORDERS A COLUMN THAT IS ON THE SCREEN. Open
+   pipeline was not. The list came back correctly ordered by the open
+   VALUE and the row printed This year in the big figure on the right,
+   so a perfectly good order read as noise:
+
+     "I sorted by pipeline and can't tell what it's actually sorting as
+     the top customer has 1 lead, the one below it has 2, then the one
+     below it has 1."
+
+   Sorting a list by a number that is nowhere on it cannot be explained
+   with a better label, so Open is a column now. `column` names the one
+   each option orders, and the heading of that column is drawn in the
+   stronger ink. */
 const SORTS = [
-  { key: 'this_year', label: 'This year, highest first',      column: 'this_year' },
-  { key: 'last_year', label: 'Last year, highest first',      column: 'last_year' },
-  { key: 'change',    label: 'Biggest rise first',            column: 'change' },
-  { key: 'open',      label: 'Open pipeline value, highest first', column: null },
-  { key: 'name',      label: 'Name, A to Z',                  column: null },
+  { key: 'this_year', label: 'This year, highest first',            column: 'this_year' },
+  { key: 'last_year', label: 'Last year, highest first',            column: 'last_year' },
+  { key: 'change',    label: 'Biggest rise first',                  column: 'change' },
+  { key: 'open',      label: 'Open pipeline value, highest first',  column: 'open' },
+  { key: 'name',      label: 'Name, A to Z',                        column: 'name' },
 ] as const;
 
-/* The three number columns, and the room the two buttons take. One set
+/* The four number columns, and the room the two buttons take. One set
    of widths, used by the header and by every row, so a column heading
    cannot drift away from the figures underneath it. */
 const W_THIS = 78;
 const W_LAST = 78;
 const W_CHANGE = 96;
+const W_OPEN = 78;
 const W_ACTIONS = 72;
 
 type SortKey = typeof SORTS[number]['key'];
@@ -226,17 +238,24 @@ export function PortfolioCustomers({ person, upto, me }: {
           {/* Twenty rows deep, and the rest on the scroll. The height is
               what makes it a list rather than a page: twenty rows of
               revenue above the fold and the next twenty a flick away. */}
-          {/* The headings, which were not there at all. Sticky, because a
-              list twenty rows deep is scrolled and a heading that has
-              gone off the top is a heading nobody has. */}
+          {/* The headings, which were not there at all: four columns of
+              money with nothing saying which was which.
+
+              ABOVE the scroller rather than inside it, so they are on
+              screen for all forty rows rather than only the first
+              twenty. The one the list is ordered by is drawn in the
+              stronger ink, which is the other half of the answer to
+              "it's not clear what it actually sorting". */}
           <div style={{
-            position: 'sticky', top: 0, zIndex: 1,
             display: 'flex', alignItems: 'center', gap: 12,
             padding: '7px 12px',
             background: 'var(--surface-sunken)',
             borderBottom: '1px solid var(--border)',
           }}>
-            <Label style={{ flex: 1, minWidth: 0 }}>Customer</Label>
+            <Label style={{
+              flex: 1, minWidth: 0,
+              color: sortedColumn === 'name' ? 'var(--text)' : undefined,
+            }}>Customer</Label>
             <Label style={{
               width: W_THIS, textAlign: 'right',
               color: sortedColumn === 'this_year' ? 'var(--text)' : undefined,
@@ -249,6 +268,10 @@ export function PortfolioCustomers({ person, upto, me }: {
               width: W_CHANGE, textAlign: 'right',
               color: sortedColumn === 'change' ? 'var(--text)' : undefined,
             }}>Change</Label>
+            <Label style={{
+              width: W_OPEN, textAlign: 'right',
+              color: sortedColumn === 'open' ? 'var(--text)' : undefined,
+            }}>Open</Label>
             <span style={{ width: W_ACTIONS }} />
           </div>
 
@@ -278,26 +301,10 @@ export function PortfolioCustomers({ person, upto, me }: {
                         r.divisions,
                         r.invoices ? `${r.invoices} ${r.invoices === 1 ? 'invoice' : 'invoices'}` : null,
                         ukDate(r.last_billed) ? `last billed ${ukDate(r.last_billed)}` : null,
-                        /* THE OPEN PIPELINE SAYS WHAT IT IS WORTH, NOT
-                           JUST HOW MANY.
-
-                           From the business: "I sorted by pipeline and
-                           can't tell what it's actually sorting as the
-                           top customer has 1 lead, the one below it has
-                           2, then the one below it has 1."
-
-                           Exactly right, and the sort was not the fault.
-                           `personal_customers` orders that option by the
-                           open VALUE and the row printed only the COUNT,
-                           so the list was in a perfectly good order by a
-                           number that was nowhere on the screen. One
-                           £90k lead sits above two £4k ones and looks
-                           like a bug. The figure being sorted on is now
-                           the one printed. */
-                        r.open_deals
-                          ? `${r.open_deals} open${r.open_value != null
-                              ? `, ${compactMoney(Number(r.open_value))}` : ''}`
-                          : null,
+                        /* Just the count here. The VALUE is a column of
+                           its own now, for the reason in the header
+                           comment above the Open heading. */
+                        r.open_deals ? `${r.open_deals} open` : null,
                       ].filter(Boolean).join(' · ') || 'Nothing billed yet'}
                     </div>
                   </div>
@@ -330,6 +337,18 @@ export function PortfolioCustomers({ person, upto, me }: {
                     {Number(r.change) === 0 ? compactMoney(0)
                       : `${up ? '+' : '\u2212'}${compactMoney(Math.abs(Number(r.change)))}`}
                     {r.change_pct != null && <span>({Math.abs(Number(r.change_pct))}%)</span>}
+                  </span>
+
+                  <span
+                    title={r.open_deals
+                      ? `${r.open_deals} open ${r.open_deals === 1 ? 'deal' : 'deals'}, worth ${money(Number(r.open_value ?? 0))} between them`
+                      : 'Nothing open with them'}
+                    style={{
+                      fontSize: 12, fontVariantNumeric: 'tabular-nums',
+                      width: W_OPEN, textAlign: 'right',
+                      color: r.open_deals ? 'var(--text-muted)' : 'var(--text-subtle)',
+                    }}>
+                    {r.open_deals ? compactMoney(Number(r.open_value ?? 0)) : '\u2014'}
                   </span>
 
                   <span style={{ width: W_ACTIONS, display: 'flex', justifyContent: 'flex-end' }}>

@@ -800,6 +800,14 @@ export function PersonalAnalytics({
           hint="What each one has spent this financial year, against the same point last year"
         >
           <PortfolioCustomers person={person} upto={upto} me={selfId ?? person} />
+          <Note>
+            This year and Last year are INVOICED revenue out of the uploads, to the
+            same day last year, so a part finished month is compared with a part
+            finished month. Open is what is still being worked with them and is not
+            revenue: it is an estimate of deals nobody has won yet. Sorting orders one
+            of those four columns, and the heading of the one it is ordering is the
+            darker of the five.
+          </Note>
         </Panel>
 
         <MoverPanel
