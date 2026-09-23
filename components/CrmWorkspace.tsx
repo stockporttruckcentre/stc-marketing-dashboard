@@ -25,6 +25,7 @@ import { CRM_CONTACTS } from '@/lib/import/dictionary';
 import { Figure, Button, Alert, Badge, GridBadge, InverseButton, RecordHead, StatStrip, StatusDot, TabShell, GridHint, type Tone } from '@/components/kit/primitives';
 import { EdgeAwareCtxMenu, MenuHead, MenuItem, MenuRule, useEdgeAwarePosition } from '@/components/kit/menus';
 import { STATUS_TONE } from '@/lib/crm/status';
+import { RELATIONSHIP_LABEL, RELATIONSHIP_MEANS, type Relationship } from '@/lib/crm/conversion';
 import { HEALTH_BLURB, HEALTH_LABEL, HEALTH_TONE, healthRank, type Health } from '@/lib/crm/health';
 import { Modal, Field, TextInput, Select, OptionCard, Checkbox, Segmented } from '@/components/kit/forms';
 import {
@@ -1901,17 +1902,19 @@ function AddContactModal({ owners, me, canAssign, listName, onCreate, onClose }:
 
       {/* Asked before the contact details, because it changes what the
           record is for. A prospect is somebody to win; an active account
-          is somebody to look after, and they are read by different
-          reports. */}
+          is somebody to look after; a cash only account pays at the
+          counter and has no account, no terms and no statement. They are
+          read by different reports. */}
       <Field label="What are they to us?"
-        hint="A prospect becomes a customer when you win a lead for them.">
+        hint={RELATIONSHIP_MEANS[relationship as Relationship] ?? RELATIONSHIP_MEANS.prospect}>
         <div>
           <Segmented
             value={relationship}
             onChange={setRelationship}
             options={[
-              { value: 'prospect', label: 'Prospect' },
-              { value: 'existing', label: 'Active customer' },
+              { value: 'prospect', label: RELATIONSHIP_LABEL.prospect },
+              { value: 'existing', label: RELATIONSHIP_LABEL.existing },
+              { value: 'cash_only', label: RELATIONSHIP_LABEL.cash_only },
             ]}
           />
         </div>

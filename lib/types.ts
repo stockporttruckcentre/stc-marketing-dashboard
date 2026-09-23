@@ -107,7 +107,7 @@ export interface CRMContact {
    * where a deal with them has got to. See migration 004. Optional in the
    * type because the column may not exist yet.
    */
-  relationship?: 'prospect' | 'existing';
+  relationship?: 'prospect' | 'existing' | 'cash_only';
   /* Red, amber, green: where the relationship stands, as opposed to
      where a deal does. Migration 099, and `lib/crm/health.ts` for what
      the three mean. Denormalised from the open health event so the CRM

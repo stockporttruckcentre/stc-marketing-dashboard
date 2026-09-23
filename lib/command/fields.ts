@@ -353,8 +353,18 @@ export const CONTACT_FIELDS: WritableField[] = [
     vocabulary: { sales: 'trailer_sales', 'trailer sales': 'trailer_sales',
                   maintenance: 'maintenance', service: 'maintenance', workshop: 'maintenance' } },
   { key: 'relationship', label: 'Relationship', kind: 'enum', entity: 'contacts',
-    capability: 'crm.edit', aliases: ['relationship', 'prospect or customer', 'existing customer'],
-    vocabulary: { prospect: 'prospect', new: 'prospect', existing: 'existing', current: 'existing' } },
+    capability: 'crm.edit',
+    aliases: ['relationship', 'prospect or customer', 'existing customer', 'customer type',
+      'account type', 'cash only', 'cash customer'],
+    /* Migration 156 added the third one. A firm that pays at the counter
+       is not an account customer, and the words people use for it are
+       "cash", "cash only" and "counter", none of which used to reach
+       anything. */
+    vocabulary: { prospect: 'prospect', new: 'prospect',
+                  existing: 'existing', current: 'existing', customer: 'existing',
+                  account: 'existing', invoiced: 'existing',
+                  cash: 'cash_only', 'cash only': 'cash_only', cashonly: 'cash_only',
+                  counter: 'cash_only', 'cash sale': 'cash_only', 'cash account': 'cash_only' } },
   { key: 'requirement', label: 'Requirement', kind: 'longtext', entity: 'leads', clearable: true, arithmetic: true,
     capability: 'crm.edit', aliases: ['requirement', 'what they want', 'their requirement', 'looking for'] },
   { key: 'notes', label: 'Notes', kind: 'longtext', entity: 'contacts', clearable: true, arithmetic: true,

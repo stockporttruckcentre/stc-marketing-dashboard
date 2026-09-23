@@ -497,9 +497,15 @@ export function SalesTracker({
     if (!row.contact_id) return;
     if (after !== 'won' || before === 'won') return;
     const rel = await relationshipOf(supabase, row.contact_id);
-    setMessage(rel === 'existing'
-      ? `Won. ${row.company_name ?? 'They'} are an active customer account now, everywhere in the app.`
-      : `Won. ${row.company_name ?? 'They'} could not be marked an active account, so check their CRM record.`);
+    setMessage(
+      rel === 'existing'
+        ? `Won. ${row.company_name ?? 'They'} are an active customer account now, everywhere in the app.`
+      /* Migration 156. Winning a job for somebody who pays at the
+         counter does not open them an account, so the record is left
+         as Cash Only and that is the right answer, not a failure. */
+      : rel === 'cash_only'
+        ? `Won. ${row.company_name ?? 'They'} stay a Cash Only account until an invoicing account is opened for them.`
+        : `Won. ${row.company_name ?? 'They'} could not be marked an active account, so check their CRM record.`);
   }, [supabase]);
 
   /**

@@ -21,6 +21,7 @@
     "check:bundle-twice": "bash scripts/sql/bundle-twice-check.sh",
     "check:calendar": "tsx scripts/calendar-check.ts",
     "check:capabilities": "tsx scripts/capability-catalog-check.ts",
+    "check:cash-only": "bash scripts/sql/cash-only-check.sh",
     "check:cash-sales": "bash scripts/sql/cash-sales-check.sh",
     "check:census": "tsx scripts/command-census.ts",
     "check:chart-colour": "tsx scripts/chart-colour-check.ts",

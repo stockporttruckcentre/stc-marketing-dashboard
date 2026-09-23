@@ -13,6 +13,7 @@ import {
 import { Segmented } from '@/components/kit/forms';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
 import { STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from '@/lib/crm/status';
+import { RELATIONSHIP_LABEL } from '@/lib/crm/conversion';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { ReminderModal } from './ReminderModal';
@@ -287,12 +288,17 @@ export function ContactDrawer({
                     Fixed by making each badge say its own thing. The
                     status is capitalised through `STATUS_LABEL`, the
                     same words the tracker uses. The relationship says
-                    Prospect or Active account, which is the question it
-                    answers and is not a synonym of any status. And where
-                    the status already IS customer, the relationship is
-                    implied and the badge is dropped: an active account
-                    with a customer status is one fact said twice, which
-                    is where this started. */}
+                    Prospect, Active account or Cash Only, which is the
+                    question it answers and is not a synonym of any
+                    status. And where the status already IS customer, the
+                    relationship is implied and the badge is dropped: an
+                    active account with a customer status is one fact said
+                    twice, which is where this started.
+
+                    Cash Only keeps its badge whatever the status says,
+                    because it is the one of the three that changes what
+                    the record MEANS: no account, no terms, no statement,
+                    and a won deal does not alter that. */}
                 <Badge tone={STATUS_TONE[edit.status] ?? 'neutral'} dot>
                   {STATUS_LABEL[edit.status as ContactStatus] ?? edit.status}
                 </Badge>
@@ -301,6 +307,9 @@ export function ContactDrawer({
                 )}
                 {(edit.relationship ?? 'prospect') === 'prospect' && (
                   <Badge tone="neutral">Prospect</Badge>
+                )}
+                {edit.relationship === 'cash_only' && (
+                  <Badge tone="warning">Cash Only</Badge>
                 )}
               </div>
               {metaLine && (
@@ -489,8 +498,9 @@ export function ContactDrawer({
                     value={edit.relationship ?? 'prospect'}
                     onChange={(v) => canEdit && saveField('relationship', v)}
                     options={[
-                      { value: 'prospect', label: 'Prospect' },
-                      { value: 'existing', label: 'Customer' },
+                      { value: 'prospect', label: RELATIONSHIP_LABEL.prospect },
+                      { value: 'existing', label: RELATIONSHIP_LABEL.existing },
+                      { value: 'cash_only', label: RELATIONSHIP_LABEL.cash_only },
                     ]}
                   />
                 </div>
