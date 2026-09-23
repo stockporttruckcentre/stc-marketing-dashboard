@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
   // Prospective vs existing. Recommended rule from the plan: existing means
   // this company already has a closed deal or a linked sold trailer.
   const wonCompanies = new Set(
-    deals.filter((d) => d.status === 'customer' || d.status === 'won')
+    deals.filter((d) => d.status === 'won')
          .map((d) => (d.company_name ?? '').trim().toLowerCase())
   );
   const isExisting = (d: any) =>
@@ -195,7 +195,7 @@ export async function GET(req: NextRequest) {
         provisional: true,
         accounts: list.length,
         openProposals: list.filter((d) => d.status === 'contacted' || d.status === 'quoted').length,
-        revenue: list.filter((d) => d.status === 'customer')
+        revenue: list.filter((d) => d.status === 'won')
                      .reduce((s, d) => s + (Number(d.sale_price) || 0), 0),
       };
     }
@@ -230,7 +230,7 @@ export async function GET(req: NextRequest) {
 
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
   const revenueMtd = deals
-    .filter((d) => d.status === 'customer' && d.order_date && new Date(d.order_date) >= monthStart)
+    .filter((d) => d.status === 'won' && d.order_date && new Date(d.order_date) >= monthStart)
     .reduce((s, d) => s + (Number(d.sale_price) || 0), 0);
 
   return NextResponse.json({
@@ -260,7 +260,7 @@ export async function GET(req: NextRequest) {
     revenueMtd,
     counts: {
       open: open.length,
-      customers: deals.filter((d) => d.status === 'customer').length,
+      customers: deals.filter((d) => d.status === 'won').length,
       trailerSide: trailerDeals.length,
       maintenanceSide: deals.length - trailerDeals.length,
     },

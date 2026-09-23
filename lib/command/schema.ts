@@ -97,8 +97,16 @@ const DEAL_STATUS: Record<string, string> = {
   lead: 'lead', leads: 'lead', new: 'lead', enquiry: 'lead', enquiries: 'lead',
   contacted: 'contacted', contact: 'contacted', approached: 'contacted',
   quoted: 'quoted', quote: 'quoted', quotes: 'quoted', proposal: 'quoted', proposals: 'quoted',
-  won: 'won', win: 'won',
-  customer: 'customer', customers: 'customer', closed: 'customer', converted: 'customer',
+  /* Every word anybody uses for "we got it" points at the one status.
+     `customer`, `customers`, `closed` and `converted` were a SECOND
+     status meaning the same event, which migration 146 took out: they
+     stay here as ways of saying it, because somebody will type them.
+
+     A question like "how many customers" is a question about the
+     entity rather than a filter and is stripped before this is read:
+     see `entityNoun` in `query.ts`. */
+  won: 'won', win: 'won', closed: 'won', converted: 'won',
+  customer: 'won', customers: 'won',
   lost: 'lost', dead: 'lost', lapsed: 'lost',
 };
 

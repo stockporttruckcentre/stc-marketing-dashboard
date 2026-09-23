@@ -99,7 +99,7 @@ function spread(
       id: `${owner}-${i}`,
       owner_id: owner,
       type,
-      status: isWon ? 'customer' : isQuoted ? 'quoted' : i % 5 === 0 ? 'lost' : 'contacted',
+      status: isWon ? 'won' : isQuoted ? 'quoted' : i % 5 === 0 ? 'lost' : 'contacted',
       estimated_value: Math.round(value / Math.max(1, won || leads)),
       sale_price: isWon ? Math.round(value / Math.max(1, won)) : null,
       order_date: isWon ? `2026-09-${day}` : null,

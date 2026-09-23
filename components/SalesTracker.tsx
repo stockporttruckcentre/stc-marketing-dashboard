@@ -27,7 +27,7 @@ import { hasAnAccount, nameOfLead } from '@/lib/crm/lead-identity';
 import { applyOrder, readOrder, writeOrder } from '@/lib/ui/order';
 import { STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from '@/lib/crm/status';
 import { fieldsFor } from '@/lib/crm/lead-fields';
-import { convertToCustomer, relationshipOf, winsAProspect } from '@/lib/crm/conversion';
+import { relationshipOf } from '@/lib/crm/conversion';
 import {
   MAINTENANCE_WHAT, WORK_KINDS, WORK_KIND_HINT, WORK_KIND_LABEL, workKindOf, type WorkKind,
 } from '@/lib/crm/work-kind';
@@ -114,24 +114,37 @@ const TYPE_LABEL: Record<LeadType, string> = {
 const SIDES: LeadType[] = ['trailer_sales', 'maintenance', 'rental'];
 const SIDE_ORDER = 'tracker-divisions';
 
-// Tracker has 3 tabs that group the existing CRM statuses
-type TrackerTab = 'all' | 'working' | 'customer' | 'lost' | 'commission';
+/* THE TABS, AND WHERE WON SITS NOW.
+
+   There used to be two words for the same event, `won` and `customer`,
+   and won was filed under Working. So a rep marked a deal won, the row
+   stayed exactly where it was among the ones they were still chasing,
+   and every figure on the screen went on ignoring it until somebody
+   later moved it to Customer.
+
+   From the business: "when marking a sales tracker record as Won (just
+   closed) it doesn't seem to do much. Then we have a status for
+   Customer, which means won anyway. We only need 1 status, Won."
+
+   So Won is its own tab and it is where a won deal lands the moment it
+   is marked. Working is the three states you are still chasing. */
+type TrackerTab = 'all' | 'working' | 'won' | 'lost' | 'commission';
 const STATUS_TO_TAB: Record<ContactStatus, TrackerTab> = {
-  lead: 'working', contacted: 'working', quoted: 'working', won: 'working',
-  customer: 'customer',
+  lead: 'working', contacted: 'working', quoted: 'working',
+  won: 'won',
   lost: 'lost',
 };
 const TAB_LABEL: Record<TrackerTab, string> = {
   all: 'All',
   working: 'Working',
-  customer: 'Customer',
+  won: 'Won',
   lost: 'Lost',
   commission: 'My commission',
 };
 const TAB_HINT: Record<TrackerTab, string> = {
   all: '',
   working: 'Active leads, chasing the deal',
-  customer: 'Active customer, ongoing relationship',
+  won: 'Closed, and they are a customer of ours',
   lost: 'Lost, no longer pursuing',
   commission: 'Your earned commission, summarised',
 };
@@ -279,7 +292,7 @@ export function SalesTracker({
   // Counts of the CURRENT side only
   const sideRows = useMemo(() => rows.filter(r => (r.type ?? 'trailer_sales') === side), [rows, side]);
   const counts = useMemo(() => {
-    const c = { all: sideRows.length, working: 0, customer: 0, lost: 0, commission: 0 } as Record<TrackerTab, number>;
+    const c = { all: sideRows.length, working: 0, won: 0, lost: 0, commission: 0 } as Record<TrackerTab, number>;
     for (const r of sideRows) c[STATUS_TO_TAB[r.status]]++;
     // commission tab "count" = number of paid-out sales (rows with commission > 0)
     c.commission = sideRows.filter(r => Number(r.commission) > 0).length;
@@ -438,9 +451,9 @@ export function SalesTracker({
      this strip was the one place not using it. Both dashboards require
      an order date:
 
-       exec   SUM(sale_price) FILTER (WHERE status = 'customer'
+       exec   SUM(sale_price) FILTER (WHERE status = 'won'
                                         AND order_date >= year start)
-       rep    status === 'customer' && d.order_date && ...
+       rep    status === 'won' && d.order_date && ...
 
      An imported spend figure has no order date, because nobody here
      closed it on a day. A deal somebody actually won does. So that is
@@ -454,30 +467,37 @@ export function SalesTracker({
      without it overstated one by a hundredfold and looked authoritative
      doing it. */
   const wonHere = useMemo(() =>
-    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'customer' && r.order_date),
+    sideRows.filter(r => STATUS_TO_TAB[r.status] === 'won' && r.order_date),
     [sideRows]);
   const totalCustomerRevenue = useMemo(() =>
     wonHere.reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0), [wonHere]);
   const totalCommission = useMemo(() =>
     wonHere.reduce((sum, r) => sum + (Number(r.commission) || 0), 0), [wonHere]);
 
-  /* The lead somebody has just won, waiting on an answer about the
-     customer behind it. See `lib/crm/conversion.ts`. */
-  const [convert, setConvert] = useState<TrackerRow | null>(null);
-
   /**
-   * Ask, if this write has just won something for a prospect.
+   * Say what winning just did, because it now does it.
    *
-   * Read from the database rather than from the row in front of us: the
-   * tracker carries a copy of a few account fields that is as old as the
-   * page, and offering to convert a firm somebody else converted an hour
-   * ago is the version of this that makes people distrust the prompt.
+   * There used to be a dialog here asking whether to make the company a
+   * customer, and a second status called Customer that somebody had to
+   * move the row to afterwards. From the business: "when marking a
+   * sales tracker record as Won (just closed) it doesn't seem to do
+   * much. Then we have a status for Customer, which means won anyway.
+   * We only need 1 status, Won. This then assumes the company is now a
+   * customer of ours."
+   *
+   * So the database does it, in `crm_account_follows_its_leads`,
+   * migration 146: winning any deal sets the company's relationship to
+   * existing and there is nothing to agree to. This reads the answer
+   * back rather than assuming it, and says so, because a change nobody
+   * is told about is a change nobody trusts.
    */
-  const maybeConvert = useCallback(async (row: TrackerRow, before: string, after: string) => {
+  const sayWhatWinningDid = useCallback(async (row: TrackerRow, before: string, after: string) => {
     if (!row.contact_id) return;
     if (after !== 'won' || before === 'won') return;
     const rel = await relationshipOf(supabase, row.contact_id);
-    if (winsAProspect(before, after, rel)) setConvert(row);
+    setMessage(rel === 'existing'
+      ? `Won. ${row.company_name ?? 'They'} are an active customer account now, everywhere in the app.`
+      : `Won. ${row.company_name ?? 'They'} could not be marked an active account, so check their CRM record.`);
   }, [supabase]);
 
   /**
@@ -537,20 +557,20 @@ export function SalesTracker({
         .then(({ error }) => { if (error) setMessage(error.message); });
     }
 
-    if (field === 'status') void maybeConvert(params.data, before, String(params.newValue));
+    if (field === 'status') void sayWhatWinningDid(params.data, before, String(params.newValue));
     return true;
-  }, [supabase, maybeConvert]);
+  }, [supabase, sayWhatWinningDid]);
 
   /* The note under the money, which has to explain a figure that is
      smaller than the row count would suggest. Silently counting 12 of
      144 rows is how somebody stops trusting the number a second time. */
   const wonNote = useMemo(() => {
-    const undated = counts.customer - wonHere.length;
+    const undated = counts.won - wonHere.length;
     if (undated <= 0) return `${wonHere.length} closed here`;
     return `${wonHere.length} closed here, ${undated} with no date`;
-  }, [counts.customer, wonHere.length]);
+  }, [counts.won, wonHere.length]);
 
-  const isCustomerTab = tab === 'customer';
+  const isCustomerTab = tab === 'won';
   const isMaintenance = side === 'maintenance';
 
   const columnDefs = useMemo<ColDef<TrackerRow>[]>(() => {
@@ -659,7 +679,7 @@ export function SalesTracker({
       ...(side === 'maintenance' ? [{ field: 'next_action' as keyof TrackerRow, headerName: 'Next action', flex: 1.2, minWidth: 160, editable: true, valueSetter: saveCell }] : []),
       { field: 'status', headerName: 'Status', width: 120, editable: true, valueSetter: saveCell,
         cellEditor: 'agSelectCellEditor',
-        cellEditorParams: { values: ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] },
+        cellEditorParams: { values: STATUS_ORDER },
         cellRenderer: (p: ICellRendererParams<TrackerRow, ContactStatus>) => p.value
           ? <GridBadge tone={STATUS_TONE[p.value] ?? 'neutral'}>{STATUS_LABEL[p.value]}</GridBadge> : null },
       /* ---- THE ONE COLUMN THAT IS NOT ABOUT THIS DEAL ----
@@ -1082,7 +1102,7 @@ export function SalesTracker({
         padding: '10px 14px', borderRadius: 'var(--r-md)',
         background: 'var(--surface)', border: '1px solid var(--border)',
       }}>
-        {(['working', 'customer', 'lost', 'all', 'commission'] as TrackerTab[]).map(t => (
+        {(['working', 'won', 'lost', 'all', 'commission'] as TrackerTab[]).map(t => (
           <Chip key={t} active={tab === t} count={counts[t]} title={TAB_HINT[t]}
             onClick={() => setTab(t)}>
             {TAB_LABEL[t]}
@@ -1159,7 +1179,7 @@ export function SalesTracker({
           row={editingRow}
           profile={profile}
           readOnly={readOnly}
-          onWon={maybeConvert}
+          onWon={sayWhatWinningDid}
           onClose={() => setEditingRow(null)}
           onSave={(patch) => {
             /* A customer note belongs to the company, so it lands on
@@ -1176,20 +1196,6 @@ export function SalesTracker({
               return x.id === editingRow.id ? { ...x, ...deal, ...shared } : { ...x, ...shared };
             }));
             setEditingRow({ ...editingRow, ...patch });
-          }}
-        />
-      )}
-
-      {convert && (
-        <ConvertProspectModal
-          row={convert}
-          onClose={() => setConvert(null)}
-          onConvert={async () => {
-            const done = await convertToCustomer(supabase, convert.contact_id!);
-            setConvert(null);
-            setMessage(done.ok
-              ? `${convert.company_name} is an active customer account now.`
-              : done.why);
           }}
         />
       )}
@@ -1252,43 +1258,6 @@ function WhoseTracker({ me, viewing, colleagues }: {
   );
 }
 
-/* =============================================================
-   Make them a customer, now that you have won something.
-
-   Asked at the moment of the handshake rather than done quietly. The
-   reasoning is in `lib/crm/conversion.ts`; what matters on screen is
-   that both answers are safe and both are one click, and that the
-   question says what will change rather than asking for a decision in
-   the abstract.
-   ============================================================= */
-function ConvertProspectModal({ row, onClose, onConvert }: {
-  row: TrackerRow; onClose: () => void; onConvert: () => void;
-}) {
-  return (
-    <Modal
-      title={`Make ${row.company_name} an active customer?`}
-      description="You have just marked this lead as won."
-      width={480}
-      onClose={onClose}
-      footer={<>
-        <Button size="sm" variant="ghost" onClick={onClose}>Leave them a prospect</Button>
-        <Button size="sm" variant="primary" onClick={onConvert}>
-          <BadgeCheck size={13} /> Make them a customer
-        </Button>
-      </>}
-    >
-      <p style={{ margin: 0, fontFamily: 'var(--inter)', fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-        They are recorded as a prospect. Converting them marks the CRM record as an active
-        customer account, which is what the customer reports, the proposal pipelines and the
-        analytics split on.
-      </p>
-      <p style={{ margin: 0, fontFamily: 'var(--inter)', fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.55 }}>
-        The lead stays won either way. If the deal is not certain yet, leave them a prospect:
-        the Relationship control on their record does this whenever you are ready.
-      </p>
-    </Modal>
-  );
-}
 
 /** The little the value block needs about a sibling pitch. */
 type SiblingLead = {
@@ -1761,7 +1730,7 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
               is a workshop figure that arrives months later out of the
               invoices, not a number a rep types at the handshake, and a
               box asking for it at the wrong moment gets a guess. */}
-          {(edit.status === 'customer' || edit.status === 'won') && (
+          {edit.status === 'won' && (
             <Card padded={false}>
               <PanelHead title={words.closing.title} hint={words.closing.hint} />
               <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -2181,7 +2150,7 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
   onMoveStatus: (s: ContactStatus) => void;
   onDuplicate: () => void; onDelete: () => void;
 }) {
-  const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+  const STATUSES: ContactStatus[] = STATUS_ORDER;
 
   return (
     <EdgeAwareCtxMenu x={x} y={y}>
@@ -2190,7 +2159,7 @@ function TrackerContextMenu({ x, y, row, onView, onEditCell, onMarkSold, onMoveS
       </MenuHead>
       <MenuItem icon={<Eye size={13} />} label="Open the lead" onClick={onView} />
       <MenuItem icon={<Edit2 size={13} />} label="Edit this cell" onClick={onEditCell} />
-      {row.type === 'trailer_sales' && row.status !== 'customer' && (
+      {row.type === 'trailer_sales' && row.status !== 'won' && (
         <MenuItem icon={<PoundSterling size={13} />} label="Mark as sold" onClick={onMarkSold} />
       )}
       <MenuRule />

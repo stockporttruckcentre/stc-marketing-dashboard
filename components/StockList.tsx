@@ -1136,7 +1136,7 @@ function SendToTrackerConfirm({ row, myEntry, others, onProceed, onClose }: {
         <Alert key={i} tone="info">
           On <strong style={{ color: 'var(--text)' }}>{o.owner_name}</strong>&apos;s tracker,
           at <strong style={{ color: 'var(--text)' }}>{o.status}</strong>
-          {o.status === 'customer' ? ', with a deal in progress' : ''}.
+          {o.status === 'won' ? ', with the sale logged against it' : ''}.
         </Alert>
       ))}
       <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-subtle)', lineHeight: 1.5 }}>

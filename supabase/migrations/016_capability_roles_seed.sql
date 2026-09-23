@@ -11,7 +11,7 @@
 -- a capability it loses here too. A seed that only ever grows is how a
 -- revoked permission survives in the database.
 --
--- 211 pairs.
+-- 213 pairs.
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS command_capability_roles (
@@ -121,6 +121,8 @@ INSERT INTO command_capability_roles (capability, role) VALUES
   ('crm.assign', 'sales'),
   ('crm.create', 'admin'),
   ('crm.create', 'sales'),
+  ('crm.dealValues', 'admin'),
+  ('crm.dealValues', 'sales'),
   ('crm.delegate', 'admin'),
   ('crm.delegate', 'sales'),
   ('crm.delete', 'admin'),

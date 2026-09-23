@@ -236,7 +236,7 @@ async function sweepMissingTables() {
   const source = require('fs').readFileSync('lib/reports/build.ts', 'utf8') as string;
   const wonQueries = source.split('\n')
     .map((line, i) => ({ line, at: i + 1 }))
-    .filter((l) => /\.eq\('status', 'customer'\)/.test(l.line));
+    .filter((l) => /\.eq\('status', 'won'\)/.test(l.line));
   ok('the builder asks for won deals somewhere', wonQueries.length > 0);
   for (const q of wonQueries) {
     /* The order date test is the next line or the one after it. Read as

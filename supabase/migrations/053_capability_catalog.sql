@@ -117,6 +117,10 @@ INSERT INTO capability_catalog (key, label, description, area, feature, danger, 
 ('crm.view',             'See the CRM',              'Open the CRM and see the organizations they are allowed to see.', 'CRM', 'Access', 'routine', '{}', TRUE, 10),
 ('crm.viewGlobal',       'See every organization',   'See the whole company list, not only their own accounts.', 'CRM', 'Access', 'routine', '{crm.view}', FALSE, 20),
 ('crm.viewOthers',       'See a colleague''s accounts', 'Look at a named colleague''s portfolio.', 'CRM', 'Access', 'sensitive', '{crm.view}', FALSE, 30),
+-- Added with migration 147. It lives here because this file IS the
+-- register, and migration 103 refuses to grant a capability the
+-- register has never heard of.
+('crm.dealValues',       'See what a deal is worth', 'See the estimated value and the agreed price of deals on a customer record, including deals on somebody else''s tracker. Without it the entries still appear, so everybody can see what is being pitched, and the figures do not.', 'CRM', 'Access', 'sensitive', '{crm.view}', FALSE, 35),
 ('crm.edit',             'Change records',           'Edit fields on an organization or contact.', 'CRM', 'Records', 'routine', '{crm.view}', TRUE, 40),
 ('crm.create',           'Add records',              'Create new organizations and contacts.', 'CRM', 'Records', 'routine', '{crm.view}', FALSE, 50),
 ('crm.delete',           'Remove records',           'Delete an organization or contact. Deletion is recoverable, but it disappears from every list until somebody restores it.', 'CRM', 'Records', 'destructive', '{crm.view}', TRUE, 60),

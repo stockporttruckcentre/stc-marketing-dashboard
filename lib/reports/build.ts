@@ -297,7 +297,7 @@ async function wonSection(db: Db, f: ReportFilters, now: Date): Promise<Section>
   const from = periodStart(f.period, now);
   let q = db.from('crm_leads')
     .select('sale_price, type, order_date, owner_id')
-    .eq('status', 'customer')
+    .eq('status', 'won')
     .not('order_date', 'is', null)
     .gte('order_date', from.toISOString().slice(0, 10));
   if (f.person) q = q.eq('owner_id', f.person);
@@ -323,7 +323,7 @@ async function wonDealsSection(db: Db, f: ReportFilters, now: Date): Promise<Sec
   const from = periodStart(f.period, now);
   let q = db.from('crm_leads')
     .select('company_name, type, what, sale_price, order_date, owner:profiles!crm_leads_owner_id_fkey ( full_name )')
-    .eq('status', 'customer')
+    .eq('status', 'won')
     .not('order_date', 'is', null)
     .gte('order_date', from.toISOString().slice(0, 10))
     .order('sale_price', { ascending: false, nullsFirst: false });

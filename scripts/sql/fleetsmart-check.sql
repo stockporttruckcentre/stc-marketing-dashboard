@@ -510,7 +510,7 @@ BEGIN
   RESET ROLE;
   SELECT l.status, l.sale_price, l.estimated_value
     INTO st, taken, money FROM crm_leads l WHERE l.id = lead;
-  IF st <> 'customer' THEN
+  IF st <> 'won' THEN
     RAISE EXCEPTION 'accepting the contract left its lead at %', st;
   END IF;
   IF taken IS DISTINCT FROM 9600 THEN
@@ -545,7 +545,7 @@ BEGIN
   SELECT lead_id INTO lead FROM fleetsmart_contracts WHERE id = made;
   IF lead IS NULL THEN RAISE EXCEPTION 'the contract has no lead'; END IF;
 
-  UPDATE crm_leads SET status = 'customer' WHERE id = lead;
+  UPDATE crm_leads SET status = 'won' WHERE id = lead;
 
   SELECT status, sent_at, decision_note INTO st, sent, note
     FROM fleetsmart_contracts WHERE id = made;
@@ -811,7 +811,7 @@ BEGIN
   RESET ROLE;
 
   SELECT status INTO st FROM crm_leads WHERE id = lead;
-  IF st <> 'customer' THEN RAISE EXCEPTION 'accepting left the lead at %', st; END IF;
+  IF st <> 'won' THEN RAISE EXCEPTION 'accepting left the lead at %', st; END IF;
 END $$;
 
 -- Amending it: the numbering, the snapshot of what it was, and the money.
@@ -952,7 +952,7 @@ BEGIN
   END IF;
 
   SELECT status INTO st FROM crm_leads WHERE id = lead;
-  IF st <> 'customer' THEN
+  IF st <> 'won' THEN
     RAISE EXCEPTION 'ending the contract moved its lead to %, and it should stay won', st;
   END IF;
   RAISE NOTICE 'ok  ending stamps the date and leaves the customer won';

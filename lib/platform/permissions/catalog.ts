@@ -69,7 +69,7 @@ export type CapabilityEntry = {
  */
 export type Capability =
   // ---- CRM ----
-  | 'crm.view' | 'crm.viewGlobal' | 'crm.viewOthers' | 'crm.health' | 'analytics.targets'
+  | 'crm.view' | 'crm.viewGlobal' | 'crm.viewOthers' | 'crm.dealValues' | 'crm.health' | 'analytics.targets'
   | 'crm.edit' | 'crm.create' | 'crm.delete' | 'crm.assign' | 'crm.manageLists'
   | 'crm.proposal' | 'crm.proposalForOthers' | 'crm.delegate'
   | 'crm.enrich' | 'crm.import' | 'crm.export'
@@ -124,6 +124,7 @@ export const CAPABILITY_CATALOG = [
   { key: 'analytics.targets', label: 'Set revenue targets', description: 'Change what a division or the group is measured against on the Analytics hub. Reading a target and setting one are different rights.', area: 'CRM', feature: 'Analytics', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 340 },
   { key: 'crm.health', label: 'Flag a customer amber or red', description: 'Record a complaint or a problem on an account, and alert whoever looks after it. Red notifies them the moment it is set.', area: 'CRM', feature: 'Records', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 45 },
   { key: 'crm.viewOthers', label: "See a colleague's accounts", description: "Look at a named colleague's portfolio.", area: 'CRM', feature: 'Access', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 30 },
+  { key: 'crm.dealValues', label: 'See what a deal is worth', description: "See the estimated value and the agreed price of deals on a customer record, including deals on somebody else's tracker. Without it the entries still appear, so everybody can see what is being pitched, and the figures do not.", area: 'CRM', feature: 'Access', danger: 'sensitive', requires: ['crm.view'], scoped: false, position: 35 },
   { key: 'crm.edit', label: 'Change records', description: 'Edit fields on an organization or contact.', area: 'CRM', feature: 'Records', danger: 'routine', requires: ['crm.view'], scoped: true, position: 40 },
   { key: 'crm.create', label: 'Add records', description: 'Create new organizations and contacts.', area: 'CRM', feature: 'Records', danger: 'routine', requires: ['crm.view'], scoped: false, position: 50 },
   { key: 'crm.delete', label: 'Remove records', description: 'Delete an organization or contact. Deletion is recoverable, but it disappears from every list until somebody restores it.', area: 'CRM', feature: 'Records', danger: 'destructive', requires: ['crm.view'], scoped: true, position: 60 },

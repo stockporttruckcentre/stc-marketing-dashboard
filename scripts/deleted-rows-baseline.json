@@ -18,8 +18,7 @@
   "components/RevenuePanel.tsx": 1,
   "components/SalesTracker.tsx": 6,
   "components/TeamCalendar.tsx": 1,
-  "components/crm/ContactDrawer.tsx": 3,
-  "components/revenue/moderate-panel.tsx": 1,
+  "components/crm/ContactDrawer.tsx": 2,
   "lib/ratecards/client.ts": 1,
   "lib/reports/build.ts": 1
 }

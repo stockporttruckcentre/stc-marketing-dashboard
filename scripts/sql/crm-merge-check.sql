@@ -42,7 +42,7 @@ BEGIN
 
   -- The canonical record: Protean bound, and missing a phone number.
   INSERT INTO crm_contacts (id, company_name, status, email, phone)
-  VALUES (keep, 'TK Components', 'customer', 'accounts@tk.example', NULL)
+  VALUES (keep, 'TK Components', 'won', 'accounts@tk.example', NULL)
   ON CONFLICT (id) DO UPDATE SET company_name = EXCLUDED.company_name, phone = NULL;
 
   -- The duplicate: older, has the phone number and some history on it.
@@ -52,7 +52,7 @@ BEGIN
                                  phone = EXCLUDED.phone, notes = EXCLUDED.notes;
 
   INSERT INTO crm_contacts (id, company_name, status)
-  VALUES (other, 'Somebody Else', 'customer') ON CONFLICT (id) DO NOTHING;
+  VALUES (other, 'Somebody Else', 'won') ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO protean_accounts (alpha, protean_name, division, contact_id, ignored)
   VALUES ('TKC01', 'TK Components', 'stc', keep, FALSE) ON CONFLICT DO NOTHING;
@@ -234,8 +234,8 @@ BEGIN
 
   -- Protean beats weight: the thin record is bound, the fat one is not.
   INSERT INTO crm_contacts (id, company_name, status) VALUES
-    ('eeeeeeee-2222-0000-0000-000000000001', 'Thin But Bound', 'customer'),
-    ('eeeeeeee-2222-0000-0000-000000000002', 'Fat But Unbound', 'customer')
+    ('eeeeeeee-2222-0000-0000-000000000001', 'Thin But Bound', 'won'),
+    ('eeeeeeee-2222-0000-0000-000000000002', 'Fat But Unbound', 'won')
   ON CONFLICT (id) DO NOTHING;
   INSERT INTO protean_accounts (alpha, protean_name, division, contact_id, ignored)
   VALUES ('THIN01', 'Thin But Bound', 'stc', 'eeeeeeee-2222-0000-0000-000000000001', FALSE)
@@ -284,9 +284,9 @@ BEGIN
   -- merged into A, and A is later merged into C, rewriting that first
   -- record makes it say B was merged into C, which never happened.
   INSERT INTO crm_contacts (id, company_name, status) VALUES
-    ('eeeeeeee-4444-0000-0000-000000000001', 'Absorber', 'customer'),
+    ('eeeeeeee-4444-0000-0000-000000000001', 'Absorber', 'won'),
     ('eeeeeeee-4444-0000-0000-000000000002', 'Absorbed', 'lead'),
-    ('eeeeeeee-4444-0000-0000-000000000003', 'Final Home', 'customer')
+    ('eeeeeeee-4444-0000-0000-000000000003', 'Final Home', 'won')
   ON CONFLICT (id) DO NOTHING;
   INSERT INTO contact_notes (contact_id, text) VALUES
     ('eeeeeeee-4444-0000-0000-000000000001', 'x'),

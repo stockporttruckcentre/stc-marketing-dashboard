@@ -431,7 +431,7 @@ export function CrmWorkspace({
       comparator: (a, b) => healthRank(a as Health) - healthRank(b as Health),
       cellRenderer: (p: ICellRendererParams<CRMContact>) => {
         const level = ((p.value as Health) ?? 'green');
-        if (level === 'green' && p.data?.status !== 'customer') return null;
+        if (level === 'green' && p.data?.status !== 'won') return null;
         const why = (p.data as unknown as { health_reason?: string })?.health_reason;
         return (
           <StatusDot

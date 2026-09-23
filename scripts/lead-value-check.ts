@@ -26,13 +26,13 @@ const lead = (status: string, over: Partial<ValuableLead> = {}): ValuableLead =>
     lead('lead', { estimated_value: 1000 }),
     lead('contacted', { estimated_value: 2000 }),
     lead('quoted', { estimated_value: 3000 }),
-    lead('customer', { sale_price: 10000 }),
+    lead('won', { sale_price: 10000 }),
     lead('won', { estimated_value: 5000 }),
     lead('lost', { estimated_value: 40000 }),
   ]);
   ok('open is lead, contacted and quoted', v.open.count === 3 && v.open.total === 6000,
     `${v.open.count} / ${v.open.total}`);
-  ok('won is won and customer', v.won.count === 2 && v.won.total === 15000,
+  ok('won is won, and there is only one word for it now', v.won.count === 2 && v.won.total === 15000,
     `${v.won.count} / ${v.won.total}`);
   ok('lost is its own', v.lost.count === 1 && v.lost.total === 40000);
   ok('the headline is open plus won', v.openAndWon === 21000, `${v.openAndWon}`);
@@ -43,7 +43,7 @@ const lead = (status: string, over: Partial<ValuableLead> = {}): ValuableLead =>
 /* ---- a won lead prefers what it sold for ---- */
 {
   ok('a won lead counts what it sold for',
-    valueOf(lead('customer', { sale_price: 9000, estimated_value: 4000 })) === 9000);
+    valueOf(lead('won', { sale_price: 9000, estimated_value: 4000 })) === 9000);
   ok('and falls back to the estimate where there is no price',
     valueOf(lead('won', { estimated_value: 4000 })) === 4000);
   ok('an open lead never reads sale_price',
@@ -69,7 +69,7 @@ const lead = (status: string, over: Partial<ValuableLead> = {}): ValuableLead =>
 {
   const v = valueLeads([
     lead('quoted', { estimated_value: '1500.50' as never }),
-    lead('customer', { sale_price: '2499.50' as never }),
+    lead('won', { sale_price: '2499.50' as never }),
   ]);
   ok('a numeric sent as a string still totals', v.openAndWon === 4000, `${v.openAndWon}`);
 }

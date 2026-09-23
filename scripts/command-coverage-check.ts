@@ -16,7 +16,7 @@
 
    npm run check:coverage
    ============================================================= */
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { parseQuery as readQuery } from '../lib/command/query';
 import { ENTITIES as ENTITIES_FOR_SPACE } from '../lib/command/schema';
 import { suggestFeatures, FEATURES } from '../lib/command/features';
@@ -1438,10 +1438,31 @@ ok('a viewer can still see what is next',
    belongs to.
 
    Twice now the specific target has been the thing that rotted. So what
-   is asserted is the rule that survives both: an analytics action
-   carries NO query string, because the page has no addressable states
-   left, and every phrase somebody would type still reaches the screen.
+   is asserted is the rule that survives both: an analytics action may
+   only carry a query the SCREEN ACTUALLY READS, and every phrase
+   somebody would type still reaches the screen.
+
+   For a while that rule was "no query string at all", which was true
+   while the page had no addressable states. It has one again: `scope`
+   and `person`, which is how the Personal portfolio is opened for a
+   named person. So the parameter names are read out of the page's own
+   `searchParams` type rather than listed here, and an action pointing
+   at a parameter nobody reads fails exactly as the eleven did.
    ------------------------------------------------------------- */
+/* The Personal portfolio, and the three things the business asked for
+   on it. Every one of them has to be reachable by typing, because a
+   feature the bar cannot reach is invisible: that is the fault this
+   file was written for. */
+for (const said of [
+  'my portfolio', 'my figures', 'how am i doing', 'my target',
+  'my customer list', 'customers on my portfolio', 'my customers and their revenue',
+  'my open deals', 'what i have won', 'what i have lost', 'across the three',
+]) {
+  const hit = suggestActions(said, CAPS.sales, 8)
+    .find((h) => h.action.path?.startsWith('/dashboard/analytics') ?? false);
+  ok(`"${said}" reaches a portfolio`, !!hit, 'reached no analytics action at all');
+}
+
 for (const said of [
   'the deals', 'what trailers have we sold', 'individual deals', 'deal review',
   'average deal size', 'who is selling', 'leaderboard', 'who has sold the most',
@@ -1458,10 +1479,22 @@ for (const said of [
 }
 
 {
-  const stale = ACTIONS.filter((a) => a.path?.startsWith('/dashboard/analytics')
-    && a.path.includes('?'));
+  /* Straight out of the page's own signature, so adding a parameter to
+     the screen is what permits an action to use it. */
+  const page = readFileSync('app/dashboard/analytics/page.tsx', 'utf8');
+  const sig = /searchParams:\s*\{([^}]*)\}/.exec(page)?.[1] ?? '';
+  const reads = new Set([...sig.matchAll(/(\w+)\??:/g)].map((m) => m[1]));
+
+  const stale = ACTIONS.filter((a) => {
+    if (!a.path?.startsWith('/dashboard/analytics')) return false;
+    const q = a.path.split('?')[1];
+    if (!q) return false;
+    return q.split('&').some((pair) => !reads.has(pair.split('=')[0]));
+  });
   ok('no analytics action carries a query the screen does not read',
     stale.length === 0, stale.map((a) => `${a.id} -> ${a.path}`).join(', '));
+  ok('and the screen does read one, so the rule is testing something',
+    reads.size > 0, 'the page signature parsed to nothing');
 }
 
 /* -------------------------------------------------------------

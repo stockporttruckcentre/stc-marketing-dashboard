@@ -471,7 +471,8 @@ SELECT reset_fixtures();
 
 -- Two customers, and a deal against each. A deal is a lead now, so the
 -- sale price and the commission sit on the pitch and the company is just
--- the company. Selling one used to set a COMPANY to 'customer' and write
+-- the company. Selling one used to set a COMPANY to the old customer
+-- status and write
 -- a sale price onto the account book.
 INSERT INTO crm_contacts (id, company_name, status, source)
 VALUES
@@ -506,16 +507,16 @@ $$;
 
 SELECT assert('both deals are won',
   (SELECT COUNT(*) FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
-    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'customer') = 2,
+    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'won') = 2,
   (SELECT COUNT(*)::TEXT FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
-    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'customer'));
+    WHERE c.company_name LIKE 'TEST buyer%' AND l.status = 'won'));
 
 -- And winning the work says something about the company, not only about
 -- one person's tracker. The CRM could never say this while a won deal
 -- and the company were separate rows.
 SELECT assert('and both are now customers of the business',
   (SELECT COUNT(*) FROM crm_contacts
-    WHERE company_name LIKE 'TEST buyer%' AND status = 'customer') = 2,
+    WHERE company_name LIKE 'TEST buyer%' AND status = 'won') = 2,
   (SELECT string_agg(company_name || '=' || status, ', ') FROM crm_contacts
     WHERE company_name LIKE 'TEST buyer%'));
 
@@ -560,7 +561,7 @@ $$;
 
 SELECT assert('and the good deal in the same call was rolled back',
   (SELECT l.status FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
-    WHERE c.company_name = 'TEST buyer three') <> 'customer',
+    WHERE c.company_name = 'TEST buyer three') <> 'won',
   (SELECT l.status FROM crm_leads l JOIN crm_contacts c ON c.id = l.contact_id
     WHERE c.company_name = 'TEST buyer three'));
 
@@ -972,17 +973,17 @@ BEGIN
   PERFORM assert('commission is worked out at the row''s rate',
     (result ->> 'commission')::NUMERIC = 400, result ->> 'commission');
   PERFORM assert('the deal is marked won',
-    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000010') = 'customer');
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000010') = 'won');
   PERFORM assert('and the company is a customer of the business now',
-    (SELECT status FROM crm_contacts WHERE id='e0000000-0000-0000-0000-000000000010') = 'customer');
+    (SELECT status FROM crm_contacts WHERE id='e0000000-0000-0000-0000-000000000010') = 'won');
   PERFORM assert('the stock unit is sold',
     (SELECT status FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'sold');
   PERFORM assert('and it carries the buyer and the rep',
     (SELECT customer FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'TEST buyer'
     AND (SELECT sales_rep FROM stock_trailers WHERE id='11111111-1111-1111-1111-111111111111') = 'DA');
   -- The rival was chasing a unit that has gone, so their pitch is lost
-  -- rather than won. It used to be set to 'customer', which read as
-  -- them having sold it too.
+  -- rather than won. It used to be set to the old customer status,
+  -- which read as them having sold it too.
   PERFORM assert('the other rep is told it is gone',
     (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000011') = 'lost');
   PERFORM assert('but keeps no commission',
@@ -1063,7 +1064,7 @@ DECLARE result JSONB;
 BEGIN
   SELECT command_mark_sold('f0000000-0000-0000-0000-000000000013', 'DA', NULL, NULL, NULL, NULL, DATE '2026-08-14') INTO result;
   PERFORM assert('a deal with no stock unit still sells',
-    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000013') = 'customer');
+    (SELECT status FROM crm_leads WHERE id='f0000000-0000-0000-0000-000000000013') = 'won');
   PERFORM assert('and reports no stock update', (result ->> 'stockUpdated')::BOOLEAN = FALSE, result::TEXT);
 END
 $$;
@@ -3222,7 +3223,7 @@ INSERT INTO crm_leads (id, contact_id, owner_id, type, status,
                        requirement, notes, stock_trailer_id,
                        sale_price, profit, commission, order_date)
 VALUES ('e1111111-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-0000000000d0',
-        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'customer',
+        'aaaaaaaa-0000-0000-0000-000000000001', 'trailer_sales', 'won',
         'two curtainsiders', 'rings on Fridays',
         '11111111-1111-1111-1111-111111111111', 24000, 4000, 400, DATE '2026-08-01');
 

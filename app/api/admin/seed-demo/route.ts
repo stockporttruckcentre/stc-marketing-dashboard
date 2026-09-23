@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
     })),
     ...CLOSED.map((c) => ({
       contact_id: byName.get(c.company), owner_id: target.id, created_by: target.id,
-      type: 'trailer_sales', status: 'customer',
+      type: 'trailer_sales', status: 'won',
       sale_price: c.sale, profit: c.profit,
       commission: Number((c.profit * 0.1).toFixed(2)), commission_rate: 0.1,
       rep_initials: initials,

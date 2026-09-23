@@ -15,7 +15,10 @@ import type { ContactStatus } from '@/lib/types';
    ============================================================= */
 export const STATUS_TONE: Record<string, Tone> = {
   lead: 'info', contacted: 'warning', quoted: 'accent',
-  won: 'success', customer: 'success', lost: 'neutral',
+  won: 'success', lost: 'neutral',
+  /* Kept so a row still carrying the old word draws as won rather than
+     as nothing at all. Nothing writes it any more: migration 146. */
+  customer: 'success',
 };
 
 /* How far along a deal is, in the order it actually moves. Sorting on
@@ -27,10 +30,26 @@ export const STATUS_TONE: Record<string, Tone> = {
    a stage before Lead, and a sort that opens with everything you failed
    to win is a sort nobody uses twice. */
 export const STATUS_ORDER: ContactStatus[] = [
-  'lead', 'contacted', 'quoted', 'won', 'customer', 'lost',
+  'lead', 'contacted', 'quoted', 'won', 'lost',
 ];
 
 export const STATUS_LABEL: Record<ContactStatus, string> = {
   lead: 'Lead', contacted: 'Contacted', quoted: 'Quoted',
-  won: 'Won', customer: 'Customer', lost: 'Lost',
+  won: 'Won', lost: 'Lost',
 };
+
+/* ---- THE WORD THAT WENT ----
+
+   `customer` was a second name for won. From the business: "Then we
+   have a status for Customer, which means won anyway. We only need 1
+   status, Won."
+
+   Migration 146 moves every row that held it. This reads anything that
+   somehow still says it, an old export being imported, a row written by
+   something that has not been restarted, and calls it what it is.
+   Nothing in this application writes it. */
+export function statusOf(raw: string | null | undefined): ContactStatus {
+  const s = String(raw ?? '').toLowerCase();
+  if (s === 'customer' || s === 'converted') return 'won';
+  return (STATUS_ORDER as string[]).includes(s) ? (s as ContactStatus) : 'lead';
+}

@@ -51,7 +51,7 @@ const TRAILERS: Row[] = [
 ];
 
 const CONTACTS: Row[] = [
-  { id: 'c1', company_name: 'Dawson Group', contact_name: 'Ian', status: 'customer', location: 'Manchester', email: 'i@d.co', fleet_size: 60, list_id: 'l1', date_of_enquiry: '2026-06-01' },
+  { id: 'c1', company_name: 'Dawson Group', contact_name: 'Ian', status: 'won', location: 'Manchester', email: 'i@d.co', fleet_size: 60, list_id: 'l1', date_of_enquiry: '2026-06-01' },
   { id: 'c2', company_name: 'Wincanton', contact_name: 'Sue', status: 'quoted', location: 'Bredbury', email: null, fleet_size: 12, list_id: 'l1', date_of_enquiry: '2026-07-01' },
   { id: 'c3', company_name: 'Culina', contact_name: 'Ed', status: 'lead', location: 'Manchester', email: 'e@c.co', fleet_size: 200, list_id: 'l1', date_of_enquiry: '2026-02-01' },
 ];

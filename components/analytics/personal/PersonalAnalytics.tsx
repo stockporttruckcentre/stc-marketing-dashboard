@@ -15,6 +15,9 @@ import {
 import { Select, TextInput } from '@/components/kit/forms';
 import { Panel, PanelGrid, Sub } from '@/components/analytics/legacy/panel';
 import { Tile } from '@/components/analytics/legacy/tiles';
+import { DealPill, PortfolioDeals, type DealState } from './PortfolioDeals';
+import { PortfolioCustomers } from './PortfolioCustomers';
+import { readChoice, writeChoice } from '@/lib/ui/remember';
 
 /* =============================================================
    Personal Analytics: one person's portfolio.
@@ -152,6 +155,16 @@ const num = (n: number | null | undefined): number | null =>
 /** How many movers each list shows. The company panels show ten. */
 const SHOW_MOVERS = 10;
 
+/* The two divisions a customer is billed under, and both together.
+   `stc` is the maintenance and workshop side: the slug is older than
+   the word the business uses for it, and renaming a slug renames it in
+   every invoice already imported. */
+const MOVER_SIDES = ['stc', 'rental', 'both'] as const;
+type MoverSide = typeof MOVER_SIDES[number];
+const SIDE_LABEL: Record<MoverSide, string> = {
+  stc: 'Maintenance', rental: 'Rentals', both: 'Both',
+};
+
 export function PersonalAnalytics({
   person, people, selfId, asked, onAsked, onLeave, onPerson,
 }: {
@@ -176,6 +189,22 @@ export function PersonalAnalytics({
   const { say } = useToast();
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState<string | null>(null);
+
+  /* WHICH DIVISION THE MOVERS ARE READ FOR.
+
+     From the business: "biggest gainers should only show maintenance,
+     rental, or both, buttons to switch". The slugs are the Protean
+     ones, because a customer is BILLED under a division rather than
+     pitched to under one. It is a preference, so it lasts the reload:
+     `lib/ui/remember.ts`, the same as every other saved choice. */
+  const [side, setSide] = useState<MoverSide>(
+    () => readChoice<MoverSide>('portfolio-mover-side', MOVER_SIDES) ?? 'both',
+  );
+
+  /* The pill somebody pressed, and the list it opens. */
+  const [deals, setDeals] = useState<
+    { type: string; label: string; state: DealState } | null
+  >(null);
 
   /* ---- Every panel moves together, or none of them do ----
 
@@ -207,6 +236,7 @@ export function PersonalAnalytics({
         supabase.rpc('personal_pipeline', { p_person: person, p_when: upto ?? null }),
         supabase.rpc('personal_movers', {
           p_person: person, p_upto: upto ?? null, p_limit: SHOW_MOVERS * 2,
+          p_division: side === 'both' ? null : side,
         }),
         supabase.rpc('personal_revenue_year', { p_person: person, p_upto: upto ?? null }),
       ]);
@@ -224,7 +254,7 @@ export function PersonalAnalytics({
     } finally {
       setLoading(false);
     }
-  }, [supabase, person, upto]);
+  }, [supabase, person, upto, side]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -529,10 +559,35 @@ export function PersonalAnalytics({
                         {money(num(row.open_total))}
                       </strong>
                     </span>
+                    {/* PRESS ONE AND SEE THE RECORDS.
+
+                        "make it so you can click 'open' or 'won' or
+                        'lost' pills and see a list of those records".
+                        A pill with nothing behind it is not a button,
+                        it is a number, so it stays a badge. */}
                     <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                      <Badge tone="neutral">{row.open_count} open</Badge>
-                      <Badge tone="neutral">{row.won_count} won</Badge>
-                      {row.lost_count > 0 && <Badge tone="neutral">{row.lost_count} lost</Badge>}
+                      <DealPill
+                        count={row.open_count} label="open"
+                        disabled={row.open_count === 0}
+                        onOpen={() => setDeals({
+                          type: t, label: TYPE_LABEL[t] ?? t, state: 'open',
+                        })}
+                      />
+                      <DealPill
+                        count={row.won_count} label="won"
+                        disabled={row.won_count === 0}
+                        onOpen={() => setDeals({
+                          type: t, label: TYPE_LABEL[t] ?? t, state: 'won',
+                        })}
+                      />
+                      {row.lost_count > 0 && (
+                        <DealPill
+                          count={row.lost_count} label="lost"
+                          onOpen={() => setDeals({
+                            type: t, label: TYPE_LABEL[t] ?? t, state: 'lost',
+                          })}
+                        />
+                      )}
                     </span>
                   </div>
                 );
@@ -708,28 +763,73 @@ export function PersonalAnalytics({
           )}
         </Panel>
 
+        {/* ---- WHO THEY ARE AND WHAT THEY SPEND ----
+
+            "personal portfolio should have a list like the revenue tab
+            of customers and their revenue. limit to 20 rows with
+            scrolling. can click into a customer and see their broken
+            down revenue, set reminder button against each, compare
+            against another customer."
+
+            All four of those are in the one component, because they are
+            one thing somebody does: look down the list, stop on a name,
+            see where the money comes from, and either put a reminder on
+            it or hold it up against somebody else. */}
+        <Panel
+          span={12}
+          title="Customers on this portfolio"
+          hint="What each one has spent this financial year, against the same point last year"
+        >
+          <PortfolioCustomers person={person} upto={upto} me={selfId ?? person} />
+        </Panel>
+
         <MoverPanel
           title="Biggest gainers"
-          hint="Customers in this portfolio spending more than the same point last year"
+          hint={side === 'both'
+            ? 'Customers in this portfolio spending more than the same point last year'
+            : `${SIDE_LABEL[side]} only, against the same point last year`}
           rows={gainers}
           loading={loading}
+          side={side}
+          onSide={(v) => { setSide(v); writeChoice('portfolio-mover-side', v); }}
           up
         />
         <MoverPanel
           title="Biggest fallers"
-          hint="Customers in this portfolio spending less than the same point last year"
+          hint={side === 'both'
+            ? 'Customers in this portfolio spending less than the same point last year'
+            : `${SIDE_LABEL[side]} only, against the same point last year`}
           rows={fallers}
           loading={loading}
+          side={side}
+          onSide={(v) => { setSide(v); writeChoice('portfolio-mover-side', v); }}
         />
       </PanelGrid>
+
+      {deals && (
+        <PortfolioDeals
+          person={person}
+          type={deals.type}
+          typeLabel={deals.label}
+          state={deals.state}
+          upto={upto}
+          onClose={() => setDeals(null)}
+        />
+      )}
     </div>
   );
 }
 
 /* One panel, drawn twice, because a gainer and a faller are the same
-   row read from opposite ends. */
-function MoverPanel({ title, hint, rows, loading, up = false }: {
-  title: string; hint: string; rows: Mover[]; loading: boolean; up?: boolean;
+   row read from opposite ends.
+
+   The division buttons are on both, and pressing one on either moves
+   both, because a gainer in maintenance and a faller in maintenance are
+   two ends of one question. Two switches that could disagree would be
+   two questions. */
+function MoverPanel({ title, hint, rows, loading, side, onSide, up = false }: {
+  title: string; hint: string; rows: Mover[]; loading: boolean;
+  side: MoverSide; onSide: (v: MoverSide) => void; up?: boolean;
 }) {
   return (
     <Panel
@@ -748,12 +848,28 @@ function MoverPanel({ title, hint, rows, loading, up = false }: {
         })),
       }}
     >
+      {/* Maintenance, rentals, or both. Asked for by name. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '9px 14px', borderBottom: '1px solid var(--border)',
+      }}>
+        {MOVER_SIDES.map((v) => (
+          <Chip
+            key={v}
+            active={side === v}
+            onClick={() => onSide(v)}
+          >{SIDE_LABEL[v]}</Chip>
+        ))}
+      </div>
+
       {rows.length === 0 ? (
         <EmptyState
           what={loading ? 'Reading the invoices' : `No ${up ? 'gainers' : 'fallers'} to show`}
           why={loading
             ? 'One moment.'
-            : 'Nobody in this portfolio has moved, or none of them are bound to Protean yet.'}
+            : side === 'both'
+              ? 'Nobody in this portfolio has moved, or none of them are bound to Protean yet.'
+              : `Nobody in this portfolio has moved on ${SIDE_LABEL[side].toLowerCase()}. Try Both.`}
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>

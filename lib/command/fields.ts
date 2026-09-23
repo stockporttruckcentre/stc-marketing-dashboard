@@ -116,8 +116,12 @@ const DEAL_STATUS: Record<string, string> = {
   lead: 'lead', enquiry: 'lead', new: 'lead',
   contacted: 'contacted', approached: 'contacted',
   quoted: 'quoted', quote: 'quoted', proposal: 'quoted',
+  /* One word for won, and every word anybody uses for it points at
+     that one. `customer` and `converted` used to be a SECOND status
+     meaning the same event, which is the thing migration 146 took out.
+     They stay here as ways of saying it, because somebody will. */
   won: 'won', win: 'won', closed: 'won',
-  customer: 'customer', converted: 'customer',
+  customer: 'won', converted: 'won', 'a customer': 'won',
   lost: 'lost', dead: 'lost', lapsed: 'lost',
 };
 

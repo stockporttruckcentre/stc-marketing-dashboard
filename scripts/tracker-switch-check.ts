@@ -120,14 +120,19 @@ async function main() {
   ok('and they are the same four, not a stale copy of somebody else’s',
     back.companies.every((c) => mine.companies.includes(c)), back.companies.join(', '));
 
-  /* And the customer he won is reachable, on the tab that is for them.
+  /* And the deal he won is reachable, on the tab that is for it.
      Proves the switch did not simply empty the component: the rows are
-     all there and the filter is doing its job. */
-  const customerChip = page.locator('button', { hasText: /^Customer/ }).first();
-  await customerChip.click();
+     all there and the filter is doing its job.
+
+     The tab is Won. It was Customer until migration 146 took the second
+     word for the same event out of the column, and the row used to sit
+     under Working while a separate Customer tab held the ones somebody
+     had moved by hand. */
+  const wonChip = page.locator('button', { hasText: /^Won/ }).first();
+  await wonChip.click();
   await page.waitForTimeout(300);
   const won = await readScreen(page);
-  ok('and the won customer is on the Customer tab',
+  ok('and the won deal is on the Won tab',
     won.companies.includes('Gregory Distribution'), won.companies.join(', '));
 
   await browser.close();

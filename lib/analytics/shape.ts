@@ -219,13 +219,13 @@ export function peopleRows(
        how a good month gets credited to the wrong person. */
     if (inWindow(l.created_at)) {
       row.leads += 1;
-      if (['quoted', 'won', 'customer'].includes(l.status)) row.quoted += 1;
+      if (['quoted', 'won'].includes(l.status)) row.quoted += 1;
     }
 
     /* The order date test, which is the rule the tracker learned the
-       hard way: a customer row with no agreed date is imported
-       invoicing, not a deal somebody closed. */
-    const won = l.status === 'customer' && l.order_date;
+       hard way: a won row with no agreed date is imported invoicing,
+       not a deal somebody closed. */
+    const won = l.status === 'won' && l.order_date;
     if (won && inWindow(l.order_date)) {
       row.won += 1;
       row.wonValue += money(l.sale_price);
@@ -233,7 +233,12 @@ export function peopleRows(
     if (won && inCompare(l.order_date)) {
       row.wasValue += money(l.sale_price);
     }
-    if (['lead', 'contacted', 'quoted', 'won'].includes(l.status)) {
+    /* Open means still being chased. Won used to sit in here because it
+       meant "agreed, but not a customer yet", which was the halfway
+       state that migration 146 took out. A won deal is finished, so it
+       is in wonValue and nowhere else: counting it in both is how a
+       pipeline figure ends up including money already in the bank. */
+    if (['lead', 'contacted', 'quoted'].includes(l.status)) {
       row.openValue += money(l.estimated_value);
     }
   }
@@ -281,7 +286,7 @@ export function sourceFlows(leads: LeadRow[], p: Period): SourceFlow[] {
       by.set(key, row);
     }
     row.leads += 1;
-    if (l.status === 'customer') {
+    if (l.status === 'won') {
       row.won[divisionOfLeadType(l.type)] += 1;
       row.value += money(l.sale_price);
     } else if (l.status === 'lost') {

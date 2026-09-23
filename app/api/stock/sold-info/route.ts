@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       FROM crm_leads cc
       JOIN profiles p ON cc.owner_id = p.id
       WHERE cc.stock_trailer_id = ${body.stock_trailer_id}
-        AND cc.status = 'customer'
+        AND cc.status = 'won'
         AND cc.sale_price IS NOT NULL
       ORDER BY cc.dispatch_date DESC NULLS LAST, cc.order_date DESC NULLS LAST
       LIMIT 1`;

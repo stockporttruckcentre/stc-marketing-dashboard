@@ -17,9 +17,12 @@ DECLARE
   boss  UUID := 'cccccccc-0000-0000-0000-000000000003';
   acme  UUID := 'cccccccc-1111-0000-0000-000000000001';
   beta  UUID := 'cccccccc-1111-0000-0000-000000000002';
+  gamma UUID := 'cccccccc-1111-0000-0000-000000000003';
   fy    DATE := financial_year_of(CURRENT_DATE);
   o     RECORD;
   n     INT;
+  m     INT;
+  k     INT;
 BEGIN
   ALTER TABLE profiles DISABLE TRIGGER USER;
   INSERT INTO auth.users (id, email) VALUES
@@ -39,7 +42,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
 
   INSERT INTO crm_contacts (id, company_name, status) VALUES
-    (acme, 'Acme Haulage', 'customer'),
+    (acme, 'Acme Haulage', 'won'),
     (beta, 'Beta Transport', 'lead')
   ON CONFLICT (id) DO UPDATE SET company_name = EXCLUDED.company_name;
 
@@ -50,7 +53,7 @@ BEGIN
     -- Percy: maintenance, open
     (acme, rep,  'maintenance',  'quoted',    40000, NULL, NULL,        'A maintenance quote'),
     -- Percy: maintenance, won this year. Target bearing.
-    (acme, rep,  'maintenance',  'customer',  50000, NULL, fy + 30,     'A maintenance contract'),
+    (acme, rep,  'maintenance',  'won',  50000, NULL, fy + 30,     'A maintenance contract'),
     -- Percy: an EXISTING CUSTOMER with a NEW OPEN deal. Still pipeline.
     (acme, rep,  'rental',       'contacted', 12000, NULL, NULL,        'A hire enquiry'),
     -- Percy: trailer sale, won this year. NOT target bearing.
@@ -62,9 +65,9 @@ BEGIN
     -- Percy: no figure at all.
     (beta, rep,  'maintenance',  'quoted',    NULL,  NULL, NULL,        'Nobody priced it'),
     -- Percy: won LAST year, so outside this financial year.
-    (acme, rep,  'maintenance',  'customer',  80000, NULL, fy - 40,     'Last year'),
+    (acme, rep,  'maintenance',  'won',  80000, NULL, fy - 40,     'Last year'),
     -- Paula: her own deal, so Percy must never see it.
-    (beta, rep2, 'maintenance',  'customer',  25000, NULL, fy + 5,      'Paula''s');
+    (beta, rep2, 'maintenance',  'won',  25000, NULL, fy + 5,      'Paula''s');
 
   -- ---- The headline ----
   SELECT * INTO o FROM personal_overview(rep);
@@ -168,7 +171,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
 
   INSERT INTO crm_contacts (id, company_name, status)
-  VALUES ('cccccccc-1111-0000-0000-000000000003', 'Gamma Freight', 'customer')
+  VALUES ('cccccccc-1111-0000-0000-000000000003', 'Gamma Freight', 'won')
   ON CONFLICT (id) DO UPDATE SET company_name = EXCLUDED.company_name;
 
   INSERT INTO protean_accounts (alpha, protean_name, division, contact_id, ignored)
@@ -226,6 +229,138 @@ BEGIN
     RAISE EXCEPTION 'a rep read another rep''s movers';
   END IF;
   RAISE NOTICE 'and a rep asking for a colleague''s movers gets none';
+
+  -- ---------------------------------------------------------
+  -- THE FOUR THINGS ASKED FOR NEXT. Migration 148.
+  -- ---------------------------------------------------------
+  PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
+
+  /* "make it so you can click 'open' or 'won' or 'lost' pills and see a
+     list of those records"
+
+     The list has to agree with the number on the pill, so both are
+     read here and compared rather than counted by hand. */
+  SELECT open_count, won_count, lost_count INTO n, m, k
+    FROM personal_pipeline(rep) WHERE lead_type = 'maintenance';
+
+  IF (SELECT COUNT(*) FROM personal_deals(rep, 'maintenance', 'open')) <> n THEN
+    RAISE EXCEPTION 'the open list and the open pill disagree: % against %',
+      (SELECT COUNT(*) FROM personal_deals(rep, 'maintenance', 'open')), n;
+  END IF;
+  IF (SELECT COUNT(*) FROM personal_deals(rep, 'maintenance', 'won')) <> m THEN
+    RAISE EXCEPTION 'the won list and the won pill disagree: % against %',
+      (SELECT COUNT(*) FROM personal_deals(rep, 'maintenance', 'won')), m;
+  END IF;
+  IF (SELECT COUNT(*) FROM personal_deals(rep, 'maintenance', 'lost')) <> k THEN
+    RAISE EXCEPTION 'the lost list and the lost pill disagree';
+  END IF;
+
+  /* The win with no order date is in neither the pill nor the list.
+     It is counted separately, as a gap, which is the whole point. */
+  IF EXISTS (SELECT 1 FROM personal_deals(rep, 'maintenance', 'won')
+              WHERE what = 'Won, no order date') THEN
+    RAISE EXCEPTION 'an undated win is in the won list but not in the won count';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM personal_deals(rep, 'maintenance', 'lost')
+                  WHERE what = 'One that went elsewhere') THEN
+    RAISE EXCEPTION 'the lost deal is not in the lost list';
+  END IF;
+
+  BEGIN
+    PERFORM COUNT(*) FROM personal_deals(rep, 'maintenance', 'somewhere else');
+    RAISE EXCEPTION 'a state that does not exist was accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE '%does not exist%' THEN RAISE; END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', rep::TEXT, TRUE);
+  IF EXISTS (SELECT 1 FROM personal_deals(rep2, 'maintenance', 'won')) THEN
+    RAISE EXCEPTION 'a rep read a colleague''s deals through the pill list';
+  END IF;
+  RAISE NOTICE 'the pills open a list that adds up to the pill, and not a colleague''s';
+
+  /* "a list like the revenue tab of customers and their revenue. limit
+     to 20 rows with scrolling." */
+  PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
+  SELECT COUNT(*) INTO n FROM personal_customers(rep, NULL, 20, 0);
+  IF n <> 2 THEN
+    RAISE EXCEPTION 'Percy has % customers on the list, wanted 2', n;
+  END IF;
+
+  /* Every row carries how many there are, so the screen can say "20 of
+     37" without asking twice. */
+  IF (SELECT DISTINCT total_rows FROM personal_customers(rep, NULL, 1, 0)) <> 2 THEN
+    RAISE EXCEPTION 'the row count does not survive the limit';
+  END IF;
+
+  /* And the second page is the second page, not the first again. */
+  IF (SELECT contact_id FROM personal_customers(rep, NULL, 1, 0))
+   = (SELECT contact_id FROM personal_customers(rep, NULL, 1, 1)) THEN
+    RAISE EXCEPTION 'scrolling past the first row shows the first row again';
+  END IF;
+
+  /* The figures are the same figures the movers panel shows. Two
+     answers to one question is how a screen stops being believed. */
+  IF (SELECT this_year FROM personal_customers(rep, NULL, 20, 0) WHERE contact_id = acme)
+   IS DISTINCT FROM (SELECT this_year FROM personal_movers(rep, NULL, 10) WHERE contact_id = acme) THEN
+    RAISE EXCEPTION 'the customer list and the movers disagree about Acme';
+  END IF;
+
+  /* Their open work is on the row, because "who owes me a decision" is
+     asked in the same breath as "what do they spend". */
+  IF (SELECT open_deals FROM personal_customers(rep, NULL, 20, 0) WHERE contact_id = acme) <> 2 THEN
+    RAISE EXCEPTION 'Acme''s two open deals are not on their row';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', rep::TEXT, TRUE);
+  IF EXISTS (SELECT 1 FROM personal_customers(rep2, NULL, 20, 0)) THEN
+    RAISE EXCEPTION 'a rep read a colleague''s customer list';
+  END IF;
+  RAISE NOTICE 'the customer list scrolls, counts itself, and agrees with the movers';
+
+  /* "can click into a customer and see their broken down revenue" */
+  PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
+  IF (SELECT ROUND(SUM(this_year), 2) FROM personal_customer_breakdown(rep, acme)
+       WHERE grain = 'division')
+   IS DISTINCT FROM (SELECT this_year FROM personal_customers(rep, NULL, 20, 0)
+                      WHERE contact_id = acme) THEN
+    RAISE EXCEPTION 'the parts do not add up to the whole for Acme';
+  END IF;
+  IF (SELECT ROUND(SUM(this_year), 2) FROM personal_customer_breakdown(rep, acme)
+       WHERE grain = 'month')
+   IS DISTINCT FROM (SELECT this_year FROM personal_customers(rep, NULL, 20, 0)
+                      WHERE contact_id = acme) THEN
+    RAISE EXCEPTION 'the months do not add up to the year for Acme';
+  END IF;
+
+  /* A customer who is not theirs has no breakdown to read, whoever asks
+     for it. Seeing one portfolio is not permission to read any
+     customer's spend by passing an id. */
+  IF EXISTS (SELECT 1 FROM personal_customer_breakdown(rep, gamma)) THEN
+    RAISE EXCEPTION 'a customer outside the portfolio was broken down anyway';
+  END IF;
+  RAISE NOTICE 'a customer breaks down by division and by month, and the parts add up';
+
+  /* "biggest gainers should only show maintenance, rental, or both" */
+  IF EXISTS (SELECT 1 FROM personal_movers(rep, NULL, 10, 'rental')) THEN
+    RAISE EXCEPTION 'a division nobody was billed under still produced movers';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM personal_movers(rep, NULL, 10, 'stc')
+                  WHERE company_name = 'Acme Haulage') THEN
+    RAISE EXCEPTION 'filtering to maintenance lost the customer billed under it';
+  END IF;
+  IF (SELECT COUNT(*) FROM personal_movers(rep, NULL, 10, NULL))
+   < (SELECT COUNT(*) FROM personal_movers(rep, NULL, 10, 'stc')) THEN
+    RAISE EXCEPTION 'both divisions found fewer movers than one of them';
+  END IF;
+  BEGIN
+    PERFORM COUNT(*) FROM personal_movers(rep, NULL, 10, 'not a division');
+    RAISE EXCEPTION 'a division that does not exist was accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE '%does not exist%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'the movers filter to one division or to both, and refuse a third';
 
   RAISE NOTICE 'the portfolio figures hold';
 END

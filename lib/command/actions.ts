@@ -1047,6 +1047,35 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who are'],
     objects: ['top customers', 'best customers', 'biggest customers', 'who spends the most'] },
 
+  /* ---- ONE PERSON'S PORTFOLIO ----
+
+     The Personal scope has been on the Analytics hub since migration
+     119 and has never been reachable by typing, which is the original
+     fault this file exists to stop: a feature the bar cannot reach is
+     invisible.
+
+     `crm.view` rather than a portfolio capability, because WHOSE
+     portfolio opens is decided by `personal_analytics_may_view` on the
+     server and by the grants in migration 143. An action that refuses
+     everybody but an administrator would hide a screen every rep is
+     entitled to for themselves. */
+  { id: 'analytics.personal', label: 'A portfolio', blurb: 'One person, their customers and their target', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?scope=personal', verbs: [...GO, 'how is'],
+    objects: ['my portfolio', 'my figures', 'my numbers', 'my target', 'my customers',
+              'personal portfolio', 'portfolio analytics', 'my analytics', 'my revenue',
+              'how am i doing', 'my year', 'somebody\u2019s portfolio', 'their figures'] },
+
+  { id: 'analytics.portfolioCustomers', label: 'Customers on a portfolio', blurb: 'Every one, what they spend, and against last year', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?scope=personal', verbs: [...GO, 'who are'],
+    objects: ['customers on my portfolio', 'my customer list', 'my accounts and what they spend',
+              'who is on my portfolio', 'portfolio customers', 'my customers and their revenue'] },
+
+  { id: 'analytics.portfolioDeals', label: 'Deals on a portfolio', blurb: 'Open, won or lost, per division', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/analytics?scope=personal', verbs: [...GO, 'which'],
+    objects: ['my open deals', 'my won deals', 'my lost deals', 'deals on my portfolio',
+              'what i have open', 'what i have won', 'what i have lost',
+              'my open pipeline', 'across the three'] },
+
   { id: 'analytics.movers', label: 'Who is growing and who is going', blurb: 'Against the same point last year', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/analytics', verbs: [...GO, 'who is'],
     /* Deliberately not "the call list", which is what the old screen

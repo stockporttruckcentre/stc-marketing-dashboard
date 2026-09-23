@@ -26,8 +26,9 @@
 import { CRM_CONTACTS } from './dictionary';
 import { ukToday } from '../format/date';
 import type { ContactStatus } from '../types';
+import { STATUS_ORDER } from '../crm/status';
 
-const VALID_STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+const VALID_STATUSES: ContactStatus[] = STATUS_ORDER;
 
 /** Every column the dictionary can legitimately produce. Nothing else lands. */
 const ALLOWED = new Set(

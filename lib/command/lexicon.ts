@@ -285,6 +285,13 @@ const RESERVED = new Set([
      its opposite was not. */
   'tracker', 'trackers', 'pipeline', 'portfolio', 'prospect', 'prospects',
 
+  /* What the portfolio panels are called. "Dean's biggest gainers" and
+     "show me the fallers" both run a possessive or a determiner into
+     the word, and without these the bar goes looking for a customer
+     called Gainers. `movers` was already reachable through the action's
+     own objects; these three make the words safe mid sentence. */
+  'gainer', 'gainers', 'faller', 'fallers', 'mover', 'movers',
+
   /* What a maintenance lead is for, folded into five kinds. Each of
      these turns up mid sentence beside a preposition ("the refurb work
      at Carrington"), and none of them is a place or a person. */
