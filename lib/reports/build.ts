@@ -122,6 +122,7 @@ export async function buildReport(
     case 'pipeline': {
       await push('byperson', () => pipelineByPersonSection(db, filters));
       await push('bystage',  () => pipelineByStageSection(db, filters));
+      await push('bydepot',  () => pipelineByDepotSection(db, filters));
       await push('biggest',  () => biggestOpenSection(db, filters));
       break;
     }
@@ -397,12 +398,13 @@ async function fleetsmartSection(db: Db, f: ReportFilters, now: Date): Promise<S
 
 async function pipelineByPersonSection(db: Db, f: ReportFilters): Promise<Section> {
   let q = db.from('crm_leads')
-    .select('estimated_value, status, type, owner:profiles!crm_leads_owner_id_fkey ( full_name )')
+    .select('estimated_value, status, type, depot_ids, owner:profiles!crm_leads_owner_id_fkey ( full_name )')
     .in('status', ['lead', 'contacted', 'quoted', 'won']);
   if (f.person) q = q.eq('owner_id', f.person);
   const { data } = await q.limit(5000);
 
-  const rows = ((data ?? []) as any[]).filter((r) => typeFits(r.type, f));
+  const rows = ((data ?? []) as any[])
+    .filter((r) => typeFits(r.type, f) && depotFits(r.depot_ids, f));
   const by = new Map<string, { deals: number; value: number }>();
   for (const r of rows) {
     const who = r.owner?.full_name ?? 'Unassigned';
@@ -430,11 +432,12 @@ async function pipelineByPersonSection(db: Db, f: ReportFilters): Promise<Sectio
 }
 
 async function pipelineByStageSection(db: Db, f: ReportFilters): Promise<Section> {
-  let q = db.from('crm_leads').select('status, estimated_value, type')
+  let q = db.from('crm_leads').select('status, estimated_value, type, depot_ids')
     .in('status', ['lead', 'contacted', 'quoted', 'won']);
   if (f.person) q = q.eq('owner_id', f.person);
   const { data } = await q.limit(5000);
-  const rows = ((data ?? []) as any[]).filter((r) => typeFits(r.type, f));
+  const rows = ((data ?? []) as any[])
+    .filter((r) => typeFits(r.type, f) && depotFits(r.depot_ids, f));
 
   const order = ['lead', 'contacted', 'quoted', 'won'];
   const label: Record<string, string> = {
@@ -461,14 +464,79 @@ async function pipelineByStageSection(db: Db, f: ReportFilters): Promise<Section
   };
 }
 
+/**
+ * The open pipeline, by depot.
+ *
+ * From the business: "when we run a report on open pipeline we can
+ * filter by depot".
+ *
+ * A deal for two depots counts ONCE UNDER EACH, so the rows do not add
+ * up to the pipeline total. That is stated on the section rather than
+ * left for somebody to work out from a sum that does not come out, and
+ * it is why the deals nobody has said a depot for get their own line
+ * instead of being dropped.
+ *
+ * Grouped in the database by `open_pipeline_by_depot`, migration 154,
+ * which reads the GIN index on the array. Pulling five thousand leads
+ * into a browser to count them is how the old analytics screen got slow.
+ */
+async function pipelineByDepotSection(db: Db, f: ReportFilters): Promise<Section | null> {
+  const types = divisionFilter(f)
+    ? (divisionFilter(f) as Division[]).map((d) =>
+        d === 'trailer' ? 'trailer_sales' : d === 'stc' ? 'maintenance' : 'rental')
+    : null;
+
+  const { data, error } = await (db as never as {
+    rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+  }).rpc('open_pipeline_by_depot', { p_types: types, p_person: f.person ?? null });
+
+  /* The report is still worth having without this one section: an
+     installation that has not run 154 yet gets the rest rather than an
+     error page. */
+  if (error) return null;
+
+  type DepotRow = {
+    depot_id: string | null; depot_name: string; deals: number; value: number;
+  };
+  let rows = (data ?? []) as DepotRow[];
+
+  /* Narrowed to some depots, the other depots' lines come off, and so
+     does the "No depot said" line: it is not one of the depots asked
+     for. */
+  const wanted = f.depots ?? [];
+  if (wanted.length > 0) {
+    rows = rows.filter((r) => r.depot_id != null && wanted.includes(r.depot_id));
+  }
+
+  return {
+    kind: 'table',
+    id: 'bydepot',
+    title: 'By depot',
+    note: 'Open leads only. A deal for two depots counts under each, so these do not add up to the pipeline total.',
+    empty: 'Nothing open at any depot.',
+    columns: [
+      { key: 'depot', label: 'Depot' },
+      { key: 'deals', label: 'Open deals', align: 'right' },
+      { key: 'value', label: 'Estimated', align: 'right' },
+    ],
+    rows: rows.map((r) => ({
+      depot: r.depot_name,
+      deals: r.deals,
+      value: money(Number(r.value) || 0),
+    })),
+  };
+}
+
 async function biggestOpenSection(db: Db, f: ReportFilters): Promise<Section> {
   let q = db.from('crm_leads')
-    .select('company_name, type, what, status, estimated_value, owner:profiles!crm_leads_owner_id_fkey ( full_name )')
+    .select('company_name, type, what, status, estimated_value, depot_ids, owner:profiles!crm_leads_owner_id_fkey ( full_name )')
     .in('status', ['lead', 'contacted', 'quoted', 'won'])
     .order('estimated_value', { ascending: false, nullsFirst: false });
   if (f.person) q = q.eq('owner_id', f.person);
   const { data } = await q.limit(60);
-  const rows = ((data ?? []) as any[]).filter((r) => typeFits(r.type, f)).slice(0, 15);
+  const rows = ((data ?? []) as any[])
+    .filter((r) => typeFits(r.type, f) && depotFits(r.depot_ids, f))
+    .slice(0, 15);
 
   return {
     kind: 'table',
@@ -880,6 +948,22 @@ function typeFits(type: string | null, f: ReportFilters): boolean {
     rental: 'rental',
   };
   return divisions.includes(asDivision[type ?? 'trailer_sales'] ?? 'trailer');
+}
+
+/**
+ * Is this deal at one of the depots the report was narrowed to?
+ *
+ * Empty means every depot AND the deals nobody has said a depot for,
+ * the same rule `divisions` follows. Narrowed, a deal with no depot on
+ * it is OUT: "the pipeline at Carrington" does not include work nobody
+ * has said is at Carrington, and quietly including it would make the
+ * filter look broken to the one person who checks.
+ */
+function depotFits(depotIds: string[] | null | undefined, f: ReportFilters): boolean {
+  const wanted = f.depots ?? [];
+  if (wanted.length === 0) return true;
+  const on = depotIds ?? [];
+  return on.some((d) => wanted.includes(d));
 }
 
 function divisionName(type: string | null): string {

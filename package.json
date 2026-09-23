@@ -39,6 +39,7 @@
     "check:dashboard-targets": "tsx scripts/dashboard-targets-check.ts",
     "check:dead-controls": "tsx scripts/dead-controls-check.ts",
     "check:deleted-rows": "tsx scripts/deleted-rows-check.ts",
+    "check:depot": "bash scripts/sql/depot-check.sh",
     "check:diary": "bash scripts/sql/calendar-check.sh",
     "check:divisions": "bash scripts/sql/divisions-check.sh",
     "check:enrichment": "bash scripts/sql/enrichment-check.sh",

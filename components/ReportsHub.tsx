@@ -17,6 +17,7 @@ import {
   type Division, type Period, type Report, type ReportFilters,
 } from '@/lib/reports/types';
 import { Gated } from '@/components/permissions/ask';
+import { useDepots } from '@/components/crm/DepotPicker';
 
 /* =============================================================
    The Reports screen.
@@ -703,6 +704,10 @@ function Options({
   people: Person[];
   onChange: (f: ReportFilters) => void;
 }) {
+  /* Read from the register rather than listed here. There were already
+     two lists of depots in this codebase and neither was right: see the
+     header of migration 154. */
+  const { depots } = useDepots();
   const set = (patch: Partial<ReportFilters>) => onChange({ ...filters, ...patch });
 
   const toggleDivision = (d: Division) => {
@@ -713,6 +718,13 @@ function Options({
   const toggleSection = (id: string) => {
     const off = filters.exclude.includes(id);
     set({ exclude: off ? filters.exclude.filter((x) => x !== id) : [...filters.exclude, id] });
+  };
+
+  const toggleDepot = (id: string) => {
+    const on = (filters.depots ?? []).includes(id);
+    set({ depots: on
+      ? (filters.depots ?? []).filter((x) => x !== id)
+      : [...(filters.depots ?? []), id] });
   };
 
   return (
@@ -729,6 +741,31 @@ function Options({
                 active={filters.divisions.length === 0 || filters.divisions.includes(d)}
                 onClick={() => toggleDivision(d)}
               >{DIVISION_LABEL[d]}</Chip>
+            ))}
+          </Field>
+        )}
+
+        {/* ---- WHICH OF OUR SITES ----
+
+            From the business: "when we run a report on open pipeline we
+            can filter by depot".
+
+            The same rule the divisions follow: none picked means all of
+            them. Narrowing to a depot DOES drop the deals nobody has
+            said a depot for, which the hint says, because "the pipeline
+            at Carrington" that quietly included work nobody has said is
+            at Carrington would be a filter nobody could trust. */}
+        {def.uses.depots && depots.length > 0 && (
+          <Field
+            label="Depots"
+            hint="None picked means every depot, and the deals nobody has said a depot for. Pick one and those come off."
+          >
+            {depots.map((d) => (
+              <Chip
+                key={d.id}
+                active={(filters.depots ?? []).length === 0 || (filters.depots ?? []).includes(d.id)}
+                onClick={() => toggleDepot(d.id)}
+              >{d.name}</Chip>
             ))}
           </Field>
         )}

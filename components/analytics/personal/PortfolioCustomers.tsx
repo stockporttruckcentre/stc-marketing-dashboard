@@ -67,13 +67,48 @@ type Part = {
   invoices: number;
 };
 
+/* ---- THE SORT SAYS WHICH WAY ROUND, AND WHICH COLUMN ----
+
+   From the business: "unsure how the Sort works on Customers on this
+   portfolio. There are no row headers to know what any of the data
+   means and it's not clear what it actually sorting and in what order."
+
+   Both halves were true, and the second was worse than unclear. The
+   option read "Biggest change" and `personal_customers` sorts that
+   column DESCENDING, so it put the biggest RISES at the top and the
+   biggest falls at the very bottom, which is the opposite of what
+   somebody scanning for a problem expects to find first. It is called
+   what it does now.
+
+   AND EVERY ONE OF THEM ORDERS A COLUMN THAT IS ON THE SCREEN. Open
+   pipeline was not. The list came back correctly ordered by the open
+   VALUE and the row printed This year in the big figure on the right,
+   so a perfectly good order read as noise:
+
+     "I sorted by pipeline and can't tell what it's actually sorting as
+     the top customer has 1 lead, the one below it has 2, then the one
+     below it has 1."
+
+   Sorting a list by a number that is nowhere on it cannot be explained
+   with a better label, so Open is a column now. `column` names the one
+   each option orders, and the heading of that column is drawn in the
+   stronger ink. */
 const SORTS = [
-  { key: 'this_year', label: 'This year' },
-  { key: 'last_year', label: 'Last year' },
-  { key: 'change',    label: 'Biggest change' },
-  { key: 'open',      label: 'Open pipeline' },
-  { key: 'name',      label: 'Name' },
+  { key: 'this_year', label: 'This year, highest first',            column: 'this_year' },
+  { key: 'last_year', label: 'Last year, highest first',            column: 'last_year' },
+  { key: 'change',    label: 'Biggest rise first',                  column: 'change' },
+  { key: 'open',      label: 'Open pipeline value, highest first',  column: 'open' },
+  { key: 'name',      label: 'Name, A to Z',                        column: 'name' },
 ] as const;
+
+/* The four number columns, and the room the two buttons take. One set
+   of widths, used by the header and by every row, so a column heading
+   cannot drift away from the figures underneath it. */
+const W_THIS = 78;
+const W_LAST = 78;
+const W_CHANGE = 96;
+const W_OPEN = 78;
+const W_ACTIONS = 72;
 
 type SortKey = typeof SORTS[number]['key'];
 const SORT_KEYS = SORTS.map((s) => s.key);
@@ -153,6 +188,11 @@ export function PortfolioCustomers({ person, upto, me }: {
 
   const other = against ? rows.find((r) => r.contact_id === against) ?? null : null;
 
+  /* Which of the three columns the list is in the order of, so the
+     heading can say so. Open pipeline and name order the list by
+     something that is not one of the three, and mark none of them. */
+  const sortedColumn = SORTS.find((s2) => s2.key === sort)?.column ?? null;
+
   return (
     <>
       <div style={{
@@ -198,6 +238,43 @@ export function PortfolioCustomers({ person, upto, me }: {
           {/* Twenty rows deep, and the rest on the scroll. The height is
               what makes it a list rather than a page: twenty rows of
               revenue above the fold and the next twenty a flick away. */}
+          {/* The headings, which were not there at all: four columns of
+              money with nothing saying which was which.
+
+              ABOVE the scroller rather than inside it, so they are on
+              screen for all forty rows rather than only the first
+              twenty. The one the list is ordered by is drawn in the
+              stronger ink, which is the other half of the answer to
+              "it's not clear what it actually sorting". */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '7px 12px',
+            background: 'var(--surface-sunken)',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <Label style={{
+              flex: 1, minWidth: 0,
+              color: sortedColumn === 'name' ? 'var(--text)' : undefined,
+            }}>Customer</Label>
+            <Label style={{
+              width: W_THIS, textAlign: 'right',
+              color: sortedColumn === 'this_year' ? 'var(--text)' : undefined,
+            }}>This year</Label>
+            <Label style={{
+              width: W_LAST, textAlign: 'right',
+              color: sortedColumn === 'last_year' ? 'var(--text)' : undefined,
+            }}>Last year</Label>
+            <Label style={{
+              width: W_CHANGE, textAlign: 'right',
+              color: sortedColumn === 'change' ? 'var(--text)' : undefined,
+            }}>Change</Label>
+            <Label style={{
+              width: W_OPEN, textAlign: 'right',
+              color: sortedColumn === 'open' ? 'var(--text)' : undefined,
+            }}>Open</Label>
+            <span style={{ width: W_ACTIONS }} />
+          </div>
+
           <div
             style={{ maxHeight: 520, overflowY: 'auto' }}
             onScroll={(e) => {
@@ -224,6 +301,9 @@ export function PortfolioCustomers({ person, upto, me }: {
                         r.divisions,
                         r.invoices ? `${r.invoices} ${r.invoices === 1 ? 'invoice' : 'invoices'}` : null,
                         ukDate(r.last_billed) ? `last billed ${ukDate(r.last_billed)}` : null,
+                        /* Just the count here. The VALUE is a column of
+                           its own now, for the reason in the header
+                           comment above the Open heading. */
                         r.open_deals ? `${r.open_deals} open` : null,
                       ].filter(Boolean).join(' · ') || 'Nothing billed yet'}
                     </div>
@@ -231,36 +311,58 @@ export function PortfolioCustomers({ person, upto, me }: {
 
                   <span style={{
                     fontSize: 13, color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-                    minWidth: 78, textAlign: 'right',
+                    width: W_THIS, textAlign: 'right',
                   }}>{compactMoney(Number(r.this_year))}</span>
 
                   <span style={{
                     fontSize: 12, color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums',
-                    minWidth: 78, textAlign: 'right',
+                    width: W_LAST, textAlign: 'right',
                   }}>{compactMoney(Number(r.last_year))}</span>
 
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 96,
-                    justifyContent: 'flex-end',
-                    fontSize: 12.5, fontVariantNumeric: 'tabular-nums',
-                    color: Number(r.change) === 0 ? 'var(--text-subtle)'
-                      : up ? 'var(--success)' : 'var(--danger)',
-                  }}>
+                  <span
+                    /* The figure says its own direction: the arrow, the
+                       colour and the sign are three readings of one
+                       fact, and a change of nought has none of them. */
+                    title={Number(r.change) === 0
+                      ? 'The same as this point last year'
+                      : `${up ? 'Up' : 'Down'} ${compactMoney(Math.abs(Number(r.change)))} on this point last year`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, width: W_CHANGE,
+                      justifyContent: 'flex-end',
+                      fontSize: 12.5, fontVariantNumeric: 'tabular-nums',
+                      color: Number(r.change) === 0 ? 'var(--text-subtle)'
+                        : up ? 'var(--success)' : 'var(--danger)',
+                    }}>
                     {Number(r.change) !== 0 && (up ? <TrendingUp size={12} /> : <TrendingDown size={12} />)}
-                    {compactMoney(Math.abs(Number(r.change)))}
+                    {Number(r.change) === 0 ? compactMoney(0)
+                      : `${up ? '+' : '\u2212'}${compactMoney(Math.abs(Number(r.change)))}`}
                     {r.change_pct != null && <span>({Math.abs(Number(r.change_pct))}%)</span>}
                   </span>
 
-                  <Button size="sm" variant="ghost"
-                    title={`Set a reminder about ${r.company_name ?? 'this customer'}`}
-                    onClick={() => setRemind(r)}>
-                    <Bell size={13} />
-                  </Button>
-                  <Button size="sm" variant="ghost"
-                    title="Break their revenue down, and compare them with somebody else"
-                    onClick={() => { setOpen(r); setAgainst(''); }}>
-                    <ArrowRight size={13} />
-                  </Button>
+                  <span
+                    title={r.open_deals
+                      ? `${r.open_deals} open ${r.open_deals === 1 ? 'deal' : 'deals'}, worth ${money(Number(r.open_value ?? 0))} between them`
+                      : 'Nothing open with them'}
+                    style={{
+                      fontSize: 12, fontVariantNumeric: 'tabular-nums',
+                      width: W_OPEN, textAlign: 'right',
+                      color: r.open_deals ? 'var(--text-muted)' : 'var(--text-subtle)',
+                    }}>
+                    {r.open_deals ? compactMoney(Number(r.open_value ?? 0)) : '\u2014'}
+                  </span>
+
+                  <span style={{ width: W_ACTIONS, display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button size="sm" variant="ghost"
+                      title={`Set a reminder about ${r.company_name ?? 'this customer'}`}
+                      onClick={() => setRemind(r)}>
+                      <Bell size={13} />
+                    </Button>
+                    <Button size="sm" variant="ghost"
+                      title="Break their revenue down, and compare them with somebody else"
+                      onClick={() => { setOpen(r); setAgainst(''); }}>
+                      <ArrowRight size={13} />
+                    </Button>
+                  </span>
                 </div>
               );
             })}

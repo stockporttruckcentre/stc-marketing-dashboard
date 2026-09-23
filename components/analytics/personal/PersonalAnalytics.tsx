@@ -13,7 +13,7 @@ import {
   Alert, Badge, Button, Chip, EmptyState, PageHead, compactMoney,
 } from '@/components/kit/primitives';
 import { Select, TextInput } from '@/components/kit/forms';
-import { Panel, PanelGrid, Sub } from '@/components/analytics/legacy/panel';
+import { Note, Panel, PanelGrid } from '@/components/analytics/legacy/panel';
 import { Tile } from '@/components/analytics/legacy/tiles';
 import { DealPill, PortfolioDeals, type DealState } from './PortfolioDeals';
 import { PortfolioCustomers } from './PortfolioCustomers';
@@ -611,10 +611,10 @@ export function PersonalAnalytics({
                   </div>
                 );
               })}
-              <Sub>
+              <Note>
                 Won this year is work with an order date inside the financial year. Open
                 pipeline is still winnable and is not revenue.
-              </Sub>
+              </Note>
             </div>
           )}
         </Panel>
@@ -691,13 +691,13 @@ export function PersonalAnalytics({
                 </Alert>
               )}
 
-              <Sub>
+              <Note>
                 {new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to
                 {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
                 {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
                 {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
                 net by tax point. This is not the figure the target is measured on.
-              </Sub>
+              </Note>
             </div>
           )}
         </Panel>
@@ -773,11 +773,11 @@ export function PersonalAnalytics({
                   </div>
                 );
               })}
-              <Sub>
+              <Note>
                 A direct debit is the same figure every month, so &#8220;Yes to all&#8221; answers
                 the rest of that contract in one press. Every answer is written down per invoice
                 and never asked again.
-              </Sub>
+              </Note>
             </div>
           </Panel>
         )}
@@ -800,6 +800,14 @@ export function PersonalAnalytics({
           hint="What each one has spent this financial year, against the same point last year"
         >
           <PortfolioCustomers person={person} upto={upto} me={selfId ?? person} />
+          <Note>
+            This year and Last year are INVOICED revenue out of the uploads, to the
+            same day last year, so a part finished month is compared with a part
+            finished month. Open is what is still being worked with them and is not
+            revenue: it is an estimate of deals nobody has won yet. Sorting orders one
+            of those four columns, and the heading of the one it is ordering is the
+            darker of the five.
+          </Note>
         </Panel>
 
         <MoverPanel

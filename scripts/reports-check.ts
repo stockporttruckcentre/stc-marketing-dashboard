@@ -259,6 +259,13 @@ async function sweepMissingTables() {
   const divisions: Division[][] = [[], ['stc'], ['rental'], ['stc', 'trailer'], ['stc', 'trailer', 'rental']];
   const periods: Period[] = ['week', 'fortnight', 'month', 'quarter', 'fy', 'year'];
   const people = [null, 'a1b2c3d4-0000-0000-0000-000000000001'];
+  /* Depot ids, migration 154. Two of them and none, which is enough to
+     prove the list is carried in order and that empty stays empty. */
+  const depotSets: string[][] = [
+    [],
+    ['dep00000-0000-0000-0000-000000000001'],
+    ['dep00000-0000-0000-0000-000000000001', 'dep00000-0000-0000-0000-000000000002'],
+  ];
 
   for (const def of REPORTS) {
     const excludes = [[], [def.sections[0]!.id], def.sections.map((s) => s.id)];
@@ -266,7 +273,10 @@ async function sweepMissingTables() {
       for (const p of periods) {
         for (const who of people) {
           for (const ex of excludes) {
-            const before: ReportFilters = { divisions: d, period: p, person: who, exclude: ex };
+            const dep = depotSets[ex.length % depotSets.length]!;
+            const before: ReportFilters = {
+              divisions: d, period: p, person: who, exclude: ex, depots: dep,
+            };
             const after = fromParams(def.slug, toParams(def.slug, before));
 
             /* All three divisions and none of them are the same
@@ -281,6 +291,9 @@ async function sweepMissingTables() {
             ok(`${def.slug}: the person survives the round trip`, after.person === who);
             ok(`${def.slug}: the excluded sections survive the round trip`,
               JSON.stringify(after.exclude) === JSON.stringify(ex));
+            ok(`${def.slug}: the depots survive the round trip`,
+              JSON.stringify(after.depots ?? []) === JSON.stringify(dep),
+              `${JSON.stringify(dep)} came back as ${JSON.stringify(after.depots)}`);
           }
         }
       }
@@ -296,6 +309,12 @@ async function sweepMissingTables() {
   ok('an unknown division is dropped', JSON.stringify(junk.divisions) === JSON.stringify(['stc']));
   ok('an unknown period falls back to the default', junk.period === 'fortnight');
   ok('an unknown section id is dropped', JSON.stringify(junk.exclude) === JSON.stringify(['health']));
+
+  /* A link with no depots on it narrows nothing, which is the same
+     reading as "every depot" and is what every report opened before 154
+     existed. A forwarded link from last month has to run whole. */
+  ok('a link with no depots on it narrows nothing',
+    JSON.stringify(junk.depots ?? []) === JSON.stringify([]));
 
   ok('the print link and the Word link carry the same filters',
     printHref('won', { divisions: ['stc'], period: 'week', person: 'x', exclude: ['deals'] })

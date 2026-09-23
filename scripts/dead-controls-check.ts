@@ -71,6 +71,8 @@ const GOVERNED = [
   'components/crm/HirePanel.tsx',
   'components/crm/VendorPicker.tsx',
   'components/crm/LeadTrailers.tsx',
+  'components/crm/DepotPicker.tsx',
+  'components/crm/GenerateProposalPicker.tsx',
 ];
 
 let bad = 0;
