@@ -1449,6 +1449,35 @@ ok('a viewer can still see what is next',
    `searchParams` type rather than listed here, and an action pointing
    at a parameter nobody reads fails exactly as the eleven did.
    ------------------------------------------------------------- */
+/* The CRM's division picker, by typing. "CRM: top of crm have a
+   rental/maint/ts picker like tracker": a picker the bar cannot reach
+   is a picker only somebody already on the screen knows about. */
+for (const said of [
+  'maintenance customers', 'workshop customers', 'rental customers',
+  'hire customers', 'trailer sales customers', 'every customer',
+  'customers on maintenance', 'customers on hire',
+]) {
+  const hit = suggestActions(said, CAPS.sales, 8)
+    .find((h) => h.action.path?.startsWith('/dashboard/crm?division=') ?? false);
+  ok(`"${said}" reaches a CRM division`, !!hit, 'reached no division action');
+}
+
+{
+  /* And the screen reads the parameter they point at, the same rule the
+     analytics actions are held to. */
+  const page = readFileSync('app/dashboard/crm/page.tsx', 'utf8');
+  const sig = /searchParams:\s*\{([^}]*)\}/.exec(page)?.[1] ?? '';
+  const reads = new Set([...sig.matchAll(/(\w+)\??:/g)].map((m) => m[1]));
+  const stale = ACTIONS.filter((a) => {
+    if (!a.path?.startsWith('/dashboard/crm')) return false;
+    const q = a.path.split('?')[1];
+    if (!q) return false;
+    return q.split('&').some((pair) => !reads.has(pair.split('=')[0]));
+  });
+  ok('no CRM action carries a query the screen does not read',
+    stale.length === 0, stale.map((a) => `${a.id} -> ${a.path}`).join(', '));
+}
+
 /* The Personal portfolio, and the three things the business asked for
    on it. Every one of them has to be reachable by typing, because a
    feature the bar cannot reach is invisible: that is the fault this

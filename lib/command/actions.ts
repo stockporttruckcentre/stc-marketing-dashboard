@@ -507,18 +507,23 @@ export const ACTIONS: CommandActionSpec[] = [
      up with no entries at all. Add a feature, add it to the inventory,
      add it here. */
 
+  /* `who`, not `scope`. The screen reads `searchParams.get('who')` and
+     always has: `?scope=mine` was accepted, navigated and did nothing,
+     which is the same fault the analytics actions had twice. Found by
+     the rule in `scripts/command-coverage-check.ts` that reads the
+     page's own signature instead of trusting the path. */
   { id: 'crm.scopeMine', label: 'Just my accounts', blurb: 'Your own portfolio', kind: 'navigate',
-    capability: 'crm.edit', path: '/dashboard/crm?scope=mine', verbs: [...GO, 'filter', 'switch to'],
+    capability: 'crm.edit', path: '/dashboard/crm?who=mine', verbs: [...GO, 'filter', 'switch to'],
     objects: ['my accounts', 'my customers', 'my portfolio', 'mine', 'my crm', 'my contacts'],
     phrases: ['just mine', 'only my accounts', 'what am i working on'] },
 
   { id: 'crm.scopeAll', label: 'The whole pipeline', blurb: 'Everybody’s accounts', kind: 'navigate',
-    capability: 'crm.viewGlobal', path: '/dashboard/crm?scope=all', verbs: [...GO, 'filter', 'switch to'],
+    capability: 'crm.viewGlobal', path: '/dashboard/crm?who=all', verbs: [...GO, 'filter', 'switch to'],
     objects: ['everyone', 'everybody', 'the whole pipeline', 'global crm', 'all accounts', 'the team’s accounts'],
     phrases: ['show me everyone', 'the global list'] },
 
   { id: 'crm.scopeUnassigned', label: 'Unassigned accounts', blurb: 'Nobody owns these yet', kind: 'navigate',
-    capability: 'crm.viewGlobal', path: '/dashboard/crm?scope=unassigned', verbs: GO,
+    capability: 'crm.viewGlobal', path: '/dashboard/crm?who=unassigned', verbs: GO,
     objects: ['unassigned', 'unowned', 'no owner', 'nobody’s', 'up for grabs', 'unclaimed'],
     phrases: ['who has nobody on them', 'accounts with no rep'] },
 
@@ -526,6 +531,34 @@ export const ACTIONS: CommandActionSpec[] = [
     capability: 'crm.viewOthers', path: '/dashboard/crm', verbs: GO,
     objects: ['dave’s accounts', 'their accounts', 'their portfolio', 'somebody’s accounts', 'his accounts', 'her accounts'],
     phrases: ['what is dave working on', 'show me their pipeline'] },
+
+  /* ---- WHICH DIVISION'S CUSTOMERS ----
+
+     "CRM: top of crm have a rental/maint/ts picker like tracker". The
+     picker is on the screen; these are the same three by typing.
+
+     A customer is in a division when somebody is working a deal of that
+     kind with them, which is the tracker's rule and the reason "like
+     tracker" was the instruction. */
+  { id: 'crm.divisionTrailer', label: 'Trailer sales customers', blurb: 'Customers with a trailer deal on', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/crm?division=trailer_sales', verbs: [...GO, 'filter', 'switch to'],
+    objects: ['trailer sales customers', 'trailer customers', 'sales customers',
+              'crm trailer sales', 'customers buying trailers'] },
+
+  { id: 'crm.divisionMaintenance', label: 'Maintenance customers', blurb: 'Customers with maintenance work on', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/crm?division=maintenance', verbs: [...GO, 'filter', 'switch to'],
+    objects: ['maintenance customers', 'workshop customers', 'service customers',
+              'crm maintenance', 'customers on maintenance'] },
+
+  { id: 'crm.divisionRental', label: 'Rental customers', blurb: 'Customers with a hire or lease on', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/crm?division=rental', verbs: [...GO, 'filter', 'switch to'],
+    objects: ['rental customers', 'hire customers', 'leasing customers',
+              'crm rental', 'customers renting', 'customers on hire'] },
+
+  { id: 'crm.divisionAll', label: 'Every customer', blurb: 'All three divisions, and the ones in none', kind: 'navigate',
+    capability: 'crm.view', path: '/dashboard/crm?division=all', verbs: [...GO, 'filter', 'switch to'],
+    objects: ['every customer', 'all divisions', 'all three divisions', 'every division',
+              'customers in any division'] },
 
   { id: 'crm.openList', label: 'Open a list', blurb: 'Switch to another working list', kind: 'navigate',
     capability: 'crm.view', path: '/dashboard/crm', verbs: GO,

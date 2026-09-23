@@ -7,7 +7,13 @@ import type { CRMContact, CrmList, Profile } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CrmPage({ searchParams }: { searchParams: { list?: string } }) {
+/* `division` is read by `CrmWorkspace` on the client, not here, but it
+   is declared so the command bar's own check can see that the screen
+   takes it. An action pointing at a parameter nobody reads is the fault
+   that rule exists for. */
+export default async function CrmPage({ searchParams }: {
+  searchParams: { list?: string; who?: string; contact?: string; division?: string };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user!.id).single();
