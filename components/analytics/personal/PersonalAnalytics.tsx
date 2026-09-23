@@ -505,8 +505,27 @@ export function PersonalAnalytics({
 
       <PanelGrid>
         {/* ---- the three divisions, from one screen ---- */}
+        {/* ---- TWO TO A ROW, NOT ONE ----
+
+            From the business: "Across the three and What this portfolio
+            invoiced, against last year should be in a 2 column layout not
+            taking up a whole row each, 80% of them is currently blank
+            space which the brand kit bans anyway."
+
+            Six of twelve each, which is what the two mover panels below
+            already do, so nothing here is a new measurement. The grid
+            stretches every panel on a row to the tallest, so the pair is
+            the same height by construction.
+
+            THEY ARE ALSO NOW ADJACENT, and that is the half that makes
+            it hold. The contract question used to sit between them, and
+            it is a full width panel that only appears when there is
+            something to answer. Left where it was, these two would pair
+            on the days it was empty and each sit alone beside six columns
+            of nothing on the days it was not, which is the fault being
+            reported. */}
         <Panel
-          span={12}
+          span={6}
           title="Across the three"
           hint="Maintenance, rentals and trailer sales, without switching tabs"
           table={{
@@ -600,6 +619,89 @@ export function PersonalAnalytics({
           )}
         </Panel>
 
+        {/* ---- the other last year, and it is a different number ----
+
+            The tiles above are WON WORK on the tracker, which is what
+            the target is measured on. This is what the portfolio's
+            customers were INVOICED, out of the uploads, which is what
+            the company Analytics screen and the two lists below read.
+            Both are real and they do not agree, so both are on the
+            screen saying which is which rather than one of them being
+            picked quietly. */}
+        <Panel
+          span={6}
+          title="What this portfolio invoiced, against last year"
+          hint="From the uploads, not the tracker. The same basis as the two lists below."
+        >
+          {!revYear ? (
+            <EmptyState
+              what={loading ? 'Reading the invoices' : 'No invoiced revenue to compare'}
+              why={loading
+                ? 'One moment.'
+                : 'None of this portfolio&#8217;s customers is bound to a Protean or Sage account yet.'}
+            />
+          ) : (
+            <div style={{ display: 'grid', gap: 10, padding: 12 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                padding: '12px 14px',
+                border: '1px solid var(--border)', borderRadius: 'var(--r)',
+                background: 'var(--surface-sunken)',
+              }}>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  This year to date <strong style={{
+                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                  }}>{money(Number(revYear.this_year))}</strong>
+                </span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Same point last year <strong style={{
+                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+                  }}>{money(Number(revYear.last_year))}</strong>
+                </span>
+                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {Number(revYear.change) < 0
+                    ? <TrendingDown size={14} color="var(--danger)" />
+                    : <TrendingUp size={14} color="var(--success)" />}
+                  <strong style={{
+                    fontSize: 15, fontVariantNumeric: 'tabular-nums',
+                    color: Number(revYear.change) < 0 ? 'var(--danger)' : 'var(--success)',
+                  }}>
+                    {Number(revYear.change) > 0 ? '+' : ''}{money(Number(revYear.change))}
+                  </strong>
+                  {revYear.change_pct != null && (
+                    <Badge tone={Number(revYear.change) < 0 ? 'warning' : 'success'}>
+                      {Number(revYear.change_pct) > 0 ? '+' : ''}
+                      {Number(revYear.change_pct).toFixed(1)}%
+                    </Badge>
+                  )}
+                </span>
+              </div>
+
+              {/* A customer with no Protean account has no invoiced
+                  figure, and that is not nought. Said out loud rather
+                  than quietly making the total smaller. */}
+              {revYear.not_bound > 0 && (
+                <Alert tone="warning">
+                  <span style={{ flex: 1 }}>
+                    {revYear.not_bound} of this portfolio&#8217;s {revYear.customers} customers
+                    {revYear.not_bound === 1 ? ' is' : ' are'} not bound to a Protean or Sage
+                    account, so {revYear.not_bound === 1 ? 'it adds' : 'they add'} nothing to
+                    either figure. That is not the same as spending nothing.
+                  </span>
+                </Alert>
+              )}
+
+              <Sub>
+                {new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to
+                {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
+                {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
+                {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
+                net by tax point. This is not the figure the target is measured on.
+              </Sub>
+            </div>
+          )}
+        </Panel>
+
         {/* ---- is this invoice the contract, or is it ad hoc work ----
 
             From the business: "you need a checker that listens to
@@ -679,89 +781,6 @@ export function PersonalAnalytics({
             </div>
           </Panel>
         )}
-
-        {/* ---- the other last year, and it is a different number ----
-
-            The tiles above are WON WORK on the tracker, which is what
-            the target is measured on. This is what the portfolio's
-            customers were INVOICED, out of the uploads, which is what
-            the company Analytics screen and the two lists below read.
-            Both are real and they do not agree, so both are on the
-            screen saying which is which rather than one of them being
-            picked quietly. */}
-        <Panel
-          span={12}
-          title="What this portfolio invoiced, against last year"
-          hint="From the uploads, not the tracker. The same basis as the two lists below."
-        >
-          {!revYear ? (
-            <EmptyState
-              what={loading ? 'Reading the invoices' : 'No invoiced revenue to compare'}
-              why={loading
-                ? 'One moment.'
-                : 'None of this portfolio&#8217;s customers is bound to a Protean or Sage account yet.'}
-            />
-          ) : (
-            <div style={{ display: 'grid', gap: 10, padding: 12 }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-                padding: '12px 14px',
-                border: '1px solid var(--border)', borderRadius: 'var(--r)',
-                background: 'var(--surface-sunken)',
-              }}>
-                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                  This year to date <strong style={{
-                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-                  }}>{money(Number(revYear.this_year))}</strong>
-                </span>
-                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                  Same point last year <strong style={{
-                    color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-                  }}>{money(Number(revYear.last_year))}</strong>
-                </span>
-                <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {Number(revYear.change) < 0
-                    ? <TrendingDown size={14} color="var(--danger)" />
-                    : <TrendingUp size={14} color="var(--success)" />}
-                  <strong style={{
-                    fontSize: 15, fontVariantNumeric: 'tabular-nums',
-                    color: Number(revYear.change) < 0 ? 'var(--danger)' : 'var(--success)',
-                  }}>
-                    {Number(revYear.change) > 0 ? '+' : ''}{money(Number(revYear.change))}
-                  </strong>
-                  {revYear.change_pct != null && (
-                    <Badge tone={Number(revYear.change) < 0 ? 'warning' : 'success'}>
-                      {Number(revYear.change_pct) > 0 ? '+' : ''}
-                      {Number(revYear.change_pct).toFixed(1)}%
-                    </Badge>
-                  )}
-                </span>
-              </div>
-
-              {/* A customer with no Protean account has no invoiced
-                  figure, and that is not nought. Said out loud rather
-                  than quietly making the total smaller. */}
-              {revYear.not_bound > 0 && (
-                <Alert tone="warning">
-                  <span style={{ flex: 1 }}>
-                    {revYear.not_bound} of this portfolio&#8217;s {revYear.customers} customers
-                    {revYear.not_bound === 1 ? ' is' : ' are'} not bound to a Protean or Sage
-                    account, so {revYear.not_bound === 1 ? 'it adds' : 'they add'} nothing to
-                    either figure. That is not the same as spending nothing.
-                  </span>
-                </Alert>
-              )}
-
-              <Sub>
-                {new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to
-                {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
-                {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
-                {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
-                net by tax point. This is not the figure the target is measured on.
-              </Sub>
-            </div>
-          )}
-        </Panel>
 
         {/* ---- WHO THEY ARE AND WHAT THEY SPEND ----
 
