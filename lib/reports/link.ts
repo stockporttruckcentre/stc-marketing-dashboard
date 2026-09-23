@@ -35,7 +35,7 @@ export const DEFAULT_PERIOD: Period = 'fortnight';
 
 /** What a report opens on before anybody touches a filter. */
 export function defaultFilters(): ReportFilters {
-  return { divisions: [], period: DEFAULT_PERIOD, person: null, exclude: [] };
+  return { divisions: [], period: DEFAULT_PERIOD, person: null, exclude: [], depots: [] };
 }
 
 /**
@@ -53,6 +53,7 @@ export function toParams(slug: string, f: ReportFilters): URLSearchParams {
   if (f.period !== DEFAULT_PERIOD) p.set('period', f.period);
   if (f.person) p.set('person', f.person);
   if (f.exclude.length) p.set('exclude', f.exclude.join(','));
+  if (f.depots?.length) p.set('depots', f.depots.join(','));
   return p;
 }
 
@@ -95,6 +96,13 @@ export function fromParams(slug: string, params: Params): ReportFilters {
     period: PERIODS.includes(period) ? period : DEFAULT_PERIOD,
     person: person || null,
     exclude: list(params, 'exclude').filter((id) => known.has(id)),
+    /* Depot ids, and they are NOT validated against a list here the way
+       divisions are: the register is a table and this file is pure. A
+       depot that no longer exists narrows the report to nothing, which
+       is a visible empty section rather than a silently wider report,
+       and `lead_depots_set` is what stops an unknown id being written in
+       the first place. */
+    depots: list(params, 'depots'),
   };
 }
 

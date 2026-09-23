@@ -239,6 +239,10 @@ export interface Lead {
   /** The maintenance rate agreed with that vendor FOR THIS DEAL. Falls
       back to the vendor's own where it is not set. */
   vendor_rate: number | null;
+
+  /** Which of our own sites the work is for. Migration 154. Empty means
+      nobody has said, which is a different answer from every site. */
+  depot_ids: string[];
 }
 
 /**
@@ -426,6 +430,22 @@ export interface ContactAddress {
   city: string | null;
   is_primary: boolean;
   created_at: string;
+}
+
+/**
+ * One of the sites this business works out of. Migration 154.
+ *
+ * The register, as opposed to `DEPOTS` below, which is the company
+ * finder's map of six depots onto the cities Lusha actually indexes and
+ * does not include Carrington. Those two answer different questions and
+ * the table is the one a deal points at.
+ */
+export interface Depot {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  sort_order: number;
 }
 
 export const DEPOTS = [

@@ -345,6 +345,7 @@ export const CONTACT_FIELDS: WritableField[] = [
     capability: 'crm.edit',
     aliases: ['vendor rate', 'third party rate', 'garage rate', 'rate with the vendor',
       'subcontract rate', 'maintenance rate'] },
+
   { key: 'source', label: 'Source', kind: 'text', entity: 'contacts',
     capability: 'crm.edit', aliases: ['source', 'came from', 'lead source', 'found via'] },
   { key: 'side', label: 'Side', kind: 'enum', entity: 'contacts', clearable: true,

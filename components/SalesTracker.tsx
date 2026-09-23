@@ -12,6 +12,7 @@ import { ScheduleMeetingModal } from './crm/ScheduleMeetingModal';
 import { CustomerValue } from './crm/CustomerValue';
 import { LeadTrailers } from './crm/LeadTrailers';
 import { HirePanel } from './crm/HirePanel';
+import { LeadDepots } from './crm/DepotPicker';
 import { CustomerNotes } from './crm/CustomerNotes';
 import type { CalendarEvent } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -1578,6 +1579,32 @@ function LeadEditDrawer({ row, profile, readOnly = false, onWon, onClose, onSave
               <TextInput readOnly={readOnly} type="number" value={edit.estimated_value == null ? '' : String(edit.estimated_value)} onChange={(v) => saveField('estimated_value', v === '' ? null : Number(v))} />
             </Field>
           </Split>
+
+          {/* ---- WHICH OF OUR SITES THE WORK IS FOR ----
+
+              From the business: "on the proposal builder make it so i
+              can choose the depot(s) the work is for. Then when we run a
+              report on open pipeline we can filter by depot".
+
+              On the drawer as well as on the proposal builder, because a
+              depot set once when the proposal was raised and never
+              changeable afterwards is a depot that is wrong the first
+              time somebody moves the work.
+
+              Every division, not only trailer sales: maintenance and
+              hire are both done somewhere too, and the report filters
+              across all three. */}
+          <Field
+            label="Depots this work is for"
+            hint="What the open pipeline report filters on."
+          >
+            <LeadDepots
+              leadId={row.id}
+              readOnly={readOnly}
+              value={edit.depot_ids ?? []}
+              onChange={(ids) => setEdit((e) => ({ ...e, depot_ids: ids }))}
+            />
+          </Field>
 
           {/* THE UNITS THIS QUOTE IS ABOUT.
 

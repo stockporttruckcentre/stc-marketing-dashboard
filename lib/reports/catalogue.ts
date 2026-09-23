@@ -48,7 +48,9 @@ export type ReportDef = {
   /** Section ids, in the order they appear, with a label for the filter. */
   sections: { id: string; label: string }[];
   /** Which filters mean anything here. A person filter on a stock report does not. */
-  uses: { divisions: boolean; period: boolean; person: boolean };
+  uses: { divisions: boolean; period: boolean; person: boolean;
+    /** Which of our own sites the work is for. Migration 154. */
+    depots?: boolean };
 };
 
 export const REPORTS: ReportDef[] = [
@@ -164,12 +166,13 @@ export const REPORTS: ReportDef[] = [
   {
     slug: 'pipeline',
     title: 'Open pipeline',
-    blurb: 'What is being worked, by person and by stage.',
+    blurb: 'What is being worked, by person, by stage and by depot.',
     category: 'pipeline',
-    uses: { divisions: true, period: false, person: true },
+    uses: { divisions: true, period: false, person: true, depots: true },
     sections: [
       { id: 'byperson', label: 'By person' },
       { id: 'bystage', label: 'By stage' },
+      { id: 'bydepot', label: 'By depot' },
       { id: 'biggest', label: 'The biggest open deals' },
     ],
   },

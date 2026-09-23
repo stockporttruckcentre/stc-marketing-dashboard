@@ -306,6 +306,41 @@ export function Sub({ children }: { children: ReactNode }) {
   return <div style={{ marginBottom: 7 }}><Label>{children}</Label></div>;
 }
 
+/* =============================================================
+   A sentence under a panel, and not a heading.
+
+   From the business, with the rendered style quoted back:
+
+     this text style: font-family: var(--panton); font-weight: 700;
+     font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase
+     [...] is not in our brand kit and is used in multiple areas of this
+     page, it is to be corrected to normal readable text.
+
+   Correct, and `Sub` above says so in its own doc comment: it is the
+   HEADING step. It is `Label`, which is the kit's two or three word
+   caption for a control, and three explanations on this page were
+   passed through it. A forty word sentence in uppercase letterspaced
+   Panton is not a caption, and the kit's own fourth rule is the reason:
+
+     Panton earns its size. Panton for headings, numbers and labels with
+     authority; Inter for anything read at length.
+
+   So prose gets the values the kit already uses for prose somebody has
+   to read, which are `Alert`'s: Inter, 12.5, `--text-muted`, 1.5. They
+   are copied from there rather than picked, because there was already a
+   right answer in the kit and the wrong thing was reaching for the
+   nearest component instead of the right one.
+   ============================================================= */
+export function Note({ children }: { children: ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 10,
+      fontFamily: 'var(--inter)', fontSize: 12.5, lineHeight: 1.5,
+      color: 'var(--text-muted)', letterSpacing: '-0.01em',
+    }}>{children}</div>
+  );
+}
+
 /**
  * A small switch between two or three ways of drawing the same panel.
  *

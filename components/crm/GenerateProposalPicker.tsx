@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Wrench, KeyRound, Hammer, ArrowRight, ShieldCheck, X } from 'lucide-react';
 import { Button, Label, SectionHead, Badge } from '@/components/kit/primitives';
+import { DepotChips, useDepots } from './DepotPicker';
 import type { CRMContact } from '@/lib/types';
 
 /**
@@ -61,20 +62,42 @@ export function GenerateProposalPicker({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /* ---- WHICH DEPOTS THE WORK IS FOR ----
+
+     From the business: "on the proposal builder make it so i can choose
+     the depot(s) the work is for. Then when we run a report on open
+     pipeline we can filter by depot".
+
+     Asked BEFORE the kind is picked, because pressing a kind is what
+     raises the proposal and navigates away. Asked after, it would be a
+     question on a screen nobody is on any more.
+
+     None picked is allowed and is its own answer: some work genuinely is
+     not for a site, and refusing to raise a proposal until somebody
+     guesses at one would put a wrong depot on the report rather than no
+     depot. The line under the chips says which it will be. */
+  const { depots, loading: loadingDepots } = useDepots();
+  const [picked, setPicked] = useState<string[]>([]);
+
   async function pick(kind: typeof KINDS[number]) {
     /* Straight to the tool, carrying the customer. Nothing is written
        here: the builder writes the contract and the contract raises the
        lead, so a proposal raised on the way would be a second record for
        the same pitch. */
     if ('direct' in kind && kind.direct) {
-      router.push(kind.direct(contact.id));
+      /* FleetSmart+ raises its own lead when the contract is saved, so
+         the depots travel with the link rather than being written here
+         against a deal that does not exist yet. */
+      const to = kind.direct(contact.id)
+        + (picked.length ? `&depots=${picked.join(',')}` : '');
+      router.push(to);
       onClose();
       return;
     }
     setBusy(kind.id); setError(null);
     const res = await fetch('/api/crm/proposal', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contact_id: contact.id, kind: kind.id }),
+      body: JSON.stringify({ contact_id: contact.id, kind: kind.id, depots: picked }),
     }).then((r) => r.json()).catch((e) => ({ error: e.message }));
     setBusy(null);
     if (res.error) { setError(res.error); return; }
@@ -104,6 +127,27 @@ export function GenerateProposalPicker({
             style={{ border: 'none', background: 'transparent', color: 'var(--text-subtle)', cursor: 'pointer', display: 'flex' }}>
             <X size={17} />
           </button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <Label>Depots this work is for</Label>
+          <div style={{ marginTop: 7 }}>
+            <DepotChips
+              depots={depots}
+              picked={picked}
+              disabled={loadingDepots || !!busy}
+              disabledWhy={loadingDepots
+                ? 'Still reading the depot list.'
+                : 'A proposal is being raised.'}
+              onToggle={(id) => setPicked((p) =>
+                p.includes(id) ? p.filter((x) => x !== id) : [...p, id])}
+            />
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-subtle)', lineHeight: 1.45 }}>
+            {picked.length === 0
+              ? 'None picked, so this will sit under "No depot said" on the pipeline report.'
+              : `It will show under ${picked.length === 1 ? 'that depot' : `each of those ${picked.length}`} on the pipeline report.`}
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))', gap: 10, marginTop: 16 }}>

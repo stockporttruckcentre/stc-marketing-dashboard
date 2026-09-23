@@ -118,6 +118,20 @@ export type ReportFilters = {
   person: string | null;
   /** Section ids to leave out. Empty means the whole report. */
   exclude: string[];
+  /* ---- Which of our own sites, migration 154 ----
+
+     From the business: "when we run a report on open pipeline we can
+     filter by depot".
+
+     Depot ids. Empty means every depot AND the deals nobody has said a
+     depot for, which is the same rule `divisions` follows: empty is
+     everything, not nothing.
+
+     Note that this narrows a report to work FOR a site, which is not the
+     same question as which division sells it. A maintenance contract for
+     Carrington is in the STC division and at the Carrington depot, and
+     both filters can be on at once. */
+  depots?: string[];
 };
 
 export const DIVISION_LABEL: Record<Division, string> = {

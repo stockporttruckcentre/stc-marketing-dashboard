@@ -1616,10 +1616,11 @@ export const ACTIONS: CommandActionSpec[] = [
     phrases: ["report of dean's won leads", 'won leads in the last two weeks'] },
 
   { id: 'report.pipeline', label: 'Open pipeline report',
-    blurb: 'What is being worked, by person and by stage',
+    blurb: 'What is being worked, by person, by stage and by depot',
     kind: 'data', capability: 'crm.view', path: '/dashboard/reports?report=pipeline',
     verbs: [...GO, 'run', 'produce'],
     objects: ['pipeline report', 'open pipeline', 'pipeline by person', 'pipeline by stage',
+              'pipeline by depot', 'pipeline by site', 'open pipeline by depot',
               'what is open', 'open deals report', 'forecast'] },
 
   { id: 'report.health', label: 'Customer problems report',
