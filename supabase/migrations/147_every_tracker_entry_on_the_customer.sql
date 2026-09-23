@@ -115,9 +115,22 @@
 -- six the business named. Marketing and the office administrators keep
 -- the CRM and do not get the money.
 --
--- This is the one part that belongs here: the legacy mapping, for an
--- account on no template at all.
+-- Two things belong here, both about accounts the eleven roles do not
+-- cover.
+--
+-- The `administrator` template predates them and is still on accounts.
+-- It holds every other CRM capability including `crm.viewOthers`, so
+-- withholding this one would leave an administrator able to open
+-- somebody's deal and unable to see what it is worth.
+--
+-- And the legacy role column, for an account on no template at all.
 -- -------------------------------------------------------------
+INSERT INTO role_template_capabilities (role_template_id, capability, scope)
+SELECT t.id, 'crm.dealValues', 'company'
+  FROM role_templates t
+ WHERE t.slug = 'administrator'
+ON CONFLICT DO NOTHING;
+
 INSERT INTO command_capability_roles (capability, role)
 SELECT 'crm.dealValues', r FROM unnest(ARRAY['admin', 'sales']) r
 ON CONFLICT DO NOTHING;
