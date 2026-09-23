@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X, Building2, Plus, Trash2, Star, CalendarPlus, FileText,
-  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Briefcase, Bell
+  MoreHorizontal, ChevronDown, Calendar, Link2, MapPin, Map as MapIcon, Share2, PenLine, Bell
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { extractCityFromAddress } from '@/lib/uk-cities';
@@ -12,30 +12,19 @@ import {
 } from '@/components/kit/primitives';
 import { Segmented } from '@/components/kit/forms';
 import { useDismissGuard } from '@/components/kit/useDismissGuard';
-import { STATUS_LABEL, STATUS_TONE } from '@/lib/crm/status';
+import { STATUS_LABEL, STATUS_ORDER, STATUS_TONE } from '@/lib/crm/status';
 import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { GenerateProposalPicker } from './GenerateProposalPicker';
 import { ReminderModal } from './ReminderModal';
 import { HealthPanel } from './HealthPanel';
 import { AddressMap } from './AddressMap';
-import { CustomerValue } from './CustomerValue';
 import { ProteanSpend } from './ProteanSpend';
 import { CustomerNotes } from './CustomerNotes';
+import { CustomerTrackerEntries } from './CustomerTrackerEntries';
 import type {
-  CRMContact, ContactStatus, CrmList, Profile, ContactAddress, Lead, LeadType,
+  CRMContact, ContactStatus, CrmList, Profile, ContactAddress,
 } from '@/lib/types';
 
-/** A pitch with whose tracker it sits on, which is how it is listed. */
-type LeadWithOwner = Lead & { owner: { id: string; full_name: string | null; email: string } | null };
-
-const LEAD_TYPE_LABEL: Record<LeadType, string> = {
-  trailer_sales: 'Trailer sales',
-  maintenance:   'Maintenance',
-  rental:        'Rental & leasing',
-};
-
-/** Open means somebody is still working it. */
-const OPEN_LEAD = (l: Lead) => l.status !== 'customer' && l.status !== 'lost';
 
 /* =============================================================
    Contact drawer.
@@ -50,10 +39,10 @@ const OPEN_LEAD = (l: Lead) => l.status !== 'customer' && l.status !== 'lost';
    folds the long tail (addresses, links) away until asked for.
    ============================================================= */
 
-const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+const STATUSES: ContactStatus[] = STATUS_ORDER;
 
 /** Where a deal has to be before anything is worth signing. */
-const SIGNABLE: string[] = ['quoted', 'won', 'customer'];
+const SIGNABLE: string[] = ['quoted', 'won'];
 
 const SIDE_LABEL: Record<string, string> = {
   trailer_sales: 'Sales and leasing',
@@ -88,8 +77,6 @@ export function ContactDrawer({
   const [linked, setLinked] = useState<any[]>([]);
   const [linkAvailable, setLinkAvailable] = useState(true);
   const [linking, setLinking] = useState(false);
-  const [leads, setLeads] = useState<LeadWithOwner[]>([]);
-  const [loadingLeads, setLoadingLeads] = useState(true);
   const [onLists, setOnLists] = useState<string[]>([]);
   const [addresses, setAddresses] = useState<ContactAddress[]>([]);
   const [showMap, setShowMap] = useState(false);
@@ -102,32 +89,6 @@ export function ContactDrawer({
      written note. First click arms, second closes, Escape closes now. */
   const dismiss = useDismissGuard(onClose);
 
-  /**
-   * Every pitch to this customer that you are allowed to see.
-   *
-   * Not filtered here. Row level security answers it: your own, ones
-   * shared with you, and for a role that can see other people's
-   * portfolios, everybody's. So a rep opens Dawson and sees their own
-   * quote, and an admin opens the same record and sees all four,
-   * without either screen deciding who deserves what.
-   *
-   * This is the question the CRM could not answer at all before. A
-   * customer's pitches were other rows of the same table on other
-   * people's lists, so "what is open with Dawson" meant hunting for
-   * copies of Dawson.
-   */
-  const loadLeads = useCallback(async () => {
-    setLoadingLeads(true);
-    const { data } = await supabase
-      .from('crm_leads')
-      .select('*, owner:profiles!crm_leads_owner_id_fkey ( id, full_name, email )')
-      .eq('contact_id', contact.id)
-      .order('status')
-      .order('date_of_enquiry', { ascending: false, nullsFirst: false });
-    setLeads((data ?? []) as unknown as LeadWithOwner[]);
-    setLoadingLeads(false);
-  }, [supabase, contact.id]);
-  useEffect(() => { loadLeads(); }, [loadLeads]);
 
   const loadAddresses = useCallback(async () => {
     const { data } = await supabase.from('contact_addresses').select('*')
@@ -335,7 +296,7 @@ export function ContactDrawer({
                 <Badge tone={STATUS_TONE[edit.status] ?? 'neutral'} dot>
                   {STATUS_LABEL[edit.status as ContactStatus] ?? edit.status}
                 </Badge>
-                {edit.relationship === 'existing' && edit.status !== 'customer' && (
+                {edit.relationship === 'existing' && edit.status !== 'won' && (
                   <Badge tone="success">Active account</Badge>
                 )}
                 {(edit.relationship ?? 'prospect') === 'prospect' && (
@@ -472,6 +433,22 @@ export function ContactDrawer({
               setEdit(next);
               onChange(next);
             }}
+          />
+
+          {/* ---- EVERY TRACKER ENTRY, FIRST ----
+
+              Asked for by name: "all tracker entries app-wide should
+              show at the top of a customer's CRM tab". It is the
+              question somebody opens a customer to answer, so it is
+              above the fields rather than below them.
+
+              Leads, FleetSmart+ contracts and trailer deals are one
+              list, because they are one list to whoever is looking.
+              See `components/crm/CustomerTrackerEntries.tsx`. */}
+          <CustomerTrackerEntries
+            contactId={edit.id}
+            canEdit={canEdit}
+            onBound={() => loadSameCustomer()}
           />
 
           {/* ---- contact ---- */}
@@ -649,37 +626,20 @@ export function ContactDrawer({
             )}
           </Collapsible>
 
-          {/* ---- the same business, under more than one account ---- */}
-          <section>
-            <SectionHead
-              title="Leads"
-              hint={leads.length
-                ? `${leads.filter(OPEN_LEAD).length} open of ${leads.length}`
-                : undefined}
-            />
+          {/* ---- THE SAME BUSINESS, UNDER MORE THAN ONE ACCOUNT ----
 
-            {/* WHAT IS BEING PITCHED TO THIS CUSTOMER, AND BY WHOM.
+              This section used to carry the list of pitches as well.
+              That list is now at the top of the record, where it was
+              asked for, and finds four times as much: see
+              `components/crm/CustomerTrackerEntries.tsx`.
 
-                This replaces "Same customer", which existed because a
-                customer could be two records: one on the sales side, one
-                on maintenance, linked so nobody typed the details twice.
-                There is one record now, so the question worth asking on
-                it is not which other Dawsons exist, it is what is open
-                with Dawson.
-
-                Who appears here is row level security's answer rather
-                than this screen's. Your own leads and ones shared with
-                you always; everybody's if your role can see other
-                people's portfolios. So a rep and an admin open the same
-                customer and see different lists, and neither list is
-                decided by the browser. */}
-
-            {/* A genuine group, where one company sits under another.
-                Shown above the pitches because it says who you are
-                dealing with, not what is being pitched. */}
-            {linkAvailable && linked.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
-                <Label>Part of the same group</Label>
+              A genuine group, where one company sits under another, is
+              not a pitch and stays here. It says who you are dealing
+              with rather than what is being sold to them. */}
+          {linkAvailable && linked.length > 0 && (
+            <section>
+              <SectionHead title="Part of the same group" hint={`${linked.length}`} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {linked.map((l: any) => (
                   <div key={l.id} style={{
                     display: 'flex', alignItems: 'center', gap: 11,
@@ -699,78 +659,8 @@ export function ContactDrawer({
                   </div>
                 ))}
               </div>
-            )}
-
-            {/* What they are worth, before the list of what makes it up.
-
-                The list was here on its own and every value on it was a
-                per lead figure, so answering "what is this customer
-                worth" meant adding six numbers in your head, and the
-                tracker's own pipeline figure only ever counted the open
-                ones. Same block as the tracker's, from
-                `components/crm/CustomerValue.tsx`, so the two screens
-                cannot answer it with two numbers. */}
-            {!loadingLeads && leads.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <CustomerValue
-                  leads={leads as never}
-                  onOpenLead={(l) => {
-                    const id = (l as { id?: string }).id;
-                    if (id) window.location.assign(`/dashboard/leads?lead=${id}`);
-                  }}
-                />
-              </div>
-            )}
-
-            {loadingLeads ? (
-              <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>Loading</div>
-            ) : leads.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>
-                Nothing open with them. Raise one from the tracker, or say
-                &ldquo;put {edit.company_name} on my tracker&rdquo;.
-              </div>
-            ) : (
-              /* The detail the value block does not carry: whose tracker
-                 each pitch is on. That is the thing a manager opens this
-                 record to find out, and it is not a number. */
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-                {leads.map((l) => (
-                  <div key={l.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 11,
-                    padding: '10px 12px', borderRadius: 'var(--r)',
-                    border: '1px solid var(--border)', background: 'var(--surface)',
-                    borderLeft: `2px solid ${OPEN_LEAD(l) ? 'var(--accent)' : 'var(--border-strong)'}`,
-                    opacity: OPEN_LEAD(l) ? 1 : 0.65,
-                  }}>
-                    <Briefcase size={15} style={{ color: 'var(--text-subtle)', flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>
-                        {LEAD_TYPE_LABEL[l.type] ?? l.type}
-                        {l.what ? <span style={{ fontWeight: 400, color: 'var(--text-subtle)' }}> · {l.what}</span> : null}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
-                        {[
-                          l.status,
-                          /* Whose tracker it is on. The thing a manager
-                             opens this record to find out. */
-                          l.owner_id === profile.id
-                            ? 'yours'
-                            : (l.owner?.full_name || l.owner?.email || 'unassigned'),
-                          l.estimated_value != null
-                            ? new Intl.NumberFormat('en-GB', {
-                                style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
-                              }).format(Number(l.estimated_value))
-                            : null,
-                        ].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                    <Button size="sm" variant="ghost"
-                      onClick={() => window.location.assign(`/dashboard/leads?lead=${l.id}`)}>Open</Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+            </section>
+          )}
 
 
           {/* What they actually spend, out of Protean.

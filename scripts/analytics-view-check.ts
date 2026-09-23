@@ -150,13 +150,31 @@ console.log('\n  The command bar\n  ---------------');
 
    Both times the action was offered, accepted, navigated, and did
    nothing. So the rule is asserted rather than the list: an analytics
-   action may carry no query string at all, because the page has no
-   states left to address. */
+   action may only carry a query the SCREEN ACTUALLY READS.
+
+   For a while that rule was "no query string at all", which was true
+   while the page had no states left to address. It has two again,
+   `scope` and `person`, which is how a named person's portfolio is
+   opened. So the parameter names come out of the page's own
+   `searchParams` type rather than being listed here, and an action
+   pointing at a parameter nobody reads fails exactly as the eighteen
+   before it did. */
 {
   const actions = require('../lib/command/actions') as
     { ACTIONS: { id: string; path?: string }[] };
-  const withQuery = actions.ACTIONS
-    .filter((a) => a.path?.startsWith('/dashboard/analytics') && a.path.includes('?'));
+
+  const page = readFileSync('app/dashboard/analytics/page.tsx', 'utf8');
+  const sig = /searchParams:\s*\{([^}]*)\}/.exec(page)?.[1] ?? '';
+  const reads = new Set([...sig.matchAll(/(\w+)\??:/g)].map((m) => m[1]));
+  ok('the page signature says which queries it reads', reads.size > 0,
+    'parsed to nothing, so the rule below is testing nothing');
+
+  const withQuery = actions.ACTIONS.filter((a) => {
+    if (!a.path?.startsWith('/dashboard/analytics')) return false;
+    const q = a.path.split('?')[1];
+    if (!q) return false;
+    return q.split('&').some((pair) => !reads.has(pair.split('=')[0]));
+  });
   ok('no analytics action navigates to a query the screen does not read',
     withQuery.length === 0,
     withQuery.map((a) => `${a.id} -> ${a.path}`).join(', '));

@@ -33,7 +33,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
 
   INSERT INTO crm_contacts (id, company_name, status)
-  VALUES (acme, 'Acme Haulage', 'customer') ON CONFLICT (id) DO NOTHING;
+  VALUES (acme, 'Acme Haulage', 'won') ON CONFLICT (id) DO NOTHING;
   INSERT INTO protean_accounts (alpha, protean_name, division, contact_id, ignored)
   VALUES ('TGT01', 'Acme Haulage', 'stc', acme, FALSE),
          ('TGT02', 'Acme Haulage', 'rental', acme, FALSE)

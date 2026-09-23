@@ -57,7 +57,7 @@ const DEANS: LeadWithAccount[] = ['Dawson Group', 'Culina Logistics', 'Wincanton
     owner_id: DEAN.id,
     shared_with: [],
     type: 'trailer_sales',
-    status: i === 3 ? 'customer' : 'quoted',
+    status: i === 3 ? 'won' : 'quoted',
     what: '4.7m curtainsider',
     requirement: null, new_or_used: 'New', estimated_value: 40000 + i * 1000,
     date_of_enquiry: '2026-08-01', action: null, next_action: null,

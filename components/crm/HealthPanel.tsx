@@ -67,13 +67,13 @@ export function HealthPanel({ contact, canFlag, onChanged }: {
 
        ensure it doesn't show for leads, we have no clue what the status
        is until we've made contact. One can manually be set but don't
-       show one by default until they're actually at Customer status.
+       show one by default until they have actually won something.
 
      The same rule as the dot on the grid, and it belongs here too: a
      highlighted Fine button says somebody decided this account is fine,
      and on a lead nobody has. The button still works, so it can be set
      by hand the moment there is a reason to. */
-  const settled = level !== 'green' || contact.status === 'customer';
+  const settled = level !== 'green' || contact.status === 'won';
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);

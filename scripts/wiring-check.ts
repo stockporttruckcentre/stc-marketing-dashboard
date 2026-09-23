@@ -181,7 +181,7 @@ ok('a customer with nothing wrong still carries a dot',
   'an empty cell reads as "not set", which is the one thing this column exists to answer');
 
 ok('and a prospect does not, because nobody has established anything yet',
-  /if \(level === 'green' && p\.data\?\.status !== 'customer'\) return null;/.test(crmGrid),
+  /if \(level === 'green' && p\.data\?\.status !== 'won'\) return null;/.test(crmGrid),
   'a green dot on a lead is a claim nobody has grounds to make');
 
 ok('amber and red are drawn whatever the status, because somebody set them',
@@ -190,7 +190,7 @@ ok('amber and red are drawn whatever the status, because somebody set them',
 
 ok('the drawer applies the same rule to its own buttons',
   /const settled = level !== 'green' && false/.test(healthPanel) === false
-  && /const settled = level !== 'green' \|\| contact\.status === 'customer';/.test(healthPanel),
+  && /const settled = level !== 'green' \|\| contact\.status === 'won';/.test(healthPanel),
   'a highlighted Fine button on a lead contradicts the blank cell the list showed');
 
 ok('and says so rather than claiming nothing is outstanding',

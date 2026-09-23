@@ -24,8 +24,11 @@ import { valueOf } from '../lib/crm/lead-value';
 type Row = { status: string; sale_price: number | null; estimated_value: number | null };
 
 /* Every shape a tracker row comes in, including the ones nobody writes
-   on purpose. A status the six do not cover is in here because the
-   TypeScript says what it does with one and the SQL has to agree. */
+   on purpose. `customer` is still swept although migration 146 took it
+   out of the column, because an old export being re-imported is exactly
+   where a retired word turns up, and `parked` was never a status at
+   all: the TypeScript says what it does with one and the SQL has to
+   agree. */
 const ROWS: Row[] = [];
 for (const status of ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost', 'parked']) {
   for (const sale of [null, 0, 33000]) {

@@ -40,10 +40,13 @@ export const dynamic = 'force-dynamic';
    anybody meant by "set these to won".
    ============================================================= */
 
-/* The six the column allows. Restated here rather than imported from
+/* The five the column allows. Restated here rather than imported from
    the grid, because this is the boundary: a value arriving from a
-   browser is a value somebody could have typed. */
-const STATUSES = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'] as const;
+   browser is a value somebody could have typed.
+
+   `customer` was the sixth and is gone: it was a second word for won,
+   and one of the two always got ignored. Migration 146. */
+const STATUSES = ['lead', 'contacted', 'quoted', 'won', 'lost'] as const;
 type Status = typeof STATUSES[number];
 
 export async function POST(req: NextRequest) {

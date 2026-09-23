@@ -31,7 +31,7 @@ const lists: CrmList[] = [
   { id: 'l1', name: 'M62 corridor', description: null, owner_id: 'u1', is_global: false, color: '#cf2417', created_at: '', updated_at: '' },
 ];
 const COMPANIES = ['Bredbury Haulage', 'FleetSmart Logistics', 'TIP Trailers UK', 'Dawson Group', 'A&A Scaffolding', 'Wincanton North', 'Marsden Logistics', 'Dane Valley Transport', 'SMH Transport', 'Bishopgate Rentals', 'Walker Transport', 'Hyde Freight'];
-const STATUS = ['lead', 'contacted', 'quoted', 'won', 'lost', 'customer'];
+const STATUS = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 const contacts: CRMContact[] = COMPANIES.map((c, i) => ({
   id: `c${i}`, list_id: 'l0', company_name: c,
   contact_name: ['Tom Moore', 'Julie Barnes', 'Rama Patel', 'Gareth Wynn'][i % 4],

@@ -3,7 +3,7 @@
 
    One business operation with three parts, and the parts are the reason
    it is an operation rather than a field write. Setting
-   `crm_contacts.status = 'customer'` looks like the whole thing and is
+   `crm_contacts.status = 'won'` looks like the whole thing and is
    not: a sale raises a commission line, flips the stock unit, and tells
    every other rep chasing the same unit that it is gone.
 

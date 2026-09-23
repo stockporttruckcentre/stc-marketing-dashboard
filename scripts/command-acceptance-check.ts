@@ -549,7 +549,7 @@ test('mark all the in stock curtainsiders as sold', async () => {
 
   /* All three parts of the operation, which is why it is an operation. */
   ok('the deals are won',
-    db.tables.crm_leads.filter((r) => r.status === 'customer').length === 2,
+    db.tables.crm_leads.filter((r) => r.status === 'won').length === 2,
     JSON.stringify(db.tables.crm_leads.map((r) => [r.company_name, r.status])));
   ok('the units are sold',
     ['u1', 'u2'].every((id) => db.tables.stock_trailers.find((r) => r.id === id)?.status === 'sold'));
@@ -2240,7 +2240,7 @@ test('deleting the selected records asks for the number first', async () => {
     crm_contacts: [
       { id: 'c1', company_name: 'TEST lead one', status: 'lead' },
       { id: 'c2', company_name: 'TEST lead two', status: 'lead' },
-      { id: 'c3', company_name: 'Real Customer', status: 'customer' },
+      { id: 'c3', company_name: 'Real Customer', status: 'won' },
     ],
   });
   const text = 'delete all 2 selected test leads';
@@ -2549,7 +2549,7 @@ test('marking deals sold and exporting them exports them sold', async () => {
   ok('it runs', done.ok, done.ok ? '' : done.why);
   if (!done.ok || !done.artefact) { ok('a file came back', false, 'no artefact'); return; }
 
-  ok('the deal is sold', db.tables.crm_leads[0]?.status === 'customer',
+  ok('the deal is sold', db.tables.crm_leads[0]?.status === 'won',
     String(db.tables.crm_leads[0]?.status));
   ok('with the commission the preview showed',
     db.tables.crm_leads[0]?.commission === 400,
@@ -2558,7 +2558,7 @@ test('marking deals sold and exporting them exports them sold', async () => {
      the CRM could not say while a won deal and the company were rows of
      one table. Migration 043. */
   ok('and the company is a customer now',
-    db.tables.crm_contacts[0]?.status === 'customer',
+    db.tables.crm_contacts[0]?.status === 'won',
     String(db.tables.crm_contacts[0]?.status));
   ok('and the stock unit went with it', db.tables.stock_trailers[0]?.status === 'sold',
     String(db.tables.stock_trailers[0]?.status));
@@ -2651,7 +2651,7 @@ test('marking deals sold on its own still sells them', async () => {
     previewProgrammeHash: preview.programmeHash,
   });
   ok('it runs', done.ok, done.ok ? '' : done.why);
-  ok('the deal sold', db.tables.crm_contacts[0]?.status === 'customer',
+  ok('the deal sold', db.tables.crm_contacts[0]?.status === 'won',
     String(db.tables.crm_contacts[0]?.status));
   ok('and the unit with it', db.tables.stock_trailers[0]?.status === 'sold',
     String(db.tables.stock_trailers[0]?.status));
@@ -5159,7 +5159,7 @@ test('duplicate this deal for a second unit', async () => {
   const db = fakeDb({
     crm_contacts: [{ id: 'c_k1', company_name: 'Dawson Group' }],
     crm_leads: [{
-      id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group', status: 'customer', type: 'trailer_sales',
+      id: 'k1', contact_id: 'c_k1', company_name: 'Dawson Group', status: 'won', type: 'trailer_sales',
       requirement: 'two curtainsiders', notes: 'rings on Fridays',
       stock_trailer_id: 'u1', sale_price: 24000, profit: 4000, commission: 400,
       order_date: '2026-08-01',
@@ -5344,7 +5344,7 @@ test('link these two customer records as the same account', async () => {
   const db = fakeDb({
     crm_contacts: [
       { id: 'c1', company_name: 'Dawson Maintenance', status: 'lead' },
-      { id: 'c2', company_name: 'Dawson Group', status: 'customer' },
+      { id: 'c2', company_name: 'Dawson Group', status: 'won' },
     ],
   });
   const text = 'link these two customer records as the same account';
@@ -5396,7 +5396,7 @@ test('link Dawson Maintenance to Dawson Group as the main account', async () => 
   const db = fakeDb({
     crm_contacts: [
       { id: 'c1', company_name: 'Dawson Maintenance', status: 'lead' },
-      { id: 'c2', company_name: 'Dawson Group', status: 'customer' },
+      { id: 'c2', company_name: 'Dawson Group', status: 'won' },
     ],
   });
   const text = 'link Dawson Maintenance to Dawson Group as the main account';

@@ -334,7 +334,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
               /* What the migration carries and what it resets. */
               ...rest,
               id: fresh,
-              status: rest.status === 'customer' ? 'quoted' : rest.status,
+              status: rest.status === 'won' ? 'quoted' : rest.status,
               stock_trailer_id: null,
               sale_price: null, profit: null, profit_pct: null, commission: null,
               order_date: null, dispatch_date: null,
@@ -454,7 +454,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
         ? (tables.crm_leads ?? [])
           .filter((r) => String(r.id) !== id
             && String(r.stock_trailer_id ?? '') === unitId
-            && r.status !== 'customer')
+            && r.status !== 'won')
           .map((r) => String(r.id))
         : [];
 
@@ -463,7 +463,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
         id,
         label: String(deal.company_name ?? id),
         deal: {
-          status: 'customer',
+          status: 'won',
           sale_price: salePrice,
           profit,
           commission,
@@ -524,7 +524,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
           rows.push({
             table: 'crm_leads', id: other,
             label: String(row?.company_name ?? other),
-            was: { status: row?.status ?? null }, set: { status: 'customer' },
+            was: { status: row?.status ?? null }, set: { status: 'won' },
           });
         }
       }
@@ -553,7 +553,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
            it too or a check would pass here and fail against Postgres. */
         const account = (tables.crm_contacts ?? [])
           .find((r) => String(r.id) === String(deal.contact_id ?? ''));
-        if (account) { account.status = 'customer'; account.relationship = 'existing'; }
+        if (account) { account.status = 'won'; account.relationship = 'existing'; }
 
         let cascaded = 0;
         if (sale.unit) {
@@ -726,7 +726,7 @@ export function fakeDb(tables: Record<string, Row[]>) {
         deals.push({
           id, contact_id: from.id, owner_id: owner, created_by: 'u1',
           type: side,
-          status: from.status === 'lost' ? 'lost' : from.status === 'customer' ? 'customer' : 'lead',
+          status: from.status === 'lost' ? 'lost' : 'lead',
           company_name: from.company_name,
           what: side === 'maintenance' ? (args.p_what ?? null) : null,
         });

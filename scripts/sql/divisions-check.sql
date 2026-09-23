@@ -46,7 +46,7 @@ $fn$;
    said had to work and the reason the type field is not on the CRM
    record. */
 INSERT INTO crm_contacts (id, company_name, source, status) VALUES
-  ('a1000000-0000-0000-0000-000000000001', 'Threeways Haulage Ltd', 'protean', 'customer')
+  ('a1000000-0000-0000-0000-000000000001', 'Threeways Haulage Ltd', 'protean', 'won')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at) VALUES

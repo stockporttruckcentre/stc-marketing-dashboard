@@ -147,7 +147,12 @@ const MARKETING_SIGNS_OFF: Capability[] = [
 
 /** The sales section, at the level that works it. */
 const SALES_DOES: Capability[] = [
-  ...CRM_DAILY, 'crm.assign', 'crm.enrich', 'leads.create', 'tracker.view',
+  /* `crm.dealValues` is here and not in CRM_DAILY on purpose. From the
+     business: "yes everyone can see open deals but only sales/bd/md/dev
+     roles can see the value of those deals at the top of the crm
+     drawer". Marketing and the office administrators keep CRM_DAILY and
+     do not get the money. */
+  ...CRM_DAILY, 'crm.dealValues', 'crm.assign', 'crm.enrich', 'leads.create', 'tracker.view',
   'finder.view', 'stock.view', 'stock.edit', 'revenue.view',
   'fleetsmart.view', 'fleetsmart.build', 'fleetsmart.send',
   'reports.view', 'analytics.view',
@@ -163,7 +168,7 @@ const OVERSEES: Capability[] = [
 
 /** Everything in the catalogue. Used by the two roles that get it all. */
 const EVERYTHING: Capability[] = [
-  'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.health', 'analytics.targets',
+  'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.dealValues', 'crm.health', 'analytics.targets',
   'crm.edit', 'crm.create', 'crm.delete', 'crm.assign', 'crm.manageLists',
   'crm.proposal', 'crm.proposalForOthers', 'crm.delegate',
   'crm.enrich', 'crm.import', 'crm.export', 'leads.create',

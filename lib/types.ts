@@ -1,5 +1,21 @@
 export type UserRole = 'admin' | 'marketer' | 'sales' | 'viewer';
-export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'customer' | 'lost';
+/* ONE WON, NOT TWO.
+ *
+ * From the business: "when marking a sales tracker record as Won (just
+ * closed) it doesn't seem to do much. Then we have a status for
+ * Customer, which means won anyway. We only need 1 status, Won. This
+ * then assumes the company is now a customer of ours so anywhere else
+ * in the app tracking who our customers are will pick this up."
+ *
+ * There were two words for the same event and the application treated
+ * them as a sequence: `won` at the handshake, `customer` weeks later,
+ * and every figure that mattered counted the second one. So a rep who
+ * marked a deal Won saw nothing move.
+ *
+ * Winning is now the whole of it. `crm_contacts.relationship` becomes
+ * `existing` the moment any deal is won, which is what the rest of the
+ * application reads to answer "are they a customer". Migration 146. */
+export type ContactStatus = 'lead' | 'contacted' | 'quoted' | 'won' | 'lost';
 
 /**
  * The three tabs of the sales tracker.

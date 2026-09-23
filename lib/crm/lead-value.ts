@@ -56,7 +56,7 @@ export type ValuableLead = {
 export type LeadValue = {
   /** Still winnable: lead, contacted, quoted. */
   open: { count: number; total: number; priced: number };
-  /** Won: customer or won. Uses `sale_price` where there is one. */
+  /** Won. Uses `sale_price` where there is one. */
   won: { count: number; total: number; priced: number };
   /** Chased and missed. */
   lost: { count: number; total: number; priced: number };
@@ -69,7 +69,9 @@ export type LeadValue = {
 };
 
 const OPEN = new Set(['lead', 'contacted', 'quoted']);
-const WON = new Set(['won', 'customer']);
+/* One word for it now. `customer` was the same event under a second
+   name and is gone: migration 146. */
+const WON = new Set(['won']);
 
 /** A number, or nothing. Postgres numerics arrive as strings. */
 function amount(v: number | string | null | undefined): number | null {

@@ -569,11 +569,11 @@ END $$;
 -- other.
 -- -------------------------------------------------------------
 INSERT INTO crm_contacts (id, company_name, source, status) VALUES
-  ('90100000-0000-0000-0000-0000000000c1', 'Close Brothers Asset Finance', 'protean', 'customer'),
-  ('90100000-0000-0000-0000-0000000000c2', 'Close Brothers Vehicle Hire Limited', 'protean', 'customer'),
+  ('90100000-0000-0000-0000-0000000000c1', 'Close Brothers Asset Finance', 'protean', 'won'),
+  ('90100000-0000-0000-0000-0000000000c2', 'Close Brothers Vehicle Hire Limited', 'protean', 'won'),
   /* And a member with an account here and nothing on it, which is the
      InPost half of the report. */
-  ('90100000-0000-0000-0000-0000000000c3', 'Close Brothers Leasing Ltd', 'protean', 'customer')
+  ('90100000-0000-0000-0000-0000000000c3', 'Close Brothers Leasing Ltd', 'protean', 'won')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at) VALUES

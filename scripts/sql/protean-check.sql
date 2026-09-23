@@ -436,7 +436,7 @@ BEGIN
   PERFORM pg_temp.act_as('80000000-0000-0000-0000-000000000001');
 
   INSERT INTO crm_contacts (id, company_name, source, status)
-  VALUES ('81000000-0000-0000-0000-000000000001', 'Record Test Ltd', 'protean', 'customer')
+  VALUES ('81000000-0000-0000-0000-000000000001', 'Record Test Ltd', 'protean', 'won')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at)

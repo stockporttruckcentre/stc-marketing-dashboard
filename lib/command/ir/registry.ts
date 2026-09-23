@@ -788,7 +788,7 @@ export const CAPABILITIES: CapabilityDef[] = [
     effect: {
       table: 'crm_contacts',
       set: {
-        status: 'customer',
+        status: 'won',
         sale_price: { arg: 'salePrice' },
         dispatch_date: { arg: 'dispatchDate' },
       },

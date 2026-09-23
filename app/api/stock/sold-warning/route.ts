@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Given a stock trailer being moved AWAY from 'sold', return any tracker entries where it
- * is marked 'customer' or 'won' (i.e. an actual sale was logged). Used to warn the user
+ * is marked 'won' (i.e. an actual sale was logged). Used to warn the user
  * about the consequences before they change the trailer's status.
  *
  * This crosses row level security over a direct postgres connection, so
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       FROM crm_leads cc
       JOIN profiles p ON cc.owner_id = p.id
       WHERE cc.stock_trailer_id = ${body.stock_trailer_id}
-        AND cc.status IN ('customer','won')`;
+        AND cc.status = 'won'`;
     return NextResponse.json({
       soldEntries: rows.map(r => ({
         owner_name: r.full_name || r.email,

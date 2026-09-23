@@ -39,7 +39,8 @@
 # A SEED THAT SITS EARLY IN THE ORDER AND KEEPS CHANGING.
 #
 # `--with <migration>` puts one migration at the front of the bundle
-# whatever `--since` says. It exists for `016_capability_roles_seed`,
+# whatever `--since` says, and may be given more than once. It exists
+# for `016_capability_roles_seed`,
 # which is generated from `lib/crm/permissions.ts` and is rewritten
 # every time a capability is added, but which sits at position five in
 # `order.txt` because a fresh install needs it before 011.
@@ -70,7 +71,7 @@ while [ $# -gt 0 ]; do
         echo "no migration called $name in scripts/sql/order.txt" >&2
         exit 1
       fi
-      if [ "$flag" = "--since" ]; then SINCE="$name"; else WITH="$name"; fi
+      if [ "$flag" = "--since" ]; then SINCE="$name"; else WITH="${WITH}${WITH:+ }$name"; fi
       shift 2
       ;;
     *)
@@ -132,16 +133,17 @@ if [ -n "$SINCE" ]; then
 else
   echo "-- The command runtime, as one file."
 fi
-[ -n "$WITH" ] && echo "-- Plus ${WITH}, which is a seed and is rerun on purpose."
+[ -n "$WITH" ] && echo "-- Plus ${WITH}, which are seeds and are rerun on purpose."
 echo "-- Generated from scripts/sql/order.txt. Do not edit by hand."
 echo "-- Safe to run more than once: every statement replaces or skips."
 echo
 echo "BEGIN;"
 echo
 
-# The named seed first, so anything after it that reads the seed sees
-# the new rows rather than the ones it is replacing.
-[ -n "$WITH" ] && emit "$WITH"
+# The named seeds first, in the order they were given, so anything
+# after one that reads it sees the new rows rather than the ones it is
+# replacing.
+for one in $WITH; do emit "$one"; done
 
 # Everything before and including --since is skipped, in file order.
 skipping=0
@@ -154,7 +156,9 @@ while read -r name; do
     continue
   fi
   # Not twice, where --with named something that comes after --since.
-  [ "$name" = "$WITH" ] && continue
+  skip=0
+  for one in $WITH; do [ "$name" = "$one" ] && skip=1; done
+  [ "$skip" = "1" ] && continue
   file="supabase/migrations/${name}.sql"
   if [ ! -f "$file" ]; then
     echo "-- MISSING: $file" >&2

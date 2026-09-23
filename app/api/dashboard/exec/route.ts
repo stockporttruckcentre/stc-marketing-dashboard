@@ -57,9 +57,9 @@ export async function GET() {
              COALESCE(p.full_name, p.email)                   AS rep,
              COUNT(*) FILTER (WHERE cc.status IN ('contacted','quoted'))            AS open_deals,
              COALESCE(SUM(cc.estimated_value) FILTER (WHERE cc.status IN ('contacted','quoted')), 0) AS open_value,
-             COUNT(*) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${yearStart})        AS won_ytd,
-             COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${yearStart}), 0)  AS revenue_ytd,
-             COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'customer' AND cc.order_date >= ${monthStart}), 0) AS revenue_mtd
+             COUNT(*) FILTER (WHERE cc.status = 'won' AND cc.order_date >= ${yearStart})        AS won_ytd,
+             COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'won' AND cc.order_date >= ${yearStart}), 0)  AS revenue_ytd,
+             COALESCE(SUM(cc.sale_price) FILTER (WHERE cc.status = 'won' AND cc.order_date >= ${monthStart}), 0) AS revenue_mtd
       -- WHOSE DEAL IT IS, AS A COLUMN.
       --
       -- This used to join through a crm_lists row whose NAME contained

@@ -135,11 +135,11 @@ DO $$
 DECLARE c UUID; l UUID;
 BEGIN
   INSERT INTO crm_contacts (company_name, status, assigned_to, email)
-  VALUES ('Health Test Haulage', 'customer', 'Dean', 'ops@healthtest.test')
+  VALUES ('Health Test Haulage', 'won', 'Dean', 'ops@healthtest.test')
   RETURNING id INTO c;
 
   INSERT INTO crm_leads (contact_id, type, status, owner_id)
-  VALUES (c, 'maintenance', 'customer', 'dd000000-0000-0000-0000-000000000002')
+  VALUES (c, 'maintenance', 'won', 'dd000000-0000-0000-0000-000000000002')
   RETURNING id INTO l;
 
   INSERT INTO crm_leads (contact_id, type, status, owner_id)
@@ -438,9 +438,9 @@ DECLARE worst TEXT;
 BEGIN
   PERFORM pg_temp.act_as('dd000000-0000-0000-0000-000000000001');
   INSERT INTO crm_contacts (company_name, status, health, health_reason, health_since)
-  VALUES ('Sort Test Red', 'customer', 'red', 'a', NOW()),
-         ('Sort Test Amber', 'customer', 'amber', 'b', NOW()),
-         ('Sort Test Green', 'customer', 'green', NULL, NULL);
+  VALUES ('Sort Test Red', 'won', 'red', 'a', NOW()),
+         ('Sort Test Amber', 'won', 'amber', 'b', NOW()),
+         ('Sort Test Green', 'won', 'green', NULL, NULL);
 
   SELECT health INTO worst FROM crm_contacts
    WHERE company_name LIKE 'Sort Test %'

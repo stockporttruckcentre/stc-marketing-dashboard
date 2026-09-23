@@ -190,7 +190,7 @@ export function parseMoney(raw: string): number | null {
   return Number.isFinite(n) ? Math.round(n * mult) : null;
 }
 
-const STATUSES = ['lead', 'contacted', 'quoted', 'won', 'customer', 'lost'];
+const STATUSES = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 const STATUS_SYNONYMS: Record<string, string> = {
   new: 'lead', prospect: 'lead', enquiry: 'lead', open: 'lead', cold: 'lead',
   called: 'contacted', spoken: 'contacted', 'in progress': 'contacted', warm: 'contacted', working: 'contacted',

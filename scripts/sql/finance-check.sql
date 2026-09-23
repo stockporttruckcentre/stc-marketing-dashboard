@@ -63,9 +63,9 @@ $fn$;
 -- Three customers with records, one account nobody has placed, and one
 -- account deliberately set aside. The last two are the reconciliation.
 INSERT INTO crm_contacts (id, company_name, source, status) VALUES
-  ('b1000000-0000-0000-0000-000000000001', 'Bigfoot Logistics Ltd', 'protean', 'customer'),
-  ('b1000000-0000-0000-0000-000000000002', 'Middleton Transport Ltd', 'protean', 'customer'),
-  ('b1000000-0000-0000-0000-000000000003', 'Newstart Haulage Ltd', 'protean', 'customer')
+  ('b1000000-0000-0000-0000-000000000001', 'Bigfoot Logistics Ltd', 'protean', 'won'),
+  ('b1000000-0000-0000-0000-000000000002', 'Middleton Transport Ltd', 'protean', 'won'),
+  ('b1000000-0000-0000-0000-000000000003', 'Newstart Haulage Ltd', 'protean', 'won')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO protean_accounts (division, alpha, protean_name, contact_id, bound_at, ignored) VALUES
@@ -290,10 +290,11 @@ DECLARE n INTEGER; v NUMERIC;
 BEGIN
   PERFORM pg_temp.act_as('b0000000-0000-0000-0000-000000000001');
 
-  /* Three divisions times six stages, every one present. */
+  /* Three divisions times five stages, every one present. Six until
+     migration 146 took the second word for won out of the column. */
   SELECT count(*) INTO n FROM pipeline_by_stage();
-  IF n <> 18 THEN
-    RAISE EXCEPTION 'the funnel has % rows, not 18. A stage nobody is at still has a rung', n;
+  IF n <> 15 THEN
+    RAISE EXCEPTION 'the funnel has % rows, not 15. A stage nobody is at still has a rung', n;
   END IF;
 
   /* An empty stage reads nought, not nothing. */
@@ -309,7 +310,7 @@ BEGIN
     RAISE EXCEPTION 'the quoted trailer lead reads % at %, not 1 at 40000', n, v;
   END IF;
 
-  RAISE NOTICE 'ok  18 rungs, empty ones drawn at nought, each lead under its own division';
+  RAISE NOTICE 'ok  15 rungs, empty ones drawn at nought, each lead under its own division';
 END $$;
 
 -- -------------------------------------------------------------

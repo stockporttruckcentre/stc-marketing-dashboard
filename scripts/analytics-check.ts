@@ -265,9 +265,9 @@ const names = new Map([['u1', 'Dean Mann'], ['u2', 'Tom Price'], ['u3', 'Sam Kea
 
 const leads: LeadRow[] = [
   // Dean: raised 3 this month, won 2 of them with dates.
-  { id: 'l1', owner_id: 'u1', type: 'trailer_sales', status: 'customer', estimated_value: 30000,
+  { id: 'l1', owner_id: 'u1', type: 'trailer_sales', status: 'won', estimated_value: 30000,
     sale_price: 29000, order_date: '2026-09-04', created_at: '2026-09-01T09:00:00Z', contact_source: 'referral' },
-  { id: 'l2', owner_id: 'u1', type: 'trailer_sales', status: 'customer', estimated_value: 26000,
+  { id: 'l2', owner_id: 'u1', type: 'trailer_sales', status: 'won', estimated_value: 26000,
     sale_price: 24000, order_date: '2026-09-06', created_at: '2026-09-02T09:00:00Z', contact_source: 'referral' },
   { id: 'l3', owner_id: 'u1', type: 'trailer_sales', status: 'quoted', estimated_value: 31000,
     sale_price: null, order_date: null, created_at: '2026-09-03T09:00:00Z', contact_source: 'website' },
@@ -278,10 +278,10 @@ const leads: LeadRow[] = [
     created_at: `2026-09-0${i + 1}T09:00:00Z`, contact_source: 'outbound',
   })),
   // Sam: a customer row with NO order date. Imported invoicing, not a win.
-  { id: 'l9', owner_id: 'u3', type: 'rental', status: 'customer', estimated_value: null,
+  { id: 'l9', owner_id: 'u3', type: 'rental', status: 'won', estimated_value: null,
     sale_price: 99999, order_date: null, created_at: '2026-09-02T09:00:00Z', contact_source: null },
   // Dean, last month, so it belongs to the comparison and not the window.
-  { id: 'l10', owner_id: 'u1', type: 'trailer_sales', status: 'customer', estimated_value: 20000,
+  { id: 'l10', owner_id: 'u1', type: 'trailer_sales', status: 'won', estimated_value: 20000,
     sale_price: 18000, order_date: '2026-08-04', created_at: '2026-08-01T09:00:00Z', contact_source: 'referral' },
 ];
 

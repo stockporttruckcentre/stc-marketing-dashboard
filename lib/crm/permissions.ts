@@ -33,6 +33,16 @@ export type CrmCapability =
   | 'crm.viewGlobal'
   /** Look at a named colleague's portfolio. */
   | 'crm.viewOthers'
+  /* See what a deal on a customer record is worth.
+
+     Its own capability rather than part of `crm.view`, because the
+     business drew the line there: "yes everyone can see open deals but
+     only sales/bd/md/dev roles can see the value of those deals at the
+     top of the crm drawer, others just see there's a lead and what the
+     lead is for". Everybody sees a deal exists, which is what stops
+     two people pitching the same customer. Not everybody sees the
+     money. */
+  | 'crm.dealValues'
   /** Change contact fields. */
   | 'crm.edit'
   /* Flag a customer amber or red, and alert whoever looks after them.
@@ -357,7 +367,7 @@ export const ROLES = ['admin', 'sales', 'marketer', 'viewer'] as const;
 
 const BY_ROLE: Record<UserRole, CrmCapability[]> = {
   admin: [
-    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.edit', 'crm.health', 'analytics.targets', 'crm.create',
+    'crm.view', 'crm.viewGlobal', 'crm.viewOthers', 'crm.dealValues', 'crm.edit', 'crm.health', 'analytics.targets', 'crm.create',
     'crm.delete', 'crm.assign', 'crm.manageLists', 'crm.proposal',
     'crm.proposalForOthers', 'crm.delegate', 'crm.enrich', 'crm.import', 'crm.export',
     'admin.users', 'admin.roles', 'admin.settings', 'admin.audit', 'stock.edit', 'marketing.edit', 'marketing.approve',
@@ -397,7 +407,7 @@ const BY_ROLE: Record<UserRole, CrmCapability[]> = {
     'access.request', 'access.decide', 'admin.usersDepartment',
   ],
   sales: [
-    'crm.view', 'crm.viewGlobal', 'crm.edit', 'crm.health', 'crm.create', 'crm.delete',
+    'crm.view', 'crm.viewGlobal', 'crm.dealValues', 'crm.edit', 'crm.health', 'crm.create', 'crm.delete',
     'crm.assign', 'crm.delegate', 'crm.manageLists', 'crm.proposal',
     'crm.enrich', 'crm.import', 'crm.export', 'stock.edit',
     /* Sales could read the planner before, and still can. Nothing else

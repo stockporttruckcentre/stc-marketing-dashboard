@@ -14,7 +14,6 @@ import {
   MAINTENANCE_WHAT, RENTAL_WHAT, WORK_KINDS, WORK_KIND_LABEL, workKindOf,
 } from '../lib/crm/work-kind';
 import { fieldsFor } from '../lib/crm/lead-fields';
-import { winsAProspect } from '../lib/crm/conversion';
 import type { LeadType } from '../lib/types';
 
 let failed = 0;
@@ -257,32 +256,37 @@ ok('and a deep link to a lead still wins over the saved order',
   'opening a trailer sale from a link must not drop you on Maintenance');
 
 /* =============================================================
-   6. Winning a lead for a prospect
+   6. Winning a lead makes them a customer, without being asked
 
      when the lead is won he marks it as won, the customer now changes
      to an active account
+
+   And, after a Won that did nothing visible:
+
+     We only need 1 status, Won. This then assumes the company is now a
+     customer of ours so anywhere else in the app tracking who our
+     customers are will pick this up.
+
+   There is no dialog any more. The conversion is on the database
+   trigger that already watched lead status, so it happens whoever wins
+   the deal and through whatever screen. `scripts/sql/one-won-check.sql`
+   is where that is proved against real PostgreSQL. What is checked here
+   is that the SCREEN still reports it, from both places a status can be
+   changed.
    ============================================================= */
 console.log('\n  Becoming a customer\n  -------------------');
 
-ok('winning a lead for a prospect asks',
-  winsAProspect('quoted', 'won', 'prospect'));
-ok('winning one for a firm that already trades with us does not',
-  !winsAProspect('quoted', 'won', 'existing'));
-ok('a record with nothing in the column is a prospect, and is asked',
-  winsAProspect('quoted', 'won', null));
-ok('editing a lead that was already won does not ask again',
-  !winsAProspect('won', 'won', 'prospect'));
-ok('and nor does any other status',
-  ['lead', 'contacted', 'quoted', 'customer', 'lost']
-    .every((s) => !winsAProspect('quoted', s, 'prospect')));
+ok('there is no convert dialog left to answer',
+  !/ConvertProspectModal/.test(source));
+ok('and no second way to set the relationship by hand',
+  !/convertToCustomer/.test(source));
 
-/* The question is asked from both places a status can be changed. The
-   grid was the one that would have been missed: it is a dropdown in a
-   cell rather than a form, and it writes through a different function. */
-ok('the grid asks when a status is changed there',
-  /if \(field === 'status'\) void maybeConvert/.test(source));
+ok('the grid says what winning did when a status is changed there',
+  /if \(field === 'status'\) void sayWhatWinningDid/.test(source));
 ok('and so does the drawer',
   /if \(field === 'status'\) onWon\?\./.test(source));
+ok('and it reads the answer back rather than assuming it',
+  /const rel = await relationshipOf\(supabase, row\.contact_id\);/.test(source));
 
 /* =============================================================
    7. Somebody else's tracker
@@ -366,8 +370,8 @@ console.log('\n  What the maintenance strip counts\n  --------------------------
 console.log('\n  What counts as won\n  ------------------');
 
 ok('the money figures require a date the deal was agreed on',
-  /STATUS_TO_TAB\[r\.status\] === 'customer' && r\.order_date/.test(source),
-  'without it, anything imported at status customer is counted as revenue somebody earned');
+  /STATUS_TO_TAB\[r\.status\] === 'won' && r\.order_date/.test(source),
+  'without it, anything imported at a won status is counted as revenue somebody earned');
 
 ok('and both the revenue and the commission are counted off the same rows',
   /wonHere\.reduce\(\(sum, r\) => sum \+ \(Number\(r\.sale_price\)/.test(source)
@@ -379,7 +383,7 @@ ok('this is the same test the exec dashboard uses',
   'the tracker disagreeing with the dashboard about revenue is how both stop being believed');
 
 ok('and the same one the rep dashboard uses',
-  /status === 'customer' && d\.order_date/.test(readFileSync('app/api/dashboard/rep/route.ts', 'utf8')));
+  /status === 'won' && d\.order_date/.test(readFileSync('app/api/dashboard/rep/route.ts', 'utf8')));
 
 ok('rows with no date are said out loud rather than quietly dropped',
   /with no date/.test(source),

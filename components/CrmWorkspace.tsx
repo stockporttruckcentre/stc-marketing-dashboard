@@ -35,6 +35,17 @@ import { ukDateShort } from '@/lib/format/date';
 import {
   applyView, clearView, describeView, readView, writeView, type SavedView,
 } from '@/lib/crm/grid-view';
+import { readChoice, writeChoice } from '@/lib/ui/remember';
+import { Tabs } from '@/components/kit/tabs';
+
+/* The three divisions, and all of them. Same three the tracker has,
+   and in the same order, because they are the same three. */
+const DIVISIONS = ['all', 'trailer_sales', 'maintenance', 'rental'] as const;
+type Division = typeof DIVISIONS[number];
+const DIVISION_LABEL: Record<Division, string> = {
+  all: 'All', trailer_sales: 'Trailer sales', maintenance: 'Maintenance', rental: 'Rental & leasing',
+};
+const DIVISION_CHOICE = 'crm-division';
 
 const STATUSES: ContactStatus[] = ['lead', 'contacted', 'quoted', 'won', 'lost'];
 
@@ -121,6 +132,55 @@ export function CrmWorkspace({
     return ((data ?? []) as CRMContact[])
       .filter((c) => onPipeline.has(c.id) || !filedIds.has(c.id));
   }, [supabase, selectedListId, showingThePipeline]);
+
+  /* ---- WHICH DIVISION'S CUSTOMERS ----
+
+     From the business: "CRM: top of crm have a rental/maint/ts picker
+     like tracker".
+
+     "like tracker" is what decides what a division MEANS here. The
+     tracker's picker is over `crm_leads.type`, the three kinds of work
+     a deal is for, so this is over the same column: a customer is in
+     Maintenance if somebody is working a maintenance deal with them.
+
+     Not `crm_contacts.side`, which exists, holds two values, defaults
+     to trailer_sales on every row ever written and has never been read
+     by anything. Filtering on it would put the whole book under Trailer
+     Sales and look like it was working.
+
+     Not the invoicing division either. That is what the revenue and
+     analytics screens split on, and it answers a different question: a
+     haulier the workshop bills every month who nobody is pitching to is
+     in the revenue tab's Maintenance and is not being worked by
+     anybody, so they are not in this one.
+
+     `crm_contact_divisions`, migration 149, counts EVERYBODY's deals
+     rather than only yours, because the CRM is the shared book. A
+     customer dropping out of a rep's Maintenance filter because the
+     maintenance deal on them is somebody else's is the opposite of
+     what a division filter is for. */
+  const [division, setDivision] = useState<Division>(() => {
+    /* A link wins over what this machine remembers, so "open the
+       maintenance customers" from the command bar lands there whatever
+       the last tab was, and a link somebody pastes into a message shows
+       them what the sender was looking at. */
+    const fromUrl = searchParams.get('division');
+    if (fromUrl && (DIVISIONS as readonly string[]).includes(fromUrl)) return fromUrl as Division;
+    return readChoice<Division>(DIVISION_CHOICE, DIVISIONS) ?? 'all';
+  });
+  const [divisionOf, setDivisionOf] = useState<Map<string, string[]>>(new Map());
+
+  const refreshDivisions = useCallback(async () => {
+    const { data, error } = await supabase.rpc('crm_contact_divisions', { p_contacts: null });
+    if (error) return;
+    const by = new Map<string, string[]>();
+    for (const r of (data ?? []) as { contact_id: string; lead_types: string[] }[]) {
+      by.set(r.contact_id, r.lead_types ?? []);
+    }
+    setDivisionOf(by);
+  }, [supabase]);
+
+  useEffect(() => { void refreshDivisions(); }, [refreshDivisions]);
 
   /* ---- "LATEST NOTE" IS THE CUSTOMER'S NEWEST NOTE ----
 
@@ -262,7 +322,14 @@ export function CrmWorkspace({
   const owners = useMemo(() => ownerOptions(profiles), [profiles]);
   const ambiguousFirstNames = useMemo(() => ownersAmbiguous(profiles), [profiles]);
   const visibleRows = useMemo(() => {
-    const scoped = applyScope(rows, scope, profile, profiles);
+    let scoped = applyScope(rows, scope, profile, profiles);
+    /* A customer with no deals at all is not hidden by a division: they
+       are not in one yet. They stay out of the three and show on All,
+       which is where somebody goes looking for who has not been
+       pitched to. */
+    if (division !== 'all') {
+      scoped = scoped.filter((r) => (divisionOf.get(r.id) ?? []).includes(division));
+    }
     const q = search.trim().toLowerCase();
     if (!q) return scoped;
     // Every field somebody would plausibly recognise a company by. Not a
@@ -272,7 +339,7 @@ export function CrmWorkspace({
       r.company_name, r.contact_name, r.email, r.phone,
       r.location, r.assigned_to, r.status, r.source, r.notes,
     ].some((v) => v && String(v).toLowerCase().includes(q)));
-  }, [rows, scope, profile, profiles, search]);
+  }, [rows, scope, profile, profiles, search, division, divisionOf]);
   const unassignedCount = useMemo(
     () => rows.filter((r) => !ownerKey(r.assigned_to)).length,
     [rows],
@@ -431,7 +498,7 @@ export function CrmWorkspace({
       comparator: (a, b) => healthRank(a as Health) - healthRank(b as Health),
       cellRenderer: (p: ICellRendererParams<CRMContact>) => {
         const level = ((p.value as Health) ?? 'green');
-        if (level === 'green' && p.data?.status !== 'customer') return null;
+        if (level === 'green' && p.data?.status !== 'won') return null;
         const why = (p.data as unknown as { health_reason?: string })?.health_reason;
         return (
           <StatusDot
@@ -964,6 +1031,21 @@ export function CrmWorkspace({
     publishSelection({ entity: 'contacts', ids: rows.map((r: any) => String(r.id)) });
   }
 
+  /* How many customers each division has, counted BEFORE the division
+     filter and after everything else, so switching tab does not change
+     the numbers on the tabs. Same rule the tracker's side counts
+     follow. */
+  const divisionCounts = useMemo(() => {
+    const scoped = applyScope(rows, scope, profile, profiles);
+    const c = { all: scoped.length, trailer_sales: 0, maintenance: 0, rental: 0 } as Record<Division, number>;
+    for (const r of scoped) {
+      for (const d of divisionOf.get(r.id) ?? []) {
+        if (d in c) c[d as Division] += 1;
+      }
+    }
+    return c;
+  }, [rows, scope, profile, profiles, divisionOf]);
+
   // ---- counts ----
   const counts = useMemo(() => {
     const c = { all: visibleRows.length, lead: 0, contacted: 0, quoted: 0, won: 0, lost: 0 } as Record<string, number>;
@@ -1058,6 +1140,23 @@ export function CrmWorkspace({
               qualifier as small subtle text beside it. Colouring five
               numbers five ways was rule one broken twice over, and it
               made a quoted count of zero shout in red. ---- */}
+      {/* WHICH DIVISION'S CUSTOMERS. Asked for by name, and built the
+          same way the tracker's is: underline tabs, because this is the
+          screen's own navigation rather than a filter within it. The
+          chips on the toolbar below are the filters.
+
+          The choice lasts past a reload. Somebody who works maintenance
+          works maintenance tomorrow as well. */}
+      <Tabs
+        value={division}
+        onChange={(v) => { setDivision(v); writeChoice(DIVISION_CHOICE, v); }}
+        tabs={DIVISIONS.map((d) => ({
+          key: d,
+          label: DIVISION_LABEL[d],
+          count: divisionCounts[d],
+        }))}
+      />
+
       <StatStrip items={[
         { label: 'Total', value: counts.all, note: 'in this view' },
         { label: 'Leads', value: counts.lead, note: 'not yet approached' },

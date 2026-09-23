@@ -493,6 +493,12 @@ $fn$;
 GRANT EXECUTE ON FUNCTION protean_ignore(TEXT, TEXT, TEXT) TO authenticated;
 
 DROP FUNCTION IF EXISTS protean_to_moderate();
+/* And its own signature. Migration 136 changes the row type this
+   returns, so on a SECOND run of the catch-up bundle this CREATE meets
+   136's version and Postgres refuses to change a return type in place.
+   The bundle is one transaction, so that took the whole file down and
+   left the database with nothing. Found by `npm run check:replay`. */
+DROP FUNCTION IF EXISTS protean_to_moderate(TEXT);
 
 CREATE OR REPLACE FUNCTION protean_to_moderate(p_division TEXT DEFAULT NULL)
 RETURNS TABLE (division TEXT, alpha TEXT, protean_name TEXT, invoices INTEGER,
