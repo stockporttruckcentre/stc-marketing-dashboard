@@ -229,7 +229,10 @@ async function readPage(page: Page) {
           width: Math.round(g.getBoundingClientRect().width),
           kids: [...g.children].map((k) => {
             const r = k.getBoundingClientRect();
-            return { top: Math.round(r.top), width: Math.round(r.width) };
+            return {
+              top: Math.round(r.top), width: Math.round(r.width),
+              label: ((k.innerText || '').split('\\n')[0] || '').trim(),
+            };
           }),
           /* Anything inside a headline card whose text is wider than
              the box drawn round it, so the screen is showing an
@@ -245,7 +248,8 @@ async function readPage(page: Page) {
   })()`) as { text: string; notKnown: number; buttons: string[]; titles: string[];
               drawer: string;
               cutSentences: string[];
-              headline: { width: number; kids: { top: number; width: number }[];
+              headline: { width: number;
+                          kids: { top: number; width: number; label: string }[];
                           clipped: string[] } | null };
 }
 
@@ -336,6 +340,16 @@ async function main() {
   ok('the headline cards are three across', onFirstRow === 3,
     head ? `${onFirstRow} card(s) sit on the first row, across ${rows.length} row(s)`
          : 'the headline grid was not found at all');
+  /* From the business: "Left to find should be card 3 always so
+     you're showing target, current progress, progress left all on 1
+     line." Read back off the screen in the order the screen draws
+     them, because "always" is a promise and not an intention. */
+  const firstRow = (head?.kids ?? []).filter((k) => k.top === rows[0]).map((k) => k.label);
+  ok('the first row is the target, the progress and what is left',
+    firstRow[0] === 'TARGET, THIS YEAR'
+      && firstRow[1] === 'TOWARDS TARGET'
+      && /LEFT TO FIND|AHEAD OF TARGET/.test(firstRow[2] ?? ''),
+    `the first row reads ${firstRow.join(' | ')}`);
   ok('and no headline card is drawn full width',
     !!head && head.kids.every((k) => k.width < head.width * 0.5),
     head ? `the widest card is ${Math.round(
