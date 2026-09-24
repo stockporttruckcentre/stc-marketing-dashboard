@@ -40,6 +40,14 @@ BEGIN
   ALTER TABLE profiles ENABLE TRIGGER USER;
   PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
 
+  /* The refusal from migration 157 is turned off FOR THE SEED ONLY.
+     This check is about what happens to two records for one company
+     that are ALREADY here, and the refusal exists to stop a third ever
+     being made. Leaving it on would mean the one thing this file
+     cannot do is construct the state it tests. It goes back on before
+     a single assertion runs. */
+  ALTER TABLE crm_contacts DISABLE TRIGGER crm_contacts_one_per_company;
+
   -- The canonical record: Protean bound, and missing a phone number.
   INSERT INTO crm_contacts (id, company_name, status, email, phone)
   VALUES (keep, 'TK Components', 'won', 'accounts@tk.example', NULL)
