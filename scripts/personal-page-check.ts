@@ -222,6 +222,13 @@ async function readPage(page: Page) {
         const d = document.querySelector('[role="dialog"], aside');
         return d ? d.innerText : '';
       })(),
+      /* WHAT IS ON THE SHELF, ROW BY ROW. Empty while it is shut,
+         which is how the check proves it starts shut. */
+      noteAbouts: [...document.querySelectorAll('[data-note-about]')]
+        .map((d) => d.getAttribute('data-note-about') || ''),
+      noteLengths: [...document.querySelectorAll('[data-note-says]')]
+        .map((d) => (d.innerText || '').trim().length),
+
       /* A SENTENCE THAT SHOUTS AT THE READER.
 
          From the business, about "This change IS the Towards target
@@ -301,6 +308,8 @@ async function readPage(page: Page) {
     };
   })()`) as { text: string; notKnown: number; buttons: string[]; titles: string[];
               drawer: string;
+              noteAbouts: string[];
+              noteLengths: number[];
               shouting: string[];
               cutSentences: string[];
               headline: { width: number;
@@ -476,11 +485,6 @@ async function main() {
     tile('OPEN PIPELINE') === compact(OPEN),
     `the tile reads "${tile('OPEN PIPELINE')}", the rows come to ${compact(OPEN)}`);
 
-  /* ---- 9 ----
-
-     "£-3k" was drawn in Biggest fallers for a customer who spent
-     £3,000 less than last year. The sign belongs before the currency
-     symbol, and it was there in one component and not the other. */
   /* ---- 8 ----
 
      From the business:
@@ -488,40 +492,102 @@ async function main() {
        He thinks these are lost earnings because it's saying things are
        or are not included or are being worked out differently.
 
-     A count of what is excluded, with no figure beside it, is read by
-     somebody paid on a number as money taken off them. Every notice
-     now names what it moves, and says the target is not one of them. */
-  console.log('\n  8. Every warning says what it is worth');
-  ok('the warning opens by saying the target is untouched',
-    /None of this changes your target/.test(read.text));
+     and, about the shape of it:
+
+       needs laying out better in something that's closed by default
+       and can be expanded [...] You're combining like 10 pieces of
+       information into a single paragraph that looks like a
+       problematic alert. As all sales guys are asking me what they
+       mean right now.
+
+     So three things: the shelf is shut and silent until somebody opens
+     it, each note is its own line with the figure it is about named on
+     it, and each one says what it is worth. */
+  console.log('\n  8. The notes are on a shelf, and each says what it is worth');
+
+  const shelf = page.getByRole('button', { name: /How these figures are counted/ });
+  ok('there is one thin bar under the cards, not a block of text',
+    await shelf.count() === 1);
+  ok('and it is shut, so none of the notes is on the screen',
+    await shelf.getAttribute('aria-expanded') === 'false'
+      && !read.text.includes('carry no figure'),
+    'the notes are showing before anybody asked for them');
+  ok('and it says how many notes are behind it',
+    /\d+ notes/.test(await shelf.innerText()));
+
+  await shelf.click();
+  await page.waitForTimeout(300);
+  const read2 = await readPage(page);
+  if (process.env.DUMP) console.log('---- the shelf, opened ----\n' + read2.text);
+
+  /* The complaint was the shape, not the words: nine facts run into one
+     paragraph with no way to tell which sentence was about which
+     number. Each is now a row naming the figure it explains. */
+  ok('every note is its own line with the figure it is about on it',
+    ['Towards target', 'The period', 'Open pipeline', 'Closed on the tracker',
+     'The deal tracker', 'Insurers and payers', 'Prospects']
+      .every((about) => read2.noteAbouts.includes(about)),
+    `the shelf names: ${read2.noteAbouts.join(', ')}`);
+  ok('and not one of them is a paragraph of several facts run together',
+    read2.noteLengths.every((n) => n < 280),
+    `the longest note is ${Math.max(...read2.noteLengths)} characters`);
+  ok('the first note says the target is untouched by the rest',
+    /Nothing on the deal tracker can add to it or take from it, so none of the notes below changes it/
+      .test(read2.text));
   ok('and the undated wins are priced rather than just counted',
-    read.text.includes(compact(UNDATED)),
+    read2.text.includes(compact(UNDATED)),
     `the page does not say the undated wins are worth ${compact(UNDATED)}`);
   ok('and it says what dating them would do',
-    /Put a date on them and that lands\./.test(read.text));
+    /Put a date on them and it lands\./.test(read2.text));
   /* "whats the open pipeline vs the real pipeline, why 2". There is
      one pipeline. The gap is that some of its deals have no figure on
      them, which is a different sentence from a second total the app is
      keeping back. */
   ok('the page never mentions a second pipeline it does not have',
-    !/real pipeline/.test(read.text));
+    !/real pipeline/.test(read2.text));
   ok('the unpriced deals are counted against the open deals they are part of',
     new RegExp(`${UNPRICED_OPEN} of your ${OPEN_DEALS} open deals carry no figure`)
-      .test(read.text),
+      .test(read2.text),
     `the page does not say ${UNPRICED_OPEN} of ${OPEN_DEALS}`);
   ok('and the old count that mixed in lost and won deals is gone',
-    !/70 deals? carry no figure/.test(read.text));
+    !/70 deals? carry no figure/.test(read2.text));
   ok('only the undated wins worth dating are the ones it asks for',
-    new RegExp(`${UNDATED_PRICED} won deals are worth ${compact(UNDATED)}`).test(read.text),
+    new RegExp(`${UNDATED_PRICED} won deals worth ${compact(UNDATED)} have no order date`)
+      .test(read2.text),
     'the page asks for all ten to be dated when eight are worth nothing');
   ok('and the wins worth nothing say so separately',
-    new RegExp(`${UNPRICED_WON} won deals carry no figure at all`).test(read.text));
+    new RegExp(`${UNPRICED_WON} won deals carry no figure at all`).test(read2.text));
   ok('the payers say they change nothing rather than that they do not belong',
     /add nothing to the figures above and taking them off would change none of them/
-      .test(read.text));
+      .test(read2.text));
   ok('and the old wording that read as money taken away is gone',
-    !/should not be on a portfolio at all/.test(read.text));
+    !/should not be on a portfolio at all/.test(read2.text));
 
+  /* A PREFERENCE THAT DOES NOT LAST THE MORNING IS NOT A PREFERENCE.
+
+     `lib/ui/remember.ts`, the same as the mover side. Shut is the
+     default, and somebody who opens the shelf wants it open tomorrow
+     as well, so the reload has to prove it rather than the code
+     claiming it. */
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  const again = page.getByRole('button', { name: /How these figures are counted/ });
+  ok('the shelf is still open after a reload',
+    await again.getAttribute('aria-expanded') === 'true',
+    'the choice did not survive the page being reloaded');
+  await again.click();
+  await page.waitForTimeout(200);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  ok('and shutting it survives a reload too',
+    await page.getByRole('button', { name: /How these figures are counted/ })
+      .getAttribute('aria-expanded') === 'false');
+
+  /* ---- 9 ----
+
+     "£-3k" was drawn in Biggest fallers for a customer who spent
+     £3,000 less than last year. The sign belongs before the currency
+     symbol, and it was there in one component and not the other. */
   console.log('\n  9. Money is written the way money is written');
   ok('no figure puts the minus sign after the £', !read.text.includes('£-'),
     'somewhere on this page money is written "£-3k"');
