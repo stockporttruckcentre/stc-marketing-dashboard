@@ -16,6 +16,7 @@ import { Select, TextInput } from '@/components/kit/forms';
 import { Note, Panel, PanelGrid } from '@/components/analytics/legacy/panel';
 import { Tile } from '@/components/analytics/legacy/tiles';
 import { DealPill, PortfolioDeals, type DealState } from './PortfolioDeals';
+import { PortfolioChange } from './PortfolioChange';
 import { PortfolioCustomers } from './PortfolioCustomers';
 import { readChoice, writeChoice } from '@/lib/ui/remember';
 
@@ -233,6 +234,9 @@ export function PersonalAnalytics({
     { type: string; label: string; state: DealState } | null
   >(null);
 
+  /* The drawer behind the invoiced row. */
+  const [breakdown, setBreakdown] = useState(false);
+
   /* ---- Every panel moves together, or none of them do ----
 
      From the scope: "Selecting a person refreshes the entire Personal
@@ -418,10 +422,27 @@ export function PersonalAnalytics({
 
       {/* ---- the headline ---- */}
       <div style={{
+        /* Three across, asked for by name once the Customers card came
+           off and nine were left.
+
+           Twelve columns with each tile taking four, not three columns
+           with each tile taking one. A Tile's own default is `span 3`,
+           written for the twelve column grids everywhere else in this
+           file, so a three column container gave every tile the whole
+           row: nine cards full width, each three quarters empty, which
+           is the layout the business has twice said is banned. The
+           container was right and the screen was wrong, which is why
+           the check now measures where the tiles land rather than what
+           the container says.
+
+           `minmax(0, 1fr)` rather than a width, so a long figure
+           shrinks its column instead of pushing the row sideways. */
         display: 'grid', gap: 10, marginBottom: 14,
-        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+        gridTemplateColumns: 'repeat(12, minmax(0, 1fr))',
       }}>
         <Tile
+          span={4}
+          noteWraps
           label="Target, this year"
           value={overview?.fy_target == null ? 'Not set' : money(num(overview.fy_target))}
           note={overview?.fy_target == null
@@ -446,6 +467,8 @@ export function PersonalAnalytics({
             number out of the same function, so they cannot differ
             again. Migration 160. */}
         <Tile
+          span={4}
+          noteWraps
           label="Towards target"
           value={money(num(overview?.target_revenue))}
           note={`Everything these customers were billed above the same point last year.`
@@ -453,11 +476,15 @@ export function PersonalAnalytics({
             + ` ${money(num(overview?.invoiced_last_year))} then.`}
         />
         <Tile
+          span={4}
+          noteWraps
           label="FS+ value won"
           value={money(num(overview?.fs_value_won))}
           note={`${overview?.fs_contracts ?? 0} contract(s) accepted this year, over their whole term. Not counted towards the target.`}
         />
         <Tile
+          span={4}
+          noteWraps
           label="FS+ value invoiced"
           value={money(num(overview?.fs_value_invoiced))}
           tone={(overview?.fs_waiting ?? 0) > 0 ? 'warning' : 'plain'}
@@ -467,6 +494,8 @@ export function PersonalAnalytics({
             : 'Billed and in the bank. This is the half that counts towards the target.'}
         />
         <Tile
+          span={4}
+          noteWraps
           label="Achieved"
           value={overview?.achieved == null ? 'Not known' : `${Number(overview.achieved).toFixed(1)}%`}
           /* Of the TARGET, said out loud. The invoiced panel below
@@ -477,6 +506,8 @@ export function PersonalAnalytics({
             : `of the ${money(num(overview?.fy_target))} target.`}
         />
         <Tile
+          span={4}
+          noteWraps
           label={Number(overview?.to_go ?? 0) < 0 ? 'Ahead of target' : 'Left to find'}
           value={overview?.to_go == null
             ? 'Not known'
@@ -486,6 +517,8 @@ export function PersonalAnalytics({
         {/* The same figure as Towards target, said the other way
             round. Migration 160 made them one number. */}
         <Tile
+          span={4}
+          noteWraps
           label={overview?.won_change == null
             ? 'Against last year'
             : Number(overview.won_change) < 0 ? 'Down on last year' : 'Up on last year'}
@@ -503,27 +536,33 @@ export function PersonalAnalytics({
         {/* Kept, and labelled for what it is. This was the target
             figure until migration 160 and it is the number that read
             £52k beside a £256k one. It is work closed on the tracker,
-            which is a different question from what the book billed. */}
+            which is a different question from what the book billed.
+
+            It is the same column, and the same sum, as the "Across the
+            three" table further down: migration 161, after the tile
+            read £52k over a table whose two rows came to £89k. */}
         <Tile
+          span={4}
+          noteWraps
           label="Closed on the tracker"
           value={money(num(overview?.tracker_revenue))}
-          note={'Deals this person closed, maintenance and rentals. '
-            + 'Not revenue, and not what the target is measured on.'}
+          note={'Maintenance and rentals off the tracker, the FleetSmart+ contracts '
+            + 'above included at their whole term value. Not revenue, and not what '
+            + 'the target is measured on.'}
         />
         <Tile
+          span={4}
+          noteWraps
           label="Open pipeline"
           value={money(num(overview?.open_pipeline))}
           note={`${overview?.open_deals ?? 0} open deal(s). Not revenue.`}
         />
         <Tile
+          span={4}
+          noteWraps
           label="Trailer Sales"
           value={money(num(overview?.trailer_revenue))}
           note="Reported here, and kept out of the target figure."
-        />
-        <Tile
-          label="Customers"
-          value={String(overview?.customers ?? 0)}
-          note="Anybody they hold a deal against, in any state."
         />
       </div>
 
@@ -696,7 +735,12 @@ export function PersonalAnalytics({
              target above is what this person won. Two honest numbers
              about one person, and nothing on the screen said they were
              different questions. */
-          hint="What the group billed these customers, from the uploads. The change below IS the Towards target figure above: one number, drawn twice."
+          /* Short enough to be read. A panel hint is drawn on one line
+             and clipped with an ellipsis, so the sentence that matters
+             most on this panel was ending in "..." and was in the one
+             place on the screen it could not be read. It is now a line
+             of its own under the figures. */
+          hint="What the group billed these customers, from the uploads."
         >
           {!revYear ? (
             <EmptyState
@@ -707,12 +751,21 @@ export function PersonalAnalytics({
             />
           ) : (
             <div style={{ display: 'grid', gap: 10, padding: 12 }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-                padding: '12px 14px',
-                border: '1px solid var(--border)', borderRadius: 'var(--r)',
-                background: 'var(--surface-sunken)',
-              }}>
+              {/* Clickable, asked for by name: "make the row clickable
+                  so you can see what makes up this 256k in detail".
+                  A button rather than a div with an onClick, so it
+                  reaches the keyboard and says what it is. */}
+              <button
+                type="button"
+                onClick={() => setBreakdown(true)}
+                title="See which customers this change is made of"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                  padding: '12px 14px', width: '100%', textAlign: 'left',
+                  border: '1px solid var(--border)', borderRadius: 'var(--r)',
+                  background: 'var(--surface-sunken)', cursor: 'pointer',
+                  font: 'inherit', color: 'inherit',
+                }}>
                 <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                   This year to date <strong style={{
                     color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
@@ -748,8 +801,17 @@ export function PersonalAnalytics({
                       {Number(revYear.change_pct).toFixed(1)}% on last year
                     </Badge>
                   )}
+                  <ArrowRight size={14} style={{ opacity: 0.6 }} />
                 </span>
-              </div>
+              </button>
+
+              {/* Said where it is read, under the figures it is about.
+                  The business has been shown two cards £204,000 apart
+                  about one person's year, so the screen now says out
+                  loud that these two are one. */}
+              <Note>
+                This change IS the Towards target figure above: one number, drawn twice.
+              </Note>
 
               {/* A customer with no Protean account has no invoiced
                   figure, and that is not nought. Said out loud rather
@@ -793,7 +855,7 @@ export function PersonalAnalytics({
                 {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
                 {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
                 {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
-                net by tax point. This is not the figure the target is measured on.
+                net by tax point. This IS the figure the target is measured on.
                 {revYear.never_billed > 0 && (
                   <> {revYear.never_billed} of the {revYear.customers} customers here have never
                   been billed, which is what a prospect is. They are counted in the list and add
@@ -943,6 +1005,17 @@ export function PersonalAnalytics({
           state={deals.state}
           upto={upto}
           onClose={() => setDeals(null)}
+        />
+      )}
+
+      {breakdown && revYear && (
+        <PortfolioChange
+          person={person}
+          upto={upto}
+          headline={Number(revYear.change)}
+          thisYear={Number(revYear.this_year)}
+          lastYear={Number(revYear.last_year)}
+          onClose={() => setBreakdown(false)}
         />
       )}
     </div>

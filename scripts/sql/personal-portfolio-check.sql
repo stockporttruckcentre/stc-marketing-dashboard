@@ -123,7 +123,28 @@ BEGIN
       COALESCE(o.tracker_revenue::TEXT, 'nothing');
   END IF;
 
+  /* AND IT IS THE SUM OF THE ROWS THE SCREEN DRAWS UNDER IT.
+
+     The tile read £52k on Dean's live portfolio over a table whose
+     two rows said £38k and £51k, because the tile had the FleetSmart+
+     contracts taken out of it and the table did not. One column, one
+     sum, asserted rather than intended. Migration 161. */
+  IF o.tracker_revenue IS DISTINCT FROM (
+       SELECT SUM(p.won_total) FILTER (WHERE p.lead_type <> 'trailer_sales')
+         FROM personal_pipeline(rep) p) THEN
+    RAISE EXCEPTION 'the tracker tile is %, and the rows under it come to %',
+      COALESCE(o.tracker_revenue::TEXT, 'nothing'),
+      COALESCE((SELECT SUM(p.won_total) FILTER (WHERE p.lead_type <> 'trailer_sales')
+                  FROM personal_pipeline(rep) p)::TEXT, 'nothing');
+  END IF;
+
+  IF o.open_pipeline IS DISTINCT FROM (
+       SELECT SUM(p.open_total) FROM personal_pipeline(rep) p) THEN
+    RAISE EXCEPTION 'the open pipeline tile is not the sum of the rows under it';
+  END IF;
+
   RAISE NOTICE 'the target is what the book grew by, and the two cards are one number';
+  RAISE NOTICE 'and every tile with a table under it is the sum of that table';
 
   IF o.trailer_revenue IS DISTINCT FROM 33000 THEN
     RAISE EXCEPTION 'trailer revenue is %, wanted 33000 at its sale price',

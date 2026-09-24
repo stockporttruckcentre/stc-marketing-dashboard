@@ -65,7 +65,14 @@ export default function Page() {
     <div className="kit" style={{ padding: '18px 24px 40px', maxWidth: 1480, margin: '0 auto' }}>
       <Leaderboard
         title="Customers"
-        legend="This year, against the biggest on the list"
+        legend="This year"
+        columns={{
+          name: 'Customer',
+          bar: 'Share of the biggest here',
+          figures: ['Last year', 'Open'],
+          headline: 'This year',
+          delta: 'Change',
+        }}
         sort={<span>Open pipeline value, highest first</span>}
         rows={ROWS.map((r) => ({
           key: r.name,

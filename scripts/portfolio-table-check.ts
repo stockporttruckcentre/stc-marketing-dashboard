@@ -35,6 +35,7 @@ type Read = {
   page: { w: number; cw: number };
   rows: { h: number; name: string; cells: Box[]; gaps: number[] }[];
   head: Box;
+  headings: Box & { text: string };
   total: Box;
 };
 
@@ -74,7 +75,13 @@ async function main() {
       return {
         card: box(card),
         page: { w: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth },
-        rows: rows.slice(1, -1).map((row) => ({
+        /* Two rows before the data now, not one: the kit's own header
+           with the title and the sort, then the column heading row the
+           business asked for by name ("needs column headers again,
+           dean doesn't know what any of those \u00a3 numbers mean").
+           Slicing only one off counted the heading row as data and
+           reported it as a row that had wrapped. */
+        rows: rows.slice(2, -1).map((row) => ({
           h: box(row).h,
           name: row.children[2] ? row.children[2].innerText : '',
           cells: [...row.children].map((c) => box(c)),
@@ -86,6 +93,7 @@ async function main() {
           ),
         })),
         head: box(rows[0]),
+        headings: Object.assign(box(rows[1]), { text: rows[1].innerText }),
         total: box(rows[rows.length - 1]),
       };
     })()`) as Read;
@@ -112,6 +120,15 @@ async function main() {
 
     ok(`${width}: the header is one row high`,
       read.head.h <= tallest + 1, `the header is ${Math.round(read.head.h)}px and a row is ${tallest}px`);
+
+    ok(`${width}: the columns are named`,
+      ['Customer', 'Last year', 'Open', 'This year', 'Change']
+        .every((h) => read.headings.text.includes(h)),
+      `the heading row reads "${read.headings.text.replace(/\n/g, ' ')}"`);
+
+    ok(`${width}: the heading row is one row high`,
+      read.headings.h <= tallest + 1,
+      `the headings are ${Math.round(read.headings.h)}px and a row is ${tallest}px`);
 
     ok(`${width}: the list has its footing row`, read.total.h > 0);
 

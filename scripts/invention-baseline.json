@@ -18,5 +18,7 @@
   "components/analytics/kit/leaderboard.tsx": 0,
   "components/analytics/personal/PortfolioCustomers.tsx": 32,
   "components/analytics/personal/PersonalAnalytics.tsx": 38,
+  "components/analytics/personal/PortfolioChange.tsx": 5,
+  "components/analytics/personal/PortfolioDeals.tsx": 15,
   "components/analytics/TargetsBoard.tsx": 0
 }

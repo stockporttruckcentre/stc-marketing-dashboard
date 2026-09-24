@@ -95,6 +95,7 @@
     "check:permission-wiring": "tsx scripts/permission-wiring-check.ts",
     "check:permissions": "bash scripts/sql/permissions-check.sh",
     "check:personal-analytics": "bash scripts/sql/personal-analytics-check.sh",
+    "check:personal-page": "tsx scripts/personal-page-check.ts",
     "check:personal-portfolio": "bash scripts/sql/personal-portfolio-check.sh",
     "check:portfolio-grants": "bash scripts/sql/portfolio-grants-check.sh",
     "check:portfolio-table": "tsx scripts/portfolio-table-check.ts",
