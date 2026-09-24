@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight, RotateCcw, TrendingDown, TrendingUp, UserRound, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -10,7 +10,7 @@ import {
 import { useToast } from '@/components/kit/toast';
 import type { Viewable } from '@/lib/analytics/scope';
 import {
-  Alert, Badge, Button, Chip, EmptyState, PageHead, compactMoney,
+  Alert, Badge, Button, Chip, EmptyState, NoteLine, NoteShelf, PageHead, compactMoney,
 } from '@/components/kit/primitives';
 import { Select, TextInput } from '@/components/kit/forms';
 import { Note, Panel, PanelGrid } from '@/components/analytics/legacy/panel';
@@ -235,6 +235,111 @@ export function PersonalAnalytics({
   const undated = sum((r) => r.won_undated);
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
+
+  /* ---- ONE NOTE, ONE FACT, ONE FIGURE IT IS ABOUT ----
+
+     Built as a list rather than written as a paragraph, because the
+     complaint was not the wording. It was nine facts run together with
+     no way to tell which sentence was about which number:
+
+       You're combining like 10 pieces of information into a single
+       paragraph that looks like a problematic alert. As all sales guys
+       are asking me what they mean right now.
+
+     `about` is the figure on this screen the note explains, so a rep
+     looking at Open pipeline can find the line about Open pipeline. */
+  const period = revYear
+    ? `${new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to `
+      + `${new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against `
+      + `${new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to `
+      + `${new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}.`
+    : null;
+
+  const notes: { about: string; says: ReactNode }[] = [];
+
+  if (overview?.target_revenue != null) {
+    notes.push({
+      about: 'Towards target',
+      says: 'The target is measured on what these customers were invoiced, above the '
+        + 'same point last year. Nothing on the deal tracker can add to it or take '
+        + 'from it, so none of the notes below changes it.',
+    });
+  }
+  if (period) {
+    notes.push({
+      about: 'The period',
+      says: `${period} Invoice net by tax point, so a part finished month is compared `
+        + 'with a part finished month.',
+    });
+  }
+  if (unpricedOpen > 0) {
+    notes.push({
+      about: 'Open pipeline',
+      says: `${unpricedOpen} of your ${openDeals} open deals carry no figure. They are `
+        + 'counted in the deal count and add nothing to the total, because nobody has '
+        + 'priced them yet.',
+    });
+  }
+  if (undatedPriced > 0) {
+    notes.push({
+      about: 'Closed on the tracker',
+      says: `${undatedPriced} won deal${undatedPriced === 1 ? '' : 's'} worth `
+        + `${money(undatedWorth ?? 0)} ${undatedPriced === 1 ? 'has' : 'have'} no order `
+        + `date, so ${undatedPriced === 1 ? 'it is' : 'they are'} in no financial year `
+        + `and not in this figure. Put a date on ${undatedPriced === 1 ? 'it' : 'them'} `
+        + 'and it lands.',
+    });
+  }
+  if (unpricedWon > 0) {
+    notes.push({
+      about: 'Closed on the tracker',
+      says: `${unpricedWon} won deal${unpricedWon === 1 ? '' : 's'} carry no figure at `
+        + `all, so ${unpricedWon === 1 ? 'it adds' : 'they add'} nothing to this figure `
+        + `whatever happens to ${unpricedWon === 1 ? 'its date' : 'their dates'}.`,
+    });
+  }
+  /* This one used to read "146 won deals have no order date" when 131
+     of them were rows off an imported sheet carrying last year's
+     spend. Telling a rep that £2.7m is missing from his target is
+     worse than saying nothing. Migration 158 separated them. */
+  if (sheetRows > 0) {
+    notes.push({
+      about: 'The deal tracker',
+      says: `${sheetRows} row${sheetRows === 1 ? '' : 's'} came off an imported customer `
+        + 'sheet and hold what that customer spent in a past year. They are not deals '
+        + 'and no figure on this screen uses them.',
+    });
+  }
+  /* The two that used to sit inside the revenue panel, named in the
+     same message: "same with the insurer note and the note below the
+     insurer note about target measurings and customers never being
+     billed". */
+  if (revYear && revYear.split_twin > 0) {
+    notes.push({
+      about: 'Customers',
+      says: `${revYear.split_twin} of these ${revYear.customers} customers `
+        + `${revYear.split_twin === 1 ? 'is' : 'are'} entered twice under a second `
+        + 'spelling and the revenue is on the other record, so the figures above are '
+        + 'missing it. The division totals are not affected. Merging them puts it back.',
+    });
+  }
+  if (revYear && revYear.payer_on_book > 0) {
+    notes.push({
+      about: 'Insurers and payers',
+      says: `${revYear.payer_on_book} of these ${revYear.payer_on_book === 1 ? 'is' : 'are'} `
+        + 'an insurer or other payer rather than a customer, and none has been invoiced '
+        + 'through this portfolio in either year. They add nothing to the figures above '
+        + 'and taking them off would change none of them.',
+    });
+  }
+  if (revYear && revYear.never_billed > 0) {
+    notes.push({
+      about: 'Prospects',
+      says: `${revYear.never_billed} of these ${revYear.customers} customers have never `
+        + 'been billed, which is what a prospect is: nobody has sold them anything yet. '
+        + 'They add nothing to either year and nothing is missing on their account.',
+    });
+  }
   const [queue, setQueue] = useState<FsCandidate[]>([]);
   const [answering, setAnswering] = useState<string | null>(null);
   const { say } = useToast();
@@ -250,6 +355,13 @@ export function PersonalAnalytics({
      `lib/ui/remember.ts`, the same as every other saved choice. */
   const [side, setSide] = useState<MoverSide>(
     () => readChoice<MoverSide>('portfolio-mover-side', MOVER_SIDES) ?? 'both',
+  );
+
+  /* Shut by default, asked for by name: "closed by default and can be
+     expanded". Remembered after that, because somebody who wants the
+     notes open wants them open tomorrow as well. */
+  const [notesOpen, setNotesOpen] = useState(
+    () => readChoice<'open' | 'shut'>('portfolio-notes', ['open', 'shut']) === 'open',
   );
 
   /* The pill somebody pressed, and the list it opens. */
@@ -605,69 +717,44 @@ export function PersonalAnalytics({
         />
       </div>
 
-      {/* ---- WHAT THE FIGURES CANNOT TELL YOU, AND WHAT IT IS WORTH ----
+      {/* ---- THE NOTES, ON A SHELF, SHUT ----
 
-          Said on the screen rather than swallowed. A portfolio with
-          eleven unpriced deals in it has a pipeline figure that is
-          smaller than the pipeline, and nobody can tell from the
-          number.
+          From the business:
 
-          From the business, about this notice and the two below it:
+            needs laying out better in something that's closed by
+            default and can be expanded to see the notes like a thin
+            bar below all 9 cards that's not intrusive. Not just one
+            bulky paragraph that looks like an alert.
 
-            He thinks these are lost earnings because it's saying
-            things are or are not included or are being worked out
-            differently.
+          and, about the same block and the two under the revenue
+          panel:
 
-          Which is what a count on its own does to somebody paid on a
-          number. Three sentences saying what is excluded, no sentence
-          saying what any of it is worth, so the reader supplies the
-          worst figure they can imagine.
+            You're combining like 10 pieces of information into a
+            single paragraph that looks like a problematic alert. As
+            all sales guys are asking me what they mean right now.
 
-          So each one now names the figure it moves, and the notice
-          opens by saying the target is not one of them. That is true
-          by construction since migration 160: the target is what these
-          customers were invoiced, and no deal on this tracker can
-          reach it in either direction. */}
-      {overview && (unpricedOpen > 0 || unpricedWon > 0 || undated > 0 || sheetRows > 0) && (
+          Nine facts in one amber block, and a team reading it as a
+          fault with their own numbers. Every one of them is now its
+          own line with the figure it is about named beside it, behind
+          one rule that says how many there are and nothing else.
+
+          Shut by default, and the choice is remembered. */}
+      {notes.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <Alert tone="warning">
-            <span style={{ flex: 1 }}>
-              <strong>None of this changes your target.</strong> The target is measured
-              on what these customers were invoiced, so nothing on the tracker can add
-              to it or take from it.{' '}
-              {unpricedOpen > 0 && (
-                <>{unpricedOpen} of your {openDeals} open deals carry no figure. They are
-                counted in Open pipeline above and add nothing to its total, because
-                nobody has priced them yet. </>
-              )}
-              {undatedPriced > 0 && (
-                <>{undatedPriced} won deal{undatedPriced === 1 ? '' : 's'}{' '}
-                {undatedPriced === 1 ? 'is' : 'are'} worth {money(undatedWorth ?? 0)} and{' '}
-                {undatedPriced === 1 ? 'has' : 'have'} no order date, so{' '}
-                {undatedPriced === 1 ? 'it is' : 'they are'} not in Closed on the tracker.
-                Put a date on {undatedPriced === 1 ? 'it' : 'them'} and that lands. </>
-              )}
-              {unpricedWon > 0 && (
-                <>{unpricedWon} won deal{unpricedWon === 1 ? '' : 's'} carry no figure at
-                all, so {unpricedWon === 1 ? 'it adds' : 'they add'} nothing to Closed on
-                the tracker whatever happens to{' '}
-                {unpricedWon === 1 ? 'its date' : 'their dates'}. </>
-              )}
-              {/* Said in the same breath, because this warning used to
-                  read "146 won deals have no order date" when 131 of
-                  those were rows off an imported sheet carrying last
-                  year's spend. Telling a rep that £2.7m of last year's
-                  turnover is missing from his target is worse than
-                  saying nothing. Migration 158 moved that figure into
-                  `sheet_revenue` and this says what is left. */}
-              {sheetRows > 0 && (
-                <>Separately, {sheetRows} row{sheetRows === 1 ? '' : 's'} on this
-                tracker came off an imported customer sheet and hold what that
-                customer spent in a past year. They are not deals, and they are
-                counted in none of the figures above.</>
-              )}
-            </span>
-          </Alert>
+          <NoteShelf
+            label="How these figures are counted"
+            count={notes.length}
+            open={notesOpen}
+            onToggle={() => {
+              const next = !notesOpen;
+              setNotesOpen(next);
+              writeChoice('portfolio-notes', next ? 'open' : 'shut');
+            }}
+          >
+            {notes.map((n) => (
+              <NoteLine key={n.about} about={n.about}>{n.says}</NoteLine>
+            ))}
+          </NoteShelf>
         </div>
       )}
 
@@ -893,69 +980,6 @@ export function PersonalAnalytics({
               {/* A customer with no Protean account has no invoiced
                   figure, and that is not nought. Said out loud rather
                   than quietly making the total smaller. */}
-              {/* ---- THE ONE THAT MATTERS, AND ONLY IT ----
-
-                  A company held twice splits its own revenue across two
-                  records, so this portfolio reads one half and some
-                  other screen reads the other. Neither is what the
-                  customer spends. The company and division totals are
-                  unaffected, which is exactly why this survives an
-                  audit, and it is why it has to be said here.
-
-                  Nothing else gets an alert. A prospect with no Protean
-                  account is a prospect, not a fault. */}
-              {revYear.split_twin > 0 && (
-                <Alert tone="warning">
-                  <span style={{ flex: 1 }}>
-                    {revYear.split_twin} of this portfolio&#8217;s {revYear.customers} customers
-                    {revYear.split_twin === 1 ? ' is' : ' are'} entered twice under
-                    {revYear.split_twin === 1 ? ' a second spelling' : ' second spellings'}, and
-                    the revenue is on the other record. The figures above are missing it. The
-                    division totals are not affected. Merging them puts it back.
-                  </span>
-                </Alert>
-              )}
-
-              {/* WORTH NOUGHT, AND IT SAYS SO.
-
-                  `payer_on_book` only counts a record with no Protean
-                  account and no invoice against it, so every one of
-                  them carries exactly nothing in either year. That is
-                  by construction in `personal_revenue_year`, not a
-                  fact about today's data.
-
-                  It used to end "so they should not be on a portfolio
-                  at all", which reads to somebody paid on this number
-                  as though their figure had been reduced. Nothing was
-                  reduced. Taking them off changes no figure on this
-                  screen, and the sentence now says that. */}
-              {revYear.payer_on_book > 0 && (
-                <Alert tone="info">
-                  <span style={{ flex: 1 }}>
-                    {revYear.payer_on_book} of these {revYear.payer_on_book === 1 ? 'is' : 'are'} an
-                    insurer or other payer rather than a customer, and{' '}
-                    {revYear.payer_on_book === 1 ? 'it has' : 'none of them has'} been invoiced
-                    through this portfolio in either year. {revYear.payer_on_book === 1
-                      ? 'It adds' : 'They add'} nothing to the figures above and taking{' '}
-                    {revYear.payer_on_book === 1 ? 'it' : 'them'} off would change none of them.
-                    What a payer settles is counted against whoever the work was done for.
-                  </span>
-                </Alert>
-              )}
-
-              <Note>
-                {new Date(`${revYear.year_from}T00:00:00`).toLocaleDateString('en-GB')} to
-                {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
-                {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
-                {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
-                net by tax point. The target is measured on the change between them.
-                {revYear.never_billed > 0 && (
-                  <> {revYear.never_billed} of the {revYear.customers} customers here have never
-                  been billed, which is what a prospect is: nobody has sold them anything
-                  yet. They are counted in the list and add nothing to either figure, and
-                  nothing is missing on their account.</>
-                )}
-              </Note>
             </div>
           )}
         </Panel>

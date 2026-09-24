@@ -11,6 +11,7 @@
    ============================================================= */
 import type React from 'react';
 import type { ReactNode, CSSProperties, ButtonHTMLAttributes } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 const EASE = 'cubic-bezier(0.2, 0, 0, 1)';
 
@@ -602,6 +603,109 @@ export function PanelHead({
 }
 
 /** The line under a grid saying what the mouse does. */
+/* =============================================================
+   A shelf of notes, shut until somebody wants them.
+
+   From the business, about the personal portfolio:
+
+     needs laying out better in something that's closed by default and
+     can be expanded to see the notes like a thin bar below all 9 cards
+     that's not intrusive. Not just one bulky paragraph that looks like
+     an alert.
+
+   and:
+
+     You're combining like 10 pieces of information into a single
+     paragraph that looks like a problematic alert. As all sales guys
+     are asking me what they mean right now.
+
+   Both halves matter. An amber block the width of the screen reads as
+   a fault whatever it says, and a rep paid on the figures above it
+   assumes the fault is theirs. And nine facts run together into one
+   paragraph cannot be read at all: there is no way to tell which
+   sentence is about which number.
+
+   So: one thin rule under the figures, shut, saying how many notes
+   there are and nothing else. Open it and each note is its own line,
+   with the figure it is about named on the left.
+
+   Shut is the default and open is remembered, because somebody who
+   wants these open wants them open tomorrow as well.
+   ============================================================= */
+export function NoteShelf({ label, count, open, onToggle, children }: {
+  /** What the notes are about, in the fewest words that are true. */
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        title={open ? 'Hide these notes' : 'Show these notes'}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          minHeight: 32, padding: '0 12px',
+          background: 'none', border: 0, cursor: 'pointer',
+          font: 'inherit', color: 'var(--text-muted)', textAlign: 'left',
+        }}
+      >
+        <ChevronRight
+          size={13}
+          style={{
+            flexShrink: 0,
+            transform: open ? 'rotate(90deg)' : undefined,
+            transition: 'transform 120ms ease',
+          }}
+        />
+        <span style={{ fontSize: 12 }}>{label}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+          {count} note{count === 1 ? '' : 's'}
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: '2px 12px 8px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One note on the shelf, and one only.
+ *
+ * `about` names the figure the note is about, so a reader can find the
+ * line that explains the number they are looking at instead of reading
+ * a paragraph to see whether it mentions it.
+ */
+export function NoteLine({ about, children }: { about: string; children: ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 12, alignItems: 'baseline',
+      padding: '6px 0', borderBottom: '1px solid var(--border)',
+    }}>
+      <span
+        data-note-about={about}
+        style={{
+          flexShrink: 0, width: 132,
+          fontFamily: 'var(--panton)', fontWeight: 700, fontSize: 11,
+          color: 'var(--text-subtle)',
+        }}
+      >{about}</span>
+      <span
+        data-note-says=""
+        style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}
+      >{children}</span>
+    </div>
+  );
+}
+
 export function GridHint({ children }: { children: ReactNode }) {
   return <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{children}</div>;
 }
