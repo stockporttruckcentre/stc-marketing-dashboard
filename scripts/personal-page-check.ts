@@ -76,6 +76,16 @@ const OPEN_RENTAL = 397800;
 const OPEN_TRAILER = 267000;
 const OPEN = OPEN_MAINTENANCE + OPEN_RENTAL + OPEN_TRAILER;
 
+/* What Dean's ten undated wins are worth, as live holds them. None of
+   the ten carries a sale price, which read as "worth nothing" until
+   the database was asked: `lead_worth` falls back to the estimate for
+   a won deal, so they are worth this and it is missing from Closed on
+   the tracker. A notice that showed only the count could never have
+   said so. */
+const UNDATED_MAINTENANCE = 35000;
+const UNDATED_TRAILER = 10950;
+const UNDATED = UNDATED_MAINTENANCE + UNDATED_TRAILER;
+
 /* The app's own `compactMoney`, restated here on purpose. The check
    has to know what the screen SHOULD say without importing the code
    that decides it, or a formatting bug would agree with itself. */
@@ -116,13 +126,13 @@ const OVERVIEW = [{
 const PIPELINE = [
   { lead_type: 'maintenance', open_count: 51, open_total: OPEN_MAINTENANCE, won_count: 4,
     won_total: WON_MAINTENANCE, lost_count: 5, lost_total: 0, unpriced: 47, won_undated: 9,
-    off_a_sheet: 131, won_total_own: null },
+    off_a_sheet: 131, won_total_own: null, won_undated_worth: UNDATED_MAINTENANCE },
   { lead_type: 'rental', open_count: 2, open_total: OPEN_RENTAL, won_count: 2,
     won_total: WON_RENTAL, lost_count: 1, lost_total: 0, unpriced: 1, won_undated: 1,
-    off_a_sheet: 0, won_total_own: WON_RENTAL },
+    off_a_sheet: 0, won_total_own: WON_RENTAL, won_undated_worth: null },
   { lead_type: 'trailer_sales', open_count: 6, open_total: OPEN_TRAILER, won_count: 11,
     won_total: WON_TRAILER, lost_count: 45, lost_total: 0, unpriced: 23, won_undated: 0,
-    off_a_sheet: 0, won_total_own: WON_TRAILER },
+    off_a_sheet: 0, won_total_own: WON_TRAILER, won_undated_worth: UNDATED_TRAILER },
 ];
 
 const REV_YEAR = [{
@@ -453,18 +463,44 @@ async function main() {
     tile('OPEN PIPELINE') === compact(OPEN),
     `the tile reads "${tile('OPEN PIPELINE')}", the rows come to ${compact(OPEN)}`);
 
-  /* ---- 8 ----
+  /* ---- 9 ----
 
      "£-3k" was drawn in Biggest fallers for a customer who spent
      £3,000 less than last year. The sign belongs before the currency
      symbol, and it was there in one component and not the other. */
-  console.log('\n  8. Money is written the way money is written');
+  /* ---- 8 ----
+
+     From the business:
+
+       He thinks these are lost earnings because it's saying things are
+       or are not included or are being worked out differently.
+
+     A count of what is excluded, with no figure beside it, is read by
+     somebody paid on a number as money taken off them. Every notice
+     now names what it moves, and says the target is not one of them. */
+  console.log('\n  8. Every warning says what it is worth');
+  ok('the warning opens by saying the target is untouched',
+    /None of this changes your target/.test(read.text));
+  ok('and the undated wins are priced rather than just counted',
+    read.text.includes(compact(UNDATED)),
+    `the page does not say the undated wins are worth ${compact(UNDATED)}`);
+  ok('and it says what dating them would do',
+    /put an order date on them and that lands in Closed on the tracker/.test(read.text));
+  ok('the unpriced deals name the one figure they move',
+    /Open pipeline above is lower than the real pipeline/.test(read.text));
+  ok('the payers say they change nothing rather than that they do not belong',
+    /add nothing to the figures above and taking them off would change none of them/
+      .test(read.text));
+  ok('and the old wording that read as money taken away is gone',
+    !/should not be on a portfolio at all/.test(read.text));
+
+  console.log('\n  9. Money is written the way money is written');
   ok('no figure puts the minus sign after the £', !read.text.includes('£-'),
     'somewhere on this page money is written "£-3k"');
   ok('a faller is drawn as a negative amount', /\u2212£3k/.test(read.text),
     'the £3,000 fall is not drawn as a fall');
 
-  console.log('\n  9. It opens, and what is inside adds up');
+  console.log('\n  10. It opens, and what is inside adds up');
   await page.getByTitle('See which customers this change is made of').click();
   await page.waitForTimeout(500);
   const drawer = await readPage(page);
@@ -486,12 +522,12 @@ async function main() {
   ok('and nothing inside it argues a point at the reader',
     drawer.shouting.length === 0, drawer.shouting.join(' | '));
 
-  /* ---- 10 ----
+  /* ---- 11 ----
 
      A laptop is not a 1440 monitor, and three cards across a narrower
      page is where a sentence starts not fitting its box. The same two
      questions, asked again at the width most of the team works at. */
-  console.log('\n  10. And the same, on a laptop');
+  console.log('\n  11. And the same, on a laptop');
   await page.setViewportSize({ width: 1180, height: 1200 });
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
