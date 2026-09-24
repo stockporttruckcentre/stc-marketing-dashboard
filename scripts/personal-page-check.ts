@@ -199,6 +199,37 @@ async function readPage(page: Page) {
         const d = document.querySelector('[role="dialog"], aside');
         return d ? d.innerText : '';
       })(),
+      /* A SENTENCE THAT SHOUTS AT THE READER.
+
+         From the business, about "This change IS the Towards target
+         figure above: one number, drawn twice":
+
+           Comments like this should not make it through. That's a
+           note for me, not a production note for a live app being
+           used by multiple teams.
+
+         The shouted word is the tell every time. It is what somebody
+         writes when they are arguing a point with one reader rather
+         than telling a team a fact, and three of them had reached the
+         screen. Labels are drawn in capitals by the kit, so those are
+         skipped; this looks only at prose, meaning four words or more,
+         set in ordinary case. Initialisms the business actually uses
+         are allowed and nothing else is. */
+      shouting: (() => {
+        const fine = ['STC', 'FS', 'VAT', 'MOT', 'HGV', 'CRM', 'PDF', 'UK', 'FY'];
+        const out = [];
+        for (const d of document.querySelectorAll('p, div, span, li')) {
+          if (d.querySelector('p, div, span, li')) continue;
+          if (getComputedStyle(d).textTransform === 'uppercase') continue;
+          const t = (d.innerText || '').trim();
+          if (t.split(/\\s+/).length < 4) continue;
+          for (const w of t.match(/\\b[A-Z]{2,}\\b/g) || []) {
+            if (!fine.includes(w)) out.push(w + ' in "' + t.slice(0, 50) + '"');
+          }
+        }
+        return out;
+      })(),
+
       /* EVERY SENTENCE ON THE PAGE THAT DOES NOT FIT ITS OWN BOX.
 
          Headings and hints are drawn on one line and cut off with an
@@ -247,6 +278,7 @@ async function readPage(page: Page) {
     };
   })()`) as { text: string; notKnown: number; buttons: string[]; titles: string[];
               drawer: string;
+              shouting: string[];
               cutSentences: string[];
               headline: { width: number;
                           kids: { top: number; width: number; label: string }[];
@@ -310,8 +342,12 @@ async function main() {
   ok('and the invoiced panel shows the same change',
     read.text.includes('+£256k'),
     'the panel and the tile are not the same number');
-  ok('and the panel says so in words',
-    /This change IS the Towards target figure above/.test(read.text));
+  /* It used to say so in words, in a sentence written at one reader.
+     The guarantee lives in `portfolio_audit` instead, so what the
+     screen owes the reader is the two figures agreeing, which the two
+     assertions above already read straight off it. */
+  ok('and it does not argue the point in a note',
+    !/one number, drawn twice/.test(read.text));
 
   console.log('\n  3. Every percentage says what it is a percentage of');
   ok('the growth badge says "on last year"', read.text.includes('% on last year'),
@@ -382,6 +418,8 @@ async function main() {
   ok('no headline card is hiding the end of its own note',
     (head?.clipped ?? []).length === 0,
     `clipped: ${(head?.clipped ?? []).join(' | ')}`);
+  ok('nothing on the page is arguing a point at the reader',
+    read.shouting.length === 0, read.shouting.join(' | '));
   ok('and no sentence anywhere on the page ends in an ellipsis',
     read.cutSentences.length === 0,
     `cut off: ${read.cutSentences.join(' | ')}`);
@@ -443,6 +481,10 @@ async function main() {
     /billed the same in both years/.test(inside));
   ok('and the breakdown has column headings too',
     ['Customer', 'Last year', 'This year', 'Change'].every((h) => inside.includes(h)));
+  /* The same rule inside the drawer, which the read above cannot see
+     because the drawer was not open when the page was first read. */
+  ok('and nothing inside it argues a point at the reader',
+    drawer.shouting.length === 0, drawer.shouting.join(' | '));
 
   /* ---- 10 ----
 

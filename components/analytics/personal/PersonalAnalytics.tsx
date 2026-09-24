@@ -821,13 +821,21 @@ export function PersonalAnalytics({
                 </span>
               </button>
 
-              {/* Said where it is read, under the figures it is about.
-                  The business has been shown two cards £204,000 apart
-                  about one person's year, so the screen now says out
-                  loud that these two are one. */}
-              <Note>
-                This change IS the Towards target figure above: one number, drawn twice.
-              </Note>
+              {/* NOTHING GOES HERE THAT IS AN ARGUMENT RATHER THAN A FACT.
+
+                  This held "This change IS the Towards target figure
+                  above: one number, drawn twice." From the business:
+
+                    Comments like this should not make it through.
+                    That's a note for me, not a production note for a
+                    live app being used by multiple teams.
+
+                  Right. It was me showing my working to one person, on
+                  a screen several teams read every day. That the two
+                  figures are one number is held true by
+                  `portfolio_audit` and by `check:personal-portfolio`,
+                  which is where a guarantee belongs. It does not need
+                  arguing for on the screen. */}
 
               {/* A customer with no Protean account has no invoiced
                   figure, and that is not nought. Said out loud rather
@@ -871,7 +879,7 @@ export function PersonalAnalytics({
                 {' '}{new Date(`${revYear.year_to}T00:00:00`).toLocaleDateString('en-GB')}, against
                 {' '}{new Date(`${revYear.last_from}T00:00:00`).toLocaleDateString('en-GB')} to
                 {' '}{new Date(`${revYear.last_to}T00:00:00`).toLocaleDateString('en-GB')}. Invoice
-                net by tax point. This IS the figure the target is measured on.
+                net by tax point. The target is measured on the change between them.
                 {revYear.never_billed > 0 && (
                   <> {revYear.never_billed} of the {revYear.customers} customers here have never
                   been billed, which is what a prospect is. They are counted in the list and add
@@ -981,12 +989,11 @@ export function PersonalAnalytics({
         >
           <PortfolioCustomers person={person} upto={upto} me={selfId ?? person} />
           <Note>
-            This year and Last year are INVOICED revenue out of the uploads, to the
+            This year and Last year are invoiced revenue out of the uploads, to the
             same day last year, so a part finished month is compared with a part
             finished month. Open is what is still being worked with them and is not
             revenue: it is an estimate of deals nobody has won yet. Sorting orders one
-            of those four columns, and the heading of the one it is ordering is the
-            darker of the five.
+            of those four columns, and the heading it is ordering is shown darker.
           </Note>
         </Panel>
 
