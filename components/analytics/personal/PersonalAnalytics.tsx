@@ -139,6 +139,8 @@ type PipelineRow = {
   lost_total: number | null;
   unpriced: number;
   won_undated: number;
+  /** What the undated wins would add if somebody dated them. Migration 162. */
+  won_undated_worth: number | null;
   /* The won figure with the FleetSmart+ deals taken out, which is what
      the target uses. Migration 159: a contract counts towards a target
      by what it has billed, never by its headline value. */
@@ -210,6 +212,12 @@ export function PersonalAnalytics({
   /* How many rows on this tracker came off an imported sheet rather
      than being deals. Migration 158; see the alert below. */
   const sheetRows = overview?.off_a_sheet ?? pipeline.reduce((n, r) => n + (r.off_a_sheet ?? 0), 0);
+  /* What the undated wins would add if somebody dated them. Migration
+     162. NULL where not one of them carries a price or an estimate,
+     which is a different sentence from nought. */
+  const undatedWorth = pipeline.some((r) => r.won_undated_worth != null)
+    ? pipeline.reduce((n, r) => n + Number(r.won_undated_worth ?? 0), 0)
+    : null;
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
   const [queue, setQueue] = useState<FsCandidate[]>([]);
@@ -582,23 +590,50 @@ export function PersonalAnalytics({
         />
       </div>
 
-      {/* ---- what the figures cannot tell you ----
+      {/* ---- WHAT THE FIGURES CANNOT TELL YOU, AND WHAT IT IS WORTH ----
 
           Said on the screen rather than swallowed. A portfolio with
           eleven unpriced deals in it has a pipeline figure that is
           smaller than the pipeline, and nobody can tell from the
-          number. */}
+          number.
+
+          From the business, about this notice and the two below it:
+
+            He thinks these are lost earnings because it's saying
+            things are or are not included or are being worked out
+            differently.
+
+          Which is what a count on its own does to somebody paid on a
+          number. Three sentences saying what is excluded, no sentence
+          saying what any of it is worth, so the reader supplies the
+          worst figure they can imagine.
+
+          So each one now names the figure it moves, and the notice
+          opens by saying the target is not one of them. That is true
+          by construction since migration 160: the target is what these
+          customers were invoiced, and no deal on this tracker can
+          reach it in either direction. */}
       {overview && (overview.unpriced > 0 || overview.won_undated > 0 || sheetRows > 0) && (
         <div style={{ marginBottom: 14 }}>
           <Alert tone="warning">
             <span style={{ flex: 1 }}>
+              <strong>None of this changes your target.</strong> The target is measured
+              on what these customers were invoiced, so nothing on the tracker can add
+              to it or take from it.{' '}
               {overview.unpriced > 0 && (
                 <>{overview.unpriced} deal{overview.unpriced === 1 ? '' : 's'} carry no
-                figure, so they are counted but add nothing. </>
+                figure, so Open pipeline above is lower than the real pipeline. Nothing
+                else uses them. </>
               )}
               {overview.won_undated > 0 && (
                 <>{overview.won_undated} won deal{overview.won_undated === 1 ? '' : 's'} have
-                no order date, so they are in no financial year and count towards no target. </>
+                no order date, so {overview.won_undated === 1 ? 'it is' : 'they are'} in no
+                financial year and {overview.won_undated === 1 ? 'is' : 'are'} not in Closed
+                on the tracker.{' '}
+                {undatedWorth == null
+                  ? `None of them carries a figure, so dating them would add nothing.`
+                  : `They are worth ${money(undatedWorth)}: put an order date on them and`
+                    + ` that lands in Closed on the tracker.`}{' '}</>
               )}
               {/* Said in the same breath, because this warning used to
                   read "146 won deals have no order date" when 131 of
@@ -863,13 +898,29 @@ export function PersonalAnalytics({
                 </Alert>
               )}
 
+              {/* WORTH NOUGHT, AND IT SAYS SO.
+
+                  `payer_on_book` only counts a record with no Protean
+                  account and no invoice against it, so every one of
+                  them carries exactly nothing in either year. That is
+                  by construction in `personal_revenue_year`, not a
+                  fact about today's data.
+
+                  It used to end "so they should not be on a portfolio
+                  at all", which reads to somebody paid on this number
+                  as though their figure had been reduced. Nothing was
+                  reduced. Taking them off changes no figure on this
+                  screen, and the sentence now says that. */}
               {revYear.payer_on_book > 0 && (
                 <Alert tone="info">
                   <span style={{ flex: 1 }}>
                     {revYear.payer_on_book} of these {revYear.payer_on_book === 1 ? 'is' : 'are'} an
-                    insurer or other payer rather than a customer. What they settle is already
-                    counted against whoever the work was done for, so they should not be on a
-                    portfolio at all.
+                    insurer or other payer rather than a customer, and{' '}
+                    {revYear.payer_on_book === 1 ? 'it has' : 'none of them has'} been invoiced
+                    through this portfolio in either year. {revYear.payer_on_book === 1
+                      ? 'It adds' : 'They add'} nothing to the figures above and taking{' '}
+                    {revYear.payer_on_book === 1 ? 'it' : 'them'} off would change none of them.
+                    What a payer settles is counted against whoever the work was done for.
                   </span>
                 </Alert>
               )}
@@ -882,8 +933,9 @@ export function PersonalAnalytics({
                 net by tax point. The target is measured on the change between them.
                 {revYear.never_billed > 0 && (
                   <> {revYear.never_billed} of the {revYear.customers} customers here have never
-                  been billed, which is what a prospect is. They are counted in the list and add
-                  nothing to either figure.</>
+                  been billed, which is what a prospect is: nobody has sold them anything
+                  yet. They are counted in the list and add nothing to either figure, and
+                  nothing is missing on their account.</>
                 )}
               </Note>
             </div>
