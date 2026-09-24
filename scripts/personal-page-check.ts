@@ -86,6 +86,16 @@ const UNDATED_MAINTENANCE = 35000;
 const UNDATED_TRAILER = 10950;
 const UNDATED = UNDATED_MAINTENANCE + UNDATED_TRAILER;
 
+/* And which figure each gap belongs to, as live holds them. The old
+   notice said "70 deals carry no figure" about the open pipeline, when
+   20 of the 70 were lost deals and 8 were wins. Only 42 are open. */
+const UNPRICED_OPEN_M = 34;
+const UNPRICED_OPEN_T = 8;
+const UNPRICED_OPEN = UNPRICED_OPEN_M + UNPRICED_OPEN_T;
+const UNPRICED_WON = 8;
+const UNDATED_PRICED = 2;
+const OPEN_DEALS = 51 + 2 + 6;   // the three rows' open_count, as the page sums them
+
 /* The app's own `compactMoney`, restated here on purpose. The check
    has to know what the screen SHOULD say without importing the code
    that decides it, or a formatting bug would agree with itself. */
@@ -126,13 +136,16 @@ const OVERVIEW = [{
 const PIPELINE = [
   { lead_type: 'maintenance', open_count: 51, open_total: OPEN_MAINTENANCE, won_count: 4,
     won_total: WON_MAINTENANCE, lost_count: 5, lost_total: 0, unpriced: 47, won_undated: 9,
-    off_a_sheet: 131, won_total_own: null, won_undated_worth: UNDATED_MAINTENANCE },
+    off_a_sheet: 131, won_total_own: null, won_undated_worth: UNDATED_MAINTENANCE,
+    unpriced_open: UNPRICED_OPEN_M, unpriced_won: UNPRICED_WON, undated_priced: 1 },
   { lead_type: 'rental', open_count: 2, open_total: OPEN_RENTAL, won_count: 2,
     won_total: WON_RENTAL, lost_count: 1, lost_total: 0, unpriced: 1, won_undated: 1,
-    off_a_sheet: 0, won_total_own: WON_RENTAL, won_undated_worth: null },
+    off_a_sheet: 0, won_total_own: WON_RENTAL, won_undated_worth: null,
+    unpriced_open: 0, unpriced_won: 0, undated_priced: 0 },
   { lead_type: 'trailer_sales', open_count: 6, open_total: OPEN_TRAILER, won_count: 11,
     won_total: WON_TRAILER, lost_count: 45, lost_total: 0, unpriced: 23, won_undated: 0,
-    off_a_sheet: 0, won_total_own: WON_TRAILER, won_undated_worth: UNDATED_TRAILER },
+    off_a_sheet: 0, won_total_own: WON_TRAILER, won_undated_worth: UNDATED_TRAILER,
+    unpriced_open: UNPRICED_OPEN_T, unpriced_won: 0, undated_priced: 1 },
 ];
 
 const REV_YEAR = [{
@@ -485,9 +498,24 @@ async function main() {
     read.text.includes(compact(UNDATED)),
     `the page does not say the undated wins are worth ${compact(UNDATED)}`);
   ok('and it says what dating them would do',
-    /put an order date on them and that lands in Closed on the tracker/.test(read.text));
-  ok('the unpriced deals name the one figure they move',
-    /Open pipeline above is lower than the real pipeline/.test(read.text));
+    /Put a date on them and that lands\./.test(read.text));
+  /* "whats the open pipeline vs the real pipeline, why 2". There is
+     one pipeline. The gap is that some of its deals have no figure on
+     them, which is a different sentence from a second total the app is
+     keeping back. */
+  ok('the page never mentions a second pipeline it does not have',
+    !/real pipeline/.test(read.text));
+  ok('the unpriced deals are counted against the open deals they are part of',
+    new RegExp(`${UNPRICED_OPEN} of your ${OPEN_DEALS} open deals carry no figure`)
+      .test(read.text),
+    `the page does not say ${UNPRICED_OPEN} of ${OPEN_DEALS}`);
+  ok('and the old count that mixed in lost and won deals is gone',
+    !/70 deals? carry no figure/.test(read.text));
+  ok('only the undated wins worth dating are the ones it asks for',
+    new RegExp(`${UNDATED_PRICED} won deals are worth ${compact(UNDATED)}`).test(read.text),
+    'the page asks for all ten to be dated when eight are worth nothing');
+  ok('and the wins worth nothing say so separately',
+    new RegExp(`${UNPRICED_WON} won deals carry no figure at all`).test(read.text));
   ok('the payers say they change nothing rather than that they do not belong',
     /add nothing to the figures above and taking them off would change none of them/
       .test(read.text));
