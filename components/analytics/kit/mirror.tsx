@@ -268,6 +268,28 @@ export function mirror(
     props.viewBox = node.viewBox;
     if (node.preserveAspectRatio) props.preserveAspectRatio = node.preserveAspectRatio;
   }
+
+  /* The size the kit drew the shape at.
+   *
+   * `geom` holds the kit's own numbers and a port normally supplies
+   * its own in their place, which is why it was not applied here. But
+   * `width` and `height` on an <svg> are not the kit's DATA, they are
+   * how big the drawing is, and leaving them off is not neutral: an
+   * <svg> with a viewBox and no size renders at the browser's default
+   * 300 by 150.
+   *
+   * That is not theoretical. The leaderboard's rise and fall arrows
+   * are 12 by 12 in the file, came through at 300 wide, and pushed
+   * every percentage out of its 44px cell and off the right edge of
+   * the card. Only set where the patch has not said otherwise, so a
+   * port that does supply its own still wins. */
+  if (node.tag === 'svg') {
+    for (const side of ['width', 'height'] as const) {
+      if (props[side] === undefined && node.geom?.[side] !== undefined) {
+        props[side] = node.geom[side];
+      }
+    }
+  }
   if (patch.title) props.title = patch.title;
   if (patch.on?.click) { props.onClick = patch.on.click; props.role = 'button'; props.tabIndex = 0; }
   if (patch.on?.enter) props.onMouseEnter = patch.on.enter;

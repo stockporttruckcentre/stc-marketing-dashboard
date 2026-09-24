@@ -1,6 +1,11 @@
 {
   "components/admin/roles/RolesScreen.tsx": 0,
   "components/admin/roles/model.ts": 0,
+  "components/admin/roles/EditPermissions.tsx": 0,
+  "components/admin/roles/icons.tsx": 0,
+  "components/admin/roles/RoleMenu.tsx": 0,
+  "components/admin/roles/views.tsx": 0,
+  "components/admin/roles/Compare.tsx": 0,
   "components/AnalyticsHub.tsx": 51,
   "components/analytics/kit/charts.tsx": 70,
   "components/analytics/kit/frame.tsx": 93,
@@ -10,10 +15,8 @@
   "components/analytics/kit/devices.tsx": 0,
   "components/analytics/kit/controls.tsx": 0,
   "components/analytics/kit/mirror.tsx": 0,
-  "components/analytics/TargetsBoard.tsx": 0,
-  "components/admin/roles/EditPermissions.tsx": 0,
-  "components/admin/roles/icons.tsx": 0,
-  "components/admin/roles/RoleMenu.tsx": 0,
-  "components/admin/roles/views.tsx": 0,
-  "components/admin/roles/Compare.tsx": 0
+  "components/analytics/kit/leaderboard.tsx": 0,
+  "components/analytics/personal/PortfolioCustomers.tsx": 32,
+  "components/analytics/personal/PersonalAnalytics.tsx": 38,
+  "components/analytics/TargetsBoard.tsx": 0
 }

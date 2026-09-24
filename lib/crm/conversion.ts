@@ -50,8 +50,39 @@
    ============================================================= */
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-/** What a record's `relationship` column can say. Migration 004. */
-export type Relationship = 'prospect' | 'existing';
+/**
+ * What a record's `relationship` column can say. Migration 004, and
+ * migration 156 for the third one.
+ *
+ *   prospect   nobody has traded with them yet
+ *   existing   they are invoiced on an account, in Protean or Sage
+ *   cash_only  every pound they have spent came over the counter
+ *
+ * From the business:
+ *
+ *   No cash sale accounts are Customers, because they pay via cash, not
+ *   via customer invoice.
+ *
+ * A Customer has an account number, terms and a statement. A cash sale
+ * has a till receipt. Counting the second as the first put 429 records
+ * on the customer list that no salesperson recognised and no account
+ * manager owned.
+ */
+export type Relationship = 'prospect' | 'existing' | 'cash_only';
+
+/** What each one is called on screen. One place, so they cannot drift. */
+export const RELATIONSHIP_LABEL: Record<Relationship, string> = {
+  prospect: 'Prospect',
+  existing: 'Customer',
+  cash_only: 'Cash Only',
+};
+
+/** What each one means, for the hint under the picker. */
+export const RELATIONSHIP_MEANS: Record<Relationship, string> = {
+  prospect: 'Nobody has traded with them yet.',
+  existing: 'They are invoiced on an account, in Protean or Sage.',
+  cash_only: 'Every pound they have spent came over the counter. No account, no terms, no statement.',
+};
 
 /**
  * The relationship on one account, read fresh.

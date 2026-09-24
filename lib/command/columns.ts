@@ -122,7 +122,7 @@ export const TABLES: TableSpec[] = [
       { name: 'vehicles', kind: 'text' },
       { name: 'last_activity_at', kind: 'system', writable: false, why: 'set by a trigger on notes and status changes' },
       { name: 'parent_customer_id', kind: 'system', writable: false, why: 'set by linking two accounts' },
-      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing'] },
+      { name: 'relationship', kind: 'enum', values: ['prospect', 'existing', 'cash_only'] },
     ],
   },
   {

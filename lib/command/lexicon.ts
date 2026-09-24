@@ -285,6 +285,14 @@ const RESERVED = new Set([
      its opposite was not. */
   'tracker', 'trackers', 'pipeline', 'portfolio', 'prospect', 'prospects',
 
+  /* And the third kind, from migration 156. "Show me the cash only
+     accounts" and "is Biffa cash only" both run the phrase into a
+     preposition, and without it here the bar goes looking for a
+     customer called Cash. Two words and one, because people write it
+     both ways. */
+  'cash only', 'cashonly', 'cash account', 'cash accounts', 'counter account',
+  'counter accounts', 'cash sale', 'cash sales',
+
   /* What the portfolio panels are called. "Dean's biggest gainers" and
      "show me the fallers" both run a possessive or a determiner into
      the word, and without these the bar goes looking for a customer
