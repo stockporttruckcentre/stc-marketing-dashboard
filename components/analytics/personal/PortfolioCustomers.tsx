@@ -261,7 +261,18 @@ export function PortfolioCustomers({ person, upto, me }: {
               one, and was it more or less than last year". */}
           <Leaderboard
             title="Customers"
-            legend="This year, against the biggest on the list"
+            legend="This year"
+            /* From the business, twice: "There are no row headers to
+               know what any of the data means", and again after the
+               table was rebuilt on the kit: "dean doesn't know what any
+               of those £ numbers mean due to lack of headers." */
+            columns={{
+              name: 'Customer',
+              bar: 'Share of the biggest here',
+              figures: ['Last year', 'Open'],
+              headline: 'This year',
+              delta: 'Change',
+            }}
             sort={(
               <Select
                 value={sort}

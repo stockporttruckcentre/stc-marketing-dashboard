@@ -91,6 +91,48 @@ const HEAD_TITLE = 0;
 const HEAD_LEGEND = 1;
 const HEAD_SORT = 2;
 
+/* -------------------------------------------------------------
+   The column headings the kit's leaderboard does not have.
+
+   From the business, twice:
+
+     There are no row headers to know what any of the data means and
+     it's not clear what it actually sorting and in what order.
+
+     The "Customers on this portfolio" table needs column headers
+     again, dean doesn't know what any of those £ numbers mean due to
+     lack of headers.
+
+   The kit's device has a title, a legend and a sort control, and no
+   headings, because in the file every column carries a swatch in the
+   legend. Four columns of money do not.
+
+   So a heading row is the kit's OWN ROW with its words replaced, which
+   keeps every width, gap and alignment identical to the rows beneath
+   it by construction rather than by matching. The only thing changed
+   is the type, and that is taken from the kit's own legend label, in
+   the same device, rather than chosen: `font-size` and `color` are
+   read out of that declaration and appended, so they win over the
+   cell's own and nothing else moves.
+   ------------------------------------------------------------- */
+function headingType(kit: KitNode): string {
+  const legend = kit.kids?.[HEAD_LEGEND]?.kids?.[0]?.style ?? '';
+  const keep = legend
+    .split(';')
+    .filter((d) => /^\s*(font-size|color)\s*:/.test(d))
+    .join(';');
+  /* `font-weight` is the one thing a heading needs that the legend
+     does not say, and the kit's own rank cell carries it. Taken from
+     there rather than typed. */
+  const rank = kit.kids?.[ROW_FIRST]?.kids?.[RANK]?.style ?? '';
+  const weight = rank.split(';').filter((d) => /^\s*font-weight\s*:/.test(d)).join(';');
+  /* Held on one line. "Last year" is two words in a 44px slot and
+     wrapped, which made the heading row taller than every row under
+     it. `white-space:nowrap` is the kit's own declaration, on its name
+     cell and on its badge, and it introduces no value. */
+  return [keep, weight, 'white-space:nowrap'].filter(Boolean).join(';');
+}
+
 export type LeaderRow = {
   key: string;
   /** The name, and the line of detail under it. */
@@ -155,10 +197,13 @@ const at = (fraction: number) => (kit: string) =>
 /** The kit's cell, with the words replaced and nothing else touched. */
 const words = (text: string): Patch => ({ text });
 
-function rowPatch(r: LeaderRow, rank: number): Patch {
+function rowPatch(r: LeaderRow, rank: number, openTheList: boolean): Patch {
   const rising = r.delta?.up !== false;
   return {
-    from: rank === 1 ? ROW_FIRST : rising ? ROW_UP : ROW_DOWN,
+    /* The kit's first row has no top rule, which is right when it opens
+       the list and wrong when a heading row opens it: without this the
+       heading and the first customer ran together. */
+    from: rank === 1 && openTheList ? ROW_FIRST : rising ? ROW_UP : ROW_DOWN,
     on: r.onClick ? { click: r.onClick } : undefined,
     style: r.onClick ? (kit) => `${kit}cursor:pointer` : undefined,
     kids: [
@@ -193,7 +238,7 @@ function rowPatch(r: LeaderRow, rank: number): Patch {
 }
 
 export function Leaderboard({
-  title, legend, sort, rows, total, empty,
+  title, legend, sort, rows, total, empty, columns,
 }: {
   /** The card's own heading, in the kit's header bar. */
   title: string;
@@ -215,6 +260,21 @@ export function Leaderboard({
   total?: { label: string; figures: [string, string]; headline: string };
   /** What to draw instead when there is nothing to list. */
   empty?: ReactNode;
+  /**
+   * What each column holds, in the kit's own row, above the data.
+   *
+   * Five words for the five cells that carry something: the name, the
+   * bar, the two figures in the narrow slot, the headline and the
+   * change. The rank and the chip have no heading because they have no
+   * meaning to explain.
+   */
+  columns?: {
+    name: string;
+    bar: string;
+    figures: [string, string];
+    headline: string;
+    delta: string;
+  };
 }) {
   const kit: KitNode = device('leaderboard');
 
@@ -235,6 +295,34 @@ export function Leaderboard({
     ],
   };
 
+  /* The kit's own row, wearing words instead of figures. */
+  const heading: Patch | null = columns ? (() => {
+    const type = headingType(kit);
+    const asHeading = (kitStyle: string) => `${kitStyle};${type}`;
+    return {
+      from: ROW_FIRST,
+      style: (kitStyle) => `${kitStyle}background:var(--bg-subtle)`,
+      kids: [
+        { text: '', style: asHeading },
+        { drop: true },
+        {
+          style: (kitStyle) => asHeading(kitStyle.replace(/flex:none;width:[^;]+/, 'flex:1')),
+          kids: [{ text: columns.name, style: asHeading }, { drop: true }],
+        },
+        { drop: true },
+        { slot: columns.bar, style: (kitStyle) =>
+          `${asHeading(kitStyle)};background:transparent;display:flex;align-items:center` },
+        { style: asHeading, kids: [
+          { text: columns.figures[0], style: asHeading },
+          { text: columns.figures[1], style: asHeading },
+          { drop: true },
+        ] },
+        { text: columns.headline, style: asHeading },
+        { style: asHeading, kids: [{ text: columns.delta, style: asHeading }] },
+      ],
+    };
+  })() : null;
+
   if (rows.length === 0) {
     return mirror(kit, { kids: [head, { slot: empty }, ...Array(5).fill({ drop: true })] });
   }
@@ -242,7 +330,8 @@ export function Leaderboard({
   return mirror(kit, {
     kids: [
       head,
-      ...rows.map((r, i) => rowPatch(r, i + 1)),
+      ...(heading ? [heading] : []),
+      ...rows.map((r, i) => rowPatch(r, i + 1, heading === null)),
       total
         ? {
             from: TOTAL,

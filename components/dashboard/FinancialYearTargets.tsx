@@ -147,7 +147,10 @@ export function FinancialYearTargets() {
           ) : (
             <>
               <div style={NOTE}>
-                {money(data.personal.target_revenue)} won
+                {/* Not "won". Migration 160: the target is what this
+                    person's book billed ABOVE the same point last year,
+                    which is what the business pays on. */}
+                {money(data.personal.target_revenue)} above last year
                 {data.personal.achieved != null
                   && `, ${Number(data.personal.achieved).toFixed(1)}% of it`}
               </div>

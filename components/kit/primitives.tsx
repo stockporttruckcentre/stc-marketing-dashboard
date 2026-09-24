@@ -395,11 +395,16 @@ export const money = (n: number | null | undefined) =>
     style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
   }).format(Number(n));
 
+/* The sign leads, the currency follows it. Written the other way round
+   this drew "£-3k" in the Biggest fallers list, which is not how money
+   is written anywhere else on the page or in either export. */
 export const compactMoney = (n: number) => {
   const v = Math.round(Number(n) || 0);
-  if (Math.abs(v) >= 1_000_000) return '£' + (v / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'm';
-  if (Math.abs(v) >= 1_000) return '£' + Math.round(v / 1_000) + 'k';
-  return '£' + v;
+  const a = Math.abs(v);
+  const sign = v < 0 ? '\u2212' : '';
+  if (a >= 1_000_000) return sign + '£' + (a / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'm';
+  if (a >= 1_000) return sign + '£' + Math.round(a / 1_000) + 'k';
+  return sign + '£' + a;
 };
 
 /**

@@ -30,7 +30,8 @@ import { Sparkline } from './monthly';
    rather than more text.
    ============================================================= */
 
-export function Tile({ label, value, tone = 'plain', movement, note, spark, colour, onClick }: {
+export function Tile({ label, value, tone = 'plain', movement, note, spark, colour, onClick,
+                      span = 3, noteWraps = false }: {
   label: string;
   value: string;
   tone?: 'plain' | 'warning' | 'danger';
@@ -40,6 +41,17 @@ export function Tile({ label, value, tone = 'plain', movement, note, spark, colo
   spark?: number[];
   colour?: string;
   onClick?: () => void;
+  /** Columns of the twelve this tile takes. Three is four across. */
+  span?: number;
+  /**
+   * Let the note run onto as many lines as it needs.
+   *
+   * A note is one line by default, so a row of tiles keeps its rhythm.
+   * That default clipped six of the ten notes on the personal
+   * portfolio the moment its tiles went three across, and a note that
+   * ends in an ellipsis explains nothing to the person reading it.
+   */
+  noteWraps?: boolean;
 }) {
   const ink = tone === 'danger' ? 'var(--danger)'
     : tone === 'warning' ? 'var(--warning)' : 'var(--text)';
@@ -51,7 +63,7 @@ export function Tile({ label, value, tone = 'plain', movement, note, spark, colo
       onClick={onClick}
       onKeyDown={(e) => { if (onClick && (e.key === 'Enter' || e.key === ' ')) onClick(); }}
       style={{
-        gridColumn: 'span 3', minWidth: 0,
+        gridColumn: `span ${span}`, minWidth: 0,
         display: 'flex', flexDirection: 'column',
         padding: '12px 14px 11px',
         background: 'var(--surface)', border: '1px solid var(--border)',
@@ -78,7 +90,10 @@ export function Tile({ label, value, tone = 'plain', movement, note, spark, colo
       {note && (
         <div style={{
           fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 3,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          ...(noteWraps
+            ? { whiteSpace: 'normal' as const }
+            : { textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }),
         }}>{note}</div>
       )}
 

@@ -76,6 +76,8 @@ const GOVERNED = [
   'components/analytics/kit/leaderboard.tsx',
   'components/analytics/personal/PortfolioCustomers.tsx',
   'components/analytics/personal/PersonalAnalytics.tsx',
+  'components/analytics/personal/PortfolioChange.tsx',
+  'components/analytics/personal/PortfolioDeals.tsx',
   'components/analytics/TargetsBoard.tsx',
 ];
 
