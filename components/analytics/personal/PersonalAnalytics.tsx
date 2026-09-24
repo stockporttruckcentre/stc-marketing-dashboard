@@ -475,6 +475,28 @@ export function PersonalAnalytics({
             + ` ${money(num(overview?.invoiced_this_year))} this year against`
             + ` ${money(num(overview?.invoiced_last_year))} then.`}
         />
+        {/* ---- THE THIRD CARD, AND IT IS ALWAYS THE THIRD ----
+
+            From the business:
+
+              Left to find should be card 3 always so you're showing
+              target, current progress, progress left all on 1 line.
+
+            So the first row is the whole target question and nothing
+            else: what it is, how far in they are, what is left. Every
+            tile above and beside it is drawn whatever the figures say,
+            none of them is conditional, so nothing can slide into
+            third place on a quiet week. The page check asserts the
+            first row is those three, in that order. */}
+        <Tile
+          span={4}
+          noteWraps
+          label={Number(overview?.to_go ?? 0) < 0 ? 'Ahead of target' : 'Left to find'}
+          value={overview?.to_go == null
+            ? 'Not known'
+            : money(Math.abs(Number(overview.to_go)))}
+          tone={overview?.to_go != null && Number(overview.to_go) > 0 ? 'warning' : 'plain'}
+        />
         <Tile
           span={4}
           noteWraps
@@ -504,15 +526,6 @@ export function PersonalAnalytics({
           note={overview?.fy_target == null
             ? 'No target to measure against'
             : `of the ${money(num(overview?.fy_target))} target.`}
-        />
-        <Tile
-          span={4}
-          noteWraps
-          label={Number(overview?.to_go ?? 0) < 0 ? 'Ahead of target' : 'Left to find'}
-          value={overview?.to_go == null
-            ? 'Not known'
-            : money(Math.abs(Number(overview.to_go)))}
-          tone={overview?.to_go != null && Number(overview.to_go) > 0 ? 'warning' : 'plain'}
         />
         {/* The same figure as Towards target, said the other way
             round. Migration 160 made them one number. */}
