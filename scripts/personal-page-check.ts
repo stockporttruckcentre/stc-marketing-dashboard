@@ -344,12 +344,36 @@ async function main() {
      you're showing target, current progress, progress left all on 1
      line." Read back off the screen in the order the screen draws
      them, because "always" is a promise and not an intention. */
-  const firstRow = (head?.kids ?? []).filter((k) => k.top === rows[0]).map((k) => k.label);
+  const rowOf = (n: number) =>
+    (head?.kids ?? []).filter((k) => k.top === rows[n]).map((k) => k.label);
+  const firstRow = rowOf(0);
   ok('the first row is the target, the progress and what is left',
     firstRow[0] === 'TARGET, THIS YEAR'
       && firstRow[1] === 'TOWARDS TARGET'
       && /LEFT TO FIND|AHEAD OF TARGET/.test(firstRow[2] ?? ''),
     `the first row reads ${firstRow.join(' | ')}`);
+  /* Nine cards, three rows, no card sitting on its own at the end. Ten
+     cards cannot be grouped three at a time, which is why the tenth
+     went: "merge left to find and achieved together so 9 cards
+     total." */
+  ok('there are nine cards in three full rows',
+    (head?.kids ?? []).length === 9 && rows.length === 3
+      && [0, 1, 2].every((n) => rowOf(n).length === 3),
+    `${(head?.kids ?? []).length} cards across ${rows.length} row(s)`);
+  /* "All FS ones stay together", and together means on one row, not
+     merely next to each other across a row break. */
+  const fsRow = [0, 1, 2].filter((n) => rowOf(n).some((l) => l.startsWith('FS+')));
+  ok('both FleetSmart+ cards are on the same row',
+    fsRow.length === 1 && rowOf(fsRow[0]).filter((l) => l.startsWith('FS+')).length === 2,
+    `FS+ cards are on row(s) ${fsRow.map((n) => n + 1).join(' and ')}`);
+  /* The percentage is on the card it is a percentage of, rather than
+     on a card of its own two places away. */
+  ok('what is left carries how far through the target that is',
+    /(LEFT TO FIND|AHEAD OF TARGET)\n[^\n]+\n[0-9.]+% of the [^\n]+ target reached\./
+      .test(read.text),
+    'the achieved percentage is not on the card it belongs to');
+  ok('and there is no Achieved card of its own any more',
+    !/\nACHIEVED\n/.test(read.text));
   ok('and no headline card is drawn full width',
     !!head && head.kids.every((k) => k.width < head.width * 0.5),
     head ? `the widest card is ${Math.round(

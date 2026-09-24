@@ -475,19 +475,28 @@ export function PersonalAnalytics({
             + ` ${money(num(overview?.invoiced_this_year))} this year against`
             + ` ${money(num(overview?.invoiced_last_year))} then.`}
         />
-        {/* ---- THE THIRD CARD, AND IT IS ALWAYS THE THIRD ----
+        {/* ---- WHAT IS LEFT, AND HOW FAR THROUGH THAT IS ----
 
             From the business:
 
               Left to find should be card 3 always so you're showing
               target, current progress, progress left all on 1 line.
 
-            So the first row is the whole target question and nothing
-            else: what it is, how far in they are, what is left. Every
-            tile above and beside it is drawn whatever the figures say,
-            none of them is conditional, so nothing can slide into
-            third place on a quiet week. The page check asserts the
-            first row is those three, in that order. */}
+            and then:
+
+              merge left to find and achieved together so 9 cards
+              total.
+
+            Which is right twice over. The percentage was never a
+            second fact: 42.6% achieved and £344k left to find are the
+            same sentence said two ways, and splitting them cost a card
+            and left nine cards that would not divide by three. One
+            card, both figures, and the row divides.
+
+            This card never disappears and never changes places, which
+            is what makes "card 3 always" a promise the check can hold
+            the page to. Past the target it relabels itself and shows
+            the overshoot, same card, same place. */}
         <Tile
           span={4}
           noteWraps
@@ -496,36 +505,12 @@ export function PersonalAnalytics({
             ? 'Not known'
             : money(Math.abs(Number(overview.to_go)))}
           tone={overview?.to_go != null && Number(overview.to_go) > 0 ? 'warning' : 'plain'}
-        />
-        <Tile
-          span={4}
-          noteWraps
-          label="FS+ value won"
-          value={money(num(overview?.fs_value_won))}
-          note={`${overview?.fs_contracts ?? 0} contract(s) accepted this year, over their whole term. Not counted towards the target.`}
-        />
-        <Tile
-          span={4}
-          noteWraps
-          label="FS+ value invoiced"
-          value={money(num(overview?.fs_value_invoiced))}
-          tone={(overview?.fs_waiting ?? 0) > 0 ? 'warning' : 'plain'}
-          note={(overview?.fs_waiting ?? 0) > 0
-            ? `Billed and in the bank. ${overview?.fs_waiting} invoice(s) worth `
-              + `${money(num(overview?.fs_waiting_worth))} are still waiting to be confirmed below.`
-            : 'Billed and in the bank. This is the half that counts towards the target.'}
-        />
-        <Tile
-          span={4}
-          noteWraps
-          label="Achieved"
-          value={overview?.achieved == null ? 'Not known' : `${Number(overview.achieved).toFixed(1)}%`}
-          /* Of the TARGET, said out loud. The invoiced panel below
-             carries a growth percentage and the two were being read as
-             the same measurement. */
           note={overview?.fy_target == null
             ? 'No target to measure against'
-            : `of the ${money(num(overview?.fy_target))} target.`}
+            : overview?.achieved == null
+              ? `against the ${money(num(overview?.fy_target))} target.`
+              : `${Number(overview.achieved).toFixed(1)}% of the`
+                + ` ${money(num(overview?.fy_target))} target reached.`}
         />
         {/* The same figure as Towards target, said the other way
             round. Migration 160 made them one number. */}
@@ -545,6 +530,24 @@ export function PersonalAnalytics({
             ? 'Nothing billed to these customers last year to compare with.'
             : `${Number(overview.won_change_pct) > 0 ? '+' : ''}`
               + `${Number(overview.won_change_pct).toFixed(1)}% on the same point last year.`}
+        />
+        <Tile
+          span={4}
+          noteWraps
+          label="FS+ value won"
+          value={money(num(overview?.fs_value_won))}
+          note={`${overview?.fs_contracts ?? 0} contract(s) accepted this year, over their whole term. Not counted towards the target.`}
+        />
+        <Tile
+          span={4}
+          noteWraps
+          label="FS+ value invoiced"
+          value={money(num(overview?.fs_value_invoiced))}
+          tone={(overview?.fs_waiting ?? 0) > 0 ? 'warning' : 'plain'}
+          note={(overview?.fs_waiting ?? 0) > 0
+            ? `Billed and in the bank. ${overview?.fs_waiting} invoice(s) worth `
+              + `${money(num(overview?.fs_waiting_worth))} are still waiting to be confirmed below.`
+            : 'Billed and in the bank. This is the half that counts towards the target.'}
         />
         {/* Kept, and labelled for what it is. This was the target
             figure until migration 160 and it is the number that read
