@@ -448,7 +448,12 @@ export function PersonalAnalytics({
         <Tile
           label="Achieved"
           value={overview?.achieved == null ? 'Not known' : `${Number(overview.achieved).toFixed(1)}%`}
-          note={overview?.fy_target == null ? 'No target to measure against' : undefined}
+          /* Of the TARGET, said out loud. The invoiced panel below
+             carries a growth percentage and the two were being read as
+             the same measurement. */
+          note={overview?.fy_target == null
+            ? 'No target to measure against'
+            : `of the ${money(num(overview?.fy_target))} target. Not the same as the growth figure below.`}
         />
         <Tile
           label={Number(overview?.to_go ?? 0) < 0 ? 'Ahead of target' : 'Left to find'}
@@ -667,7 +672,12 @@ export function PersonalAnalytics({
         <Panel
           span={6}
           title="What this portfolio invoiced, against last year"
-          hint="From the uploads, not the tracker. The same basis as the two lists below."
+          /* "is not the target figure" is the whole point of this line.
+             This panel is what the group billed these customers. The
+             target above is what this person won. Two honest numbers
+             about one person, and nothing on the screen said they were
+             different questions. */
+          hint="What the group billed these customers, from the uploads. This is not the target figure above, which is work this person won."
         >
           {!revYear ? (
             <EmptyState
@@ -704,10 +714,19 @@ export function PersonalAnalytics({
                   }}>
                     {Number(revYear.change) > 0 ? '+' : ''}{money(Number(revYear.change))}
                   </strong>
+                  {/* "on last year", because this percentage sits a few
+                      centimetres from the Achieved tile, which is a
+                      percentage of the target, and the two were read as
+                      one. From the business, looking at both at once:
+                      "So how is his target already at 16% - 256k of his
+                      600k target that you are counting here". It was
+                      not: 16.0% is growth, and £256k of £600k is 42.6%.
+                      Neither number was wrong and neither said what it
+                      was a percentage of. */}
                   {revYear.change_pct != null && (
                     <Badge tone={Number(revYear.change) < 0 ? 'warning' : 'success'}>
                       {Number(revYear.change_pct) > 0 ? '+' : ''}
-                      {Number(revYear.change_pct).toFixed(1)}%
+                      {Number(revYear.change_pct).toFixed(1)}% on last year
                     </Badge>
                   )}
                 </span>
