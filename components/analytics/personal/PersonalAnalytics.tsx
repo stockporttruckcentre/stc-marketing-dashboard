@@ -94,6 +94,9 @@ type Overview = {
      queue behind it says so rather than looking finished. */
   fs_waiting: number;
   fs_waiting_worth: number | null;
+  /* Migration 158. Rows off an imported customer sheet, which are not
+     deals and are in none of the figures above. */
+  off_a_sheet: number;
 };
 
 /* The portfolio's invoiced revenue, this year against the same point
@@ -131,6 +134,10 @@ type PipelineRow = {
   lost_total: number | null;
   unpriced: number;
   won_undated: number;
+  /* The won figure with the FleetSmart+ deals taken out, which is what
+     the target uses. Migration 159: a contract counts towards a target
+     by what it has billed, never by its headline value. */
+  won_total_own: number | null;
   /* Migration 158. Rows that came off an imported sheet carrying what
      a customer spent in a past year. They are not deals, they have no
      order date and they never reach a target, so they are counted
@@ -197,7 +204,7 @@ export function PersonalAnalytics({
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
   /* How many rows on this tracker came off an imported sheet rather
      than being deals. Migration 158; see the alert below. */
-  const sheetRows = pipeline.reduce((n, r) => n + (r.off_a_sheet ?? 0), 0);
+  const sheetRows = overview?.off_a_sheet ?? pipeline.reduce((n, r) => n + (r.off_a_sheet ?? 0), 0);
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
   const [queue, setQueue] = useState<FsCandidate[]>([]);
