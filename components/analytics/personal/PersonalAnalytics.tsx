@@ -141,6 +141,10 @@ type PipelineRow = {
   won_undated: number;
   /** What the undated wins would add if somebody dated them. Migration 162. */
   won_undated_worth: number | null;
+  /* Each gap against the one figure it moves. Migration 163. */
+  unpriced_open: number;
+  unpriced_won: number;
+  undated_priced: number;
   /* The won figure with the FleetSmart+ deals taken out, which is what
      the target uses. Migration 159: a contract counts towards a target
      by what it has billed, never by its headline value. */
@@ -218,6 +222,17 @@ export function PersonalAnalytics({
   const undatedWorth = pipeline.some((r) => r.won_undated_worth != null)
     ? pipeline.reduce((n, r) => n + Number(r.won_undated_worth ?? 0), 0)
     : null;
+  /* Counted per figure rather than in one lump. Migration 163: the old
+     lump was 70, of which 20 were lost deals and 8 were wins, so a
+     sentence about the open pipeline was quoting a number that was two
+     thirds about something else. */
+  const sum = (f: (r: PipelineRow) => number | null | undefined) =>
+    pipeline.reduce((n, r) => n + Number(f(r) ?? 0), 0);
+  const openDeals = sum((r) => r.open_count);
+  const unpricedOpen = sum((r) => r.unpriced_open);
+  const unpricedWon = sum((r) => r.unpriced_won);
+  const undatedPriced = sum((r) => r.undated_priced);
+  const undated = sum((r) => r.won_undated);
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
   const [queue, setQueue] = useState<FsCandidate[]>([]);
@@ -613,27 +628,30 @@ export function PersonalAnalytics({
           by construction since migration 160: the target is what these
           customers were invoiced, and no deal on this tracker can
           reach it in either direction. */}
-      {overview && (overview.unpriced > 0 || overview.won_undated > 0 || sheetRows > 0) && (
+      {overview && (unpricedOpen > 0 || unpricedWon > 0 || undated > 0 || sheetRows > 0) && (
         <div style={{ marginBottom: 14 }}>
           <Alert tone="warning">
             <span style={{ flex: 1 }}>
               <strong>None of this changes your target.</strong> The target is measured
               on what these customers were invoiced, so nothing on the tracker can add
               to it or take from it.{' '}
-              {overview.unpriced > 0 && (
-                <>{overview.unpriced} deal{overview.unpriced === 1 ? '' : 's'} carry no
-                figure, so Open pipeline above is lower than the real pipeline. Nothing
-                else uses them. </>
+              {unpricedOpen > 0 && (
+                <>{unpricedOpen} of your {openDeals} open deals carry no figure. They are
+                counted in Open pipeline above and add nothing to its total, because
+                nobody has priced them yet. </>
               )}
-              {overview.won_undated > 0 && (
-                <>{overview.won_undated} won deal{overview.won_undated === 1 ? '' : 's'} have
-                no order date, so {overview.won_undated === 1 ? 'it is' : 'they are'} in no
-                financial year and {overview.won_undated === 1 ? 'is' : 'are'} not in Closed
-                on the tracker.{' '}
-                {undatedWorth == null
-                  ? `None of them carries a figure, so dating them would add nothing.`
-                  : `They are worth ${money(undatedWorth)}: put an order date on them and`
-                    + ` that lands in Closed on the tracker.`}{' '}</>
+              {undatedPriced > 0 && (
+                <>{undatedPriced} won deal{undatedPriced === 1 ? '' : 's'}{' '}
+                {undatedPriced === 1 ? 'is' : 'are'} worth {money(undatedWorth ?? 0)} and{' '}
+                {undatedPriced === 1 ? 'has' : 'have'} no order date, so{' '}
+                {undatedPriced === 1 ? 'it is' : 'they are'} not in Closed on the tracker.
+                Put a date on {undatedPriced === 1 ? 'it' : 'them'} and that lands. </>
+              )}
+              {unpricedWon > 0 && (
+                <>{unpricedWon} won deal{unpricedWon === 1 ? '' : 's'} carry no figure at
+                all, so {unpricedWon === 1 ? 'it adds' : 'they add'} nothing to Closed on
+                the tracker whatever happens to{' '}
+                {unpricedWon === 1 ? 'its date' : 'their dates'}. </>
               )}
               {/* Said in the same breath, because this warning used to
                   read "146 won deals have no order date" when 131 of
