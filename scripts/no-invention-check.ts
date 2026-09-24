@@ -64,6 +64,18 @@ const GOVERNED = [
   'components/analytics/kit/devices.tsx',
   'components/analytics/kit/controls.tsx',
   'components/analytics/kit/mirror.tsx',
+  /* The portfolio's customer table, added after the business reported
+     it: "75% blank room on the rows which is a banned primitive, and
+     none of it was used for the extra column and instead you just made
+     the other columns smaller."
+
+     It was outside this list, which is why it drifted. The table now
+     wears the kit's own leaderboard row, `leaderboard.tsx` holds
+     NOTHING and is watched from nought, and the screen around it is
+     watched from where it stands so the number can only fall. */
+  'components/analytics/kit/leaderboard.tsx',
+  'components/analytics/personal/PortfolioCustomers.tsx',
+  'components/analytics/personal/PersonalAnalytics.tsx',
   'components/analytics/TargetsBoard.tsx',
 ];
 
