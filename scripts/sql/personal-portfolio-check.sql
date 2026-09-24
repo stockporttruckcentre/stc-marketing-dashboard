@@ -20,6 +20,7 @@ DECLARE
   gamma UUID := 'cccccccc-1111-0000-0000-000000000003';
   fy    DATE := financial_year_of(CURRENT_DATE);
   o     RECORD;
+  rv    RECORD;
   n     INT;
   m     INT;
   k     INT;
@@ -72,11 +73,57 @@ BEGIN
   -- ---- The headline ----
   SELECT * INTO o FROM personal_overview(rep);
 
-  IF o.target_revenue IS DISTINCT FROM 50000 THEN
-    RAISE EXCEPTION 'target bearing revenue is %, wanted 50000 (maintenance won this year only)',
-      COALESCE(o.target_revenue::TEXT, 'nothing');
+  /* ---- THE TARGET IS WHAT THE BOOK GREW BY. Migration 160. ----
+
+     From the business:
+
+       You, yourself, should be EXTREMELY concerned that you have one
+       card saying he's made 256k and another saying only 52k, that
+       should make you want to stop everything and fix this because
+       that's literally paying dean's commission.
+
+     Two cards on one screen, about one person, £204,000 apart, and the
+     smaller one was what a commission got paid against. The target is
+     no longer won work on the tracker: it is what this person's
+     customers were billed above the same point last year, which is the
+     figure the panel already drew.
+
+     So the assertion is not a number typed here. It is that the two
+     cards are THE SAME NUMBER, which is the only thing that can stop
+     them drifting apart again. */
+  SELECT * INTO rv FROM personal_revenue_year(rep);
+
+  IF o.target_revenue IS DISTINCT FROM rv.change THEN
+    RAISE EXCEPTION
+      'Towards target says % and the revenue panel says %. They are one number.',
+      COALESCE(o.target_revenue::TEXT, 'nothing'), COALESCE(rv.change::TEXT, 'nothing');
   END IF;
-  RAISE NOTICE 'target bearing revenue counts this year''s won work and nothing else';
+
+  IF o.invoiced_this_year IS DISTINCT FROM rv.this_year
+     OR o.invoiced_last_year IS DISTINCT FROM rv.last_year THEN
+    RAISE EXCEPTION 'the two halves of the target figure do not match the panel';
+  END IF;
+
+  IF o.achieved IS DISTINCT FROM ROUND((rv.change / o.fy_target) * 100, 1) THEN
+    RAISE EXCEPTION 'achieved is %, and the change over the target is %',
+      COALESCE(o.achieved::TEXT, 'nothing'),
+      ROUND((rv.change / o.fy_target) * 100, 1)::TEXT;
+  END IF;
+
+  IF o.to_go IS DISTINCT FROM ROUND(o.fy_target - rv.change, 2) THEN
+    RAISE EXCEPTION 'what is left to find does not agree with the target and the change';
+  END IF;
+
+  /* Won work on the tracker is still reported, and is no longer what
+     the target is measured on. 50,000 is the maintenance deal won this
+     year in the fixture; the trailer sale, the lost one, the undated
+     one and last year's are all correctly out of it. */
+  IF o.tracker_revenue IS DISTINCT FROM 50000 THEN
+    RAISE EXCEPTION 'work closed on the tracker is %, wanted 50000', 
+      COALESCE(o.tracker_revenue::TEXT, 'nothing');
+  END IF;
+
+  RAISE NOTICE 'the target is what the book grew by, and the two cards are one number';
 
   IF o.trailer_revenue IS DISTINCT FROM 33000 THEN
     RAISE EXCEPTION 'trailer revenue is %, wanted 33000 at its sale price',
@@ -105,13 +152,13 @@ BEGIN
 
   -- ---- Lost is neither ----
   IF o.lost_deals <> 1 THEN RAISE EXCEPTION 'lost deals is %, wanted 1', o.lost_deals; END IF;
-  IF o.open_pipeline >= 99000 OR COALESCE(o.target_revenue, 0) >= 99000 THEN
-    RAISE EXCEPTION 'the lost 99000 reached pipeline or revenue';
+  IF o.open_pipeline >= 99000 OR COALESCE(o.tracker_revenue, 0) >= 99000 THEN
+    RAISE EXCEPTION 'the lost 99000 reached pipeline or closed work';
   END IF;
   RAISE NOTICE 'lost work is in neither pipeline nor revenue';
 
   -- ---- Somebody else's deal is nowhere near it ----
-  IF COALESCE(o.target_revenue, 0) >= 75000 THEN
+  IF COALESCE(o.tracker_revenue, 0) >= 75000 THEN
     RAISE EXCEPTION 'Paula''s 25000 is in Percy''s figures';
   END IF;
   SELECT COUNT(*) INTO n FROM personal_pipeline(rep) WHERE lead_type = 'maintenance';
@@ -125,16 +172,23 @@ BEGIN
   RAISE NOTICE 'with no target there is no percentage and no remainder, rather than zero';
 
   -- ---- With a target, the arithmetic ----
+  --
+  -- On the CHANGE, not on won work. Migration 160: the target is what
+  -- the book billed above the same point last year, so the percentage
+  -- and the remainder are worked out from that and from nothing else.
   PERFORM set_personal_fy_target(rep, 200000);
-  SELECT * INTO o FROM personal_overview(rep);
+  SELECT * INTO o  FROM personal_overview(rep);
+  SELECT * INTO rv FROM personal_revenue_year(rep);
   IF o.fy_target IS DISTINCT FROM 200000 THEN RAISE EXCEPTION 'the target did not arrive'; END IF;
-  IF o.achieved IS DISTINCT FROM 25.0 THEN
-    RAISE EXCEPTION 'achieved is %, wanted 25.0 (50000 of 200000)', o.achieved;
+  IF o.achieved IS DISTINCT FROM ROUND((rv.change / 200000) * 100, 1) THEN
+    RAISE EXCEPTION 'achieved is %, and the change over the target is %',
+      COALESCE(o.achieved::TEXT, 'nothing'), ROUND((rv.change / 200000) * 100, 1)::TEXT;
   END IF;
-  IF o.to_go IS DISTINCT FROM 150000 THEN
-    RAISE EXCEPTION 'to go is %, wanted 150000', o.to_go;
+  IF o.to_go IS DISTINCT FROM ROUND(200000 - rv.change, 2) THEN
+    RAISE EXCEPTION 'to go is %, and the target less the change is %',
+      COALESCE(o.to_go::TEXT, 'nothing'), ROUND(200000 - rv.change, 2)::TEXT;
   END IF;
-  RAISE NOTICE 'against a target the percentage and the remainder are the target bearing figure';
+  RAISE NOTICE 'against a target the percentage and the remainder are worked out from the change';
 
   -- ---- The ladder, again, on the figures themselves ----
   PERFORM set_config('request.jwt.claim.sub', rep::TEXT, TRUE);
@@ -151,8 +205,11 @@ BEGIN
   -- ---- Switching person changes every figure ----
   PERFORM set_config('request.jwt.claim.sub', boss::TEXT, TRUE);
   SELECT * INTO o FROM personal_overview(rep2);
-  IF o.target_revenue IS DISTINCT FROM 25000 THEN
-    RAISE EXCEPTION 'Paula''s revenue is %, wanted 25000', COALESCE(o.target_revenue::TEXT, 'nothing');
+  /* Her CLOSED work, because the target figure is now the change on
+     her book and this fixture gives her no invoices. What matters here
+     is that switching person changes every figure. */
+  IF o.tracker_revenue IS DISTINCT FROM 25000 THEN
+    RAISE EXCEPTION 'Paula''s closed work is %, wanted 25000', COALESCE(o.tracker_revenue::TEXT, 'nothing');
   END IF;
   IF o.person_id <> rep2 OR o.full_name <> 'Paula Rep' THEN
     RAISE EXCEPTION 'the overview came back about the wrong person';
