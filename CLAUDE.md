@@ -418,6 +418,28 @@ Every merge is `--no-ff`, so each one is a single revertible commit rather than
 a handful of loose ones. The feature branch is left in place afterwards, which
 is what makes a revert recoverable rather than a loss.
 
+### A push to main is the deploy
+
+Vercel builds `main` automatically. There is no second step, no approval and
+nobody to tell: the moment step 3 above lands, production is rebuilding and the
+team is on the new code within a few minutes. README, "Deploying", says the
+same thing and says it first. **Read it rather than asking.**
+
+Two things follow, and they are the reason this is repeated here:
+
+- **The revert command is not a formality.** It is the rollback for something
+  several teams are using. State it in the same message as the merge.
+- **"Merged to main" and "they can see it" are minutes apart, not a separate
+  decision.** When somebody reports a screen that does not match what was just
+  merged, the first question is what their browser is holding. Ask for a hard
+  refresh before diagnosing anything else, and do not go looking for a deploy
+  step that does not exist.
+
+`docs/deploying-the-command-runtime.md` says there is no `.vercel` directory
+and no project reference in any file. That is true and it is about environment
+variables. It is not evidence that nothing is connected, and it has been read
+that way once already.
+
 ## Any SQL to run goes into the chat as a file
 
 Never only into the repository. A migration committed and not handed over is a
