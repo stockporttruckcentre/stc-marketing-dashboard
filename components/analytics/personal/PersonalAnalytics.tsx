@@ -94,6 +94,10 @@ type Overview = {
      queue behind it says so rather than looking finished. */
   fs_waiting: number;
   fs_waiting_worth: number | null;
+  /* Migration 160. The two halves of the target figure, so the tile
+     can show its own arithmetic. */
+  invoiced_this_year: number | null;
+  invoiced_last_year: number | null;
   /* Migration 158. Rows off an imported customer sheet, which are not
      deals and are in none of the figures above. */
   off_a_sheet: number;
@@ -424,12 +428,29 @@ export function PersonalAnalytics({
             ? 'Nobody has set one. That is not the same as nought.'
             : year ? `Financial year from ${year}` : undefined}
         />
+        {/* ---- WHAT THE BUSINESS PAYS ON ----
+
+            From the business:
+
+              Dean's target is £600k fixed. He earns revenue on
+              anything that exceeds last year's sales [...] the
+              £256,000 card should track all his revenue as it's simply
+              just a mirror of his "towards target" figure with a
+              comparison against last year.
+
+              You, yourself, should be EXTREMELY concerned that you
+              have one card saying he's made 256k and another saying
+              only 52k [...] that's literally paying dean's commission.
+
+            This tile and the revenue panel below now read the SAME
+            number out of the same function, so they cannot differ
+            again. Migration 160. */}
         <Tile
           label="Towards target"
           value={money(num(overview?.target_revenue))}
-          note={`Won tracker work ${money(num(overview?.tracker_revenue))}`
-            + ` plus FleetSmart+ invoiced ${money(num(overview?.fs_value_invoiced))}.`
-            + ' Trailer sales are not in this.'}
+          note={`Everything these customers were billed above the same point last year.`
+            + ` ${money(num(overview?.invoiced_this_year))} this year against`
+            + ` ${money(num(overview?.invoiced_last_year))} then.`}
         />
         <Tile
           label="FS+ value won"
@@ -453,7 +474,7 @@ export function PersonalAnalytics({
              the same measurement. */
           note={overview?.fy_target == null
             ? 'No target to measure against'
-            : `of the ${money(num(overview?.fy_target))} target. Not the same as the growth figure below.`}
+            : `of the ${money(num(overview?.fy_target))} target.`}
         />
         <Tile
           label={Number(overview?.to_go ?? 0) < 0 ? 'Ahead of target' : 'Left to find'}
@@ -462,11 +483,8 @@ export function PersonalAnalytics({
             : money(Math.abs(Number(overview.to_go)))}
           tone={overview?.to_go != null && Number(overview.to_go) > 0 ? 'warning' : 'plain'}
         />
-        {/* Won work against the same point last year. The SAME basis as
-            the three tiles to its left, so it answers "up on last
-            year" in the currency the target is measured in. The
-            invoiced comparison is a separate panel further down and is
-            never mixed into this one. */}
+        {/* The same figure as Towards target, said the other way
+            round. Migration 160 made them one number. */}
         <Tile
           label={overview?.won_change == null
             ? 'Against last year'
@@ -477,19 +495,20 @@ export function PersonalAnalytics({
           tone={overview?.won_change == null
             ? 'plain'
             : Number(overview.won_change) < 0 ? 'warning' : 'plain'}
-          /* Migration 128. No figure for last year is not a start of
-             nought, so there is no rise to report and the note says
-             why rather than leaving "Not known" unexplained. The
-             tracker simply was not carrying won deals a year ago. */
-          note={overview?.last_year_won == null
-            ? `Nothing won on the tracker last year to compare with. `
-              + `${money(num(overview?.won_to_date))} won so far this year.`
-            : `${money(num(overview?.won_to_date))} so far, `
-              + `${money(num(overview?.last_year_won))} to the same point last year`
-              + (overview?.won_change_pct == null
-                ? ''
-                : `, ${Number(overview.won_change_pct) > 0 ? '+' : ''}`
-                  + `${Number(overview.won_change_pct).toFixed(1)}%`)}
+          note={overview?.won_change_pct == null
+            ? 'Nothing billed to these customers last year to compare with.'
+            : `${Number(overview.won_change_pct) > 0 ? '+' : ''}`
+              + `${Number(overview.won_change_pct).toFixed(1)}% on the same point last year.`}
+        />
+        {/* Kept, and labelled for what it is. This was the target
+            figure until migration 160 and it is the number that read
+            £52k beside a £256k one. It is work closed on the tracker,
+            which is a different question from what the book billed. */}
+        <Tile
+          label="Closed on the tracker"
+          value={money(num(overview?.tracker_revenue))}
+          note={'Deals this person closed, maintenance and rentals. '
+            + 'Not revenue, and not what the target is measured on.'}
         />
         <Tile
           label="Open pipeline"
@@ -677,7 +696,7 @@ export function PersonalAnalytics({
              target above is what this person won. Two honest numbers
              about one person, and nothing on the screen said they were
              different questions. */
-          hint="What the group billed these customers, from the uploads. This is not the target figure above, which is work this person won."
+          hint="What the group billed these customers, from the uploads. The change below IS the Towards target figure above: one number, drawn twice."
         >
           {!revYear ? (
             <EmptyState
