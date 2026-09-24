@@ -131,6 +131,12 @@ type PipelineRow = {
   lost_total: number | null;
   unpriced: number;
   won_undated: number;
+  /* Migration 158. Rows that came off an imported sheet carrying what
+     a customer spent in a past year. They are not deals, they have no
+     order date and they never reach a target, so they are counted
+     apart rather than reported as work somebody has failed to price
+     or failed to date. */
+  off_a_sheet: number;
 };
 
 type Mover = {
@@ -189,6 +195,9 @@ export function PersonalAnalytics({
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [pipeline, setPipeline] = useState<PipelineRow[]>([]);
+  /* How many rows on this tracker came off an imported sheet rather
+     than being deals. Migration 158; see the alert below. */
+  const sheetRows = pipeline.reduce((n, r) => n + (r.off_a_sheet ?? 0), 0);
   const [movers, setMovers] = useState<Mover[]>([]);
   const [revYear, setRevYear] = useState<RevenueYear | null>(null);
   const [queue, setQueue] = useState<FsCandidate[]>([]);
@@ -493,7 +502,7 @@ export function PersonalAnalytics({
           eleven unpriced deals in it has a pipeline figure that is
           smaller than the pipeline, and nobody can tell from the
           number. */}
-      {overview && (overview.unpriced > 0 || overview.won_undated > 0) && (
+      {overview && (overview.unpriced > 0 || overview.won_undated > 0 || sheetRows > 0) && (
         <div style={{ marginBottom: 14 }}>
           <Alert tone="warning">
             <span style={{ flex: 1 }}>
@@ -503,7 +512,20 @@ export function PersonalAnalytics({
               )}
               {overview.won_undated > 0 && (
                 <>{overview.won_undated} won deal{overview.won_undated === 1 ? '' : 's'} have
-                no order date, so they are in no financial year and count towards no target.</>
+                no order date, so they are in no financial year and count towards no target. </>
+              )}
+              {/* Said in the same breath, because this warning used to
+                  read "146 won deals have no order date" when 131 of
+                  those were rows off an imported sheet carrying last
+                  year's spend. Telling a rep that £2.7m of last year's
+                  turnover is missing from his target is worse than
+                  saying nothing. Migration 158 moved that figure into
+                  `sheet_revenue` and this says what is left. */}
+              {sheetRows > 0 && (
+                <>Separately, {sheetRows} row{sheetRows === 1 ? '' : 's'} on this
+                tracker came off an imported customer sheet and hold what that
+                customer spent in a past year. They are not deals, and they are
+                counted in none of the figures above.</>
               )}
             </span>
           </Alert>
